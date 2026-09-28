@@ -12,8 +12,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md LICENSE ./
-RUN uv sync --no-dev --no-install-project
+COPY pyproject.toml uv.lock README.md LICENSE ./
+RUN uv sync --frozen --no-dev --no-install-project
 
 
 FROM dependencies AS runtime-base
