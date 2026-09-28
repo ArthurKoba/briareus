@@ -73,20 +73,49 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
 
 
 class _FakeOAuthDiscovery:
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+
     def get_well_known_routes(self, mcp_path: str | None = None):
-        assert mcp_path is not None
+        assert mcp_path == "/mcp"
 
         async def metadata(_request):
             return JSONResponse({})
 
         return [
-            Route("/.well-known/oauth-authorization-server", metadata),
-            Route(f"/.well-known/oauth-protected-resource{mcp_path}", metadata),
+            Route(
+                f"/.well-known/oauth-authorization-server{self.prefix}",
+                metadata,
+            ),
+            Route(
+                f"/.well-known/oauth-protected-resource{self.prefix}/mcp",
+                metadata,
+            ),
         ]
 
 
+def test_oauth_surface_urls_are_path_scoped() -> None:
+    settings = server_module.BridgeSettings(
+        oauth_base_url="https://mcp.example.test/",
+    )
+
+    assert server_module._oauth_surface_url(settings, "root") == "https://mcp.example.test"
+    assert (
+        server_module._oauth_surface_url(settings, "analysis")
+        == "https://mcp.example.test/analysis"
+    )
+    assert (
+        server_module._oauth_surface_url(settings, "files")
+        == "https://mcp.example.test/files"
+    )
+
+
 def test_oauth_discovery_covers_every_public_mcp_resource(monkeypatch) -> None:
-    monkeypatch.setattr(server_module, "_auth", _FakeOAuthDiscovery())
+    fake_auth = {
+        surface: _FakeOAuthDiscovery(prefix)
+        for surface, prefix in server_module._OAUTH_SURFACE_PREFIXES.items()
+    }
+    monkeypatch.setattr(server_module, "_auth_by_surface", fake_auth)
 
     paths = {
         getattr(route, "path", "")
@@ -94,8 +123,12 @@ def test_oauth_discovery_covers_every_public_mcp_resource(monkeypatch) -> None:
     }
 
     assert "/.well-known/oauth-authorization-server" in paths
-    for mcp_path in server_module._PUBLIC_MCP_PATHS:
-        assert f"/.well-known/oauth-protected-resource{mcp_path}" in paths
+    assert "/.well-known/oauth-protected-resource/mcp" in paths
+    for prefix in server_module._OAUTH_SURFACE_PREFIXES.values():
+        if not prefix:
+            continue
+        assert f"/.well-known/oauth-authorization-server{prefix}" in paths
+        assert f"/.well-known/oauth-protected-resource{prefix}/mcp" in paths
 
 
 def test_mounted_analysis_http_app_runs_fastmcp_lifespan() -> None:

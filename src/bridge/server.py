@@ -38,6 +38,15 @@ _PUBLIC_MCP_PATHS = (
     "/analysis/mcp",
     "/ghidra/mcp",
 )
+_OAUTH_SURFACE_PREFIXES = {
+    "root": "",
+    "github": "/github",
+    "gitlab": "/gitlab",
+    "files": "/files",
+    "web": "/web",
+    "analysis": "/analysis",
+    "ghidra": "/ghidra",
+}
 
 
 def _github_user_allowed(ctx: AuthContext) -> bool:
@@ -47,9 +56,17 @@ def _github_user_allowed(ctx: AuthContext) -> bool:
     return bool(login) and login in _oauth_allowed_users
 
 
-def _build_auth(settings: BridgeSettings) -> tuple[GitHubProvider | None, list[AuthMiddleware]]:
+def _oauth_surface_url(settings: BridgeSettings, surface: str) -> str:
+    try:
+        prefix = _OAUTH_SURFACE_PREFIXES[surface]
+    except KeyError as exc:
+        raise ValueError(f"unknown OAuth surface: {surface}") from exc
+    return f"{settings.oauth_base_url.rstrip('/')}{prefix}"
+
+
+def _build_auth(settings: BridgeSettings) -> dict[str, GitHubProvider]:
     if not settings.oauth_enabled:
-        return None, []
+        return {}
 
     missing = [
         name
@@ -65,19 +82,29 @@ def _build_auth(settings: BridgeSettings) -> tuple[GitHubProvider | None, list[A
     if missing:
         raise RuntimeError("missing GitHub OAuth settings: " + ", ".join(missing))
 
-    provider = GitHubProvider(
-        client_id=settings.oauth_client_id,
-        client_secret=settings.oauth_client_secret,
-        base_url=settings.oauth_base_url,
-        required_scopes=["read:user"],
-        jwt_signing_key=settings.oauth_jwt_signing_key,
-        allowed_client_redirect_uris=[_CHATGPT_OAUTH_REDIRECT],
-        require_authorization_consent="external",
-        enable_cimd=False,
-        fallback_refresh_token_expiry_seconds=30 * 24 * 60 * 60,
-        fastmcp_access_token_expiry_seconds=30 * 60,
-    )
-    return provider, [AuthMiddleware(auth=_github_user_allowed)]
+    providers: dict[str, GitHubProvider] = {}
+    for surface in _OAUTH_SURFACE_PREFIXES:
+        surface_url = _oauth_surface_url(settings, surface)
+        providers[surface] = GitHubProvider(
+            client_id=settings.oauth_client_id,
+            client_secret=settings.oauth_client_secret,
+            base_url=surface_url,
+            issuer_url=surface_url,
+            required_scopes=["read:user"],
+            jwt_signing_key=settings.oauth_jwt_signing_key,
+            allowed_client_redirect_uris=[_CHATGPT_OAUTH_REDIRECT],
+            require_authorization_consent="external",
+            enable_cimd=False,
+            fallback_refresh_token_expiry_seconds=30 * 24 * 60 * 60,
+            fastmcp_access_token_expiry_seconds=30 * 60,
+        )
+    return providers
+
+
+def _auth_middleware(surface: str) -> list[AuthMiddleware]:
+    if surface not in _auth_by_surface:
+        return []
+    return [AuthMiddleware(auth=_github_user_allowed)]
 
 
 def _proxy(name: str, url: str) -> FastMCP:
@@ -88,8 +115,8 @@ def _public_facade(name: str, backend_name: str, backend_url: str) -> FastMCP:
     surface = FastMCP(
         name,
         version=__version__,
-        auth=_auth,
-        middleware=_auth_middleware,
+        auth=_auth_by_surface.get(name),
+        middleware=_auth_middleware(name),
     )
     surface.mount(server=_proxy(backend_name, backend_url))
     return surface
@@ -98,7 +125,7 @@ def _public_facade(name: str, backend_name: str, backend_url: str) -> FastMCP:
 _settings = BridgeSettings()
 _management_settings = ManagementClientSettings()
 _oauth_allowed_users = frozenset(_settings.oauth_allowed_users)
-_auth, _auth_middleware = _build_auth(_settings)
+_auth_by_surface = _build_auth(_settings)
 _BACKENDS = _settings.backends
 
 _backend_router = BackendRouter(
@@ -151,8 +178,8 @@ mcp = FastMCP(
         "bridge_tools to fetch one backend tool catalog/signatures, and bridge_call "
         "to forward a call to a selected backend."
     ),
-    auth=_auth,
-    middleware=_auth_middleware,
+    auth=_auth_by_surface.get("root"),
+    middleware=_auth_middleware("root"),
 )
 
 github_surface = _public_facade("github", "github", _BACKENDS["github"])
@@ -239,14 +266,11 @@ def _http_app(surface: FastMCP) -> Starlette:
 
 
 def _oauth_discovery_routes() -> list[BaseRoute]:
-    """Publish RFC 8414/9728 discovery for every externally mounted MCP resource."""
-    if _auth is None:
-        return []
-
+    """Publish RFC 8414/9728 discovery for every independently scoped MCP resource."""
     routes: list[BaseRoute] = []
     seen_paths: set[str] = set()
-    for mcp_path in _PUBLIC_MCP_PATHS:
-        for route in _auth.get_well_known_routes(mcp_path=mcp_path):
+    for auth in _auth_by_surface.values():
+        for route in auth.get_well_known_routes(mcp_path="/mcp"):
             path = getattr(route, "path", "")
             if not path or path in seen_paths:
                 continue
@@ -291,8 +315,8 @@ app.router.lifespan_context = _gateway_lifespan
 
 # Mounted FastMCP apps cannot publish their /.well-known routes at the origin root.
 # ChatGPT and other MCP clients discover OAuth from the externally-visible resource
-# URL, so expose one protected-resource document per public MCP path while sharing
-# the same authorization server/DCR endpoints.
+# URL. Each mounted surface owns a path-scoped authorization server and resource
+# audience so RFC 8707 resource indicators cannot bleed across MCP endpoints.
 for _route in reversed(_oauth_discovery_routes()):
     if getattr(_route, "path", "") not in {
         getattr(existing, "path", "") for existing in app.routes

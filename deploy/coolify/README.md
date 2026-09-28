@@ -105,3 +105,36 @@ separate cache-safe mechanism.
 Every runtime image has a TCP healthcheck for port 8000. Configure Coolify health checks
 to honor container readiness before replacing public gateway traffic. Provider health
 does not gate gateway startup.
+
+
+## OAuth callbacks for dedicated MCP surfaces
+
+Each public MCP surface is an independent OAuth protected resource. FastMCP binds
+access-token audiences to the exact MCP endpoint, so mounted surfaces use path-scoped
+authorization servers:
+
+```text
+/mcp          -> OAuth base https://mcp.koba-nexus.ru
+/github/mcp   -> OAuth base https://mcp.koba-nexus.ru/github
+/gitlab/mcp   -> OAuth base https://mcp.koba-nexus.ru/gitlab
+/files/mcp    -> OAuth base https://mcp.koba-nexus.ru/files
+/web/mcp      -> OAuth base https://mcp.koba-nexus.ru/web
+/analysis/mcp -> OAuth base https://mcp.koba-nexus.ru/analysis
+/ghidra/mcp   -> OAuth base https://mcp.koba-nexus.ru/ghidra
+```
+
+The GitHub OAuth application must allow the corresponding upstream callback URL for
+every public surface that will be used. GitHub supports multiple callback URLs; avoid
+wildcard matching when explicit callbacks are practical.
+
+For the Analysis ChatGPT app, the required callback is:
+
+```text
+https://mcp.koba-nexus.ru/analysis/auth/callback
+```
+
+The root bridge continues to use:
+
+```text
+https://mcp.koba-nexus.ru/auth/callback
+```
