@@ -9,6 +9,7 @@ from fastmcp.server.auth import AuthContext
 from fastmcp.server.auth.providers.github import GitHubProvider
 from fastmcp.server.middleware import AuthMiddleware
 from starlette.applications import Starlette
+from starlette.routing import BaseRoute
 
 from common.models import JsonObject
 from common.runtime_annotations import (
@@ -26,6 +27,15 @@ from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 _STARTED_AT = datetime.now(UTC).isoformat()
 _CHATGPT_OAUTH_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 _ADMIN_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_PUBLIC_MCP_PATHS = (
+    "/mcp",
+    "/github/mcp",
+    "/gitlab/mcp",
+    "/files/mcp",
+    "/web/mcp",
+    "/analysis/mcp",
+    "/ghidra/mcp",
+)
 
 
 def _github_user_allowed(ctx: AuthContext) -> bool:
@@ -193,16 +203,7 @@ async def bridge_call(
 def bridge_capabilities() -> JsonObject:
     return BridgeCapabilities(
         backends=sorted(_BACKENDS),
-        public_surfaces=[
-            "/mcp",
-            "/github/mcp",
-            "/gitlab/mcp",
-            "/files/mcp",
-            "/web/mcp",
-            "/analysis/mcp",
-            "/ghidra/mcp",
-            "/admin",
-        ],
+        public_surfaces=[*_PUBLIC_MCP_PATHS, "/admin"],
         features=[
             "mcp",
             "streamable-http",
@@ -235,7 +236,33 @@ def _http_app(surface: FastMCP) -> Starlette:
     )
 
 
+def _oauth_discovery_routes() -> list[BaseRoute]:
+    """Publish RFC 8414/9728 discovery for every externally mounted MCP resource."""
+    if _auth is None:
+        return []
+
+    routes: list[BaseRoute] = []
+    seen_paths: set[str] = set()
+    for mcp_path in _PUBLIC_MCP_PATHS:
+        for route in _auth.get_well_known_routes(mcp_path=mcp_path):
+            path = getattr(route, "path", "")
+            if not path or path in seen_paths:
+                continue
+            seen_paths.add(path)
+            routes.append(route)
+    return routes
+
+
 app = _http_app(mcp)
+# Mounted FastMCP apps cannot publish their /.well-known routes at the origin root.
+# ChatGPT and other MCP clients discover OAuth from the externally-visible resource
+# URL, so expose one protected-resource document per public MCP path while sharing
+# the same authorization server/DCR endpoints.
+for _route in reversed(_oauth_discovery_routes()):
+    if getattr(_route, "path", "") not in {
+        getattr(existing, "path", "") for existing in app.routes
+    }:
+        app.routes.insert(0, _route)
 app.mount("/github", _http_app(github_surface))
 app.mount("/gitlab", _http_app(gitlab_surface))
 app.mount("/files", _http_app(files_surface))

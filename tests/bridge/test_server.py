@@ -1,6 +1,9 @@
 import pytest
 from fastmcp import Client
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
+import bridge.server as server_module
 from bridge.server import app, mcp
 
 
@@ -66,3 +69,29 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
     } <= paths
     assert "/http" not in paths
     assert "/curl" not in paths
+
+
+class _FakeOAuthDiscovery:
+    def get_well_known_routes(self, mcp_path: str | None = None):
+        assert mcp_path is not None
+
+        async def metadata(_request):
+            return JSONResponse({})
+
+        return [
+            Route("/.well-known/oauth-authorization-server", metadata),
+            Route(f"/.well-known/oauth-protected-resource{mcp_path}", metadata),
+        ]
+
+
+def test_oauth_discovery_covers_every_public_mcp_resource(monkeypatch) -> None:
+    monkeypatch.setattr(server_module, "_auth", _FakeOAuthDiscovery())
+
+    paths = {
+        getattr(route, "path", "")
+        for route in server_module._oauth_discovery_routes()
+    }
+
+    assert "/.well-known/oauth-authorization-server" in paths
+    for mcp_path in server_module._PUBLIC_MCP_PATHS:
+        assert f"/.well-known/oauth-protected-resource{mcp_path}" in paths
