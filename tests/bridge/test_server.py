@@ -2,6 +2,7 @@ import pytest
 from fastmcp import Client
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.testclient import TestClient
 
 import bridge.server as server_module
 from bridge.server import app, mcp
@@ -95,3 +96,29 @@ def test_oauth_discovery_covers_every_public_mcp_resource(monkeypatch) -> None:
     assert "/.well-known/oauth-authorization-server" in paths
     for mcp_path in server_module._PUBLIC_MCP_PATHS:
         assert f"/.well-known/oauth-protected-resource{mcp_path}" in paths
+
+
+def test_mounted_analysis_http_app_runs_fastmcp_lifespan() -> None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1"},
+        },
+    }
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/analysis/mcp",
+            json=payload,
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "Task group is not initialized" not in response.text

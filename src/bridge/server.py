@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import platform
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
 
 from fastmcp import FastMCP
@@ -253,7 +255,40 @@ def _oauth_discovery_routes() -> list[BaseRoute]:
     return routes
 
 
-app = _http_app(mcp)
+_root_http_app = _http_app(mcp)
+_github_http_app = _http_app(github_surface)
+_gitlab_http_app = _http_app(gitlab_surface)
+_files_http_app = _http_app(files_surface)
+_web_http_app = _http_app(web_surface)
+_analysis_http_app = _http_app(analysis_surface)
+_ghidra_http_app = _http_app(ghidra_surface)
+
+_MCP_HTTP_APPS = (
+    _root_http_app,
+    _github_http_app,
+    _gitlab_http_app,
+    _files_http_app,
+    _web_http_app,
+    _analysis_http_app,
+    _ghidra_http_app,
+)
+# Starlette does not run lifespans of mounted sub-applications. Preserve every
+# FastMCP-generated lifespan before replacing the root lifespan with one owner
+# that enters all session-manager contexts for the lifetime of the gateway.
+_MCP_LIFESPANS = tuple(mcp_app.router.lifespan_context for mcp_app in _MCP_HTTP_APPS)
+
+
+@asynccontextmanager
+async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
+    async with AsyncExitStack() as stack:
+        for lifespan in _MCP_LIFESPANS:
+            await stack.enter_async_context(lifespan(app))
+        yield
+
+
+app = _root_http_app
+app.router.lifespan_context = _gateway_lifespan
+
 # Mounted FastMCP apps cannot publish their /.well-known routes at the origin root.
 # ChatGPT and other MCP clients discover OAuth from the externally-visible resource
 # URL, so expose one protected-resource document per public MCP path while sharing
@@ -263,12 +298,12 @@ for _route in reversed(_oauth_discovery_routes()):
         getattr(existing, "path", "") for existing in app.routes
     }:
         app.routes.insert(0, _route)
-app.mount("/github", _http_app(github_surface))
-app.mount("/gitlab", _http_app(gitlab_surface))
-app.mount("/files", _http_app(files_surface))
-app.mount("/web", _http_app(web_surface))
-app.mount("/analysis", _http_app(analysis_surface))
-app.mount("/ghidra", _http_app(ghidra_surface))
+app.mount("/github", _github_http_app)
+app.mount("/gitlab", _gitlab_http_app)
+app.mount("/files", _files_http_app)
+app.mount("/web", _web_http_app)
+app.mount("/analysis", _analysis_http_app)
+app.mount("/ghidra", _ghidra_http_app)
 
 _admin_proxy = AdminProxy(_management_settings.url)
 app.add_route("/admin", _admin_proxy.handle, methods=_ADMIN_METHODS)
