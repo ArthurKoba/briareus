@@ -6,18 +6,21 @@ import urllib.parse
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql.base import Executable
+from sqlalchemy.sql.elements import ColumnElement
+from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import FileResponse, RedirectResponse, Response
+from starlette.templating import Jinja2Templates
 from starlette_admin import (
-    Breakpoints,
     BooleanField,
+    Breakpoints,
     CardRowWidget,
     Col,
     CustomView,
@@ -36,6 +39,7 @@ from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
 
+from common.models import json_int, json_str
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
@@ -87,7 +91,7 @@ class _BaseAccountView(ModelView):
     row_actions = ("view", "edit", "test_connection", "delete")
     row_actions_display_type = RowActionsDisplayType.KEBAB
     page_size = 25
-    page_size_options = [25, 50, 100]
+    page_size_options: ClassVar[list[int]] = [25, 50, 100]
     search_auto_submit = True
     exclude_fields_from_create = ("id", "encrypted_credential", "created_at", "updated_at")
     exclude_fields_from_edit = ("id", "encrypted_credential", "created_at", "updated_at")
@@ -114,29 +118,29 @@ class _BaseAccountView(ModelView):
 
     def _validated(self, obj: GitHubAccountRecord | GitLabAccountRecord) -> Account:
         if self.provider is Provider.GITHUB:
-            record = cast(GitHubAccountRecord, obj)
+            github_record = cast(GitHubAccountRecord, obj)
             return Account(
-                id=record.id,
-                alias=record.alias,
+                id=github_record.id,
+                alias=github_record.alias,
                 provider=Provider.GITHUB,
-                auth_type=AuthType(record.auth_type),
-                external_id=record.app_id,
-                enabled=record.enabled,
-                created_at=record.created_at,
-                updated_at=record.updated_at,
+                auth_type=AuthType(github_record.auth_type),
+                external_id=github_record.app_id,
+                enabled=github_record.enabled,
+                created_at=github_record.created_at,
+                updated_at=github_record.updated_at,
             )
-        record = cast(GitLabAccountRecord, obj)
+        gitlab_record = cast(GitLabAccountRecord, obj)
         return Account(
-            id=record.id,
-            alias=record.alias,
+            id=gitlab_record.id,
+            alias=gitlab_record.alias,
             provider=Provider.GITLAB,
-            auth_type=AuthType(record.auth_type),
-            base_url=record.base_url,
-            verify_tls=record.verify_tls,
-            ca_cert_pem=record.ca_cert_pem,
-            enabled=record.enabled,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
+            auth_type=AuthType(gitlab_record.auth_type),
+            base_url=gitlab_record.base_url,
+            verify_tls=gitlab_record.verify_tls,
+            ca_cert_pem=gitlab_record.ca_cert_pem,
+            enabled=gitlab_record.enabled,
+            created_at=gitlab_record.created_at,
+            updated_at=gitlab_record.updated_at,
         )
 
     def _apply_normalized(
@@ -340,18 +344,18 @@ class SettingsView(CustomView):
         self.telemetry = telemetry
 
     @staticmethod
-    def _form_config(form: object) -> ManagementConfig:
-        get = getattr(form, "get")
-        contains = getattr(form, "__contains__")
+    def _form_config(form: FormData) -> ManagementConfig:
         return ManagementConfig(
-            logging_enabled=contains("logging_enabled"),
-            logging_capture_payloads=contains("logging_capture_payloads"),
-            logging_retention_days=int(str(get("logging_retention_days", "30"))),
-            logging_max_records=int(str(get("logging_max_records", "10000"))),
-            file_auto_cleanup_enabled=contains("file_auto_cleanup_enabled"),
-            file_retention_days=int(str(get("file_retention_days", "30"))),
-            file_cleanup_limit=int(str(get("file_cleanup_limit", "1000"))),
-            maintenance_interval_minutes=int(str(get("maintenance_interval_minutes", "60"))),
+            logging_enabled="logging_enabled" in form,
+            logging_capture_payloads="logging_capture_payloads" in form,
+            logging_retention_days=int(str(form.get("logging_retention_days", "30"))),
+            logging_max_records=int(str(form.get("logging_max_records", "10000"))),
+            file_auto_cleanup_enabled="file_auto_cleanup_enabled" in form,
+            file_retention_days=int(str(form.get("file_retention_days", "30"))),
+            file_cleanup_limit=int(str(form.get("file_cleanup_limit", "1000"))),
+            maintenance_interval_minutes=int(
+                str(form.get("maintenance_interval_minutes", "60"))
+            ),
         )
 
     @route("", methods=["GET", "POST"])
@@ -367,7 +371,7 @@ class SettingsView(CustomView):
                 flash(request, "Settings saved", "success")
                 return RedirectResponse("/admin/settings", status_code=303)
         config = await asyncio.to_thread(self.config.get)
-        return self.templates.TemplateResponse(
+        return _view_templates(self).TemplateResponse(
             request=request,
             name="management_settings.html",
             context={"title": "Settings", "config": config},
@@ -411,7 +415,15 @@ class FilesView(CustomView):
         )
         base_url = "/admin/files"
         sort_urls = {
-            field: f"{base_url}?{urllib.parse.urlencode({'q': query, 'sort': field, 'order': 'desc' if sort_by == field and sort_order == 'asc' else 'asc'})}"
+            field: f"{base_url}?{urllib.parse.urlencode({
+                'q': query,
+                'sort': field,
+                'order': (
+                    'desc'
+                    if sort_by == field and sort_order == 'asc'
+                    else 'asc'
+                ),
+            })}"
             for field in allowed_sorts
         }
         return self.templates.TemplateResponse(
@@ -433,15 +445,15 @@ class FilesView(CustomView):
     async def upload(self, request: Request) -> Response:
         form = await request.form()
         upload = form.get("file")
-        if upload is None or not hasattr(upload, "file") or not hasattr(upload, "filename"):
+        if not isinstance(upload, UploadFile):
             flash(request, "Choose a file to upload", "error")
             return RedirectResponse("/admin/files", status_code=303)
-        name = str(getattr(upload, "filename", "upload.bin") or "upload.bin")
-        content_type = str(getattr(upload, "content_type", "") or "")
+        name = upload.filename or "upload.bin"
+        content_type = upload.content_type or ""
         try:
             await asyncio.to_thread(
                 self.files.upload,
-                getattr(upload, "file"),
+                upload.file,
                 name=name,
                 mime_type=content_type,
             )
@@ -514,8 +526,17 @@ class FilesView(CustomView):
         return RedirectResponse("/admin/files", status_code=303)
 
 
+def _view_templates(view: CustomView) -> Jinja2Templates:
+    if view.templates is None:
+        raise RuntimeError("admin templates are not initialized")
+    return view.templates
+
+
 def _dashboard(engine: Engine, files: FileAdminStore) -> CustomView:
-    async def count(model: type[object], *_filters: object) -> int:
+    async def count(
+        model: type[object],
+        *_filters: ColumnElement[bool],
+    ) -> int:
         statement = select(func.count()).select_from(model)
         for criterion in _filters:
             statement = statement.where(criterion)
@@ -549,11 +570,11 @@ def _dashboard(engine: Engine, files: FileAdminStore) -> CustomView:
 
     async def stored_files(_request: Request) -> int:
         stats = await asyncio.to_thread(files.stats)
-        return int(stats.get("files", 0))
+        return json_int(stats.get("files"), field="files")
 
     async def storage_used(_request: Request) -> str:
         stats = await asyncio.to_thread(files.stats)
-        return str(stats.get("size_display", "0 B"))
+        return json_str(stats.get("size_display"), default="0 B", field="size_display")
 
     async def error_rate(_request: Request) -> float:
         calls, errors = await asyncio.gather(count_calls(_request), count_errors(_request))

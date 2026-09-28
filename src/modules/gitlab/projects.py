@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from common.models import JsonObject
+from common.models import JsonObject, json_member_object
 
 from .api import GitLabApiClient
 from .errors import GitLabError
@@ -60,7 +60,11 @@ class GitLabProjectClient(GitLabApiClient):
             )
 
         if project:
-            project_result = self.project_status(project)["project"]
+            project_result = json_member_object(
+                self.project_status(project),
+                "project",
+                required=True,
+            )
             permissions = project_result.get("permissions")
             access: JsonObject = {}
             if isinstance(permissions, dict):

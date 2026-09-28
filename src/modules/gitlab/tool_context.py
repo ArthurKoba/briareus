@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 
 from common.management_client import ManagementClient
-from common.models import JsonObject
+from common.models import JsonObject, json_array
 from common.settings import GitLabSettings
 
 from .gitlab_client import GitLabClient
@@ -28,8 +28,9 @@ class GitLabRuntimeContext:
             for account in accounts:
                 if not isinstance(account, dict):
                     continue
-                account["potential_capabilities"] = self._potential_capabilities(
-                    str(account.get("auth_type", ""))
+                account["potential_capabilities"] = json_array(
+                    self._potential_capabilities(str(account.get("auth_type", ""))),
+                    context="GitLab potential capabilities",
                 )
                 account["permission_scope"] = "project-dependent"
         return result
@@ -59,8 +60,9 @@ class GitLabRuntimeContext:
     ) -> JsonObject:
         client = self.client(account_id)
         result = client.account_capabilities(project.strip())
-        result["potential_capabilities"] = self._potential_capabilities(
-            client.profile.auth_type
+        result["potential_capabilities"] = json_array(
+            self._potential_capabilities(client.profile.auth_type),
+            context="GitLab potential capabilities",
         )
         result["permission_scope"] = "project-dependent"
         return result

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 
 from common.management_client import ManagementClient
-from common.models import JsonObject
+from common.models import JsonObject, json_array
 from common.settings import GitHubPolicySettings
 
 from .github_identity import GitHubPrettyIdentityClient
@@ -31,7 +31,10 @@ class GitHubRuntimeContext:
                 if not isinstance(account, dict):
                     continue
                 auth_type = str(account.get("auth_type", ""))
-                account["potential_capabilities"] = self._potential_capabilities(auth_type)
+                account["potential_capabilities"] = json_array(
+                    self._potential_capabilities(auth_type),
+                    context="GitHub potential capabilities",
+                )
                 account["permission_scope"] = "repository-dependent"
         return result
 
@@ -60,7 +63,10 @@ class GitHubRuntimeContext:
     ) -> JsonObject:
         client = self._client(account_id)
         result = client.account_capabilities()
-        result["potential_capabilities"] = self._potential_capabilities(client.auth_type)
+        result["potential_capabilities"] = json_array(
+            self._potential_capabilities(client.auth_type),
+            context="GitHub potential capabilities",
+        )
         result["permission_scope"] = "repository-dependent"
         if repository.strip():
             result["repository"] = client.capabilities(repository.strip())

@@ -4,9 +4,25 @@ import sqlite3
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Float, Integer, MetaData, String, Text, create_engine, event, inspect
+from sqlalchemy import (
+    Boolean,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    create_engine,
+    event,
+    inspect,
+)
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    sessionmaker,
+)
 from sqlalchemy.pool import ConnectionPoolEntry
 
 

@@ -99,7 +99,8 @@ class FileMetadataStore(FileStoreCore):
         self.ensure()
         with self._connect() as db:
             row = db.execute(
-                "SELECT COUNT(*) AS file_count, COALESCE(SUM(size_bytes), 0) AS total_bytes FROM files"
+                "SELECT COUNT(*) AS file_count, "
+                "COALESCE(SUM(size_bytes), 0) AS total_bytes FROM files"
             ).fetchone()
             reference_count = int(
                 db.execute("SELECT COUNT(*) FROM file_refs").fetchone()[0]

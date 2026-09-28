@@ -10,9 +10,16 @@ from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from common.settings import FileSettings, ManagementSettings
-from management.application.services import AccountService, ManagementConfigService, TelemetryService
+from management.application.services import (
+    AccountService,
+    ManagementConfigService,
+    TelemetryService,
+)
 from management.infrastructure.crypto import FernetCredentialCipher
-from management.infrastructure.database import create_database, ensure_zero_state_schema
+from management.infrastructure.database import (
+    create_database,
+    ensure_zero_state_schema,
+)
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.provider_checks import ProviderConnectionVerifier
 from management.infrastructure.repositories import (
