@@ -6,7 +6,7 @@ import urllib.parse
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import cast
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -91,7 +91,6 @@ class _BaseAccountView(ModelView):
     row_actions = ("view", "edit", "test_connection", "delete")
     row_actions_display_type = RowActionsDisplayType.KEBAB
     page_size = 25
-    page_size_options: ClassVar[list[int]] = [25, 50, 100]
     search_auto_submit = True
     exclude_fields_from_create = ("id", "encrypted_credential", "created_at", "updated_at")
     exclude_fields_from_edit = ("id", "encrypted_credential", "created_at", "updated_at")
@@ -115,6 +114,7 @@ class _BaseAccountView(ModelView):
         )
         self.cipher = cipher
         self.accounts = accounts
+        self.page_size_options = [25, 50, 100]
 
     def _validated(self, obj: GitHubAccountRecord | GitLabAccountRecord) -> Account:
         if self.provider is Provider.GITHUB:
@@ -279,7 +279,6 @@ class GitLabAccountView(_BaseAccountView):
 class InvocationView(ModelView):
     row_actions_display_type = RowActionsDisplayType.KEBAB
     page_size = 50
-    page_size_options = [25, 50, 100]
     fields = cast(
         Sequence[BaseField],
         (
@@ -310,6 +309,7 @@ class InvocationView(ModelView):
             display_name="MCP Call",
         )
         self.telemetry = telemetry
+        self.page_size_options = [25, 50, 100]
 
     def can_create(self, _request: Request) -> bool:
         return False
@@ -426,7 +426,7 @@ class FilesView(CustomView):
             })}"
             for field in allowed_sorts
         }
-        return self.templates.TemplateResponse(
+        return _view_templates(self).TemplateResponse(
             request=request,
             name="management_files.html",
             context={
@@ -470,7 +470,7 @@ class FilesView(CustomView):
             info = await asyncio.to_thread(self.files.info, file_id)
         except Exception as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return self.templates.TemplateResponse(
+        return _view_templates(self).TemplateResponse(
             request=request,
             name="management_file_detail.html",
             context={"title": "File details", "info": info, "base_url": "/admin/files"},
