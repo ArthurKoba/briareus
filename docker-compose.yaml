@@ -23,7 +23,7 @@ x-file-settings: &file-settings
 x-file-service: &file-service
   <<: *private-service
   volumes:
-    - files-data:/files
+    - files:/files
 
 services:
   management:
@@ -42,8 +42,8 @@ services:
       MANAGEMENT_SESSION_SECRET: ${MANAGEMENT_SESSION_SECRET}
       MANAGEMENT_SESSION_HTTPS_ONLY: ${MANAGEMENT_SESSION_HTTPS_ONLY:-true}
     volumes:
-      - management-data:/management
-      - files-data:/files
+      - management:/management
+      - files:/files
 
   auth:
     <<: *runtime
@@ -59,7 +59,7 @@ services:
       GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS}
       AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS: ${AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS:-300}
     volumes:
-      - auth-data:/data/fastmcp
+      - auth:/auth
 
   gateway:
     <<: *runtime
@@ -83,6 +83,10 @@ services:
       MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://mcp.koba-nexus.ru}
   github:
     <<: *private-service
+    depends_on:
+      management:
+        condition: service_healthy
+        required: true
     build:
       <<: *build
       target: github
@@ -95,6 +99,10 @@ services:
 
   gitlab:
     <<: *private-service
+    depends_on:
+      management:
+        condition: service_healthy
+        required: true
     build:
       <<: *build
       target: gitlab
@@ -125,6 +133,10 @@ services:
 
   analysis:
     <<: *private-service
+    depends_on:
+      ghidra:
+        condition: service_healthy
+        required: true
     build:
       <<: *build
       target: analysis
@@ -148,9 +160,9 @@ services:
       - coolify
 
 volumes:
-  management-data:
-  files-data:
-  auth-data:
+  management:
+  files:
+  auth:
 
 networks:
   coolify:

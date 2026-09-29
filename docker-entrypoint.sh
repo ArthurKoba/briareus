@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-FASTMCP_DIR="${FASTMCP_HOME:-/data/fastmcp}"
+FASTMCP_DIR="${FASTMCP_HOME:-/auth}"
 FILE_DIR="${FILE_ROOT:-/files}"
 MANAGEMENT_DIR="/management"
 

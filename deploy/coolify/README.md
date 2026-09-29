@@ -27,8 +27,10 @@ A deployment may rebuild or recreate multiple containers; that is acceptable. Is
 is a runtime property, not a custom deployment-script property:
 
 - every service has its own `restart: unless-stopped` policy;
-- there are no `depends_on` or health-gated startup chains between runtimes;
-- gateway startup does not require any provider to be healthy;
+- dependencies are declared only for primary runtime requirements;
+- GitHub and GitLab require healthy Management because account credentials are resolved there;
+- Analysis requires healthy Ghidra because Ghidra is its native backend;
+- gateway startup does not require provider containers to be healthy;
 - an unavailable provider affects only its MCP surface;
 - auth is not on the bearer-token request path;
 - gateway validates already-issued signed access tokens locally;
@@ -71,18 +73,23 @@ GITHUB_OAUTH_CLIENT_SECRET=...
 
 ## Persistent storage
 
-The Compose stack owns these logical volumes:
+The Compose stack owns three named volumes with minimal logical names:
 
 ```text
-management-data -> /management
-files-data      -> /files
-auth-data       -> /data/fastmcp
+management -> /management
+files      -> /files
+auth       -> /auth
 ```
 
-They are ordinary Compose volumes, not `external` volumes with hard-coded Docker names.
-Coolify/Compose therefore keeps the resource project prefix on the physical volume names
-(for example `<project>_files-data`) and reuses the existing data when the same resource
-is redeployed. Do not delete, rename or recreate these volumes during ordinary deployments.
+All mount destinations are absolute paths inside containers. No host bind paths are used.
+The volumes are ordinary Compose volumes, not `external` volumes with hard-coded Docker
+names, so Docker/Coolify keeps them in managed volume storage and they can be backed up
+independently of container filesystems.
+
+Renaming the existing production volumes is a one-time migration. Do not deploy the
+renamed volume contract until the current `<project>_management-data`,
+`<project>_files-data` and `<project>_auth-data` contents have been copied into the
+new `<project>_management`, `<project>_files` and `<project>_auth` volumes.
 
 ## Build and deploy behaviour
 
