@@ -94,10 +94,12 @@ topology authority and starts separate containers for `auth`, `gateway`, `manage
 `github`, `gitlab`, `files`, `curl`, `analysis`, and `ghidra`.
 
 Deployments may rebuild or recreate the stack. Runtime correctness does not depend on
-selective-restart scripts: each service has its own restart policy, there are no
-health-gated `depends_on` chains, and gateway startup does not require provider
-availability. If one provider is broken, only that provider surface is unavailable;
-the other containers continue running and can still be used to repair the system.
+selective-restart scripts. Each service has its own restart policy, and Compose
+dependencies exist only where a runtime cannot perform its primary job without another
+service: GitHub and GitLab require Management for account resolution, while Analysis
+requires Ghidra. Gateway is deliberately not health-gated on provider availability, so
+one broken provider does not prevent the remaining MCP surfaces from starting and being
+used to repair the system.
 
 The multi-stage Dockerfile keeps rebuilds fast by installing locked dependencies before
 copying runtime-specific source trees, so unchanged stages reuse the local Docker cache.
