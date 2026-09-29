@@ -14,7 +14,6 @@ def _settings() -> AuthServiceSettings:
         oauth_client_secret="secret",
         oauth_jwt_signing_key="0123456789abcdef0123456789abcdef",
         oauth_allowed_users=("arthurkoba",),
-        service_token="service-token",
     )
 
 
@@ -45,3 +44,27 @@ def test_multi_resource_provider_issues_distinct_audiences_under_one_issuer() ->
     assert root_issuer.audience == root
     assert analysis_issuer.audience == analysis
     assert root_issuer.audience != analysis_issuer.audience
+
+
+@pytest.mark.asyncio
+async def test_upstream_claims_embed_only_allowed_identity() -> None:
+    settings = _settings()
+    provider = MultiResourceGitHubProvider(settings)
+
+    class FakeValidator:
+        async def verify_token(self, _token: str):
+            from fastmcp.server.auth import AccessToken
+
+            return AccessToken(
+                token="upstream",
+                client_id="github-user",
+                scopes=["read:user"],
+                subject="42",
+                claims={"login": "ArthurKoba"},
+            )
+
+    provider._token_validator = FakeValidator()  # type: ignore[assignment]
+
+    claims = await provider._extract_upstream_claims({"access_token": "upstream"})
+
+    assert claims == {"login": "arthurkoba", "sub": "42"}

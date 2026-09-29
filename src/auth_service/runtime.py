@@ -9,4 +9,4 @@ settings = AuthServiceSettings()
 settings.validate_bootstrap()
 
 provider = MultiResourceGitHubProvider(settings)
-app = build_auth_app(provider, settings)
+app = build_auth_app(provider)

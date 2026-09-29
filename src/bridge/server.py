@@ -24,13 +24,13 @@ from common.runtime_annotations import (
     READ_ONLY_LOCAL,
 )
 from common.settings import (
-    AuthClientSettings,
     BridgeSettings,
+    GatewayAuthSettings,
     ManagementClientSettings,
 )
 
 from . import __version__
-from .auth_client import AuthServiceTokenVerifier
+from .auth_client import LocalAuthTokenVerifier
 from .backend_router import BackendDescriptor, BackendRouter
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 from .reverse_proxy import ReverseProxy
@@ -54,7 +54,7 @@ def _proxy(name: str, url: str) -> FastMCP:
 
 
 def _build_surface_auth(
-    settings: AuthClientSettings,
+    settings: GatewayAuthSettings,
 ) -> dict[str, RemoteAuthProvider]:
     if not settings.enabled:
         return {}
@@ -64,7 +64,7 @@ def _build_surface_auth(
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
         resource = resource_url(settings.public_base_url, surface)
-        verifier = AuthServiceTokenVerifier(settings, resource)
+        verifier = LocalAuthTokenVerifier(settings, resource)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
@@ -91,7 +91,7 @@ def _public_facade(
 
 
 _settings = BridgeSettings()
-_auth_settings = AuthClientSettings()
+_auth_settings = GatewayAuthSettings()
 _management_settings = ManagementClientSettings()
 _BACKENDS = _settings.backends
 _auth_by_surface = _build_surface_auth(_auth_settings)

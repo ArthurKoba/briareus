@@ -1,167 +1,90 @@
-# Coolify split deployment
+# Coolify deployment
 
-Production runs MCP Bridge as independent Coolify applications. The repository-level
-`docker-compose.yaml` remains the local/integration topology only.
+Production uses one Git-backed Docker Compose application named `mcp-bridge`.
+All services are separate containers inside that one stack. Coolify builds locally
+on the server and reuses the local Docker build cache.
 
-The public edge is split into two stable control-plane runtimes:
-
-- `auth` owns OAuth/DCR/GitHub login, the single upstream callback, token storage and
-  exact MCP resource audiences.
-- `gateway` owns the public MCP domain, protected-resource metadata, routing and the
-  Admin reverse proxy.
-
-Provider runtimes remain private and independently deployable.
-
-## Runtime ownership
-
-| Application | Docker target | Internal name | Public | Persistent storage |
-| --- | --- | --- | --- | --- |
-| auth | `auth` | `auth` | through gateway only | `auth-data:/data/fastmcp` |
-| gateway | `gateway` | `gateway` | `mcp.koba-nexus.ru` | none |
-| management | `management` | `management` | through gateway `/admin` | `management-data:/management`, `files-data:/files` |
-| github | `github` | `github` | no | none |
-| gitlab | `gitlab` | `gitlab` | no | none |
-| files | `files` | `files` | no | `files-data:/files` |
-| curl | `curl` | `curl` | no | `files-data:/files` |
-| analysis | `analysis` | `analysis` | no | none |
-| ghidra | `ghidra` | `ghidra` | no | none |
-
-All applications join the same Coolify network. Only gateway receives the public
-domain. Auth is never assigned its own public domain; gateway forwards the OAuth routes
-to it.
-
-The native backend behind the `ghidra` runtime remains private. ChatGPT connects to
-`/analysis/mcp`, not to a raw Ghidra surface.
-
-## Public OAuth contract
-
-There is one authorization server:
+## Runtime model
 
 ```text
-https://mcp.koba-nexus.ru
+Traefik -> gateway
+             |
+             +-- auth
+             +-- management
+             +-- github
+             +-- gitlab
+             +-- files
+             +-- curl
+             +-- analysis -> ghidra
 ```
 
-and one upstream GitHub callback:
+Only gateway is public. All other services communicate over Compose DNS by service
+name and port.
+
+## Failure isolation
+
+A deployment may recreate multiple containers; that is acceptable. Runtime failures
+must remain isolated:
+
+- provider services have independent restart policies and no health-gated
+  `depends_on` relationships;
+- gateway startup does not require any provider to be healthy;
+- an unavailable provider affects only its MCP surface;
+- auth is not on the bearer-token request path;
+- gateway validates signed access tokens locally;
+- auth is required only for OAuth registration, login, refresh and revocation;
+- an auth outage therefore does not invalidate already-issued access tokens.
+
+## OAuth
+
+There is one authorization server and one callback:
 
 ```text
-https://mcp.koba-nexus.ru/auth/callback
+issuer:   https://mcp.koba-nexus.ru
+callback: https://mcp.koba-nexus.ru/auth/callback
 ```
 
-The authorization server accepts only the explicit MCP resource allowlist:
+Auth owns GitHub OAuth and token issuance. Auth and gateway share only the FastMCP
+JWT signing key and the allowed GitHub user list. GitHub client ID/secret remain
+auth-only.
 
-```text
-https://mcp.koba-nexus.ru/mcp
-https://mcp.koba-nexus.ru/github/mcp
-https://mcp.koba-nexus.ru/gitlab/mcp
-https://mcp.koba-nexus.ru/files/mcp
-https://mcp.koba-nexus.ru/web/mcp
-https://mcp.koba-nexus.ru/analysis/mcp
-```
-
-Every resource publishes RFC 9728 protected-resource metadata pointing back to the same
-authorization server. Access and refresh tokens are audience-bound to the exact resource
-selected by the client. No path-specific GitHub callback URLs are used.
-
-## Required environment ownership
-
-Auth application:
-
-```text
-OAUTH_BASE_URL=https://mcp.koba-nexus.ru
-GITHUB_OAUTH_CLIENT_ID=...
-GITHUB_OAUTH_CLIENT_SECRET=...
-GITHUB_OAUTH_JWT_SIGNING_KEY=...
-GITHUB_OAUTH_ALLOWED_USERS=ArthurKoba
-AUTH_SERVICE_TOKEN=...
-```
-
-Gateway application:
+Required shared environment:
 
 ```text
 OAUTH_ENABLED=true
 OAUTH_BASE_URL=https://mcp.koba-nexus.ru
-AUTH_URL=http://auth:8000
-AUTH_SERVICE_TOKEN=...
-MANAGEMENT_URL=http://management:8000
+GITHUB_OAUTH_JWT_SIGNING_KEY=...
+GITHUB_OAUTH_ALLOWED_USERS=ArthurKoba
 ```
 
-`AUTH_SERVICE_TOKEN` is shared only by auth and gateway. GitHub OAuth credentials and
-the JWT signing key exist only in auth.
-
-## Watch paths
-
-Every application watches its Docker/runtime authority:
+Auth additionally requires:
 
 ```text
-Dockerfile
-docker-entrypoint.sh
-pyproject.toml
-uv.lock
-src/common/**
+GITHUB_OAUTH_CLIENT_ID=...
+GITHUB_OAUTH_CLIENT_SECRET=...
 ```
 
-Add runtime-specific paths:
+`AUTH_SERVICE_TOKEN`, `AUTH_URL` and `AUTH_TIMEOUT_SECONDS` are not used.
+
+## Persistent storage
+
+The Compose stack owns:
 
 ```text
-auth:
-  src/auth_service/**
-
-gateway:
-  src/bridge/**
-
-management:
-  src/management/**
-  src/modules/files/**
-
-github:
-  src/modules/github/**
-
-gitlab:
-  src/modules/gitlab/**
-
-files:
-  src/modules/files/**
-
-curl:
-  src/modules/curl/**
-  src/modules/files/**
-
-analysis:
-  src/modules/analysis/**
-
-ghidra:
-  src/modules/ghidra/**
+management-data -> /management
+files-data      -> /files
+auth-data       -> /data/fastmcp
 ```
 
-A provider-only change therefore rebuilds/restarts only that provider. Auth and gateway
-remain untouched. A change to `src/common/**`, Dockerfile or dependency lock is shared
-runtime authority and intentionally fans out.
+Do not delete or recreate these volumes during ordinary deployments.
 
-## Availability model
+## Build behaviour
 
-Gateway startup does not require provider containers. Backend catalog/call failures are
-isolated to the selected backend.
+The repository keeps one multi-stage Dockerfile. Each Compose service selects its
+own target. Dependencies are installed before service source code is copied, so
+normal source changes reuse local dependency layers.
 
-Gateway token verification depends on the private auth runtime, but auth restart does not
-restart gateway. During a short auth outage new requests requiring token verification
-return authentication failure; provider processes remain up.
+Keep Coolify build cache enabled. Do not enable "Disable Build Cache". Avoid embedding
+the source commit into dependency layers.
 
-Management restart affects Admin/account resolution only. It does not restart gateway,
-auth or unrelated providers.
-
-## Build cache
-
-Third-party dependencies are installed from committed `uv.lock` before source code is
-copied:
-
-```text
-uv sync --frozen --no-dev --no-install-project
-```
-
-Do not enable Coolify "Disable Build Cache" for normal deployments. Keep "Include Source
-Commit in Build" disabled unless build metadata is injected through a cache-safe layer.
-
-## Health/readiness
-
-Every runtime image exposes TCP port 8000 and has a TCP healthcheck. Configure Coolify to
-honor readiness before replacing the public gateway instance.
+No custom selective-build script or GitHub Actions deployment pipeline is required.

@@ -1,65 +1,72 @@
 from __future__ import annotations
 
-import httpx
 import pytest
+from fastmcp.server.auth.jwt_issuer import JWTIssuer, derive_jwt_key
+from pydantic import AnyHttpUrl
 
-from bridge.auth_client import AuthServiceTokenVerifier
-from common.settings import AuthClientSettings
+from bridge.auth_client import LocalAuthTokenVerifier
+from common.settings import GatewayAuthSettings
+
+
+def _settings() -> GatewayAuthSettings:
+    return GatewayAuthSettings(
+        enabled=True,
+        public_base_url="https://mcp.example.test",
+        oauth_jwt_signing_key="0123456789abcdef0123456789abcdef",
+        oauth_allowed_users=("arthurkoba",),
+    )
 
 
 @pytest.mark.asyncio
-async def test_auth_client_verifier_sends_exact_resource(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeClient:
-        async def __aenter__(self) -> FakeClient:
-            return self
-
-        async def __aexit__(
-            self,
-            exc_type: object,
-            exc: object,
-            traceback: object,
-        ) -> None:
-            return None
-
-        async def post(self, url: str, **kwargs: object) -> httpx.Response:
-            captured["url"] = url
-            captured.update(kwargs)
-            request = httpx.Request("POST", url)
-            return httpx.Response(
-                200,
-                json={
-                    "token": "token",
-                    "client_id": "client",
-                    "scopes": ["read:user"],
-                    "resource": "https://mcp.example.test/analysis/mcp",
-                    "claims": {"login": "ArthurKoba"},
-                },
-                request=request,
-            )
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: FakeClient())
-
-    settings = AuthClientSettings(
-        enabled=True,
-        url="http://auth:8000",
-        service_token="service-token",
-        public_base_url="https://mcp.example.test",
+async def test_local_auth_verifier_accepts_matching_signed_resource() -> None:
+    settings = _settings()
+    resource = "https://mcp.example.test/analysis/mcp"
+    signing_key = derive_jwt_key(
+        low_entropy_material=settings.oauth_jwt_signing_key,
+        salt="fastmcp-jwt-signing-key",
     )
-    verifier = AuthServiceTokenVerifier(
+    issuer = JWTIssuer(
+        issuer=str(AnyHttpUrl(settings.public_base_url)),
+        audience=resource,
+        signing_key=signing_key,
+    )
+    token = issuer.issue_access_token(
+        client_id="chatgpt",
+        scopes=["read:user"],
+        jti="test-jti",
+        upstream_claims={"login": "arthurkoba", "sub": "42"},
+    )
+
+    verifier = LocalAuthTokenVerifier(settings, resource)
+    access = await verifier.verify_token(token)
+
+    assert access is not None
+    assert access.resource == resource
+    assert access.subject == "42"
+
+
+@pytest.mark.asyncio
+async def test_local_auth_verifier_rejects_wrong_audience() -> None:
+    settings = _settings()
+    signing_key = derive_jwt_key(
+        low_entropy_material=settings.oauth_jwt_signing_key,
+        salt="fastmcp-jwt-signing-key",
+    )
+    issuer = JWTIssuer(
+        issuer=str(AnyHttpUrl(settings.public_base_url)),
+        audience="https://mcp.example.test/files/mcp",
+        signing_key=signing_key,
+    )
+    token = issuer.issue_access_token(
+        client_id="chatgpt",
+        scopes=["read:user"],
+        jti="test-jti",
+        upstream_claims={"login": "arthurkoba", "sub": "42"},
+    )
+
+    verifier = LocalAuthTokenVerifier(
         settings,
         "https://mcp.example.test/analysis/mcp",
     )
 
-    token = await verifier.verify_token("token")
-
-    assert token is not None
-    assert token.resource == "https://mcp.example.test/analysis/mcp"
-    assert captured["url"] == "http://auth:8000/internal/verify"
-    assert captured["json"] == {
-        "token": "token",
-        "resource": "https://mcp.example.test/analysis/mcp",
-    }
+    assert await verifier.verify_token(token) is None
