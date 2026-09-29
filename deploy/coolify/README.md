@@ -1,8 +1,8 @@
 # Coolify deployment
 
 Production uses one Git-backed Docker Compose application named `mcp-bridge`.
-All services are separate containers inside that one stack. Coolify builds locally
-on the server and reuses the local Docker build cache.
+All services are separate containers inside that stack. Coolify builds locally on the
+server and reuses the local Docker build cache.
 
 ## Runtime model
 
@@ -18,22 +18,25 @@ Traefik -> gateway
              +-- analysis -> ghidra
 ```
 
-Only gateway is public. All other services communicate over Compose DNS by service
-name and port.
+Only gateway is public. All other services communicate over Compose DNS by service name
+and port.
 
 ## Failure isolation
 
-A deployment may recreate multiple containers; that is acceptable. Runtime failures
-must remain isolated:
+A deployment may rebuild or recreate multiple containers; that is acceptable. Isolation
+is a runtime property, not a custom deployment-script property:
 
-- provider services have independent restart policies and no health-gated
-  `depends_on` relationships;
+- every service has its own `restart: unless-stopped` policy;
+- there are no `depends_on` or health-gated startup chains between runtimes;
 - gateway startup does not require any provider to be healthy;
 - an unavailable provider affects only its MCP surface;
 - auth is not on the bearer-token request path;
-- gateway validates signed access tokens locally;
+- gateway validates already-issued signed access tokens locally;
 - auth is required only for OAuth registration, login, refresh and revocation;
 - an auth outage therefore does not invalidate already-issued access tokens.
+
+This is the recovery model: a broken Management, GitLab or Analysis container must not
+prevent GitHub or other healthy providers from starting and remaining usable.
 
 ## OAuth
 
@@ -44,9 +47,9 @@ issuer:   https://mcp.koba-nexus.ru
 callback: https://mcp.koba-nexus.ru/auth/callback
 ```
 
-Auth owns GitHub OAuth and token issuance. Auth and gateway share only the FastMCP
-JWT signing key and the allowed GitHub user list. GitHub client ID/secret remain
-auth-only.
+Auth owns GitHub OAuth and token issuance. Auth and gateway share the FastMCP JWT signing
+key and allowed GitHub user list so gateway can verify bearer tokens locally. GitHub
+client ID/secret remain auth-only.
 
 Required shared environment:
 
@@ -78,74 +81,37 @@ auth-data       -> /data/fastmcp
 
 Do not delete or recreate these volumes during ordinary deployments.
 
-## Selective local deployment
+## Build and deploy behaviour
 
-The repository keeps one multi-stage Dockerfile and one Coolify Compose application.
-Coolify still performs the build locally on the deployment server, so unchanged Docker
-layers stay in the server-local build cache.
+Use the standard Coolify Git-backed Docker Compose deployment flow. No custom selective
+build/start script, deploy-state volume, GitHub Actions deployment pipeline or external
+image registry is required.
 
-Container replacement is selective. Configure the application as follows:
+Recommended Coolify settings:
 
 ```text
 Auto Deploy: ON
-Preserve Repository: ON
-Shallow Clone: OFF
+Preserve Repository: optional
+Shallow Clone: default is fine
 Disable Build Cache: OFF
 Include Source Commit in Build: OFF
 Custom Build Command: <empty>
-Custom Start Command: bash deploy/coolify/start-selective.sh
+Custom Start Command: <empty>
 ```
 
-Set Watch Paths to:
+The repository uses one multi-stage Dockerfile and each Compose service selects its own
+target. The dependency layer copies only `pyproject.toml` and `uv.lock` and runs
+`uv sync --frozen --no-dev --no-install-project` before runtime-specific source is
+copied. Normal source changes therefore reuse the server-local dependency cache.
 
-```text
-Dockerfile
-docker-entrypoint.sh
-docker-compose.yaml
-pyproject.toml
-uv.lock
-src/**
-deploy/coolify/*.sh
-```
+A full Compose reconcile may restart healthy containers briefly, but a failure in one
+runtime must not cascade into another runtime after startup. Keep orchestration simple
+and preserve that failure-isolation contract instead of adding selective-restart state.
 
-Watch Paths prevent documentation/test-only pushes from starting a Coolify deployment.
-They do not choose individual Compose services.
+## Public routing
 
-The standard Coolify build phase remains unchanged and uses the local Docker cache.
-After the build, `start-selective.sh` compares the current Git commit with the last
-successfully started commit stored in the Docker volume
-`mcp-bridge-deploy-state`. It then runs `docker compose up -d --no-deps --wait`
-only for affected services.
+Only gateway receives `https://mcp.koba-nexus.ru`. Provider runtimes, auth and
+management have no public domains. Gateway routes the public MCP surfaces and Admin UI
+to the corresponding private service.
 
-Runtime ownership map:
-
-```text
-src/auth_service/**       -> auth
-src/bridge/**             -> gateway
-src/management/**         -> management
-src/modules/github/**     -> github
-src/modules/gitlab/**     -> gitlab
-src/modules/files/**      -> management, files, curl
-src/modules/curl/**       -> curl
-src/modules/analysis/**   -> analysis
-src/modules/ghidra/**     -> ghidra
-src/common/**             -> all runtimes
-Dockerfile                -> all runtimes
-docker-entrypoint.sh      -> all runtimes
-docker-compose.yaml       -> all runtimes
-pyproject.toml / uv.lock  -> all runtimes
-```
-
-If the previous successful commit is unavailable in the preserved Git history, the
-script fails safe by selecting all services. The deployment SHA is updated only after
-the selected services pass Compose health waiting.
-
-No GitHub Actions deployment pipeline or external image registry is required.
-
-## Build cache boundaries
-
-Dependencies are installed before runtime-specific source code is copied. The dependency
-layer copies only `pyproject.toml` and `uv.lock`; documentation changes therefore do
-not invalidate `uv sync`.
-
-Keep Coolify build cache enabled and keep Include Source Commit in Build disabled.
+Native Ghidra remains private; ChatGPT uses `/analysis/mcp`.

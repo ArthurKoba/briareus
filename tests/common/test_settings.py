@@ -8,10 +8,10 @@ from pydantic import ValidationError
 from common.settings import (
     AnalysisSettings,
     AsgiServerSettings,
-    GatewayAuthSettings,
     AuthServiceSettings,
     BridgeSettings,
     FileSettings,
+    GatewayAuthSettings,
     GitHubPolicySettings,
     GitLabSettings,
     ManagementClientSettings,
