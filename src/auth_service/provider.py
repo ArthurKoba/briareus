@@ -5,11 +5,12 @@ import json
 from contextvars import ContextVar
 from urllib.parse import parse_qs, urlsplit
 
+from fastmcp.server.auth import AccessToken as FastMCPAccessToken
 from fastmcp.server.auth.jwt_issuer import JWTIssuer
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from mcp.server.auth.provider import (
-    AccessToken,
+    AccessToken as SDKAccessToken,
     AuthorizationCode,
     AuthorizationParams,
     RefreshToken,
@@ -234,7 +235,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
 
     async def revoke_token(
         self,
-        token: AccessToken | RefreshToken,
+        token: SDKAccessToken | RefreshToken,
     ) -> None:
         audience = self._jwt_audience_unverified(token.token)
         try:
@@ -248,7 +249,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
         finally:
             self._resource_context.reset(context)
 
-    async def load_access_token(self, token: str) -> AccessToken | None:
+    async def load_access_token(self, token: str) -> FastMCPAccessToken | None:
         audience = self._jwt_audience_unverified(token)
         try:
             resource = self.canonical_resource(audience)
