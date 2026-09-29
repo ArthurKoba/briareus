@@ -23,8 +23,14 @@ _DEFAULT_PRIVATE_ORIGINS = (
     "http://127.0.0.1:*",
     "http://[::1]:*",
 )
-_DEFAULT_PUBLIC_HOSTS = ("localhost:*", "127.0.0.1:*", "[::1]:*")
+_DEFAULT_PUBLIC_HOSTS = (
+    "mcp.koba-nexus.ru",
+    "localhost:*",
+    "127.0.0.1:*",
+    "[::1]:*",
+)
 _DEFAULT_PUBLIC_ORIGINS = (
+    "https://mcp.koba-nexus.ru",
     "http://localhost:*",
     "http://127.0.0.1:*",
     "http://[::1]:*",
@@ -227,7 +233,7 @@ class AuthServiceSettings(ProcessSettings):
 
 
 class GatewayAuthSettings(ProcessSettings):
-    enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
+    enabled: bool = Field(True, validation_alias="OAUTH_ENABLED")
     public_base_url: str = Field(
         "https://mcp.koba-nexus.ru",
         validation_alias="OAUTH_BASE_URL",

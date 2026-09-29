@@ -158,3 +158,16 @@ def test_file_settings_are_frozen_and_validate_limits() -> None:
 
     with pytest.raises(ValidationError):
         FileSettings(root=Path("relative/path"))
+
+
+def test_production_public_defaults_do_not_require_compose_overrides(monkeypatch) -> None:
+    for name in ("OAUTH_ENABLED", "OAUTH_BASE_URL", "MCP_ALLOWED_HOSTS", "MCP_ALLOWED_ORIGINS"):
+        monkeypatch.delenv(name, raising=False)
+
+    auth = GatewayAuthSettings()
+    bridge = BridgeSettings()
+
+    assert auth.enabled is True
+    assert auth.public_base_url == "https://mcp.koba-nexus.ru"
+    assert "mcp.koba-nexus.ru" in bridge.allowed_hosts
+    assert "https://mcp.koba-nexus.ru" in bridge.allowed_origins

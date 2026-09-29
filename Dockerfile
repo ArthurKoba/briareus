@@ -57,7 +57,8 @@ FROM runtime-base AS management
 COPY src/management ./src/management
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/files ./src/modules/files
-ENV ASGI_APP=management.runtime:app
+ENV ASGI_APP=management.runtime:app \
+    ASGI_FORWARDED_ALLOW_IPS=*
 
 
 FROM runtime-base AS github
