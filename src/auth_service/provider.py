@@ -9,12 +9,8 @@ from fastmcp.server.auth import AccessToken as FastMCPAccessToken
 from fastmcp.server.auth.jwt_issuer import JWTIssuer
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.adapters.pydantic import PydanticAdapter
-from mcp.server.auth.provider import (
-    AccessToken as SDKAccessToken,
-    AuthorizationCode,
-    AuthorizationParams,
-    RefreshToken,
-)
+from mcp.server.auth.provider import AccessToken as SDKAccessToken
+from mcp.server.auth.provider import AuthorizationCode, AuthorizationParams, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
@@ -264,9 +260,12 @@ class MultiResourceGitHubProvider(GitHubProvider):
 
         if access is None:
             return None
-        return access.model_copy(
-            update={
-                "token": token,
-                "resource": resource,
-            }
+        return FastMCPAccessToken(
+            token=token,
+            client_id=access.client_id,
+            scopes=list(access.scopes),
+            expires_at=access.expires_at,
+            resource=resource,
+            subject=access.subject,
+            claims=dict(access.claims or {}),
         )
