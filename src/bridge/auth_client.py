@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 from fastmcp.server.auth import AccessToken, TokenVerifier
+
 from common.settings import AuthClientSettings
 
 

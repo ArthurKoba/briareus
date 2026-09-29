@@ -5,11 +5,11 @@ import json
 from contextvars import ContextVar
 from urllib.parse import parse_qs, urlsplit
 
-from fastmcp.server.auth import AccessToken
 from fastmcp.server.auth.jwt_issuer import JWTIssuer
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from mcp.server.auth.provider import (
+    AccessToken,
     AuthorizationCode,
     AuthorizationParams,
     RefreshToken,
