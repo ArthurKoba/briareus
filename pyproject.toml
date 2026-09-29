@@ -38,6 +38,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
+  "src/auth_service",
   "src/bridge",
   "src/common",
   "src/management",

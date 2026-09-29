@@ -43,6 +43,11 @@ ENTRYPOINT ["/usr/local/bin/bridge-entrypoint"]
 CMD ["/app/.venv/bin/python", "-m", "common.asgi"]
 
 
+FROM runtime-base AS auth
+COPY src/auth_service ./src/auth_service
+ENV ASGI_APP=auth_service.runtime:app
+
+
 FROM runtime-base AS gateway
 COPY src/bridge ./src/bridge
 ENV ASGI_APP=bridge.server:app

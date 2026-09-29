@@ -45,6 +45,23 @@ services:
       - management-data:/management
       - files-data:/files
 
+  auth:
+    <<: *runtime
+    build:
+      <<: *build
+      target: auth
+    environment:
+      ASGI_APP: auth_service.runtime:app
+      OAUTH_BASE_URL: ${OAUTH_BASE_URL:-https://mcp.koba-nexus.ru}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET}
+      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY}
+      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS}
+      AUTH_SERVICE_TOKEN: ${AUTH_SERVICE_TOKEN}
+      AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS: ${AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS:-300}
+    volumes:
+      - auth-data:/data/fastmcp
+
   gateway:
     <<: *runtime
     build:
@@ -54,10 +71,9 @@ services:
       ASGI_APP: bridge.server:app
       OAUTH_ENABLED: ${OAUTH_ENABLED:-true}
       OAUTH_BASE_URL: ${OAUTH_BASE_URL:-https://mcp.koba-nexus.ru}
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET}
-      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY}
-      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS}
+      AUTH_URL: ${AUTH_URL:-http://auth:8000}
+      AUTH_SERVICE_TOKEN: ${AUTH_SERVICE_TOKEN}
+      AUTH_TIMEOUT_SECONDS: ${AUTH_TIMEOUT_SECONDS:-10}
       MANAGEMENT_URL: ${MANAGEMENT_URL:-http://management:8000}
       GITHUB_URL: ${GITHUB_URL:-http://github:8000/mcp}
       GITLAB_URL: ${GITLAB_URL:-http://gitlab:8000/mcp}
@@ -67,9 +83,6 @@ services:
       GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
       MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-mcp.koba-nexus.ru,localhost:*,127.0.0.1:*}
       MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://mcp.koba-nexus.ru}
-    volumes:
-      - fastmcp-data:/data/fastmcp
-
   github:
     <<: *private-service
     build:
@@ -143,9 +156,9 @@ volumes:
   files-data:
     external: true
     name: files-data
-  fastmcp-data:
+  auth-data:
     external: true
-    name: fastmcp-data
+    name: auth-data
 
 networks:
   coolify:

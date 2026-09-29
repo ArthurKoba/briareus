@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 import pytest
 from fastmcp import Client
-from starlette.responses import JSONResponse
-from starlette.routing import Route
 from starlette.testclient import TestClient
 
-import bridge.server as server_module
 from bridge.server import app, mcp
+from common.mcp_surfaces import MCP_SURFACE_PATHS
 
 
 @pytest.mark.asyncio
@@ -39,21 +39,15 @@ async def test_bridge_root_is_map_not_backend_namespace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bridge_capabilities_publish_single_origin_paths() -> None:
+async def test_bridge_capabilities_publish_only_supported_public_surfaces() -> None:
     async with Client(mcp) as client:
         result = await client.call_tool("bridge_capabilities", {})
 
     assert result.data is not None
-    assert {
-        "/mcp",
-        "/github/mcp",
-        "/gitlab/mcp",
-        "/files/mcp",
-        "/web/mcp",
-        "/analysis/mcp",
-        "/ghidra/mcp",
-        "/admin",
-    } <= set(result.data["public_surfaces"])
+    surfaces = set(result.data["public_surfaces"])
+    assert set(MCP_SURFACE_PATHS.values()) <= surfaces
+    assert "/admin" in surfaces
+    assert "/ghidra/mcp" not in surfaces
 
 
 def test_http_app_mounts_expected_public_surfaces() -> None:
@@ -64,71 +58,11 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
         "/files",
         "/web",
         "/analysis",
-        "/ghidra",
         "/admin",
         "/admin/{path:path}",
     } <= paths
-    assert "/http" not in paths
+    assert "/ghidra" not in paths
     assert "/curl" not in paths
-
-
-class _FakeOAuthDiscovery:
-    def __init__(self, prefix: str) -> None:
-        self.prefix = prefix
-
-    def get_well_known_routes(self, mcp_path: str | None = None):
-        assert mcp_path == "/mcp"
-
-        async def metadata(_request):
-            return JSONResponse({})
-
-        return [
-            Route(
-                f"/.well-known/oauth-authorization-server{self.prefix}",
-                metadata,
-            ),
-            Route(
-                f"/.well-known/oauth-protected-resource{self.prefix}/mcp",
-                metadata,
-            ),
-        ]
-
-
-def test_oauth_surface_urls_are_path_scoped() -> None:
-    settings = server_module.BridgeSettings(
-        oauth_base_url="https://mcp.example.test/",
-    )
-
-    assert server_module._oauth_surface_url(settings, "root") == "https://mcp.example.test"
-    assert (
-        server_module._oauth_surface_url(settings, "analysis")
-        == "https://mcp.example.test/analysis"
-    )
-    assert (
-        server_module._oauth_surface_url(settings, "files")
-        == "https://mcp.example.test/files"
-    )
-
-
-def test_oauth_discovery_covers_every_public_mcp_resource(monkeypatch) -> None:
-    fake_auth = {
-        surface: _FakeOAuthDiscovery(prefix)
-        for surface, prefix in server_module._OAUTH_SURFACE_PREFIXES.items()
-    }
-    monkeypatch.setattr(server_module, "_auth_by_surface", fake_auth)
-
-    paths = {
-        getattr(route, "path", "")
-        for route in server_module._oauth_discovery_routes()
-    }
-
-    assert "/.well-known/oauth-authorization-server" in paths
-    assert "/.well-known/oauth-protected-resource/mcp" in paths
-    for prefix in server_module._OAUTH_SURFACE_PREFIXES.values():
-        if not prefix:
-            continue
-        assert f"/.well-known/oauth-authorization-server{prefix}" in paths
-        assert f"/.well-known/oauth-protected-resource{prefix}/mcp" in paths
 
 
 def test_mounted_analysis_http_app_runs_fastmcp_lifespan() -> None:

@@ -6,11 +6,11 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Route
 
-from bridge.admin_proxy import AdminProxy
+from bridge.reverse_proxy import ReverseProxy
 
 
-def test_admin_proxy_is_registered_as_request_handler() -> None:
-    proxy = AdminProxy("http://management:8000")
+def test_reverse_proxy_is_registered_as_request_handler() -> None:
+    proxy = ReverseProxy("http://management:8000", backend_name="management")
     app = Starlette(routes=[Route("/admin", proxy.handle, methods=["GET"])])
 
     route = app.routes[0]
@@ -19,7 +19,9 @@ def test_admin_proxy_is_registered_as_request_handler() -> None:
 
 
 @pytest.mark.asyncio
-async def test_admin_proxy_rewrites_internal_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_reverse_proxy_rewrites_internal_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeClient:
         async def __aenter__(self) -> FakeClient:
             return self
@@ -42,7 +44,8 @@ async def test_admin_proxy_rewrites_internal_redirect(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: FakeClient())
 
-    proxy = AdminProxy("http://management:8000")
+    proxy = ReverseProxy("http://management:8000", backend_name="management")
+
     async def receive() -> dict[str, object]:
         return {"type": "http.request", "body": b"", "more_body": False}
 
@@ -69,7 +72,7 @@ async def test_admin_proxy_rewrites_internal_redirect(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_admin_proxy_rewrites_backend_origin_inside_next_param(
+async def test_reverse_proxy_rewrites_backend_origin_inside_next_param(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeClient:
@@ -99,7 +102,7 @@ async def test_admin_proxy_rewrites_backend_origin_inside_next_param(
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: FakeClient())
 
-    proxy = AdminProxy("http://management:8000")
+    proxy = ReverseProxy("http://management:8000", backend_name="management")
 
     async def receive() -> dict[str, object]:
         return {"type": "http.request", "body": b"", "more_body": False}
@@ -127,7 +130,7 @@ async def test_admin_proxy_rewrites_backend_origin_inside_next_param(
 
 
 @pytest.mark.asyncio
-async def test_admin_proxy_forwards_public_origin_headers(
+async def test_reverse_proxy_forwards_public_origin_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, str] = {}
@@ -153,7 +156,7 @@ async def test_admin_proxy_forwards_public_origin_headers(
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: FakeClient())
 
-    proxy = AdminProxy("http://management:8000")
+    proxy = ReverseProxy("http://management:8000", backend_name="management")
 
     async def receive() -> dict[str, object]:
         return {"type": "http.request", "body": b"", "more_body": False}
