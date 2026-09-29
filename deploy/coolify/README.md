@@ -71,7 +71,7 @@ GITHUB_OAUTH_CLIENT_SECRET=...
 
 ## Persistent storage
 
-The Compose stack owns:
+The Compose stack owns these logical volumes:
 
 ```text
 management-data -> /management
@@ -79,7 +79,10 @@ files-data      -> /files
 auth-data       -> /data/fastmcp
 ```
 
-Do not delete or recreate these volumes during ordinary deployments.
+They are ordinary Compose volumes, not `external` volumes with hard-coded Docker names.
+Coolify/Compose therefore keeps the resource project prefix on the physical volume names
+(for example `<project>_files-data`) and reuses the existing data when the same resource
+is redeployed. Do not delete, rename or recreate these volumes during ordinary deployments.
 
 ## Build and deploy behaviour
 

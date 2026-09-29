@@ -149,14 +149,8 @@ services:
 
 volumes:
   management-data:
-    external: true
-    name: management-data
   files-data:
-    external: true
-    name: files-data
   auth-data:
-    external: true
-    name: auth-data
 
 networks:
   coolify:

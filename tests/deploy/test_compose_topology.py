@@ -37,3 +37,12 @@ def test_compose_does_not_publish_host_ports() -> None:
 
     for name, service in services.items():
         assert "ports" not in service, name
+
+
+def test_compose_owns_persistent_volumes() -> None:
+    document = yaml.safe_load(COMPOSE_FILE.read_text())
+    volumes = document["volumes"]
+
+    assert set(volumes) == {"management-data", "files-data", "auth-data"}
+    for config in volumes.values():
+        assert config is None or "external" not in config
