@@ -233,7 +233,7 @@ class AuthServiceSettings(ProcessSettings):
 
 
 class GatewayAuthSettings(ProcessSettings):
-    enabled: bool = Field(True, validation_alias="OAUTH_ENABLED")
+    enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
     public_base_url: str = Field(
         "https://mcp.koba-nexus.ru",
         validation_alias="OAUTH_BASE_URL",

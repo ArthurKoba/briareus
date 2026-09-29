@@ -50,7 +50,8 @@ ENV ASGI_APP=auth_service.runtime:app
 
 FROM runtime-base AS gateway
 COPY src/bridge ./src/bridge
-ENV ASGI_APP=bridge.server:app
+ENV ASGI_APP=bridge.server:app \
+    OAUTH_ENABLED=true
 
 
 FROM runtime-base AS management
