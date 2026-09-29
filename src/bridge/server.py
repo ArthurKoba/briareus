@@ -36,6 +36,7 @@ from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 from .reverse_proxy import ReverseProxy
 
 _STARTED_AT = datetime.now(UTC).isoformat()
+_AUTH_BACKEND_URL = "http://auth:8000"
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _AUTH_PROXY_PATHS = (
     "/.well-known/oauth-authorization-server",
@@ -51,6 +52,10 @@ _AUTH_PROXY_PATHS = (
 
 def _proxy(name: str, url: str) -> FastMCP:
     return create_proxy(url, name=f"{name}-backend", mode="auto")
+
+
+def _build_auth_reverse_proxy() -> ReverseProxy:
+    return ReverseProxy(_AUTH_BACKEND_URL, backend_name="auth")
 
 
 def _build_surface_auth(
@@ -304,7 +309,7 @@ for _route in _resource_discovery_routes():
     app.router.routes.append(_route)
 
 if _auth_settings.enabled:
-    _auth_proxy = ReverseProxy(_auth_settings.url, backend_name="auth")
+    _auth_proxy = _build_auth_reverse_proxy()
     for _path in _AUTH_PROXY_PATHS:
         app.add_route(_path, _auth_proxy.handle, methods=_PROXY_METHODS)
 

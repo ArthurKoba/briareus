@@ -78,13 +78,74 @@ auth-data       -> /data/fastmcp
 
 Do not delete or recreate these volumes during ordinary deployments.
 
-## Build behaviour
+## Selective local deployment
 
-The repository keeps one multi-stage Dockerfile. Each Compose service selects its
-own target. Dependencies are installed before service source code is copied, so
-normal source changes reuse local dependency layers.
+The repository keeps one multi-stage Dockerfile and one Coolify Compose application.
+Coolify still performs the build locally on the deployment server, so unchanged Docker
+layers stay in the server-local build cache.
 
-Keep Coolify build cache enabled. Do not enable "Disable Build Cache". Avoid embedding
-the source commit into dependency layers.
+Container replacement is selective. Configure the application as follows:
 
-No custom selective-build script or GitHub Actions deployment pipeline is required.
+```text
+Auto Deploy: ON
+Preserve Repository: ON
+Shallow Clone: OFF
+Disable Build Cache: OFF
+Include Source Commit in Build: OFF
+Custom Build Command: <empty>
+Custom Start Command: bash deploy/coolify/start-selective.sh
+```
+
+Set Watch Paths to:
+
+```text
+Dockerfile
+docker-entrypoint.sh
+docker-compose.yaml
+pyproject.toml
+uv.lock
+src/**
+deploy/coolify/*.sh
+```
+
+Watch Paths prevent documentation/test-only pushes from starting a Coolify deployment.
+They do not choose individual Compose services.
+
+The standard Coolify build phase remains unchanged and uses the local Docker cache.
+After the build, `start-selective.sh` compares the current Git commit with the last
+successfully started commit stored in the Docker volume
+`mcp-bridge-deploy-state`. It then runs `docker compose up -d --no-deps --wait`
+only for affected services.
+
+Runtime ownership map:
+
+```text
+src/auth_service/**       -> auth
+src/bridge/**             -> gateway
+src/management/**         -> management
+src/modules/github/**     -> github
+src/modules/gitlab/**     -> gitlab
+src/modules/files/**      -> management, files, curl
+src/modules/curl/**       -> curl
+src/modules/analysis/**   -> analysis
+src/modules/ghidra/**     -> ghidra
+src/common/**             -> all runtimes
+Dockerfile                -> all runtimes
+docker-entrypoint.sh      -> all runtimes
+docker-compose.yaml       -> all runtimes
+pyproject.toml / uv.lock  -> all runtimes
+```
+
+If the previous successful commit is unavailable in the preserved Git history, the
+script fails safe by selecting all services. The deployment SHA is updated only after
+the selected services pass Compose health waiting.
+
+No GitHub Actions deployment pipeline or external image registry is required.
+
+## Build cache boundaries
+
+Dependencies are installed before runtime-specific source code is copied. The dependency
+layer copies only `pyproject.toml` and `uv.lock`; documentation changes therefore do
+not invalidate `uv sync`.
+
+Keep Coolify build cache enabled and keep Include Source Commit in Build disabled.

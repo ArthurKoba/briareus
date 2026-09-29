@@ -4,7 +4,7 @@ import pytest
 from fastmcp import Client
 from starlette.testclient import TestClient
 
-from bridge.server import app, mcp
+from bridge.server import _build_auth_reverse_proxy, app, mcp
 from common.mcp_surfaces import MCP_SURFACE_PATHS
 
 
@@ -89,3 +89,9 @@ def test_mounted_analysis_http_app_runs_fastmcp_lifespan() -> None:
 
     assert response.status_code == 200
     assert "Task group is not initialized" not in response.text
+
+
+def test_auth_proxy_targets_compose_auth_service() -> None:
+    proxy = _build_auth_reverse_proxy()
+
+    assert proxy.base_url == "http://auth:8000"

@@ -12,7 +12,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 
