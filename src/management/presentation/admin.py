@@ -28,6 +28,7 @@ from starlette_admin import (
     PasswordField,
     RowActionsDisplayType,
     StatWidget,
+    StringField,
     TextAreaField,
     action,
     flash,
@@ -40,6 +41,7 @@ from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
 
 from common.models import json_int, json_str
+from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
@@ -276,6 +278,10 @@ class GitLabAccountView(_BaseAccountView):
     searchable_fields = ("alias", "base_url")
 
 
+def _display_invocation_tool(_request: Request, obj: InvocationRecord) -> str:
+    return public_tool_name(obj.module, obj.tool)
+
+
 class InvocationView(ModelView):
     row_actions_display_type = RowActionsDisplayType.KEBAB
     page_size = 50
@@ -285,7 +291,7 @@ class InvocationView(ModelView):
             "id",
             "occurred_at",
             "module",
-            "tool",
+            StringField("tool", label="Tool", getter=_display_invocation_tool),
             "provider",
             "account_id",
             "status",

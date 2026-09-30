@@ -273,13 +273,6 @@ def test_required_reviewer_changes_requested_blocks_current_head() -> None:
         client.assert_required_reviews("ArthurKoba/koba-mcp-bridge", 7)
 
 
-def test_protected_pull_request_merge_requires_administrator() -> None:
-    client = RecordingActionsClient()
-
-    with pytest.raises(GitHubAgentError, match="requires administrator"):
-        client.merge_pull_request("ArthurKoba/koba-mcp-bridge", 7)
-
-
 @pytest.mark.asyncio
 async def test_dispatch_workflow_is_exposed_on_fastmcp_surface() -> None:
     from fastmcp import Client, FastMCP

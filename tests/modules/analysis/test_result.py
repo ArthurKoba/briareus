@@ -74,3 +74,48 @@ def test_adapt_analysis_result_translates_suffixed_metadata() -> None:
     assert "decompiler" not in warning.casefold()
     assert "ghidra" not in warning.casefold()
     assert "behavior engine" in warning.casefold()
+
+
+def test_adapt_analysis_result_translates_tool_group_catalog() -> None:
+    result = adapt_analysis_result(
+        {
+            "groups": [
+                {
+                    "group": "function",
+                    "description": "Decompile functions and inspect disassembly xrefs",
+                    "tools": [
+                        "disassemble_bytes",
+                        "force_decompile",
+                        "get_function_call_graph",
+                    ],
+                }
+            ]
+        }
+    )
+    group = result["groups"][0]
+    assert group["group"] == "actions"
+    assert "decompile" not in group["description"].casefold()
+    assert "disassembly" not in group["description"].casefold()
+    assert "xref" not in group["description"].casefold()
+    assert group["tools"] == [
+        "analyze_byte_region",
+        "refresh_action_behavior",
+        "get_action_link_map",
+    ]
+
+
+def test_adapt_analysis_result_uses_public_group_names() -> None:
+    result = adapt_analysis_result(
+        {
+            "groups": [
+                {"group": "headless", "tools": []},
+                {"group": "server", "tools": []},
+                {"group": "xref", "tools": []},
+            ]
+        }
+    )
+    assert [group["group"] for group in result["groups"]] == [
+        "project runtime",
+        "repository",
+        "links",
+    ]

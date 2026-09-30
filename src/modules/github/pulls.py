@@ -318,21 +318,31 @@ class GitHubPullClient(GitHubRepositoryClientBase):
         # avoiding an impossible merge requirement on repositories such as
         # ghidra-mcp, whose aggregate check is named "Build Status". GitHub's
         # own branch protection/rulesets remain the final merge authority.
-        configured_names = set(required)
-        if configured_names and not configured_names.intersection(by_name):
+        def matches(required_name: str, checks_by_name: dict[str, JsonObject]) -> list[JsonObject]:
+            exact = checks_by_name.get(required_name)
+            if exact is not None:
+                return [exact]
+            matrix_prefix = f"{required_name} ("
+            return [
+                item
+                for name, item in checks_by_name.items()
+                if name.startswith(matrix_prefix)
+            ]
+
+        if required and not any(matches(name, by_name) for name in required):
             repository_info = self._repository_metadata(repository)
             default_branch = json_str(repository_info.get("default_branch"))
-            baseline_names: set[str] = set()
+            baseline_by_name: dict[str, JsonObject] = {}
             if default_branch:
                 baseline = self.check_runs(repository, default_branch)
                 baseline_checks = baseline["check_runs"]
                 assert isinstance(baseline_checks, list)
-                baseline_names = {
-                    json_str(item.get("name"))
+                baseline_by_name = {
+                    json_str(item.get("name")): item
                     for item in baseline_checks
                     if isinstance(item, dict)
                 }
-            if not configured_names.intersection(baseline_names):
+            if not any(matches(name, baseline_by_name) for name in required):
                 return {
                     "repository": repository,
                     "ref": ref,
@@ -340,14 +350,14 @@ class GitHubPullClient(GitHubRepositoryClientBase):
                     "status": "delegated_to_github",
                 }
 
-        missing = [name for name in required if name not in by_name]
+        missing = [name for name in required if not matches(name, by_name)]
         failing = [
             name
             for name in required
-            if name in by_name
-            and (
-                by_name[name].get("status") != "completed"
-                or by_name[name].get("conclusion") != "success"
+            if any(
+                item.get("status") != "completed"
+                or item.get("conclusion") != "success"
+                for item in matches(name, by_name)
             )
         ]
         if missing or failing:
@@ -368,6 +378,7 @@ class GitHubPullClient(GitHubRepositoryClientBase):
         merge_method: str = "squash",
         commit_title: str | None = None,
         commit_message: str | None = None,
+        expected_head_sha: str | None = None,
     ) -> JsonObject:
         repository = self._assert_allowed(repository)
         if merge_method not in {"merge", "squash", "rebase"}:
@@ -390,6 +401,10 @@ class GitHubPullClient(GitHubRepositoryClientBase):
         head_sha = json_str(head.get("sha"))
         if not head_sha:
             raise GitHubAgentError("pull request head has no sha")
+        if expected_head_sha and head_sha != expected_head_sha:
+            raise GitHubAgentError(
+                f"pull request head changed: expected {expected_head_sha}, found {head_sha}"
+            )
         self.assert_required_checks(repository, head_sha)
 
         payload: JsonObject = {"merge_method": merge_method}

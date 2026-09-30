@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from modules.analysis.terminology import (
+    analysis_group_name,
     analysis_result_key,
     analysis_result_text,
     analysis_schema,
@@ -319,6 +320,11 @@ def test_argument_names_neutralize_backend_tokens() -> None:
             "binary_name": {"type": "string"},
             "pcode_mode": {"type": "string"},
             "assembly_context": {"type": "integer"},
+            "max_functions": {"type": "integer"},
+            "min_xrefs": {"type": "integer"},
+            "is_thunk": {"type": "boolean"},
+            "gzf_path": {"type": "string"},
+            "gar_path": {"type": "string"},
         },
     }
     exposed = analysis_schema(schema, "synthetic_backend_tool")
@@ -327,6 +333,11 @@ def test_argument_names_neutralize_backend_tokens() -> None:
         "program_name",
         "ir_mode",
         "low_level_context",
+        "max_actions",
+        "min_links",
+        "is_forwarder",
+        "package_path",
+        "archive_path",
     }
 
 
@@ -375,6 +386,20 @@ def test_hardening_guard_rejects_embedded_backend_identifiers() -> None:
         "memory bytes",
         "instructions",
         "set_decompiler_comment",
+        "function_name",
+        "min_xrefs",
+        "is_thunk",
+        "xrefed",
+        "headless",
+        "BSim",
+        "DomainFile",
+        "ClearFlowAndRepairCmd",
+        "Swing thread",
+        "Java source",
+        "FUN_*",
+        "DAT_*",
+        "gzf_path",
+        "gar_path",
     ):
         assert analysis_surface_violations(leaked)
 
@@ -393,7 +418,8 @@ def test_internal_variable_type_name_is_neutralized() -> None:
 def test_internal_tool_names_are_removed_from_public_text() -> None:
     source = (
         "Use add_function_tag, delete_function_tag, analyze_function_completeness, "
-        "rename_function, set_function_this_type, and add_memory_reference."
+        "rename_function, set_function_this_type, add_memory_reference, "
+        "and batch_remove_function_tags."
     )
     public = analysis_text(source)
     for internal_name in (
@@ -403,6 +429,7 @@ def test_internal_tool_names_are_removed_from_public_text() -> None:
         "rename_function",
         "set_function_this_type",
         "add_memory_reference",
+        "batch_remove_function_tags",
     ):
         assert internal_name not in public
     assert "add_action_tag" in public
@@ -411,3 +438,30 @@ def test_internal_tool_names_are_removed_from_public_text() -> None:
     assert "name_action" in public
     assert "set_action_this_type" in public
     assert "add_data_link" in public
+    assert "remove_action_tag" in public
+
+
+def test_analysis_group_names_hide_backend_categories() -> None:
+    assert analysis_group_name("function") == "actions"
+    assert analysis_group_name("xref") == "links"
+    assert analysis_group_name("headless") == "project runtime"
+    assert analysis_group_name("server") == "repository"
+    assert analysis_group_name("comment") == "annotations"
+
+
+def test_backend_implementation_markers_are_neutralized() -> None:
+    source = (
+        "FUN_* DAT_*-style autogen xrefed headless BSim DomainFile "
+        "ClearFlowAndRepairCmd Swing thread Java source"
+    )
+    public = analysis_text(source)
+    assert not analysis_surface_violations(public)
+    lowered = public.casefold()
+    assert "default-named" in lowered
+    assert "auto-generated placeholders" in lowered
+    assert "linked" in lowered
+    assert "isolated" in lowered
+    assert "project file" in lowered
+    assert "runtime repair command" in lowered
+    assert "runtime command thread" in lowered
+    assert "source code" in lowered

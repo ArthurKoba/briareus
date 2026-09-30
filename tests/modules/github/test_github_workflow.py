@@ -445,6 +445,33 @@ def test_required_checks_delegate_when_names_do_not_belong_to_repository(
     assert result["status"] == "delegated_to_github"
 
 
+def test_required_checks_accept_matrix_job_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dev = GitHubDevClient(
+        app_id="123",
+        private_key="key-material",
+        required_checks=("test", "docker"),
+    )
+
+    def fake_check_runs(repository: str, ref: str) -> dict[str, object]:
+        return {
+            "repository": repository,
+            "ref": ref,
+            "check_runs": [
+                {"name": "test", "status": "completed", "conclusion": "success"},
+                {"name": "docker (analysis)", "status": "completed", "conclusion": "success"},
+                {"name": "docker (github)", "status": "completed", "conclusion": "success"},
+            ],
+        }
+
+    monkeypatch.setattr(dev, "check_runs", fake_check_runs)
+
+    result = dev.assert_required_checks("ArthurKoba/mcp-bridge", "head-sha")
+
+    assert result["status"] == "ok"
+
+
 def test_required_checks_stay_strict_when_repository_uses_configured_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -24,6 +24,7 @@ from .terminology import (
     analysis_tool_name,
     analysis_vocabulary,
     normalize_arguments,
+    tool_alias,
 )
 
 
@@ -316,6 +317,12 @@ class AnalysisToolProvider(Provider):
         ghidra_schema = _backend_tool_schema(backend_tool)
         exposed_schema = analysis_schema(ghidra_schema, ghidra_name)
         exposed_schema["title"] = f"{analysis_name}Arguments"
+        argument_aliases = tool_alias(ghidra_name, ghidra_schema).argument_aliases
+        if argument_aliases:
+            exposed_schema = json_object(
+                _rewrite_catalog_references(exposed_schema, argument_aliases),
+                context=f"{analysis_name} public argument schema",
+            )
         if aliases:
             exposed_schema = json_object(
                 _rewrite_catalog_references(exposed_schema, aliases),
@@ -343,6 +350,10 @@ class AnalysisToolProvider(Provider):
         signature_target.__annotations__["return"] = signature.return_annotation
         description = analysis_text(backend_tool.description or "")
         title = _backend_tool_title(backend_tool)
+        if argument_aliases:
+            description = _rewrite_catalog_text(description, argument_aliases)
+            if title:
+                title = _rewrite_catalog_text(analysis_text(title), argument_aliases)
         if aliases:
             description = _rewrite_catalog_text(description, aliases)
             if title:

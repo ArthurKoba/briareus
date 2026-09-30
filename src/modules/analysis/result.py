@@ -4,7 +4,13 @@ from typing import cast
 
 from common.models import JsonValue, json_loads, json_value
 
-from .terminology import analysis_result_key, analysis_result_text
+from .terminology import (
+    analysis_group_name,
+    analysis_result_key,
+    analysis_result_text,
+    analysis_text,
+    analysis_tool_name,
+)
 
 
 def decode_result(data: object) -> JsonValue:
@@ -64,5 +70,11 @@ def adapt_analysis_result(value: JsonValue, parent_key: str | None = None) -> Js
     if isinstance(value, list):
         return [adapt_analysis_result(item, parent_key) for item in value]
     if isinstance(value, str):
+        if parent_key == "tools":
+            return analysis_tool_name(value)
+        if parent_key == "group":
+            return analysis_group_name(value)
+        if parent_key in {"description", "title"}:
+            return analysis_text(value)
         return analysis_result_text(value, parent_key)
     return value
