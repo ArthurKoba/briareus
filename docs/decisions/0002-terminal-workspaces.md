@@ -32,9 +32,12 @@ audit/settings, and may use the canonical Files store for explicit import/export
 `workspace` is data-plane. It runs arbitrary agent commands as a fixed non-root UID/GID,
 owns the persistent workspace volume, has outbound network access, and is not attached to
 the normal MCP provider network. It exposes only a narrow private execution API to
-`terminal` over a dedicated network.
+`terminal` over a Unix-domain socket on a tiny shared control volume. There is no network
+path from the workspace container back into the MCP provider/control-plane network.
 
-Neither runtime receives the Docker socket. The workspace image has no sudo path and
+Neither runtime receives the Docker socket. The workspace is attached only to a dedicated
+outbound/egress network; the terminal control-plane is not attached to that network.
+ The workspace image has no sudo path and
 runtime containers use `no-new-privileges` with capabilities dropped unless a narrowly
 defined future hardware feature requires otherwise.
 

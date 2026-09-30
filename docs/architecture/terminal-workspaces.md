@@ -25,21 +25,26 @@ gateway
 terminal  -----------------> management
    |  \--------------------> Files store/API
    |
-   | private execution API
+   | HTTP/JSON over Unix socket
+   | shared control socket volume
    v
 workspace
    |
    +-- persistent /workspace
    +-- persistent /home/agent
-   +-- outbound Internet
+   +-- dedicated outbound-only Docker network
    +-- optional explicitly-passed serial devices
 
 workspace is NOT attached to the normal provider network.
+terminal is NOT attached to the workspace egress network.
 workspace has NO Docker socket and NO sudo/root execution path.
 ```
 
 The terminal runtime is an ordinary MCP Bridge module. The workspace runtime is not a
-public MCP backend; it is an execution worker owned by the terminal module.
+public MCP backend; it is an execution worker owned by the terminal module. Control calls
+use a Unix-domain socket (for example `/run/terminal/workspace.sock`) on a small shared
+volume instead of a Docker network. This keeps arbitrary workspace processes from gaining
+a network route to terminal, Management or provider runtimes.
 
 ## Workspace filesystem
 
@@ -172,7 +177,8 @@ Workspace container baseline:
 - `security_opt: no-new-privileges:true`;
 - no Docker/Podman socket;
 - no host filesystem bind mounts;
-- dedicated network, separated from provider/control-plane services;
+- dedicated egress network, separated from provider/control-plane services;
+- control-plane execution RPC over Unix socket, not TCP;
 - CPU/memory/PID limits configurable in Compose;
 - bounded exec output and job log retention;
 - explicit kill/cancel APIs;
