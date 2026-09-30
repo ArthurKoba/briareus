@@ -315,3 +315,19 @@ class ReverseAdminClient:
                 bool(item.get("return_type_resolved")) for item in results
             ),
         }
+
+
+    async def session_settings(self) -> JsonObject:
+        return json_object(
+            await self._call("project_session_settings"),
+            context="reverse session settings",
+        )
+
+    async def set_idle_timeout(self, idle_timeout_seconds: float) -> JsonObject:
+        return json_object(
+            await self._call(
+                "set_project_idle_timeout",
+                {"idle_timeout_seconds": idle_timeout_seconds},
+            ),
+            context="reverse session settings update",
+        )

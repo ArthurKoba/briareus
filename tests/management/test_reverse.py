@@ -219,3 +219,29 @@ async def test_reverse_quick_coverage_marks_large_program_approximate() -> None:
     assert coverage["sample_size"] == 4
     assert coverage["evaluated_functions"] == 4
     assert coverage["complete_80_plus_percent"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_reverse_session_settings_use_private_backend_tools() -> None:
+    client = FakeReverseAdminClient(
+        {
+            "project_session_settings": {
+                "idle_timeout_seconds": 900.0,
+                "auto_release_enabled": True,
+            },
+            "set_project_idle_timeout": {
+                "idle_timeout_seconds": 120.0,
+                "auto_release_enabled": True,
+            },
+        }
+    )
+
+    current = await client.session_settings()
+    updated = await client.set_idle_timeout(120)
+
+    assert current["idle_timeout_seconds"] == 900.0
+    assert updated["idle_timeout_seconds"] == 120.0
+    assert client.calls == [
+        ("project_session_settings", {}),
+        ("set_project_idle_timeout", {"idle_timeout_seconds": 120}),
+    ]

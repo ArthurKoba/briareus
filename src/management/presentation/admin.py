@@ -25,6 +25,7 @@ from starlette_admin import (
     CardRowWidget,
     Col,
     CustomView,
+    DateTimeField,
     EnumField,
     PasswordField,
     RowActionsDisplayType,
@@ -284,10 +285,6 @@ def _display_invocation_tool(_request: Request, obj: InvocationRecord) -> str:
     return public_tool_name(obj.module, obj.tool)
 
 
-def _display_invocation_time(_request: Request, obj: InvocationRecord) -> str:
-    return obj.occurred_at.isoformat()
-
-
 def _display_invocation_duration(_request: Request, obj: InvocationRecord) -> str:
     return f"{obj.duration_ms:.1f} ms"
 
@@ -300,7 +297,7 @@ class InvocationView(ModelView):
         (
             "module",
             StringField("tool", label="Tool", getter=_display_invocation_tool),
-            StringField("occurred_at", label="Time", getter=_display_invocation_time),
+            DateTimeField("occurred_at", label="Time"),
             StringField("duration_ms", label="Duration", getter=_display_invocation_duration),
             "status",
             "provider",
@@ -590,10 +587,12 @@ class SettingsView(CustomView):
         self,
         config: ManagementConfigService,
         audit: InvocationAuditService,
+        reverse: ReverseAdminClient,
     ) -> None:
         super().__init__()
         self.config = config
         self.audit = audit
+        self.reverse = reverse
 
     @staticmethod
     def _form_config(form: FormData) -> ManagementConfig:
@@ -616,17 +615,42 @@ class SettingsView(CustomView):
             form = await request.form()
             try:
                 config = self._form_config(form)
+                reverse_idle_timeout = float(
+                    str(form.get("reverse_idle_timeout_seconds", "900"))
+                )
+                if not 0 <= reverse_idle_timeout <= 86_400:
+                    raise ValueError(
+                        "Reverse idle timeout must be between 0 and 86400 seconds"
+                    )
+                await self.reverse.set_idle_timeout(reverse_idle_timeout)
                 await asyncio.to_thread(self.config.update, config)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, RuntimeError) as exc:
                 flash(request, f"Invalid settings: {exc}", "error")
             else:
                 flash(request, "Settings saved", "success")
                 return RedirectResponse("/admin/settings", status_code=303)
+
         config = await asyncio.to_thread(self.config.get)
+        try:
+            reverse_settings = await self.reverse.session_settings()
+            reverse_error = ""
+        except Exception as exc:
+            reverse_settings = {
+                "idle_timeout_seconds": 900.0,
+                "auto_release_enabled": True,
+                "source": "unavailable",
+            }
+            reverse_error = str(exc)
+
         return _view_templates(self).TemplateResponse(
             request=request,
             name="management_settings.html",
-            context={"title": "Settings", "config": config},
+            context={
+                "title": "Settings",
+                "config": config,
+                "reverse_settings": reverse_settings,
+                "reverse_error": reverse_error,
+            },
         )
 
     @route("/cleanup-logs", methods=["POST"])
@@ -784,7 +808,11 @@ def _view_templates(view: CustomView) -> Jinja2Templates:
     return view.templates
 
 
-def _dashboard(engine: Engine, files: FileAdminStore) -> CustomView:
+def _dashboard(
+    engine: Engine,
+    files: FileAdminStore,
+    reverse: ReverseAdminClient,
+) -> CustomView:
     async def count(
         model: type[object],
         *_filters: ColumnElement[bool],
@@ -827,6 +855,57 @@ def _dashboard(engine: Engine, files: FileAdminStore) -> CustomView:
     async def storage_used(_request: Request) -> str:
         stats = await asyncio.to_thread(files.stats)
         return json_str(stats.get("size_display"), default="0 B", field="size_display")
+
+    async def reverse_overview(request: Request) -> JsonObject:
+        task = cast(
+            asyncio.Task[JsonObject] | None,
+            getattr(request.state, "_reverse_overview_task", None),
+        )
+        if task is None:
+            task = asyncio.create_task(reverse.overview())
+            request.state._reverse_overview_task = task
+        try:
+            return await task
+        except Exception:
+            return {"projects": [], "workers": []}
+
+    async def reverse_projects(request: Request) -> int:
+        overview = await reverse_overview(request)
+        projects = overview.get("projects")
+        return len(projects) if isinstance(projects, list) else 0
+
+    async def reverse_sessions(request: Request) -> int:
+        overview = await reverse_overview(request)
+        projects = overview.get("projects")
+        if not isinstance(projects, list):
+            return 0
+        return sum(
+            1
+            for item in projects
+            if isinstance(item, dict) and item.get("session") == "active"
+        )
+
+    async def reverse_workers(request: Request) -> int:
+        overview = await reverse_overview(request)
+        workers = overview.get("workers")
+        if not isinstance(workers, list):
+            return 0
+        return sum(
+            1
+            for item in workers
+            if isinstance(item, dict) and bool(item.get("enabled", True))
+        )
+
+    async def reverse_queue(request: Request) -> int:
+        overview = await reverse_overview(request)
+        workers = overview.get("workers")
+        if not isinstance(workers, list):
+            return 0
+        return sum(
+            json_int(item.get("queued"), default=0)
+            for item in workers
+            if isinstance(item, dict)
+        )
 
     async def error_rate(_request: Request) -> float:
         calls, errors = await asyncio.gather(count_calls(_request), count_errors(_request))
@@ -873,6 +952,22 @@ def _dashboard(engine: Engine, files: FileAdminStore) -> CustomView:
                     StatWidget(title="Storage used", value_callback=storage_used),
                     breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
                 ),
+                Col(
+                    StatWidget(title="Reverse projects", value_callback=reverse_projects),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
+                Col(
+                    StatWidget(title="Reverse sessions", value_callback=reverse_sessions),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
+                Col(
+                    StatWidget(title="Reverse workers", value_callback=reverse_workers),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
+                Col(
+                    StatWidget(title="Reverse queued", value_callback=reverse_queue),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
             ]
         ),
     )
@@ -895,13 +990,14 @@ def build_admin(
     config: ManagementConfigService,
     files: FileAdminStore,
 ) -> Admin:
+    reverse = ReverseAdminClient()
     admin = Admin(
         engine,
         title="MCP Management",
         base_url="/admin",
         auth_provider=ManagementAuthProvider(settings),
         secret_key=settings.session_secret,
-        index_view=_dashboard(engine, files),
+        index_view=_dashboard(engine, files, reverse),
         templates_dir=str(Path(__file__).with_name("templates")),
         plugins=[ManagementUiPlugin()],
     )
@@ -924,7 +1020,7 @@ def build_admin(
             menu_label="GitLab Accounts",
         )
     )
-    admin.add_view(ReverseView(ReverseAdminClient()))
+    admin.add_view(ReverseView(reverse))
     admin.add_view(InvocationView(InvocationRecord, audit))
-    admin.add_view(SettingsView(config, audit))
+    admin.add_view(SettingsView(config, audit, reverse))
     return admin
