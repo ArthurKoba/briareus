@@ -14,10 +14,32 @@
   {% endif %}
 
   <div class="row row-cards mb-3">
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-3"><div class="text-secondary">Workers</div><div class="h2 mb-0">{{ workers | length }}</div></div></div></div>
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-3"><div class="text-secondary">Active sessions</div><div class="h2 mb-0">{{ active_sessions }}</div></div></div></div>
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-3"><div class="text-secondary">Running workers</div><div class="h2 mb-0">{{ running_workers }}</div></div></div></div>
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-3"><div class="text-secondary">Queued calls</div><div class="h2 mb-0">{{ queued_total }}</div></div></div></div>
+    <div class="col-6 col-md-2"><div class="card"><div class="card-body py-3"><div class="text-secondary">Workers</div><div class="h2 mb-0">{{ workers | length }}</div></div></div></div>
+    <div class="col-6 col-md-2"><div class="card"><div class="card-body py-3"><div class="text-secondary">Enabled</div><div class="h2 mb-0">{{ enabled_workers }}</div></div></div></div>
+    <div class="col-6 col-md-2"><div class="card"><div class="card-body py-3"><div class="text-secondary">Sessions</div><div class="h2 mb-0">{{ active_sessions }}</div></div></div></div>
+    <div class="col-6 col-md-2"><div class="card"><div class="card-body py-3"><div class="text-secondary">Running</div><div class="h2 mb-0">{{ running_workers }}</div></div></div></div>
+    <div class="col-6 col-md-2"><div class="card"><div class="card-body py-3"><div class="text-secondary">Queued</div><div class="h2 mb-0">{{ queued_total }}</div></div></div></div>
+    <div class="col-6 col-md-2"><div class="card"><div class="card-body py-3"><div class="text-secondary">Projects</div><div class="h2 mb-0">{{ projects | length }}</div></div></div></div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">Create project</h3></div>
+    <div class="card-body">
+      <form method="post" action="/admin/reverse/create" class="row g-2 align-items-end">
+        {{ csrf_input(request) }}
+        <div class="col-12 col-md-4">
+          <label class="form-label">Project name</label>
+          <input class="form-control" name="name" placeholder="project_name" required>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label">Parent directory / group</label>
+          <input class="form-control" name="parent_dir" placeholder="/projects/group or blank for root">
+        </div>
+        <div class="col-12 col-md-2">
+          <button class="btn btn-primary w-100" type="submit">Create</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <div class="card mb-3">
@@ -25,24 +47,38 @@
     <div class="table-responsive">
       <table class="table table-vcenter card-table">
         <thead><tr>
-          <th>Worker</th><th>Project</th><th>State</th><th>Queue</th>
-          <th>Current operation</th><th>Last used</th><th>Idle</th><th>Health</th>
+          <th>Worker</th><th>State</th><th>Project</th><th>Queue</th>
+          <th>Current operation</th><th>Last used</th><th>Health</th><th></th>
         </tr></thead>
         <tbody>
         {% for worker in workers %}
+          {% set enabled = worker.get("enabled", true) %}
           <tr>
             <td>#{{ worker["worker_index"] }}</td>
-            <td>{{ worker["project_name"] or "—" }}</td>
             <td>
-              {% if worker["running"] %}<span class="badge bg-green-lt">running</span>
+              {% if not enabled %}<span class="badge bg-orange-lt">disabled</span>
+              {% elif worker["running"] %}<span class="badge bg-green-lt">running</span>
               {% elif worker["project_id"] %}<span class="badge bg-blue-lt">idle</span>
               {% else %}<span class="badge bg-secondary-lt">free</span>{% endif %}
             </td>
+            <td>{{ worker["project_name"] or "—" }}</td>
             <td>{{ worker["queued"] or 0 }}</td>
             <td><code>{{ worker["current_operation"] or "—" }}</code></td>
-            <td>{{ worker["last_used_at"] or "—" }}</td>
-            <td>{% if worker["idle_seconds"] is not none %}{{ worker["idle_seconds"] }}s{% else %}—{% endif %}</td>
+            <td class="text-nowrap">{{ worker["last_used_at"] or "—" }}</td>
             <td>{% if worker["healthy"] %}<span class="badge bg-green-lt">healthy</span>{% else %}<span class="badge bg-red-lt">error</span>{% endif %}</td>
+            <td class="text-nowrap">
+              {% if enabled %}
+              <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/disable" style="display:inline">
+                {{ csrf_input(request) }}
+                <button class="btn btn-warning" type="submit" onclick="return confirm('Disable worker #{{ worker['worker_index'] }} and release its idle session?')">Disable</button>
+              </form>
+              {% else %}
+              <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/enable" style="display:inline">
+                {{ csrf_input(request) }}
+                <button class="btn btn-primary" type="submit">Enable</button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
         {% else %}
           <tr><td colspan="8" class="text-secondary">No worker state available.</td></tr>
@@ -52,24 +88,42 @@
     </div>
   </div>
 
-  <div class="card">
-    <div class="card-header"><h3 class="card-title">Projects</h3></div>
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <span class="text-secondary">Project groups:</span>
+        <a class="btn btn-sm {% if not group_filter %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/admin/reverse">All</a>
+        {% for group in groups %}
+          <a class="btn btn-sm {% if group_filter == group %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/admin/reverse?group={{ group | urlencode }}">{{ group }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% for group, items in project_groups.items() %}
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h3 class="card-title mb-0">{{ group }}</h3>
+      <span class="badge bg-secondary-lt">{{ items | length }} projects</span>
+    </div>
     <div class="table-responsive">
       <table class="table table-vcenter card-table">
         <thead><tr>
-          <th>Name</th><th>Path</th><th>Session</th><th>Worker</th>
-          <th>Queue</th><th>Running</th><th>Last used</th><th></th>
+          <th style="min-width:220px">Name</th><th>Session</th><th>Worker</th>
+          <th>Queue</th><th>Last used</th><th style="min-width:260px">Path</th><th></th>
         </tr></thead>
         <tbody>
-        {% for project in projects %}
+        {% for project in items %}
           <tr>
-            <td>{{ project["name"] }}</td>
-            <td><code>{{ project["path"] }}</code></td>
-            <td>{{ project["session"] }}</td>
+            <td><a href="/admin/reverse/project/{{ project['project_id'] }}">{{ project["name"] }}</a></td>
+            <td>
+              {% if project["session"] == "active" %}<span class="badge bg-blue-lt">active</span>
+              {% else %}<span class="badge bg-secondary-lt">available</span>{% endif %}
+            </td>
             <td>{% if project["worker_index"] is not none %}#{{ project["worker_index"] }}{% else %}—{% endif %}</td>
-            <td>{{ project["queued"] or 0 }}</td>
-            <td>{{ "yes" if project["running"] else "no" }}</td>
-            <td>{{ project["last_used_at"] or "—" }}</td>
+            <td>{{ project["queued"] or 0 }}{% if project["running"] %} / running{% endif %}</td>
+            <td class="text-nowrap">{{ project["last_used_at"] or "—" }}</td>
+            <td><code class="text-break">{{ project["path"] }}</code></td>
             <td class="text-nowrap">
               <a class="btn" href="/admin/reverse/project/{{ project['project_id'] }}">Inspect</a>
               {% if project["session"] == "active" %}
@@ -83,13 +137,20 @@
                 <button class="btn btn-primary" type="submit">Open</button>
               </form>
               {% endif %}
+              <form method="post" action="/admin/reverse/delete/{{ project['project_id'] }}" style="display:inline">
+                {{ csrf_input(request) }}
+                <button class="btn btn-danger" type="submit" onclick="return confirm('Permanently delete project {{ project['name'] }}?')">Delete</button>
+              </form>
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="text-secondary">No projects found.</td></tr>
+          <tr><td colspan="7" class="text-secondary">No projects in this group.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
+  {% else %}
+  <div class="alert alert-info">No projects found.</div>
+  {% endfor %}
 {% endblock %}

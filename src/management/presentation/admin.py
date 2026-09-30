@@ -368,6 +368,18 @@ class ReverseView(CustomView):
         workers = overview.get("workers")
         project_items = projects if isinstance(projects, list) else []
         worker_items = workers if isinstance(workers, list) else []
+
+        group_filter = request.query_params.get("group", "").strip()
+        groups: dict[str, list[JsonObject]] = {}
+        for raw in project_items:
+            if not isinstance(raw, dict):
+                continue
+            item = raw
+            group = str(item.get("group") or "Root")
+            if group_filter and group != group_filter:
+                continue
+            groups.setdefault(group, []).append(item)
+
         active = sum(
             1
             for item in project_items
@@ -383,6 +395,20 @@ class ReverseView(CustomView):
             for item in worker_items
             if isinstance(item, dict) and bool(item.get("running"))
         )
+        enabled_workers = sum(
+            1
+            for item in worker_items
+            if isinstance(item, dict) and bool(item.get("enabled", True))
+        )
+        all_groups = sorted(
+            {
+                str(item.get("group") or "Root")
+                for item in project_items
+                if isinstance(item, dict)
+            },
+            key=str.casefold,
+        )
+
         return _view_templates(self).TemplateResponse(
             request=request,
             name="management_reverse.html",
@@ -390,10 +416,14 @@ class ReverseView(CustomView):
                 "title": "Reverse",
                 "overview": overview,
                 "projects": project_items,
+                "project_groups": groups,
+                "groups": all_groups,
+                "group_filter": group_filter,
                 "workers": worker_items,
                 "active_sessions": active,
                 "queued_total": queued,
                 "running_workers": running,
+                "enabled_workers": enabled_workers,
                 "error": error,
             },
         )
@@ -403,6 +433,9 @@ class ReverseView(CustomView):
         project_id = request.path_params["project_id"]
         folder = request.query_params.get("folder", "/") or "/"
         error = ""
+        coverage: JsonObject | None = None
+        coverage_program = request.query_params.get("program", "").strip()
+        coverage_mode = request.query_params.get("coverage", "").strip().casefold()
         try:
             session = await self.reverse.session_info(project_id)
         except Exception as exc:
@@ -419,6 +452,12 @@ class ReverseView(CustomView):
                     self.reverse.project_files(project_id, folder),
                     self.reverse.open_programs(project_id),
                 )
+                if coverage_program and coverage_mode in {"quick", "full"}:
+                    coverage = await self.reverse.coverage(
+                        project_id,
+                        coverage_program,
+                        full=coverage_mode == "full",
+                    )
             except Exception as exc:
                 error = str(exc)
 
@@ -449,6 +488,9 @@ class ReverseView(CustomView):
                 "programs": programs,
                 "folder_links": folder_links,
                 "parent_folder": parent_folder,
+                "coverage": coverage,
+                "coverage_program": coverage_program,
+                "coverage_mode": coverage_mode,
                 "error": error,
             },
         )
@@ -473,6 +515,69 @@ class ReverseView(CustomView):
             flash(request, f"Release session failed: {exc}", "error")
         else:
             flash(request, "Project session released", "success")
+        return RedirectResponse("/admin/reverse", status_code=303)
+
+
+    @route("/create", methods=["POST"])
+    async def create_project(self, request: Request) -> Response:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        parent_dir = str(form.get("parent_dir", "")).strip()
+        if not name:
+            flash(request, "Project name is required", "error")
+            return RedirectResponse("/admin/reverse", status_code=303)
+        try:
+            result = await self.reverse.create_project(name, parent_dir)
+        except Exception as exc:
+            flash(request, f"Create project failed: {exc}", "error")
+        else:
+            project_id = str(result.get("project_id") or "")
+            flash(request, f"Created project {name}", "success")
+            if project_id:
+                return RedirectResponse(
+                    f"/admin/reverse/project/{project_id}",
+                    status_code=303,
+                )
+        return RedirectResponse("/admin/reverse", status_code=303)
+
+    @route("/delete/{project_id:path}", methods=["POST"])
+    async def delete_project(self, request: Request) -> Response:
+        project_id = request.path_params["project_id"]
+        try:
+            result = await self.reverse.delete_project(project_id)
+        except Exception as exc:
+            flash(request, f"Delete project failed: {exc}", "error")
+        else:
+            name = str(result.get("name") or project_id)
+            flash(request, f"Deleted project {name}", "success")
+        return RedirectResponse("/admin/reverse", status_code=303)
+
+    @route("/worker/{worker_index:path}/{action}", methods=["POST"])
+    async def worker_control(self, request: Request) -> Response:
+        try:
+            worker_index = int(request.path_params["worker_index"])
+        except ValueError:
+            flash(request, "Invalid worker index", "error")
+            return RedirectResponse("/admin/reverse", status_code=303)
+
+        action = request.path_params["action"].casefold()
+        if action not in {"enable", "disable"}:
+            flash(request, "Invalid worker action", "error")
+            return RedirectResponse("/admin/reverse", status_code=303)
+
+        try:
+            await self.reverse.set_worker_enabled(
+                worker_index,
+                enabled=action == "enable",
+            )
+        except Exception as exc:
+            flash(request, f"Worker control failed: {exc}", "error")
+        else:
+            flash(
+                request,
+                f"Worker #{worker_index} {action}d",
+                "success",
+            )
         return RedirectResponse("/admin/reverse", status_code=303)
 
 
