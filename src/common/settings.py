@@ -173,6 +173,51 @@ class BridgeSettings(ProcessSettings):
         )
 
 
+class ObservabilitySettings(ProcessSettings):
+    service_name: str = Field("mcp-bridge", validation_alias="OTEL_SERVICE_NAME")
+    endpoint: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT")
+    metrics_endpoint_override: str = Field(
+        "",
+        validation_alias="OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    )
+    headers: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_HEADERS")
+    resource_attributes: str = Field("", validation_alias="OTEL_RESOURCE_ATTRIBUTES")
+    timeout_ms: int = Field(
+        10_000,
+        ge=100,
+        le=120_000,
+        validation_alias="OTEL_EXPORTER_OTLP_TIMEOUT",
+    )
+
+    @field_validator(
+        "service_name",
+        "endpoint",
+        "metrics_endpoint_override",
+        "headers",
+        "resource_attributes",
+        mode="before",
+    )
+    @classmethod
+    def _strip_observability_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.metrics_endpoint_override or self.endpoint)
+
+    @property
+    def metrics_endpoint(self) -> str:
+        if self.metrics_endpoint_override:
+            return self.metrics_endpoint_override
+        if not self.endpoint:
+            return ""
+        return self.endpoint.rstrip("/") + "/v1/metrics"
+
+    @property
+    def timeout_seconds(self) -> float:
+        return self.timeout_ms / 1000
+
+
 class AuthServiceSettings(ProcessSettings):
     public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
     oauth_client_id: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_ID")
