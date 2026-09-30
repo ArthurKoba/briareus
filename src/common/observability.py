@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import json
+import threading
+import time
+import urllib.parse
+import urllib.request
+from collections.abc import Iterable
+from typing import Protocol
+
+from .account_contracts import InvocationEvent
+from .management_client import ManagementClient
+from .settings import ObservabilitySettings
+
+
+class ObservabilitySink(Protocol):
+    """Best-effort destination for runtime and MCP invocation observations."""
+
+    def record_runtime_started(self, scope: str) -> None: ...
+
+    def record_invocation(self, event: InvocationEvent) -> None: ...
+
+
+class CompositeObservabilitySink:
+    """Fan out one observation to independent sinks without coupling failures."""
+
+    def __init__(self, sinks: Iterable[ObservabilitySink]) -> None:
+        self.sinks = tuple(sinks)
+
+    def record_runtime_started(self, scope: str) -> None:
+        for sink in self.sinks:
+            try:
+                sink.record_runtime_started(scope)
+            except Exception:
+                continue
+
+    def record_invocation(self, event: InvocationEvent) -> None:
+        for sink in self.sinks:
+            try:
+                sink.record_invocation(event)
+            except Exception:
+                continue
+
+
+class ManagementAuditSink:
+    """Persist redacted invocation history in Management for operator audit."""
+
+    def __init__(self, management: ManagementClient) -> None:
+        self.management = management
+
+    def record_runtime_started(self, scope: str) -> None:
+        del scope
+
+    def record_invocation(self, event: InvocationEvent) -> None:
+        self.management.record_invocation(event)
+
+
+def _parse_key_values(value: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for raw_item in value.split(","):
+        item = raw_item.strip()
+        if not item or "=" not in item:
+            continue
+        key, raw_value = item.split("=", 1)
+        key = urllib.parse.unquote(key.strip())
+        decoded = urllib.parse.unquote(raw_value.strip())
+        if key:
+            result[key] = decoded
+    return result
+
+
+def _otlp_value(value: object) -> dict[str, object]:
+    if isinstance(value, bool):
+        return {"boolValue": value}
+    if isinstance(value, int):
+        return {"intValue": str(value)}
+    if isinstance(value, float):
+        return {"doubleValue": value}
+    return {"stringValue": str(value)}
+
+
+def _otlp_attributes(values: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        {"key": key, "value": _otlp_value(value)}
+        for key, value in sorted(values.items())
+        if value not in {"", None}
+    ]
+
+
+class OtlpHttpMetricsSink:
+    """Export low-cardinality MCP/runtime metrics using OTLP/HTTP JSON."""
+
+    def __init__(self, scope: str, settings: ObservabilitySettings) -> None:
+        self.scope = scope
+        self.settings = settings
+        self.endpoint = settings.metrics_endpoint
+        self.headers = _parse_key_values(settings.headers)
+        self.resource_attributes = _parse_key_values(settings.resource_attributes)
+        self.resource_attributes["service.name"] = settings.service_name
+        self.resource_attributes["mcp.scope"] = scope
+
+    def _export(self, metrics: list[dict[str, object]]) -> None:
+        if not self.endpoint or not metrics:
+            return
+        now = str(time.time_ns())
+        payload = {
+            "resourceMetrics": [
+                {
+                    "resource": {
+                        "attributes": _otlp_attributes(self.resource_attributes),
+                    },
+                    "scopeMetrics": [
+                        {
+                            "scope": {"name": f"mcp-bridge.{self.scope}"},
+                            "metrics": metrics,
+                        }
+                    ],
+                }
+            ]
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "mcp-bridge-otlp/0.1",
+            **self.headers,
+        }
+        request = urllib.request.Request(
+            self.endpoint,
+            data=body,
+            method="POST",
+            headers=headers,
+        )
+        with urllib.request.urlopen(
+            request,
+            timeout=self.settings.timeout_seconds,
+        ) as response:
+            response.read(min(4096, int(response.headers.get("Content-Length", "0") or 0)))
+        del now
+
+    @staticmethod
+    def _delta_counter(
+        name: str,
+        description: str,
+        attributes: dict[str, object],
+        now: str,
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "description": description,
+            "unit": "{event}",
+            "sum": {
+                "aggregationTemporality": 1,
+                "isMonotonic": True,
+                "dataPoints": [
+                    {
+                        "attributes": _otlp_attributes(attributes),
+                        "startTimeUnixNano": now,
+                        "timeUnixNano": now,
+                        "asInt": "1",
+                    }
+                ],
+            },
+        }
+
+    @staticmethod
+    def _gauge(
+        name: str,
+        description: str,
+        unit: str,
+        value: float,
+        attributes: dict[str, object],
+        now: str,
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "description": description,
+            "unit": unit,
+            "gauge": {
+                "dataPoints": [
+                    {
+                        "attributes": _otlp_attributes(attributes),
+                        "timeUnixNano": now,
+                        "asDouble": value,
+                    }
+                ]
+            },
+        }
+
+    def record_runtime_started(self, scope: str) -> None:
+        now = str(time.time_ns())
+        attrs = {"mcp.scope": scope}
+        self._export(
+            [
+                self._delta_counter(
+                    "mcp.runtime.started",
+                    "Runtime process starts.",
+                    attrs,
+                    now,
+                ),
+                self._gauge(
+                    "mcp.runtime.up",
+                    "Runtime availability at observation time.",
+                    "1",
+                    1.0,
+                    attrs,
+                    now,
+                ),
+            ]
+        )
+
+    def record_invocation(self, event: InvocationEvent) -> None:
+        now = str(time.time_ns())
+        attrs: dict[str, object] = {
+            "mcp.scope": self.scope,
+            "mcp.module": event.module,
+            "mcp.tool": event.tool,
+            "mcp.status": event.status,
+        }
+        if event.provider:
+            attrs["mcp.provider"] = event.provider
+        if event.error_type:
+            attrs["error.type"] = event.error_type
+
+        metrics = [
+            self._delta_counter(
+                "mcp.tool.calls",
+                "MCP tool calls.",
+                attrs,
+                now,
+            ),
+            self._gauge(
+                "mcp.tool.duration",
+                "Observed MCP tool call duration.",
+                "ms",
+                event.duration_ms,
+                attrs,
+                now,
+            ),
+        ]
+        if event.status == "error":
+            metrics.append(
+                self._delta_counter(
+                    "mcp.tool.errors",
+                    "MCP tool call errors.",
+                    attrs,
+                    now,
+                )
+            )
+        self._export(metrics)
+
+
+def build_observability(
+    scope: str,
+    *,
+    management: ManagementClient | None = None,
+    settings: ObservabilitySettings | None = None,
+) -> CompositeObservabilitySink:
+    configured = settings or ObservabilitySettings()
+    sinks: list[ObservabilitySink] = []
+    if management is not None:
+        sinks.append(ManagementAuditSink(management))
+    if configured.enabled:
+        sinks.append(OtlpHttpMetricsSink(scope, configured))
+    return CompositeObservabilitySink(sinks)
+
+
+def announce_runtime_started(sink: ObservabilitySink, scope: str) -> None:
+    """Emit startup observation without delaying process initialization."""
+
+    thread = threading.Thread(
+        target=sink.record_runtime_started,
+        args=(scope,),
+        name=f"observability-{scope}-startup",
+        daemon=True,
+    )
+    thread.start()
