@@ -59,7 +59,7 @@ async def _maintenance_loop() -> None:
         try:
             config = await asyncio.to_thread(config_service.get)
             interval_seconds = config.maintenance_interval_minutes * 60
-            await asyncio.to_thread(telemetry.cleanup)
+            await asyncio.to_thread(audit.cleanup)
             if config.file_auto_cleanup_enabled:
                 await asyncio.to_thread(
                     files.cleanup,

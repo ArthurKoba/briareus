@@ -678,6 +678,6 @@ def build_admin(
             menu_label="GitLab Accounts",
         )
     )
-    admin.add_view(InvocationView(InvocationRecord, telemetry))
-    admin.add_view(SettingsView(config, telemetry))
+    admin.add_view(InvocationView(InvocationRecord, audit))
+    admin.add_view(SettingsView(config, audit))
     return admin
