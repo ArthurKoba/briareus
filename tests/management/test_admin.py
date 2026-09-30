@@ -12,7 +12,7 @@ from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
     ManagementConfigService,
-    TelemetryService,
+    InvocationAuditService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -53,11 +53,11 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
         cipher,
         ProviderConnectionVerifier(),
     )
-    telemetry = TelemetryService(SqlAlchemyInvocationRepository(sessions))
+    audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
     config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
     files = FileAdminStore(FileSettings(root=tmp_path / "files"))
 
-    admin = build_admin(engine, settings, cipher, accounts, telemetry, config, files)
+    admin = build_admin(engine, settings, cipher, accounts, audit, config, files)
 
     assert admin.base_url == "/admin"
     assert admin.index_view.path == "/"

@@ -14,7 +14,7 @@ from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
     ManagementConfigService,
-    TelemetryService,
+    InvocationAuditService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -49,7 +49,7 @@ config_repository = SqlAlchemyManagementConfigRepository(sessions)
 config_service = ManagementConfigService(config_repository)
 config_service.get()
 accounts = AccountService(account_repository, cipher, ProviderConnectionVerifier())
-telemetry = TelemetryService(invocation_repository)
+audit = InvocationAuditService(invocation_repository)
 files = FileAdminStore(FileSettings())
 
 
@@ -100,7 +100,7 @@ app.include_router(
     build_internal_router(
         ApiServices(
             accounts=accounts,
-            telemetry=telemetry,
+            audit=audit,
             service_token=settings.service_token,
         )
     )
@@ -112,5 +112,5 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-admin = build_admin(engine, settings, cipher, accounts, telemetry, config_service, files)
+admin = build_admin(engine, settings, cipher, accounts, audit, config_service, files)
 admin.mount_to(app)

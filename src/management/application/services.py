@@ -82,7 +82,7 @@ class AccountService:
         )
 
 
-class TelemetryService:
+class InvocationAuditService:
     def __init__(self, repository: InvocationRepository) -> None:
         self.repository = repository
 
