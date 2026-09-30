@@ -41,7 +41,7 @@ from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
 
-from common.models import JsonObject, json_int, json_str
+from common.models import JsonObject, JsonValue, json_int, json_str
 from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
 from management.application.services import (
@@ -409,7 +409,7 @@ class ReverseView(CustomView):
             error = str(exc)
 
         files: JsonObject = {}
-        programs: list[object] = []
+        programs: list[JsonValue] = []
         folder_links: list[dict[str, str]] = []
         parent_folder: str | None = None
         if session.get("session") == "active" and not error:
