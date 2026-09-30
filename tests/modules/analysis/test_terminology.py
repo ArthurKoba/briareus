@@ -336,3 +336,13 @@ def test_analysis_vocabulary_is_public_only() -> None:
     assert "behavior" in vocabulary
     assert "ir" in vocabulary
     assert not analysis_surface_violations(str(vocabulary))
+
+
+
+def test_plural_backend_terms_are_neutralized() -> None:
+    public = analysis_text(
+        "Repair flow and re-disassembles retained code for alternative decompilers."
+    )
+    assert not analysis_surface_violations(public)
+    assert "re-analyze low-level operations" in public
+    assert "behavior engines" in public
