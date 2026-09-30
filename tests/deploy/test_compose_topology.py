@@ -85,3 +85,102 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     assert services["files"]["volumes"] == ["files:/files"]
     assert services["curl"]["volumes"] == ["files:/files"]
     assert services["auth"]["volumes"] == ["auth:/auth"]
+
+
+def test_compose_exposes_only_external_bootstrap_environment() -> None:
+    services = _services()
+    expected = {
+        "management": {
+            "MANAGEMENT_ENCRYPTION_KEY",
+            "MANAGEMENT_SERVICE_TOKEN",
+            "MANAGEMENT_ADMIN_USERNAME",
+            "MANAGEMENT_ADMIN_PASSWORD",
+            "MANAGEMENT_SESSION_SECRET",
+        },
+        "auth": {
+            "MCP_PUBLIC_BASE_URL",
+            "GITHUB_OAUTH_CLIENT_ID",
+            "GITHUB_OAUTH_CLIENT_SECRET",
+            "GITHUB_OAUTH_JWT_SIGNING_KEY",
+            "GITHUB_OAUTH_ALLOWED_USERS",
+        },
+        "gateway": {
+            "OAUTH_ENABLED",
+            "MCP_PUBLIC_BASE_URL",
+            "GITHUB_OAUTH_JWT_SIGNING_KEY",
+            "GITHUB_OAUTH_ALLOWED_USERS",
+            "MCP_ALLOWED_HOSTS",
+            "MCP_ALLOWED_ORIGINS",
+        },
+        "github": {"MANAGEMENT_SERVICE_TOKEN"},
+        "gitlab": {"MANAGEMENT_SERVICE_TOKEN"},
+        "files": {"MANAGEMENT_SERVICE_TOKEN"},
+        "curl": {"MANAGEMENT_SERVICE_TOKEN"},
+        "analysis": {"MANAGEMENT_SERVICE_TOKEN"},
+        "ghidra": {"MANAGEMENT_SERVICE_TOKEN"},
+    }
+
+    for name, service in services.items():
+        assert set(service.get("environment", {})) == expected[name]
+
+
+def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
+    forbidden = {
+        "ASGI_APP",
+        "ASGI_FORWARDED_ALLOW_IPS",
+        "MANAGEMENT_URL",
+        "MANAGEMENT_TIMEOUT_SECONDS",
+        "MANAGEMENT_DATABASE_PATH",
+        "MANAGEMENT_SESSION_HTTPS_ONLY",
+        "AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS",
+        "GITHUB_URL",
+        "GITLAB_URL",
+        "FILES_URL",
+        "CURL_URL",
+        "ANALYSIS_URL",
+        "GHIDRA_URL",
+        "GHIDRA_MCP_URL",
+        "GITHUB_AGENT_PROTECTED_BRANCHES",
+        "GITHUB_AGENT_REQUIRED_CHECKS",
+        "GITHUB_AGENT_REQUIRED_REVIEWERS",
+        "GITLAB_PROTECTED_BRANCHES",
+        "GITLAB_REGISTRY_CACHE_TTL_SECONDS",
+        "FILE_UPLOAD_MAX_BYTES",
+        "FILE_UPLOAD_CHUNK_BYTES",
+        "FILE_MAX_EXTRACT_FILES",
+        "FILE_MAX_EXTRACT_BYTES",
+        "CURL_BINARY",
+        "ANALYSIS_SCHEMA_CACHE_TTL_SECONDS",
+    }
+
+    for name, service in _services().items():
+        assert forbidden.isdisjoint(service.get("environment", {})), name
+
+
+
+def test_compose_requires_all_external_bootstrap_values() -> None:
+    serialized = COMPOSE_FILE.read_text()
+    required = {
+        "MANAGEMENT_ENCRYPTION_KEY",
+        "MANAGEMENT_SERVICE_TOKEN",
+        "MANAGEMENT_ADMIN_USERNAME",
+        "MANAGEMENT_ADMIN_PASSWORD",
+        "MANAGEMENT_SESSION_SECRET",
+        "GITHUB_OAUTH_CLIENT_ID",
+        "GITHUB_OAUTH_CLIENT_SECRET",
+        "GITHUB_OAUTH_JWT_SIGNING_KEY",
+        "GITHUB_OAUTH_ALLOWED_USERS",
+        "MCP_PUBLIC_BASE_URL",
+        "MCP_ALLOWED_HOSTS",
+        "MCP_ALLOWED_ORIGINS",
+    }
+
+    assert "${SERVICE_" not in serialized
+    for name in required:
+        assert f"${{{name}:?}}" in serialized
+
+
+def test_compose_keeps_oauth_enablement_optional() -> None:
+    serialized = COMPOSE_FILE.read_text()
+    assert "${OAUTH_ENABLED:-true}" in serialized
+    assert "${OAUTH_ENABLED:?}" not in serialized

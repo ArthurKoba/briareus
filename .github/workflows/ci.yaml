@@ -24,6 +24,19 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      MANAGEMENT_ENCRYPTION_KEY: ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=
+      MANAGEMENT_SERVICE_TOKEN: ci-management-token
+      MANAGEMENT_ADMIN_USERNAME: ci-admin
+      MANAGEMENT_ADMIN_PASSWORD: ci-admin-password
+      MANAGEMENT_SESSION_SECRET: ci-session-secret
+      MCP_PUBLIC_BASE_URL: https://mcp.example.test
+      MCP_ALLOWED_HOSTS: mcp.example.test
+      MCP_ALLOWED_ORIGINS: https://mcp.example.test
+      GITHUB_OAUTH_CLIENT_ID: ci-client
+      GITHUB_OAUTH_CLIENT_SECRET: ci-secret
+      GITHUB_OAUTH_JWT_SIGNING_KEY: ci-jwt-signing-key
+      GITHUB_OAUTH_ALLOWED_USERS: ci-user
     strategy:
       fail-fast: false
       matrix:

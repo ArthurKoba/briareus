@@ -6,19 +6,10 @@ x-runtime: &runtime
   restart: unless-stopped
 
 x-management-client: &management-client
-  MANAGEMENT_URL: ${MANAGEMENT_URL:-http://management:8000}
-  MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN}
-  MANAGEMENT_TIMEOUT_SECONDS: ${MANAGEMENT_TIMEOUT_SECONDS:-10}
+  MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN:?}
 
 x-private-service: &private-service
   <<: *runtime
-
-x-file-settings: &file-settings
-  <<: *management-client
-  FILE_UPLOAD_MAX_BYTES: ${FILE_UPLOAD_MAX_BYTES:-8589934592}
-  FILE_UPLOAD_CHUNK_BYTES: ${FILE_UPLOAD_CHUNK_BYTES:-1048576}
-  FILE_MAX_EXTRACT_FILES: ${FILE_MAX_EXTRACT_FILES:-20000}
-  FILE_MAX_EXTRACT_BYTES: ${FILE_MAX_EXTRACT_BYTES:-17179869184}
 
 x-file-service: &file-service
   <<: *private-service
@@ -32,15 +23,11 @@ services:
       <<: *build
       target: management
     environment:
-      ASGI_APP: management.runtime:app
-      ASGI_FORWARDED_ALLOW_IPS: "*"
-      MANAGEMENT_DATABASE_PATH: ${MANAGEMENT_DATABASE_PATH:-/management/management.sqlite3}
-      MANAGEMENT_ENCRYPTION_KEY: ${MANAGEMENT_ENCRYPTION_KEY}
-      MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN}
-      MANAGEMENT_ADMIN_USERNAME: ${MANAGEMENT_ADMIN_USERNAME:-admin}
-      MANAGEMENT_ADMIN_PASSWORD: ${MANAGEMENT_ADMIN_PASSWORD}
-      MANAGEMENT_SESSION_SECRET: ${MANAGEMENT_SESSION_SECRET}
-      MANAGEMENT_SESSION_HTTPS_ONLY: ${MANAGEMENT_SESSION_HTTPS_ONLY:-true}
+      MANAGEMENT_ENCRYPTION_KEY: ${MANAGEMENT_ENCRYPTION_KEY:?}
+      MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN:?}
+      MANAGEMENT_ADMIN_USERNAME: ${MANAGEMENT_ADMIN_USERNAME:?}
+      MANAGEMENT_ADMIN_PASSWORD: ${MANAGEMENT_ADMIN_PASSWORD:?}
+      MANAGEMENT_SESSION_SECRET: ${MANAGEMENT_SESSION_SECRET:?}
     volumes:
       - management:/management
       - files:/files
@@ -51,13 +38,11 @@ services:
       <<: *build
       target: auth
     environment:
-      ASGI_APP: auth_service.runtime:app
-      OAUTH_BASE_URL: ${OAUTH_BASE_URL:-https://mcp.koba-nexus.ru}
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET}
-      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY}
-      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS}
-      AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS: ${AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS:-300}
+      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
+      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:?}
+      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS:?}
     volumes:
       - auth:/auth
 
@@ -67,20 +52,13 @@ services:
       <<: *build
       target: gateway
     environment:
-      ASGI_APP: bridge.server:app
       OAUTH_ENABLED: ${OAUTH_ENABLED:-true}
-      OAUTH_BASE_URL: ${OAUTH_BASE_URL:-https://mcp.koba-nexus.ru}
-      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY}
-      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS}
-      MANAGEMENT_URL: ${MANAGEMENT_URL:-http://management:8000}
-      GITHUB_URL: ${GITHUB_URL:-http://github:8000/mcp}
-      GITLAB_URL: ${GITLAB_URL:-http://gitlab:8000/mcp}
-      FILES_URL: ${FILES_URL:-http://files:8000/mcp}
-      CURL_URL: ${CURL_URL:-http://curl:8000/mcp}
-      ANALYSIS_URL: ${ANALYSIS_URL:-http://analysis:8000/mcp}
-      GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
-      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-mcp.koba-nexus.ru,localhost:*,127.0.0.1:*}
-      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://mcp.koba-nexus.ru}
+      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
+      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:?}
+      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS:?}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:?}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:?}
+
   github:
     <<: *private-service
     depends_on:
@@ -92,10 +70,6 @@ services:
       target: github
     environment:
       <<: *management-client
-      ASGI_APP: modules.github.runtime:app
-      GITHUB_AGENT_PROTECTED_BRANCHES: ${GITHUB_AGENT_PROTECTED_BRANCHES:-main,master}
-      GITHUB_AGENT_REQUIRED_CHECKS: ${GITHUB_AGENT_REQUIRED_CHECKS:-test,docker}
-      GITHUB_AGENT_REQUIRED_REVIEWERS: ${GITHUB_AGENT_REQUIRED_REVIEWERS:-}
 
   gitlab:
     <<: *private-service
@@ -108,9 +82,6 @@ services:
       target: gitlab
     environment:
       <<: *management-client
-      ASGI_APP: modules.gitlab.runtime:app
-      GITLAB_PROTECTED_BRANCHES: ${GITLAB_PROTECTED_BRANCHES:-main,master}
-      GITLAB_REGISTRY_CACHE_TTL_SECONDS: ${GITLAB_REGISTRY_CACHE_TTL_SECONDS:-60}
 
   files:
     <<: *file-service
@@ -118,8 +89,7 @@ services:
       <<: *build
       target: files
     environment:
-      <<: *file-settings
-      ASGI_APP: modules.files.runtime:app
+      <<: *management-client
 
   curl:
     <<: *file-service
@@ -127,9 +97,7 @@ services:
       <<: *build
       target: curl
     environment:
-      <<: *file-settings
-      ASGI_APP: modules.curl.runtime:app
-      CURL_BINARY: ${CURL_BINARY:-}
+      <<: *management-client
 
   analysis:
     <<: *private-service
@@ -142,9 +110,6 @@ services:
       target: analysis
     environment:
       <<: *management-client
-      ASGI_APP: modules.analysis.runtime:app
-      GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
-      ANALYSIS_SCHEMA_CACHE_TTL_SECONDS: ${ANALYSIS_SCHEMA_CACHE_TTL_SECONDS:-30}
 
   ghidra:
     <<: *private-service
@@ -153,8 +118,6 @@ services:
       target: ghidra
     environment:
       <<: *management-client
-      ASGI_APP: modules.ghidra.runtime:app
-      GHIDRA_MCP_URL: ${GHIDRA_MCP_URL:-http://bridge:8081/mcp}
     networks:
       - default
       - coolify

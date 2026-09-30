@@ -174,10 +174,7 @@ class BridgeSettings(ProcessSettings):
 
 
 class AuthServiceSettings(ProcessSettings):
-    public_base_url: str = Field(
-        "https://mcp.koba-nexus.ru",
-        validation_alias="OAUTH_BASE_URL",
-    )
+    public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
     oauth_client_id: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_ID")
     oauth_client_secret: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_SECRET")
     oauth_jwt_signing_key: str = Field("", validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY")
@@ -215,6 +212,7 @@ class AuthServiceSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
+                ("MCP_PUBLIC_BASE_URL", self.public_base_url),
                 ("GITHUB_OAUTH_CLIENT_ID", self.oauth_client_id),
                 ("GITHUB_OAUTH_CLIENT_SECRET", self.oauth_client_secret),
                 ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
@@ -228,10 +226,7 @@ class AuthServiceSettings(ProcessSettings):
 
 class GatewayAuthSettings(ProcessSettings):
     enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
-    public_base_url: str = Field(
-        "https://mcp.koba-nexus.ru",
-        validation_alias="OAUTH_BASE_URL",
-    )
+    public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
     oauth_jwt_signing_key: str = Field(
         "",
         validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY",
@@ -262,7 +257,7 @@ class GatewayAuthSettings(ProcessSettings):
             for name, value in (
                 ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
                 ("GITHUB_OAUTH_ALLOWED_USERS", self.oauth_allowed_users),
-                ("OAUTH_BASE_URL", self.public_base_url),
+                ("MCP_PUBLIC_BASE_URL", self.public_base_url),
             )
             if not value
         ]
@@ -330,6 +325,7 @@ class ManagementSettings(ProcessSettings):
             for name, value in (
                 ("MANAGEMENT_ENCRYPTION_KEY", self.encryption_key),
                 ("MANAGEMENT_SERVICE_TOKEN", self.service_token),
+                ("MANAGEMENT_ADMIN_USERNAME", self.admin_username),
                 ("MANAGEMENT_ADMIN_PASSWORD", self.admin_password),
                 ("MANAGEMENT_SESSION_SECRET", self.session_secret),
             )

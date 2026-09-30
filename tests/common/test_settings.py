@@ -86,7 +86,7 @@ def test_bridge_build_sha_uses_coolify_source_commit(monkeypatch) -> None:
 
 
 def test_auth_service_bootstrap_is_typed(monkeypatch) -> None:
-    monkeypatch.setenv("OAUTH_BASE_URL", " https://mcp.example.test ")
+    monkeypatch.setenv("MCP_PUBLIC_BASE_URL", " https://mcp.example.test ")
     monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", " client ")
     monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", " secret ")
     monkeypatch.setenv("GITHUB_OAUTH_JWT_SIGNING_KEY", " jwt ")
@@ -102,7 +102,7 @@ def test_auth_service_bootstrap_is_typed(monkeypatch) -> None:
 
 def test_gateway_auth_settings_validate_tokens_locally(monkeypatch) -> None:
     monkeypatch.setenv("OAUTH_ENABLED", "true")
-    monkeypatch.setenv("OAUTH_BASE_URL", "https://mcp.example.test")
+    monkeypatch.setenv("MCP_PUBLIC_BASE_URL", "https://mcp.example.test")
     monkeypatch.setenv("GITHUB_OAUTH_JWT_SIGNING_KEY", " jwt ")
     monkeypatch.setenv("GITHUB_OAUTH_ALLOWED_USERS", "ArthurKoba")
 
@@ -141,6 +141,7 @@ def test_management_settings_reject_missing_bootstrap(monkeypatch) -> None:
     for name in (
         "MANAGEMENT_ENCRYPTION_KEY",
         "MANAGEMENT_SERVICE_TOKEN",
+        "MANAGEMENT_ADMIN_USERNAME",
         "MANAGEMENT_ADMIN_PASSWORD",
         "MANAGEMENT_SESSION_SECRET",
     ):
@@ -158,3 +159,30 @@ def test_file_settings_are_frozen_and_validate_limits() -> None:
 
     with pytest.raises(ValidationError):
         FileSettings(root=Path("relative/path"))
+
+
+def test_public_runtime_defaults_are_deployment_agnostic(monkeypatch) -> None:
+    for name in ("MCP_PUBLIC_BASE_URL", "MCP_ALLOWED_HOSTS", "MCP_ALLOWED_ORIGINS"):
+        monkeypatch.delenv(name, raising=False)
+
+    auth = GatewayAuthSettings()
+    bridge = BridgeSettings()
+
+    assert auth.public_base_url == ""
+    assert bridge.allowed_hosts == ("localhost:*", "127.0.0.1:*", "[::1]:*")
+    assert bridge.allowed_origins == (
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "http://[::1]:*",
+    )
+
+
+def test_auth_service_requires_public_base_url(monkeypatch) -> None:
+    monkeypatch.delenv("MCP_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "client")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GITHUB_OAUTH_JWT_SIGNING_KEY", "jwt")
+    monkeypatch.setenv("GITHUB_OAUTH_ALLOWED_USERS", "user")
+
+    with pytest.raises(ValueError, match="MCP_PUBLIC_BASE_URL"):
+        AuthServiceSettings().validate_bootstrap()

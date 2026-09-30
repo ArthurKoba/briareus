@@ -42,32 +42,55 @@ prevent GitHub or other healthy providers from starting and remaining usable.
 
 ## OAuth
 
-There is one authorization server and one callback:
+There is one externally configured authorization-server base URL. For a deployment
+whose public base URL is `https://mcp.example.com`, the issuer and callback become:
 
 ```text
-issuer:   https://mcp.koba-nexus.ru
-callback: https://mcp.koba-nexus.ru/auth/callback
+issuer:   https://mcp.example.com
+callback: https://mcp.example.com/auth/callback
 ```
+
+The application contains no production hostname in runtime defaults. `MCP_PUBLIC_BASE_URL`,
+`MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` are deployment inputs.
 
 Auth owns GitHub OAuth and token issuance. Auth and gateway share the FastMCP JWT signing
 key and allowed GitHub user list so gateway can verify bearer tokens locally. GitHub
 client ID/secret remain auth-only.
 
-Required shared environment:
+All bootstrap credentials are explicit required environment variables on the Coolify
+application. Docker Compose declares each one with `${VAR:?}`, so deployment stops
+immediately if a required value is missing or empty:
 
 ```text
-OAUTH_ENABLED=true
-OAUTH_BASE_URL=https://mcp.koba-nexus.ru
-GITHUB_OAUTH_JWT_SIGNING_KEY=...
-GITHUB_OAUTH_ALLOWED_USERS=ArthurKoba
-```
-
-Auth additionally requires:
-
-```text
+MANAGEMENT_ENCRYPTION_KEY=...
+MANAGEMENT_SERVICE_TOKEN=...
+MANAGEMENT_ADMIN_USERNAME=...
+MANAGEMENT_ADMIN_PASSWORD=...
+MANAGEMENT_SESSION_SECRET=...
 GITHUB_OAUTH_CLIENT_ID=...
 GITHUB_OAUTH_CLIENT_SECRET=...
+GITHUB_OAUTH_JWT_SIGNING_KEY=...
+GITHUB_OAUTH_ALLOWED_USERS=...
+MCP_PUBLIC_BASE_URL=https://mcp.example.com
+MCP_ALLOWED_HOSTS=mcp.example.com
+MCP_ALLOWED_ORIGINS=https://mcp.example.com
 ```
+
+Coolify `SERVICE_*` magic generators are intentionally not used for this Git-backed
+Docker Compose application because they can be materialized as empty application
+variables instead of generated values. Internal secrets should be generated once when
+provisioning the Coolify resource and then kept stable.
+
+`MANAGEMENT_ENCRYPTION_KEY` must be a valid Fernet key (URL-safe base64 encoding of
+32 random bytes). If an existing Management database with encrypted provider credentials
+is migrated, preserve its original encryption key; changing it makes those stored
+credentials unreadable.
+
+Runtime wiring and tuning are source-owned defaults, not Coolify environment settings.
+This includes service-to-service URLs, ASGI app selection, cache TTLs, file limits,
+policy defaults and database/file paths. Public OAuth/HTTP identity is deployment-owned:
+`MCP_PUBLIC_BASE_URL`, `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` are required.
+`OAUTH_ENABLED` remains an optional feature flag and defaults to `true` in Compose.
 
 `AUTH_SERVICE_TOKEN`, `AUTH_URL` and `AUTH_TIMEOUT_SECONDS` are not used.
 
@@ -86,10 +109,9 @@ The volumes are ordinary Compose volumes, not `external` volumes with hard-coded
 names, so Docker/Coolify keeps them in managed volume storage and they can be backed up
 independently of container filesystems.
 
-Renaming the existing production volumes is a one-time migration. Do not deploy the
-renamed volume contract until the current `<project>_management-data`,
-`<project>_files-data` and `<project>_auth-data` contents have been copied into the
-new `<project>_management`, `<project>_files` and `<project>_auth` volumes.
+Production has already migrated to the clean logical names. The active project should
+therefore contain only `<project>_management`, `<project>_files` and
+`<project>_auth` for this stack.
 
 ## Build and deploy behaviour
 
@@ -120,7 +142,7 @@ and preserve that failure-isolation contract instead of adding selective-restart
 
 ## Public routing
 
-Only gateway receives `https://mcp.koba-nexus.ru`. Provider runtimes, auth and
+Only gateway receives the deployment's public domain. Provider runtimes, auth and
 management have no public domains. Gateway routes the public MCP surfaces and Admin UI
 to the corresponding private service.
 
