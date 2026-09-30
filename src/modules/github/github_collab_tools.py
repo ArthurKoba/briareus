@@ -61,32 +61,6 @@ def register_github_collab_tools(
             team_reviewers,
         )
 
-    @mcp.tool(title="GitHub agent update review comment", annotations=write_annotations)
-    def github_agent_update_review_comment(
-        account_id: str,
-        repository: str,
-        comment_id: int,
-        body: str,
-    ) -> JsonObject:
-        """Replace the body of an inline review comment."""
-        return client_factory(account_id).update_review_comment(repository, comment_id, body)
-
-    @mcp.tool(title="GitHub agent reply to review comment", annotations=write_annotations)
-    def github_agent_reply_to_review_comment(
-        account_id: str,
-        repository: str,
-        number: int,
-        comment_id: int,
-        body: str,
-    ) -> JsonObject:
-        """Reply inside an inline review comment thread."""
-        return client_factory(account_id).reply_to_review_comment(
-            repository,
-            number,
-            comment_id,
-            body,
-        )
-
     @mcp.tool(title="GitHub agent list review threads", annotations=read_annotations)
     def github_agent_list_review_threads(
         account_id: str,
@@ -95,20 +69,6 @@ def register_github_collab_tools(
     ) -> JsonObject:
         """List inline review threads including resolved/outdated state."""
         return client_factory(account_id).list_review_threads(repository, number)
-
-    @mcp.tool(title="GitHub agent set review thread state", annotations=write_annotations)
-    def github_agent_set_review_thread_resolved(
-        account_id: str,
-        repository: str,
-        thread_id: str,
-        resolved: bool,
-    ) -> JsonObject:
-        """Resolve or unresolve one inline review thread."""
-        return client_factory(account_id).set_review_thread_resolved(
-            repository,
-            thread_id,
-            resolved,
-        )
 
     @mcp.tool(title="GitHub agent mark pull ready", annotations=write_annotations)
     def github_agent_mark_pull_ready_for_review(

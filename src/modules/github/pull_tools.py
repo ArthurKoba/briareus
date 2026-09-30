@@ -82,17 +82,6 @@ def register_github_pull_tools(
         """List submitted reviews for a pull request."""
         return client_factory(account_id).list_reviews(repository, number)
 
-    @mcp.tool(title="GitHub agent create review", annotations=write_annotations)
-    def github_agent_create_review(
-        account_id: str,
-        repository: str,
-        number: int,
-        event: str,
-        body: str,
-    ) -> JsonObject:
-        """Submit APPROVE, REQUEST_CHANGES, or COMMENT review feedback."""
-        return client_factory(account_id).create_review(repository, number, event, body)
-
     @mcp.tool(title="GitHub agent update pull branch", annotations=write_annotations)
     def github_agent_update_pull_branch(
         account_id: str,
