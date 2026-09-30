@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import atexit
-import json
 import logging
 import threading
 import time
 import urllib.parse
 from collections.abc import Iterable, Iterator, Mapping
-from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext, suppress
 
 from opentelemetry import metrics, trace
 from opentelemetry._logs import set_logger_provider
@@ -346,14 +345,15 @@ class OpenTelemetrySink(ObservabilitySink):
             return
         self._shutdown = True
         for target in self._attached_loggers:
-            try:
+            with suppress(Exception):
                 target.removeHandler(self.logging_handler)
-            except Exception:
-                pass
         try:
             self.force_flush()
         except Exception:
-            logger.exception("OpenTelemetry force_flush failed during shutdown scope=%s", self.scope)
+            logger.exception(
+                "OpenTelemetry force_flush failed during shutdown scope=%s",
+                self.scope,
+            )
         self.logger_provider.shutdown()
         self.tracer_provider.shutdown()
         self.meter_provider.shutdown()
