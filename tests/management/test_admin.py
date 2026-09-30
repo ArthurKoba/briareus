@@ -67,8 +67,21 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     assert "GitHub Accounts" in labels
     assert "GitLab Accounts" in labels
     assert "MCP Calls" in labels
+    assert "Reverse" in labels
     assert "Settings" in labels
     assert "Files" in labels
+
+    invocation_view = next(
+        view for view in admin._views if getattr(view, "menu_label", "") == "MCP Calls"
+    )
+    assert [field.name for field in invocation_view.fields][:5] == [
+        "module",
+        "tool",
+        "occurred_at",
+        "duration_ms",
+        "status",
+    ]
+    assert invocation_view.fields_default_sort == [("occurred_at", True)]
     engine.dispose()
 
 

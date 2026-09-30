@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import posixpath
 import urllib.parse
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -40,7 +41,7 @@ from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
 
-from common.models import json_int, json_str
+from common.models import JsonObject, JsonValue, json_int, json_str
 from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
 from management.application.services import (
@@ -57,6 +58,7 @@ from management.infrastructure.database import (
     InvocationRecord,
 )
 from management.infrastructure.files import FileAdminStore
+from management.infrastructure.reverse import ReverseAdminClient
 from management.presentation.admin_ui import ManagementUiPlugin
 
 
@@ -282,27 +284,36 @@ def _display_invocation_tool(_request: Request, obj: InvocationRecord) -> str:
     return public_tool_name(obj.module, obj.tool)
 
 
+def _display_invocation_time(_request: Request, obj: InvocationRecord) -> str:
+    return obj.occurred_at.isoformat()
+
+
+def _display_invocation_duration(_request: Request, obj: InvocationRecord) -> str:
+    return f"{obj.duration_ms:.1f} ms"
+
+
 class InvocationView(ModelView):
     row_actions_display_type = RowActionsDisplayType.KEBAB
     page_size = 50
     fields = cast(
         Sequence[BaseField],
         (
-            "id",
-            "occurred_at",
             "module",
             StringField("tool", label="Tool", getter=_display_invocation_tool),
-            "provider",
-            "account_id",
+            StringField("occurred_at", label="Time", getter=_display_invocation_time),
+            StringField("duration_ms", label="Duration", getter=_display_invocation_duration),
             "status",
-            "duration_ms",
+            "provider",
             "error_type",
+            "account_id",
             "request_id",
+            StringField("id", label="Call ID"),
             TextAreaField("arguments_json", label="Arguments"),
             TextAreaField("result_json", label="Result"),
             TextAreaField("error_message", label="Error message"),
         ),
     )
+    fields_default_sort = (("occurred_at", True),)
     searchable_fields = ("module", "tool", "provider", "account_id", "error_type", "request_id")
     exclude_fields_from_list = ("arguments_json", "result_json", "error_message")
     actions = ("clear_all", "delete")
@@ -333,6 +344,136 @@ class InvocationView(ModelView):
     async def clear_all(self, request: Request, _selection: object) -> None:
         removed = await asyncio.to_thread(self.audit.clear)
         flash(request, f"Deleted {removed} invocation log records", "success")
+
+
+class ReverseView(CustomView):
+    menu_label = "Reverse"
+    icon = "fa fa-diagram-project"
+    path = "/reverse"
+
+    def __init__(self, reverse: ReverseAdminClient) -> None:
+        super().__init__()
+        self.reverse = reverse
+
+    @route("")
+    async def index(self, request: Request) -> Response:
+        try:
+            overview = await self.reverse.overview()
+            error = ""
+        except Exception as exc:
+            overview = {"projects": [], "workers": [], "worker_count": 0, "count": 0}
+            error = str(exc)
+
+        projects = overview.get("projects")
+        workers = overview.get("workers")
+        project_items = projects if isinstance(projects, list) else []
+        worker_items = workers if isinstance(workers, list) else []
+        active = sum(
+            1
+            for item in project_items
+            if isinstance(item, dict) and item.get("session") == "active"
+        )
+        queued = sum(
+            json_int(item.get("queued"), default=0)
+            for item in worker_items
+            if isinstance(item, dict)
+        )
+        running = sum(
+            1
+            for item in worker_items
+            if isinstance(item, dict) and bool(item.get("running"))
+        )
+        return _view_templates(self).TemplateResponse(
+            request=request,
+            name="management_reverse.html",
+            context={
+                "title": "Reverse",
+                "overview": overview,
+                "projects": project_items,
+                "workers": worker_items,
+                "active_sessions": active,
+                "queued_total": queued,
+                "running_workers": running,
+                "error": error,
+            },
+        )
+
+    @route("/project/{project_id:path}")
+    async def project_detail(self, request: Request) -> Response:
+        project_id = request.path_params["project_id"]
+        folder = request.query_params.get("folder", "/") or "/"
+        error = ""
+        try:
+            session = await self.reverse.session_info(project_id)
+        except Exception as exc:
+            session = {"project_id": project_id, "session": "unknown"}
+            error = str(exc)
+
+        files: JsonObject = {}
+        programs: list[JsonValue] = []
+        folder_links: list[dict[str, str]] = []
+        parent_folder: str | None = None
+        if session.get("session") == "active" and not error:
+            try:
+                files, programs = await asyncio.gather(
+                    self.reverse.project_files(project_id, folder),
+                    self.reverse.open_programs(project_id),
+                )
+            except Exception as exc:
+                error = str(exc)
+
+        raw_folders = files.get("folders")
+        if isinstance(raw_folders, list):
+            base = folder.rstrip("/")
+            for raw_name in raw_folders:
+                if not isinstance(raw_name, str) or not raw_name:
+                    continue
+                folder_links.append(
+                    {
+                        "name": raw_name,
+                        "path": f"/{raw_name}" if not base else f"{base}/{raw_name}",
+                    }
+                )
+        if folder != "/":
+            parent_folder = posixpath.dirname(folder.rstrip("/")) or "/"
+
+        return _view_templates(self).TemplateResponse(
+            request=request,
+            name="management_reverse_project.html",
+            context={
+                "title": "Reverse Project",
+                "project_id": project_id,
+                "folder": folder,
+                "session": session,
+                "files": files,
+                "programs": programs,
+                "folder_links": folder_links,
+                "parent_folder": parent_folder,
+                "error": error,
+            },
+        )
+
+    @route("/open/{project_id:path}", methods=["POST"])
+    async def open_session(self, request: Request) -> Response:
+        project_id = request.path_params["project_id"]
+        try:
+            await self.reverse.open_session(project_id)
+        except Exception as exc:
+            flash(request, f"Open session failed: {exc}", "error")
+        else:
+            flash(request, "Project session opened", "success")
+        return RedirectResponse("/admin/reverse", status_code=303)
+
+    @route("/release/{project_id:path}", methods=["POST"])
+    async def release_session(self, request: Request) -> Response:
+        project_id = request.path_params["project_id"]
+        try:
+            await self.reverse.release_session(project_id)
+        except Exception as exc:
+            flash(request, f"Release session failed: {exc}", "error")
+        else:
+            flash(request, "Project session released", "success")
+        return RedirectResponse("/admin/reverse", status_code=303)
 
 
 class SettingsView(CustomView):
@@ -678,6 +819,7 @@ def build_admin(
             menu_label="GitLab Accounts",
         )
     )
+    admin.add_view(ReverseView(ReverseAdminClient()))
     admin.add_view(InvocationView(InvocationRecord, audit))
     admin.add_view(SettingsView(config, audit))
     return admin
