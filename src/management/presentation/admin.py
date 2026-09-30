@@ -22,10 +22,10 @@ from starlette.templating import Jinja2Templates
 from starlette_admin import (
     BooleanField,
     Breakpoints,
-    DateTimeField,
     CardRowWidget,
     Col,
     CustomView,
+    DateTimeField,
     EnumField,
     PasswordField,
     RowActionsDisplayType,
