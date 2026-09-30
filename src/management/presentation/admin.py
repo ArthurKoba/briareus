@@ -58,6 +58,7 @@ from management.infrastructure.database import (
     InvocationRecord,
 )
 from management.infrastructure.files import FileAdminStore
+from management.infrastructure.reverse import ReverseAdminClient
 from management.presentation.admin_ui import ManagementUiPlugin
 
 
