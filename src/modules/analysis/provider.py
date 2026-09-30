@@ -142,6 +142,11 @@ class AnalysisToolProvider(Provider):
                 backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
 
             tools = self._adapt_catalog(backend_tools)
+            aliases = {
+                backend_tool.name: analysis_tool_name(backend_tool.name)
+                for backend_tool in backend_tools
+            }
+            tools.extend(self._catalog_tools(tools, aliases))
             tools.append(self._vocabulary_tool())
             self._validate_public_catalog(tools)
             if ttl > 0:
@@ -152,6 +157,8 @@ class AnalysisToolProvider(Provider):
         adapted: list[Tool] = []
         owners: dict[str, str] = {}
         for backend_tool in backend_tools:
+            if backend_tool.name in {"search_tools", "check_tools"}:
+                continue
             alias = analysis_tool_name(backend_tool.name)
             owner = owners.get(alias)
             if owner is not None and owner != backend_tool.name:
@@ -162,6 +169,78 @@ class AnalysisToolProvider(Provider):
             owners[alias] = backend_tool.name
             adapted.append(self._adapt_tool(backend_tool, alias))
         return adapted
+
+    @staticmethod
+    def _catalog_tools(
+        public_tools: list[Tool],
+        aliases: dict[str, str],
+    ) -> list[Tool]:
+        async def search_tools(query: str, limit: int = 15) -> JsonObject:
+            tokens = [token.casefold() for token in query.split() if token.strip()]
+            matches: list[JsonObject] = []
+            for tool in public_tools:
+                haystack = " ".join(
+                    value
+                    for value in (
+                        tool.name,
+                        tool.title or "",
+                        tool.description or "",
+                    )
+                    if value
+                ).casefold()
+                if tokens and not all(token in haystack for token in tokens):
+                    continue
+                matches.append(
+                    {
+                        "name": tool.name,
+                        "status": "callable",
+                        "description": tool.description or "",
+                    }
+                )
+            matches.sort(key=lambda item: str(item["name"]))
+            bounded_limit = max(1, min(limit, 100))
+            return {
+                "query": query,
+                "match_count": len(matches),
+                "returned": min(len(matches), bounded_limit),
+                "matches": matches[:bounded_limit],
+            }
+
+        async def check_tools(tools: str) -> JsonObject:
+            public_names = {tool.name for tool in public_tools}
+            results: JsonObject = {}
+            requested = [item.strip() for item in tools.split(",") if item.strip()]
+            callable_count = 0
+            for requested_name in requested:
+                public_name = aliases.get(requested_name, requested_name)
+                status = "callable" if public_name in public_names else "not_found"
+                if status == "callable":
+                    callable_count += 1
+                results[public_name] = {"status": status}
+            return {
+                "results": results,
+                "summary": f"{callable_count}/{len(requested)} callable",
+            }
+
+        search_tool = FunctionTool.from_function(
+            search_tools,
+            name="search_tools",
+            title="Search Analysis Tools",
+            description=(
+                "Search the currently published Analysis tool catalog by public semantic "
+                "name, title, or description. Results contain only callable public names."
+            ),
+        )
+        check_tool = FunctionTool.from_function(
+            check_tools,
+            name="check_tools",
+            title="Check Analysis Tools",
+            description=(
+                "Check whether public Analysis tool names are callable. Legacy aliases may "
+                "be accepted for compatibility, but results always use public semantic names."
+            ),
+        )
+        return [search_tool, check_tool]
 
     @staticmethod
     def _vocabulary_tool() -> Tool:
