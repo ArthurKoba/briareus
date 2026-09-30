@@ -91,11 +91,18 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
     services = _services()
     observability = {
         "OTEL_SERVICE_NAME",
+        "OTEL_SERVICE_VERSION",
+        "OTEL_SERVICE_INSTANCE_ID",
+        "OTEL_ENVIRONMENT",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
         "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
         "OTEL_EXPORTER_OTLP_HEADERS",
         "OTEL_RESOURCE_ATTRIBUTES",
         "OTEL_EXPORTER_OTLP_TIMEOUT",
+        "OTEL_METRIC_EXPORT_INTERVAL",
+        "OTEL_LOG_LEVEL",
     }
     expected = {
         "management": observability | {
@@ -198,11 +205,18 @@ def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
     services = _services()
     required = {
         "OTEL_SERVICE_NAME",
+        "OTEL_SERVICE_VERSION",
+        "OTEL_SERVICE_INSTANCE_ID",
+        "OTEL_ENVIRONMENT",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
         "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
         "OTEL_EXPORTER_OTLP_HEADERS",
         "OTEL_RESOURCE_ATTRIBUTES",
         "OTEL_EXPORTER_OTLP_TIMEOUT",
+        "OTEL_METRIC_EXPORT_INTERVAL",
+        "OTEL_LOG_LEVEL",
     }
 
     for name, service in services.items():
