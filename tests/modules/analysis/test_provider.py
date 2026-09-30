@@ -237,8 +237,7 @@ async def test_public_catalog_search_and_check_use_semantic_names() -> None:
         ),
     ]
     public = provider._adapt_catalog(backend_tools)
-    aliases = {tool.name: analysis_tool_name(tool.name) for tool in backend_tools}
-    search_tool, check_tool = provider._catalog_tools(public, aliases)
+    search_tool, check_tool = provider._catalog_tools(public)
 
     search = await search_tool.fn(query="outbound actions", limit=10)
     assert search["matches"][0]["name"] == "get_outbound_actions"
@@ -249,7 +248,7 @@ async def test_public_catalog_search_and_check_use_semantic_names() -> None:
     )
     assert checked["results"]["get_outbound_actions"]["status"] == "callable"
     assert checked["results"]["analyze_action_complete"]["status"] == "callable"
-    assert "get_function_callees" not in checked["results"]
+    assert checked["results"]["get_function_callees"]["status"] == "not_found"
 
 
 def test_private_registry_tools_are_not_adapted_directly() -> None:

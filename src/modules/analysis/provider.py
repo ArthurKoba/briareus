@@ -142,11 +142,7 @@ class AnalysisToolProvider(Provider):
                 backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
 
             tools = self._adapt_catalog(backend_tools)
-            aliases = {
-                backend_tool.name: analysis_tool_name(backend_tool.name)
-                for backend_tool in backend_tools
-            }
-            tools.extend(self._catalog_tools(tools, aliases))
+            tools.extend(self._catalog_tools(tools))
             tools.append(self._vocabulary_tool())
             self._validate_public_catalog(tools)
             if ttl > 0:
@@ -171,10 +167,7 @@ class AnalysisToolProvider(Provider):
         return adapted
 
     @staticmethod
-    def _catalog_tools(
-        public_tools: list[Tool],
-        aliases: dict[str, str],
-    ) -> list[Tool]:
+    def _catalog_tools(public_tools: list[Tool]) -> list[Tool]:
         async def search_tools(query: str, limit: int = 15) -> JsonObject:
             tokens = [token.casefold() for token in query.split() if token.strip()]
             matches: list[JsonObject] = []
@@ -212,11 +205,10 @@ class AnalysisToolProvider(Provider):
             requested = [item.strip() for item in tools.split(",") if item.strip()]
             callable_count = 0
             for requested_name in requested:
-                public_name = aliases.get(requested_name, requested_name)
-                status = "callable" if public_name in public_names else "not_found"
+                status = "callable" if requested_name in public_names else "not_found"
                 if status == "callable":
                     callable_count += 1
-                results[public_name] = {"status": status}
+                results[requested_name] = {"status": status}
             return {
                 "results": results,
                 "summary": f"{callable_count}/{len(requested)} callable",
@@ -236,8 +228,8 @@ class AnalysisToolProvider(Provider):
             name="check_tools",
             title="Check Analysis Tools",
             description=(
-                "Check whether public Analysis tool names are callable. Legacy aliases may "
-                "be accepted for compatibility, but results always use public semantic names."
+                "Check whether public Analysis tool names are callable. Only names from the "
+                "published Analysis catalog are accepted."
             ),
         )
         return [search_tool, check_tool]
