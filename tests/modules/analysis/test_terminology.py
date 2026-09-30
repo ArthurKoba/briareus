@@ -511,3 +511,65 @@ def test_enhanced_action_search_omits_invalid_empty_backend_defaults() -> None:
     assert normalized["sort_by"] == "address"
     assert normalized["offset"] == 0
     assert normalized["limit"] == 100
+
+
+def test_enhanced_action_search_drops_fastmcp_optional_none_values() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string"},
+            "min_xrefs": {"type": "integer", "default": ""},
+            "max_xrefs": {"type": "integer", "default": ""},
+            "has_custom_name": {"type": "boolean", "default": ""},
+            "is_thunk": {"type": "boolean", "default": ""},
+            "is_external": {"type": "boolean", "default": ""},
+            "offset": {"type": "integer", "default": 0},
+            "limit": {"type": "integer", "default": 100},
+        },
+        "required": ["project_id"],
+    }
+
+    normalized = normalize_arguments(
+        schema,
+        {
+            "project_id": "project-1",
+            "min_links": None,
+            "max_links": None,
+            "has_custom_name": True,
+            "is_forwarder": None,
+            "is_external": None,
+        },
+        "search_functions_enhanced",
+    )
+
+    assert normalized == {
+        "project_id": "project-1",
+        "has_custom_name": True,
+        "offset": 0,
+        "limit": 100,
+    }
+
+
+def test_optional_false_and_zero_are_not_dropped() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string"},
+            "min_xrefs": {"type": "integer", "default": ""},
+            "is_external": {"type": "boolean", "default": ""},
+        },
+        "required": ["project_id"],
+    }
+
+    normalized = normalize_arguments(
+        schema,
+        {
+            "project_id": "project-1",
+            "min_links": 0,
+            "is_external": False,
+        },
+        "search_functions_enhanced",
+    )
+
+    assert normalized["min_xrefs"] == 0
+    assert normalized["is_external"] is False

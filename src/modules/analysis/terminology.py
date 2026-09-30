@@ -684,9 +684,23 @@ def _prefer_analysis_aliases(
     tool_name: str | None = None,
 ) -> JsonObject:
     normalized = dict(arguments)
+    required_raw = input_schema.get("required")
+    required = {str(name) for name in required_raw} if isinstance(required_raw, list) else set()
+
     for ghidra_name, property_schema in _schema_properties(input_schema).items():
         analysis_name = analysis_argument_name(ghidra_name, property_schema, tool_name)
+
+        # FastMCP may materialize omitted optional parameters as explicit None.
+        # The backend schema does not accept null for scalar bool/int/number fields,
+        # so treat None as "not provided" for non-required arguments before
+        # validating the canonical backend model. Explicit False/0 remain intact.
+        if ghidra_name not in required:
+            for candidate in {ghidra_name, analysis_name}:
+                if normalized.get(candidate) is None:
+                    normalized.pop(candidate, None)
+
         if analysis_name == ghidra_name or analysis_name not in normalized:
             continue
         normalized.pop(ghidra_name, None)
+
     return json_object(normalized, context="analysis tool arguments")
