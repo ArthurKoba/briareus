@@ -15,6 +15,16 @@ The project is designed around a few core ideas:
 - isolate workers and constrain CPU, memory, storage, network, and filesystem access;
 - make integrations modular so new development and analysis tools can be added over time.
 
+## Documentation
+
+The documentation entry point is [docs/README.md](docs/README.md). It links the current
+architecture map, component catalog, repository map, roadmap, existing technical notes,
+and future architecture decision records.
+
+The documentation intentionally separates the current implementation from the target
+modular runtime direction so incremental migrations can be reviewed without treating
+the roadmap as already implemented.
+
 ## Architecture
 
 ```text
@@ -35,55 +45,207 @@ koba-mcp-bridge
 
 Mounted MCP backends are optional. The public bridge starts normally when none are configured. FastMCP proxy providers connect lazily, so a temporarily unavailable backend does not prevent the gateway itself from starting.
 
-## Ghidra backend
+## Artifact service
 
-Set the runtime variable below to mount an internal Ghidra MCP server:
+Koba provides one universal persistent file service for every backend and worker.
+Files are immutable and content-addressed. The public identifier is:
+
+```text
+sha256:<digest>
+```
+
+Physical storage paths are private implementation details and are never used as
+cross-service identifiers.
+
+For client/chat attachments, agents should call `artifact_ingest_file` with the
+attachment/file argument itself. The tool marks `file` in
+`_meta["openai/fileParams"]`, so ChatGPT supplies a structured file payload
+containing `download_url`, `file_id`, and optional MIME/name metadata. Koba
+streams the authorized temporary URL directly into canonical storage and returns
+`artifact_id`. Attachment bytes never need to be serialized through
+model-visible base64.
+
+For generic MCP clients that cannot provide a file-capable argument, Koba also
+provides a resumable fallback protocol:
+
+- `artifact_upload_begin` creates an upload session from file metadata;
+- `artifact_upload_write` appends one bounded base64 chunk at the exact next offset;
+- `artifact_upload_list` enumerates open/completed sessions for autonomous recovery;
+- `artifact_upload_status` resumes interrupted transfers from the server-confirmed offset;
+- `artifact_upload_finish` verifies size and optional SHA-256, commits the immutable
+  object, and returns its `artifact_id`;
+- `artifact_upload_cleanup` previews or removes stale upload-session state by age without deleting committed artifacts;
+- `artifact_upload_cancel` discards a specific unfinished transfer.
+
+The protocol is transport-only. The agent does not choose a Koba filesystem path
+and no backend-specific directory participates in upload. After commit, every
+consumer receives only the immutable `artifact_id`.
+
+The generic artifact surface also provides:
+
+- `artifact_status`, `artifact_list`, `artifact_info`, `artifact_read`;
+- `artifact_create_text`;
+- `artifact_extract`, `artifact_collection_list`,
+  `artifact_collection_resolve`, `artifact_collection_delete`;
+- `artifact_references`, `artifact_release_reference`;
+- `artifact_delete`, `artifact_gc`.
+
+Archive extraction creates a collection manifest whose members are themselves
+immutable artifacts. The same object can therefore be reused by multiple
+projects, workers, and backends without copying it again in the artifact store.
+
+Consumers hold durable references to source artifacts. Normal deletion refuses
+to remove referenced objects; garbage collection only targets objects with no
+consumer or collection references.
+
+## Curl HTTP client
+
+The structured curl tools use the `chrome-desktop` HTTP header preset by
+default. This applies to `curl_request`, `curl_download`, and
+`curl_stream_capture`, so ordinary requests present a current desktop Chrome
+User-Agent and matching browser navigation headers unless the caller selects a
+different preset.
+
+Use `preset="curl"` for native curl-style defaults, `preset="json-api"` for
+JSON APIs, or `preset="none"` when only explicitly supplied headers should be
+sent. Caller-provided headers always override preset headers.
+
+Browser presets reproduce HTTP request headers only. They do not emulate Chrome
+JavaScript execution, cookies/session state beyond what the caller supplies,
+TLS fingerprints, or browser HTTP/2 settings.
+
+## Ghidra integration
+
+Ghidra is a consumer of the artifact service, not the owner of uploaded files.
+`ghidra_import_artifact(artifact_id, ...)` resolves the immutable object
+internally, imports it into the currently open Ghidra project, and records a
+durable `ghidra-project` source reference.
+
+After import, Ghidra stores the program in its own project database under
+`/projects`. The canonical source artifact remains independently available for
+re-import, verification, or use by another backend. `ghidra_project_sources`
+lists the retained source objects for the current project.
+
+Ghidra outputs can be brought back into the same universal artifact store with:
+
+- `ghidra_export_program_artifact` for GZF;
+- `ghidra_archive_project_artifact` for GAR.
+
+Set the runtime variable below to mount the internal Ghidra MCP server:
 
 ```text
 GHIDRA_MCP_URL=http://ghidra-mcp:8081/mcp
 ```
 
-The mounted backend is namespaced as `ghidra`, so its tools are exposed through the public gateway with `ghidra_` prefixes. Ghidra itself does not need to be exposed publicly; it should share a private Docker network with this bridge.
+The mounted backend is namespaced as `ghidra`. Ghidra itself stays on the
+private Docker network.
+
+## Secrets / Infisical
+
+Koba uses self-hosted Infisical as the central provider for provider-specific
+credentials and configuration. Runtime workloads authenticate with an Infisical
+Machine Identity using Universal Auth and receive a short-lived access token.
+
+Coolify only keeps the Infisical bootstrap and transport configuration:
+
+```text
+INFISICAL_HOST=https://secrets.koba-nexus.ru
+INFISICAL_PROJECT_ID=<project UUID>
+INFISICAL_ENVIRONMENT=prod
+INFISICAL_BASE_PATH=/
+INFISICAL_CLIENT_ID=<machine identity client id>
+INFISICAL_CLIENT_SECRET=<machine identity client secret>
+INFISICAL_VERIFY_TLS=true
+```
+
+Connectors resolve values by convention below `INFISICAL_BASE_PATH`. Explicit
+`env://`, `file://`, and `infisical://` references remain available as
+low-level compatibility primitives, but normal connector configuration does not
+require per-secret `*_REF` variables.
+
+Deployment and migration instructions are in
+[`deploy/infisical/README.md`](deploy/infisical/README.md).
+
+MCP diagnostics expose only provider/configuration status and redacted reference checks;
+there is intentionally no MCP tool that returns secret plaintext.
+
+## GitLab connector
+
+GitLab is implemented as a reusable subserver rather than another monolithic block of
+gateway-only tools. The same GitLab tool provider is exposed in two ways:
+
+- the normal gateway endpoint at `/mcp`, where tools are namespaced as `gitlab_*`;
+- a dedicated GitLab-only endpoint at `/gitlab/mcp`, where the same tools are exposed
+  without the `gitlab_` namespace prefix.
+
+Every GitLab operation requires an explicit `profile_id`. There is deliberately no
+process-global "current GitLab" or "current account", so concurrent agents can use
+different GitLab instances or different accounts on the same instance without switching
+each other's context.
+
+GitLab profiles are discovered from Infisical folders below:
+
+```text
+/gitlab/accounts/<profile_id>
+├── BASE_URL
+├── AUTH_TYPE
+├── TOKEN
+├── LABEL        # optional
+├── VERIFY_TLS   # optional, default true
+└── CA_FILE      # optional
+```
+
+Creating a new account folder makes the profile discoverable without adding Coolify
+environment variables. Legacy `GITLAB_PROFILES_FILE` and `GITLAB_PROFILES_JSON`
+remain fallback-only during migration.
+
+Supported authentication modes are:
+
+- `private_token` -> GitLab `PRIVATE-TOKEN` header for personal/project/group access tokens;
+- `bearer` -> `Authorization: Bearer ...` for OAuth-compatible access tokens;
+- `job_token` -> `JOB-TOKEN` for endpoints that support CI/CD job-token authentication.
+
+The connector currently exposes profile/account validation, project discovery, repository
+file/tree/code-search operations, atomic commit actions, branches and compare, merge
+requests, issues, and CI pipelines/jobs/job traces with retry/cancel controls.
+
+Direct writes to branches listed in `GITLAB_PROTECTED_BRANCHES` are blocked by the bridge
+(default: `main,master`). Feature branches can be created from protected branches and
+merge requests can target protected branches. GitLab's own protected branch, approval,
+role, and token-scope settings remain the authoritative server-side access controls.
 
 ## GitHub OAuth
 
-OAuth is disabled by default so a deployment can be upgraded before credentials are configured. When `OAUTH_ENABLED=true`, the bridge requires all of the following runtime environment variables:
-
-- `OAUTH_GITHUB_CLIENT_ID`
-- `OAUTH_GITHUB_CLIENT_SECRET`
-- `OAUTH_JWT_SIGNING_KEY`
-- `OAUTH_ALLOWED_GITHUB_USERS`
-
-The public OAuth base URL defaults to:
+When `OAUTH_ENABLED=true`, GitHub OAuth configuration is resolved from Infisical:
 
 ```text
-https://mcp.koba-nexus.ru
+/github/oauth
+├── CLIENT_ID
+├── CLIENT_SECRET
+├── JWT_SIGNING_KEY
+└── ALLOWED_USERS
 ```
 
-and can be changed with `OAUTH_BASE_URL`.
+Only `OAUTH_ENABLED` and `OAUTH_BASE_URL` remain deployment variables. The
+public OAuth base URL defaults to `https://mcp.koba-nexus.ru`.
 
-The GitHub OAuth application callback URL is:
-
-```text
-https://mcp.koba-nexus.ru/auth/callback
-```
-
-OAuth client registrations and token state are stored below `FASTMCP_HOME`, which defaults to `/data/fastmcp` in the container. Production deployments should mount `/data/fastmcp` as persistent storage before enabling OAuth.
-
-Secrets belong in runtime environment variables or the deployment secret store. They must not be committed to the repository or injected at image build time.
+OAuth client registrations and token state are stored below `FASTMCP_HOME`, which
+defaults to `/data/fastmcp` in the container. Production deployments should keep
+that directory persistent.
 
 ## GitHub App development backend
 
 The `github_agent_*` tools authenticate as a GitHub App installation. Automated repository activity is therefore attributed to the app identity rather than the human account used to log into the MCP bridge.
 
-Required runtime variables:
+The development identity is resolved from Infisical:
 
 ```text
-GITHUB_AGENT_APP_ID=<GitHub App numeric App ID>
-GITHUB_AGENT_PRIVATE_KEY_B64=<base64-encoded GitHub App private key PEM>
+/github/development
+├── APP_ID
+└── PRIVATE_KEY_PEM
 ```
 
-`GITHUB_AGENT_PRIVATE_KEY` can be used instead of the base64 form when the deployment system can safely store multiline PEM values.
+Legacy environment variables remain fallback-only during the migration window.
 
 The GitHub App installation is the single source of truth for repository access. There is no duplicated bridge-side repository allowlist. Adding or removing repositories in the GitHub App installation immediately changes the repository set visible to the bridge without changing Coolify environment variables.
 
@@ -115,14 +277,17 @@ Core repository/files:
 - UTF-8 file read/write/delete;
 - directory listing;
 - binary file read/write using base64;
+- server-side copy/move of existing Git blobs between paths without serializing binary contents through MCP; copy may read from another ref, while atomic move/rename requires `source_ref` to resolve to the destination branch HEAD;
 - repository-scoped code search;
 - atomic multi-file commits through Git Data blobs/trees/commits;
+- atomic commit changes may use `operation: copy` to reuse an existing file blob from another ref without transporting its contents;
 - optimistic branch-head verification with `expected_head_sha`.
 
 Branches, commits, and tags:
 
 - branch list/create/delete/rename;
 - non-force fast-forward of non-protected branches;
+- guarded ancestor-only branch reset with expected-head CAS, dry-run by default, and explicit protected-branch override for intentional history repair;
 - working-branch merge while protected targets remain blocked;
 - ref comparison;
 - commit history filtered by ref/path;
@@ -151,6 +316,7 @@ Issues and CI:
 - GitHub Actions workflow-run and job listing;
 - job-log diagnostics;
 - workflow artifact listing/download;
+- dispatch `workflow_dispatch` workflows with explicit refs/inputs;
 - rerun one job, rerun failed jobs, rerun a workflow run, and cancel a workflow run.
 
 ### Development GitHub App permissions
@@ -160,7 +326,7 @@ Configure the development GitHub App with only the repositories that agents are 
 - **Contents: Read and write** — files, Git Data objects, refs, tags;
 - **Pull requests: Read and write** — PR lifecycle, reviews, merge;
 - **Issues: Read and write** — issue lifecycle and comments;
-- **Actions: Read and write** — workflow diagnostics plus rerun/cancel controls;
+- **Actions: Read and write** — workflow diagnostics plus dispatch/rerun/cancel controls;
 - **Checks: Read-only** — required-check gating.
 
 Do not grant organization/administration permissions to the app unless a later feature explicitly requires them. Branch/ruleset administration should remain a human-controlled GitHub setting.
@@ -169,14 +335,15 @@ Do not grant organization/administration permissions to the app unless a later f
 
 A second GitHub App can be configured for independent review identity. This is intentionally separate from the development App so a development agent cannot satisfy an identity-specific approval requirement by approving its own PR as the same bot actor.
 
-Reviewer runtime variables:
+The reviewer identity is resolved from Infisical:
 
 ```text
-GITHUB_REVIEWER_APP_ID=<reviewer GitHub App numeric App ID>
-GITHUB_REVIEWER_PRIVATE_KEY_B64=<base64-encoded reviewer private key PEM>
+/github/reviewer
+├── APP_ID
+└── PRIVATE_KEY_PEM
 ```
 
-`GITHUB_REVIEWER_PRIVATE_KEY` is also supported for multiline PEM storage.
+Legacy environment variables remain fallback-only during the migration window.
 
 The reviewer App installation is also the sole source of repository access. `github_reviewer_list_repositories` discovers its current installation repository set directly from GitHub. No reviewer repository list is duplicated in Coolify.
 

@@ -13,14 +13,20 @@ from fastmcp.server.middleware import AuthMiddleware
 from mcp.types import ToolAnnotations
 
 from . import __version__
-from .github_actions import GitHubActionsClient
+from .artifact_tools import register_artifact_tools
+from .curl_mcp_tools import register_curl_tools
 from .github_actions_tools import register_github_actions_tools
 from .github_agent import github_agent_configured
 from .github_collab_tools import register_github_collab_tools
+from .github_identity import GitHubPrettyIdentityClient
 from .github_review_tools import register_github_review_tools
 from .github_reviewer import github_reviewer_client_from_env, github_reviewer_configured
 from .github_reviewer_tools import register_github_reviewer_tools
 from .github_tools import register_github_workflow_tools
+from .gitlab_tools import register_gitlab_tools
+from .reverse_workflow import register_reverse_workflow_tools
+from .secrets import SecretError, resolve_config_secret, resolve_secret
+from .secrets_tools import register_secrets_tools
 
 _STARTED_AT = datetime.now(UTC).isoformat()
 _READ_ONLY_LOCAL = ToolAnnotations(
@@ -37,11 +43,23 @@ _WRITE_EXTERNAL = ToolAnnotations(
     idempotent_hint=False,
     open_world_hint=True,
 )
+_WRITE_LOCAL = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
+)
 _DESTRUCTIVE_EXTERNAL = ToolAnnotations(
     read_only_hint=False,
     destructive_hint=True,
     idempotent_hint=False,
     open_world_hint=True,
+)
+_DESTRUCTIVE_LOCAL = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=True,
+    idempotent_hint=False,
+    open_world_hint=False,
 )
 _CHATGPT_OAUTH_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 
@@ -60,8 +78,33 @@ def _required_env(name: str) -> str:
     return value
 
 
+def _required_secret(name: str, ref_name: str) -> str:
+    reference = os.getenv(ref_name, "").strip()
+    if reference:
+        try:
+            return resolve_secret(reference)
+        except SecretError:
+            legacy = os.getenv(name, "").strip()
+            if legacy:
+                return legacy
+            raise
+    return _required_env(name)
+
+
+def _github_oauth_value(secret_name: str, legacy_env: str) -> str:
+    try:
+        return resolve_config_secret("github/oauth", secret_name).strip()
+    except SecretError as exc:
+        legacy = os.getenv(legacy_env, "").strip()
+        if legacy:
+            return legacy
+        raise RuntimeError(
+            f"unable to load GitHub OAuth {secret_name!r} from Infisical: {exc}"
+        ) from exc
+
+
 def _allowed_github_users() -> set[str]:
-    raw = _required_env("OAUTH_ALLOWED_GITHUB_USERS")
+    raw = _github_oauth_value("ALLOWED_USERS", "OAUTH_ALLOWED_GITHUB_USERS")
     return {item.strip().casefold() for item in raw.split(",") if item.strip()}
 
 
@@ -77,11 +120,20 @@ def _build_auth() -> tuple[GitHubProvider | None, list[AuthMiddleware]]:
         return None, []
 
     provider = GitHubProvider(
-        client_id=_required_env("OAUTH_GITHUB_CLIENT_ID"),
-        client_secret=_required_env("OAUTH_GITHUB_CLIENT_SECRET"),
+        client_id=_github_oauth_value(
+            "CLIENT_ID",
+            "OAUTH_GITHUB_CLIENT_ID",
+        ),
+        client_secret=_github_oauth_value(
+            "CLIENT_SECRET",
+            "OAUTH_GITHUB_CLIENT_SECRET",
+        ),
         base_url=os.getenv("OAUTH_BASE_URL", "https://mcp.koba-nexus.ru"),
         required_scopes=["read:user"],
-        jwt_signing_key=_required_env("OAUTH_JWT_SIGNING_KEY"),
+        jwt_signing_key=_github_oauth_value(
+            "JWT_SIGNING_KEY",
+            "OAUTH_JWT_SIGNING_KEY",
+        ),
         allowed_client_redirect_uris=[_CHATGPT_OAUTH_REDIRECT],
         require_authorization_consent="external",
         enable_cimd=False,
@@ -108,8 +160,8 @@ def _mount_backends(server: FastMCP) -> dict[str, str]:
 
 
 @lru_cache(maxsize=1)
-def _github_agent_client() -> GitHubActionsClient:
-    return GitHubActionsClient.from_env()
+def _github_agent_client() -> GitHubPrettyIdentityClient:
+    return GitHubPrettyIdentityClient.from_env()
 
 
 _auth, _auth_middleware = _build_auth()
@@ -119,11 +171,38 @@ mcp = FastMCP(
     version=__version__,
     instructions=(
         "Koba MCP Bridge is the authenticated gateway for Koba infrastructure, "
-        "local tools, and mounted MCP backends."
+        "local tools, and mounted MCP backends. Files are first-class immutable "
+        "artifacts identified by artifact_id. For client/chat attachments, prefer "
+        "artifact_ingest_file so the client can hand Koba an authorized file URL and "
+        "Koba can stream the bytes directly without model-visible base64. Use "
+        "artifact_upload_* only as the generic resumable fallback. Backend-specific "
+        "adapters such as ghidra_import_artifact consume artifact_id. Filesystem paths "
+        "are private server implementation details and are never cross-service identifiers."
     ),
     auth=_auth,
     middleware=_auth_middleware,
 )
+
+
+gitlab_mcp = FastMCP(
+    "koba-gitlab",
+    version=__version__,
+    instructions=(
+        "Dedicated GitLab connector surface. Every operation requires an explicit "
+        "profile_id selecting one GitLab instance and credential identity. Profiles "
+        "never contain inline tokens; credentials come from runtime secret env vars "
+        "or mounted secret files."
+    ),
+    auth=_auth,
+    middleware=_auth_middleware,
+)
+register_gitlab_tools(
+    gitlab_mcp,
+    _READ_EXTERNAL,
+    _WRITE_EXTERNAL,
+    _DESTRUCTIVE_EXTERNAL,
+)
+mcp.mount(gitlab_mcp, namespace="gitlab")
 
 
 @mcp.tool(
@@ -162,7 +241,28 @@ def bridge_build_info() -> dict[str, str]:
 )
 def bridge_capabilities() -> dict[str, object]:
     """Return the currently enabled high-level bridge capabilities."""
-    features = ["mcp", "streamable-http", "opentelemetry", "gateway"]
+    features = [
+        "mcp",
+        "streamable-http",
+        "opentelemetry",
+        "gateway",
+        "artifact-store-v2",
+        "agent-resumable-upload",
+        "attachment-file-ingress",
+        "artifact-collections",
+        "artifact-references",
+        "infisical-secrets",
+        "secret-references",
+        "curl-http-client",
+        "curl-artifact-download",
+        "curl-stream-capture",
+        "curl-browser-header-presets",
+        "gitlab-multi-profile",
+        "gitlab-dedicated-endpoint",
+        "gitlab-repository-workflow",
+        "gitlab-merge-requests",
+        "gitlab-ci",
+    ]
     if _auth is not None:
         features.append("github-oauth")
     if github_agent_configured():
@@ -285,6 +385,10 @@ register_github_actions_tools(
     _WRITE_EXTERNAL,
     _DESTRUCTIVE_EXTERNAL,
 )
+register_artifact_tools(mcp, _READ_ONLY_LOCAL, _WRITE_LOCAL, _DESTRUCTIVE_LOCAL)
+register_secrets_tools(mcp, _READ_EXTERNAL)
+register_curl_tools(mcp, _READ_ONLY_LOCAL, _WRITE_EXTERNAL)
+register_reverse_workflow_tools(mcp, _READ_ONLY_LOCAL, _WRITE_LOCAL)
 
 if github_reviewer_configured():
     register_github_reviewer_tools(
@@ -302,14 +406,24 @@ def _split_env(name: str, default: str) -> list[str]:
 
 _MOUNTED_BACKENDS = _mount_backends(mcp)
 
+_allowed_hosts = _split_env(
+    "MCP_ALLOWED_HOSTS",
+    "localhost:*,127.0.0.1:*,[::1]:*",
+)
+_allowed_origins = _split_env(
+    "MCP_ALLOWED_ORIGINS",
+    "http://localhost:*,http://127.0.0.1:*,http://[::1]:*",
+)
+
 app = mcp.http_app(
     path="/mcp",
-    allowed_hosts=_split_env(
-        "MCP_ALLOWED_HOSTS",
-        "localhost:*,127.0.0.1:*,[::1]:*",
-    ),
-    allowed_origins=_split_env(
-        "MCP_ALLOWED_ORIGINS",
-        "http://localhost:*,http://127.0.0.1:*,http://[::1]:*",
-    ),
+    allowed_hosts=_allowed_hosts,
+    allowed_origins=_allowed_origins,
 )
+
+gitlab_app = gitlab_mcp.http_app(
+    path="/mcp",
+    allowed_hosts=_allowed_hosts,
+    allowed_origins=_allowed_origins,
+)
+app.mount("/gitlab", gitlab_app)

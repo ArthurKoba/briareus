@@ -4,8 +4,11 @@ import base64
 import hashlib
 
 import pytest
+from fastmcp import Client, FastMCP
+from mcp.types import ToolAnnotations
 
 from koba_mcp_bridge.github_actions import GitHubActionsClient
+from koba_mcp_bridge.github_actions_tools import register_github_actions_tools
 from koba_mcp_bridge.github_agent import GitHubAgentError
 
 
@@ -112,6 +115,92 @@ def test_download_artifact_returns_base64_and_hash() -> None:
     assert result["sha256"] == hashlib.sha256(client.download_payload).hexdigest()
 
 
+
+def test_enable_workflow_uses_actions_enable_endpoint() -> None:
+    class EnableClient(RecordingActionsClient):
+        def _repo_request(
+            self,
+            repository: str,
+            method: str,
+            path: str,
+            *,
+            payload: object | None = None,
+            allowed_errors: set[int] | None = None,
+        ) -> tuple[int, object]:
+            del repository, payload, allowed_errors
+            self.calls.append((method, path))
+            return 204, {}
+
+    client = EnableClient()
+    result = client.enable_workflow(
+        "ArthurKoba/ghidra",
+        "build-ghidra-multi-platform-artifact.yml",
+    )
+
+    assert result["enabled"] is True
+    assert result["status"] == 204
+    assert client.calls == [
+        (
+            "PUT",
+            "/repos/ArthurKoba/ghidra/actions/workflows/"
+            "build-ghidra-multi-platform-artifact.yml/enable",
+        )
+    ]
+
+
+def test_dispatch_workflow_uses_workflow_dispatch_endpoint() -> None:
+    class DispatchClient(RecordingActionsClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dispatch_payload = None
+
+        def _repo_request(
+            self,
+            repository: str,
+            method: str,
+            path: str,
+            *,
+            payload: object | None = None,
+            allowed_errors: set[int] | None = None,
+        ) -> tuple[int, object]:
+            del repository, allowed_errors
+            self.calls.append((method, path))
+            self.dispatch_payload = payload
+            return 204, {}
+
+    client = DispatchClient()
+    result = client.dispatch_workflow(
+        "ArthurKoba/openipc-builder",
+        "build-one.yml",
+        "master",
+        {
+            "platform": "fh8626v100_lite",
+            "firmware_ref": "work/fh8626v100-divinus",
+            "rebuild_packages": "divinus",
+            "clean_output": False,
+        },
+    )
+
+    assert result["dispatched"] is True
+    assert result["status"] == 204
+    assert client.calls == [
+        (
+            "POST",
+            "/repos/ArthurKoba/openipc-builder/actions/workflows/"
+            "build-one.yml/dispatches",
+        )
+    ]
+    assert client.dispatch_payload == {
+        "ref": "master",
+        "inputs": {
+            "platform": "fh8626v100_lite",
+            "firmware_ref": "work/fh8626v100-divinus",
+            "rebuild_packages": "divinus",
+            "clean_output": False,
+        },
+    }
+
+
 def test_rerun_and_cancel_endpoints() -> None:
     client = RecordingActionsClient()
     repository = "ArthurKoba/koba-mcp-bridge"
@@ -192,3 +281,30 @@ def test_protected_pull_request_merge_requires_administrator(
 
     with pytest.raises(GitHubAgentError, match="requires administrator"):
         client.merge_pull_request("ArthurKoba/koba-mcp-bridge", 7)
+
+@pytest.mark.asyncio
+async def test_dispatch_workflow_is_exposed_on_fastmcp_surface() -> None:
+    server = FastMCP("github-actions-surface")
+    read = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+    write = ToolAnnotations(read_only_hint=False, open_world_hint=True)
+    destructive = ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        open_world_hint=True,
+    )
+    client = RecordingActionsClient()
+
+    register_github_actions_tools(
+        server,
+        lambda: client,
+        read,
+        write,
+        destructive,
+    )
+
+    async with Client(server) as mcp_client:
+        names = {tool.name for tool in await mcp_client.list_tools()}
+
+    assert "github_agent_enable_workflow" in names
+    assert "github_agent_dispatch_workflow" in names
+

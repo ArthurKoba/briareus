@@ -8,6 +8,7 @@ import urllib.request
 
 from .github_agent import GitHubAgentError
 from .github_collab import GitHubCollabClient, required_reviewer_logins_from_env
+from .github_history import GitHubHistoryMixin
 from .github_workflow import protected_branches_from_env
 
 _GITHUB_API = "https://api.github.com"
@@ -29,7 +30,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-class GitHubActionsClient(GitHubCollabClient):
+class GitHubActionsClient(GitHubHistoryMixin, GitHubCollabClient):
     """Adds GitHub Actions diagnostics and controlled run mutations."""
 
     def assert_required_reviews(
@@ -280,6 +281,65 @@ class GitHubActionsClient(GitHubCollabClient):
             "size": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
             "content_base64": base64.b64encode(data).decode("ascii"),
+        }
+
+    def enable_workflow(
+        self,
+        repository: str,
+        workflow_id: str,
+    ) -> dict[str, object]:
+        """Enable one GitHub Actions workflow in an installed repository."""
+        repository = self._assert_allowed(repository)
+        workflow = workflow_id.strip()
+        if not workflow:
+            raise GitHubAgentError("workflow_id must not be empty")
+
+        workflow_q = urllib.parse.quote(workflow, safe="")
+        status, _ = self._repo_request(
+            repository,
+            "PUT",
+            f"/repos/{repository}/actions/workflows/{workflow_q}/enable",
+        )
+        return {
+            "repository": repository,
+            "workflow_id": workflow,
+            "status": status,
+            "enabled": status in {200, 204},
+        }
+
+    def dispatch_workflow(
+        self,
+        repository: str,
+        workflow_id: str,
+        ref: str,
+        inputs: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        repository = self._assert_allowed(repository)
+        workflow = workflow_id.strip()
+        target_ref = ref.strip()
+        if not workflow:
+            raise GitHubAgentError("workflow_id must not be empty")
+        if not target_ref:
+            raise GitHubAgentError("ref must not be empty")
+
+        workflow_q = urllib.parse.quote(workflow, safe="")
+        payload: dict[str, object] = {"ref": target_ref}
+        if inputs:
+            payload["inputs"] = dict(inputs)
+
+        status, _ = self._repo_request(
+            repository,
+            "POST",
+            f"/repos/{repository}/actions/workflows/{workflow_q}/dispatches",
+            payload=payload,
+        )
+        return {
+            "repository": repository,
+            "workflow_id": workflow,
+            "ref": target_ref,
+            "inputs": dict(inputs or {}),
+            "status": status,
+            "dispatched": status in {201, 204},
         }
 
     def rerun_workflow_job(self, repository: str, job_id: int) -> dict[str, object]:

@@ -6,6 +6,7 @@ import urllib.parse
 from typing import Any
 
 from .github_agent import GitHubAgentError, GitHubAppClient
+from .secrets import SecretError, resolve_config_secret
 
 _DEFAULT_PROTECTED_BRANCHES = "main,master"
 _DEFAULT_REQUIRED_CHECKS = "test,docker"
@@ -17,10 +18,21 @@ def _split_env(name: str, default: str = "") -> list[str]:
 
 
 def protected_branches_from_env() -> set[str]:
-    return {item.casefold() for item in _split_env(
-        "GITHUB_AGENT_PROTECTED_BRANCHES",
-        _DEFAULT_PROTECTED_BRANCHES,
-    )}
+    try:
+        raw = resolve_config_secret(
+            "github/development",
+            "PROTECTED_BRANCHES",
+        )
+    except SecretError:
+        raw = os.getenv(
+            "GITHUB_AGENT_PROTECTED_BRANCHES",
+            _DEFAULT_PROTECTED_BRANCHES,
+        )
+    return {
+        item.strip().casefold()
+        for item in raw.split(",")
+        if item.strip()
+    }
 
 
 def required_checks_from_env() -> list[str]:
@@ -165,6 +177,274 @@ class GitHubDevClient(GitHubAppClient):
             "content_sha": str(saved.get("sha", "")),
         }
 
+    def _tree_entry_at_path(
+        self,
+        repository: str,
+        root_tree_sha: str,
+        path: str,
+    ) -> dict[str, object] | None:
+        """Resolve one tree entry by path without reading blob contents."""
+        parts = [part for part in path.strip("/").split("/") if part]
+        if not parts:
+            raise GitHubAgentError("path must not be empty")
+
+        tree_sha = root_tree_sha
+        for index, part in enumerate(parts):
+            _, tree = self._repo_request(
+                repository,
+                "GET",
+                f"/repos/{repository}/git/trees/{self._quote(tree_sha)}",
+            )
+            if not isinstance(tree, dict) or not isinstance(tree.get("tree"), list):
+                raise GitHubAgentError("unexpected Git tree response")
+            entry = next(
+                (
+                    item
+                    for item in tree["tree"]
+                    if isinstance(item, dict) and str(item.get("path", "")) == part
+                ),
+                None,
+            )
+            if entry is None:
+                return None
+            if index == len(parts) - 1:
+                return dict(entry)
+            if str(entry.get("type", "")) != "tree":
+                return None
+            tree_sha = str(entry.get("sha", ""))
+            if not tree_sha:
+                raise GitHubAgentError("Git tree entry has no sha")
+        return None
+
+    def copy_files(
+        self,
+        repository: str,
+        source_ref: str,
+        branch: str,
+        message: str,
+        copies: list[dict[str, Any]],
+        expected_head_sha: str | None = None,
+        operation: str = "copy",
+        overwrite: bool = False,
+    ) -> dict[str, object]:
+        """Copy or move existing Git blobs without transferring file contents."""
+        repository = self._assert_allowed(repository)
+        branch = self._assert_mutable_branch(branch)
+        source_ref = source_ref.strip()
+        operation = operation.strip().casefold()
+        if not source_ref:
+            raise GitHubAgentError("source_ref must not be empty")
+        if not copies:
+            raise GitHubAgentError("copies must not be empty")
+        if operation not in {"copy", "move"}:
+            raise GitHubAgentError("operation must be 'copy' or 'move'")
+
+        _, source_commit = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/commits/{self._quote(source_ref)}",
+        )
+        if not isinstance(source_commit, dict) or not source_commit.get("sha"):
+            raise GitHubAgentError("unable to resolve source_ref")
+        source_sha = str(source_commit["sha"])
+
+        branch_q = self._quote(branch)
+        _, ref = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/git/ref/heads/{branch_q}",
+        )
+        if not isinstance(ref, dict) or not isinstance(ref.get("object"), dict):
+            raise GitHubAgentError("unable to resolve branch head")
+        head_sha = str(ref["object"].get("sha", ""))
+        if not head_sha:
+            raise GitHubAgentError("branch head has no sha")
+        if expected_head_sha and head_sha != expected_head_sha:
+            raise GitHubAgentError(
+                f"branch head changed: expected {expected_head_sha}, found {head_sha}"
+            )
+        if operation == "move" and source_sha != head_sha:
+            raise GitHubAgentError(
+                "move requires source_ref to resolve to the current destination branch HEAD"
+            )
+
+        _, parent = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/git/commits/{head_sha}",
+        )
+        if not isinstance(parent, dict) or not isinstance(parent.get("tree"), dict):
+            raise GitHubAgentError("unable to resolve parent tree")
+        base_tree = str(parent["tree"].get("sha", ""))
+        if not base_tree:
+            raise GitHubAgentError("parent commit has no tree sha")
+
+        source_tree = base_tree
+        if source_sha != head_sha:
+            _, source_git_commit = self._repo_request(
+                repository,
+                "GET",
+                f"/repos/{repository}/git/commits/{source_sha}",
+            )
+            if (
+                not isinstance(source_git_commit, dict)
+                or not isinstance(source_git_commit.get("tree"), dict)
+            ):
+                raise GitHubAgentError("unable to resolve source commit tree")
+            source_tree = str(source_git_commit["tree"].get("sha", ""))
+            if not source_tree:
+                raise GitHubAgentError("source commit has no tree sha")
+
+        tree_entries: list[dict[str, object]] = []
+        seen_destinations: set[str] = set()
+        seen_move_sources: set[str] = set()
+        processed: list[dict[str, object]] = []
+
+        for item in copies:
+            source_path = "/".join(
+                part
+                for part in str(item.get("source_path", "")).strip("/").split("/")
+                if part
+            )
+            destination_path = "/".join(
+                part
+                for part in str(item.get("destination_path", "")).strip("/").split("/")
+                if part
+            )
+            if not source_path or not destination_path:
+                raise GitHubAgentError(
+                    "every copy requires source_path and destination_path"
+                )
+            if source_path == destination_path:
+                raise GitHubAgentError(
+                    "source_path and destination_path must be different"
+                )
+            if destination_path in seen_destinations:
+                raise GitHubAgentError(
+                    f"duplicate destination_path: {destination_path}"
+                )
+            seen_destinations.add(destination_path)
+            if operation == "move":
+                if source_path in seen_move_sources:
+                    raise GitHubAgentError(f"duplicate move source_path: {source_path}")
+                seen_move_sources.add(source_path)
+
+            source = self._tree_entry_at_path(
+                repository,
+                source_tree,
+                source_path,
+            )
+            if source is None or str(source.get("type", "")) != "blob":
+                raise GitHubAgentError(
+                    f"source path is not a Git blob: {source_path}"
+                )
+            blob_sha = str(source.get("sha", ""))
+            source_mode = str(source.get("mode", ""))
+            if not blob_sha or not source_mode:
+                raise GitHubAgentError(
+                    f"source blob is missing sha or mode: {source_path}"
+                )
+            mode = str(item.get("mode") or source_mode)
+
+            destination = self._tree_entry_at_path(
+                repository,
+                base_tree,
+                destination_path,
+            )
+            if destination is not None:
+                if not overwrite:
+                    raise GitHubAgentError(
+                        f"destination_path already exists: {destination_path}"
+                    )
+                if str(destination.get("type", "")) != "blob":
+                    raise GitHubAgentError(
+                        f"destination_path is not a blob: {destination_path}"
+                    )
+
+            tree_entries.append(
+                {
+                    "path": destination_path,
+                    "mode": mode,
+                    "type": "blob",
+                    "sha": blob_sha,
+                }
+            )
+            if operation == "move":
+                tree_entries.append(
+                    {
+                        "path": source_path,
+                        "mode": source_mode,
+                        "type": "blob",
+                        "sha": None,
+                    }
+                )
+            processed.append(
+                {
+                    "source_path": source_path,
+                    "destination_path": destination_path,
+                    "sha": blob_sha,
+                    "mode": mode,
+                    "size": int(source.get("size", 0)),
+                }
+            )
+
+        _, tree = self._repo_request(
+            repository,
+            "POST",
+            f"/repos/{repository}/git/trees",
+            payload={"base_tree": base_tree, "tree": tree_entries},
+        )
+        if not isinstance(tree, dict) or not tree.get("sha"):
+            raise GitHubAgentError("GitHub did not return a tree sha")
+        tree_sha = str(tree["sha"])
+
+        _, new_commit = self._repo_request(
+            repository,
+            "POST",
+            f"/repos/{repository}/git/commits",
+            payload={"message": message, "tree": tree_sha, "parents": [head_sha]},
+        )
+        if not isinstance(new_commit, dict) or not new_commit.get("sha"):
+            raise GitHubAgentError("GitHub did not return a commit sha")
+        commit_sha = str(new_commit["sha"])
+
+        _, current_ref = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/git/ref/heads/{branch_q}",
+        )
+        current_object = (
+            current_ref.get("object")
+            if isinstance(current_ref, dict)
+            and isinstance(current_ref.get("object"), dict)
+            else {}
+        )
+        current_head_sha = str(current_object.get("sha", ""))
+        if current_head_sha != head_sha:
+            raise GitHubAgentError(
+                f"branch head changed before update: expected {head_sha}, "
+                f"found {current_head_sha}"
+            )
+
+        self._repo_request(
+            repository,
+            "PATCH",
+            f"/repos/{repository}/git/refs/heads/{branch_q}",
+            payload={"sha": commit_sha, "force": False},
+        )
+        return {
+            "repository": repository,
+            "source_ref": source_ref,
+            "source_sha": source_sha,
+            "branch": branch,
+            "operation": operation,
+            "previous_head_sha": head_sha,
+            "commit_sha": commit_sha,
+            "tree_sha": tree_sha,
+            "copied": processed if operation == "copy" else [],
+            "moved": processed if operation == "move" else [],
+        }
+
     def delete_file(
         self,
         repository: str,
@@ -216,6 +496,7 @@ class GitHubDevClient(GitHubAppClient):
             raise GitHubAgentError("parent commit has no tree sha")
 
         tree_entries: list[dict[str, object]] = []
+        copy_ref_cache: dict[str, str] = {}
         for change in changes:
             path = str(change.get("path", "")).strip("/")
             if not path:
@@ -225,6 +506,57 @@ class GitHubDevClient(GitHubAppClient):
             if operation == "delete":
                 tree_entries.append(
                     {"path": path, "mode": mode, "type": "blob", "sha": None}
+                )
+                continue
+            if operation == "copy":
+                source_path = str(change.get("source_path", "")).strip("/")
+                source_ref = str(change.get("source_ref", "")).strip()
+                if not source_path or not source_ref:
+                    raise GitHubAgentError(
+                        "copy changes require source_path and source_ref"
+                    )
+
+                source_sha = copy_ref_cache.get(source_ref)
+                if source_sha is None:
+                    _, source_commit = self._repo_request(
+                        repository,
+                        "GET",
+                        f"/repos/{repository}/commits/{self._quote(source_ref)}",
+                    )
+                    if (
+                        not isinstance(source_commit, dict)
+                        or not source_commit.get("sha")
+                    ):
+                        raise GitHubAgentError(
+                            f"unable to resolve source_ref: {source_ref}"
+                        )
+                    source_sha = str(source_commit["sha"])
+                    copy_ref_cache[source_ref] = source_sha
+
+                _, source = self._repo_request(
+                    repository,
+                    "GET",
+                    (
+                        f"/repos/{repository}/contents/{self._path(source_path)}"
+                        f"?ref={self._quote(source_sha)}"
+                    ),
+                )
+                if not isinstance(source, dict) or source.get("type") != "file":
+                    raise GitHubAgentError(
+                        f"copy source is not a regular file: {source_path}"
+                    )
+                blob_sha = str(source.get("sha", ""))
+                if not blob_sha:
+                    raise GitHubAgentError(
+                        f"copy source has no blob sha: {source_path}"
+                    )
+                tree_entries.append(
+                    {
+                        "path": path,
+                        "mode": mode,
+                        "type": "blob",
+                        "sha": blob_sha,
+                    }
                 )
                 continue
             if operation not in {"upsert", "create", "update"}:
@@ -401,6 +733,116 @@ class GitHubDevClient(GitHubAppClient):
     def fast_forward(self, repository: str, branch: str, to_ref: str) -> dict[str, object]:
         self._assert_mutable_branch(branch)
         return super().fast_forward(repository, branch, to_ref)
+
+    def reset_branch(
+        self,
+        repository: str,
+        branch: str,
+        target_ref: str,
+        expected_head_sha: str,
+        allow_protected_branch: bool = False,
+        dry_run: bool = True,
+    ) -> dict[str, object]:
+        """Force-reset a branch to an existing ancestor commit with CAS safeguards."""
+        repository = self._assert_allowed(repository)
+        branch = branch.strip()
+        target_ref = target_ref.strip()
+        expected_head_sha = expected_head_sha.strip()
+        if not branch:
+            raise GitHubAgentError("branch must not be empty")
+        if not target_ref:
+            raise GitHubAgentError("target_ref must not be empty")
+        if not expected_head_sha:
+            raise GitHubAgentError("expected_head_sha must not be empty")
+        if (
+            branch.casefold() in protected_branches_from_env()
+            and not allow_protected_branch
+        ):
+            raise GitHubAgentError(
+                f"reset of protected branch requires allow_protected_branch=true: {branch}"
+            )
+
+        branch_q = self._quote(branch)
+        _, ref = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/git/ref/heads/{branch_q}",
+        )
+        if not isinstance(ref, dict) or not isinstance(ref.get("object"), dict):
+            raise GitHubAgentError("unable to resolve branch head")
+        head_sha = str(ref["object"].get("sha", ""))
+        if not head_sha:
+            raise GitHubAgentError("branch head has no sha")
+        if head_sha != expected_head_sha:
+            raise GitHubAgentError(
+                f"branch head changed: expected {expected_head_sha}, found {head_sha}"
+            )
+
+        _, target = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/commits/{self._quote(target_ref)}",
+        )
+        if not isinstance(target, dict) or not target.get("sha"):
+            raise GitHubAgentError("unable to resolve target_ref")
+        target_sha = str(target["sha"])
+
+        if target_sha != head_sha:
+            _, comparison = self._repo_request(
+                repository,
+                "GET",
+                (
+                    f"/repos/{repository}/compare/"
+                    f"{self._quote(target_sha)}...{self._quote(head_sha)}"
+                ),
+            )
+            if not isinstance(comparison, dict):
+                raise GitHubAgentError("unexpected compare response")
+            if (
+                str(comparison.get("status", "")) != "ahead"
+                or int(comparison.get("behind_by", 0)) != 0
+            ):
+                raise GitHubAgentError(
+                    "target_ref must resolve to an ancestor of the current branch head"
+                )
+
+        result = {
+            "repository": repository,
+            "branch": branch,
+            "previous_head_sha": head_sha,
+            "target_ref": target_ref,
+            "target_sha": target_sha,
+            "protected_branch_override": allow_protected_branch,
+            "dry_run": dry_run,
+        }
+        if dry_run or target_sha == head_sha:
+            return result
+
+        _, current_ref = self._repo_request(
+            repository,
+            "GET",
+            f"/repos/{repository}/git/ref/heads/{branch_q}",
+        )
+        current_object = (
+            current_ref.get("object")
+            if isinstance(current_ref, dict)
+            and isinstance(current_ref.get("object"), dict)
+            else {}
+        )
+        current_head_sha = str(current_object.get("sha", ""))
+        if current_head_sha != head_sha:
+            raise GitHubAgentError(
+                f"branch head changed before reset: expected {head_sha}, "
+                f"found {current_head_sha}"
+            )
+
+        _, updated = self._repo_request(
+            repository,
+            "PATCH",
+            f"/repos/{repository}/git/refs/heads/{branch_q}",
+            payload={"sha": target_sha, "force": True},
+        )
+        return {**result, "dry_run": False, "result": updated}
 
     def list_tags(
         self,
@@ -791,6 +1233,39 @@ class GitHubDevClient(GitHubAppClient):
             if isinstance(item, dict)
         }
         required = required_checks_from_env()
+
+        # The bridge can serve multiple repositories whose CI check names are
+        # unrelated. GITHUB_AGENT_REQUIRED_CHECKS is therefore only applicable
+        # when at least one configured check name is part of this repository's
+        # normal CI surface. If the PR head has none of them, inspect the
+        # repository's default branch before deciding that they are "missing".
+        #
+        # This keeps the strict test/docker gate for koba-mcp-bridge while
+        # avoiding an impossible merge requirement on repositories such as
+        # ghidra-mcp, whose aggregate check is named "Build Status". GitHub's
+        # own branch protection/rulesets remain the final merge authority.
+        configured_names = set(required)
+        if configured_names and not configured_names.intersection(by_name):
+            repository_info = self._repository_metadata(repository)
+            default_branch = str(repository_info.get("default_branch", ""))
+            baseline_names: set[str] = set()
+            if default_branch:
+                baseline = self.check_runs(repository, default_branch)
+                baseline_checks = baseline["check_runs"]
+                assert isinstance(baseline_checks, list)
+                baseline_names = {
+                    str(item.get("name", ""))
+                    for item in baseline_checks
+                    if isinstance(item, dict)
+                }
+            if not configured_names.intersection(baseline_names):
+                return {
+                    "repository": repository,
+                    "ref": ref,
+                    "required": required,
+                    "status": "delegated_to_github",
+                }
+
         missing = [name for name in required if name not in by_name]
         failing = [
             name

@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
+import queue
+import ssl
+import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 
 import jwt
+
+from .secrets import (
+    InfisicalConfig,
+    SecretError,
+    resolve_config_secret,
+    resolve_secret,
+)
 
 _GITHUB_API = "https://api.github.com"
 _GITHUB_API_VERSION = "2026-03-10"
@@ -21,31 +30,77 @@ class GitHubAgentError(RuntimeError):
 
 
 def github_agent_configured() -> bool:
+    if InfisicalConfig.from_env().configured():
+        return True
     return bool(
         os.getenv("GITHUB_AGENT_APP_ID", "").strip()
         and (
-            os.getenv("GITHUB_AGENT_PRIVATE_KEY", "").strip()
+            os.getenv("GITHUB_AGENT_PRIVATE_KEY_REF", "").strip()
+            or os.getenv("GITHUB_AGENT_PRIVATE_KEY", "").strip()
             or os.getenv("GITHUB_AGENT_PRIVATE_KEY_B64", "").strip()
         )
     )
 
 
+def _development_app_id() -> str:
+    infisical_error: SecretError | None = None
+    try:
+        return resolve_config_secret("github/development", "APP_ID").strip()
+    except SecretError as exc:
+        infisical_error = exc
+
+    app_id = os.getenv("GITHUB_AGENT_APP_ID", "").strip()
+    if app_id:
+        return app_id
+    if infisical_error is not None:
+        raise GitHubAgentError(
+            "unable to load GitHub development APP_ID from Infisical: "
+            f"{infisical_error}"
+        ) from infisical_error
+    raise GitHubAgentError("GitHub development APP_ID is not configured")
+
+
 def _private_key_from_env() -> str:
+    infisical_error: SecretError | None = None
+    try:
+        return resolve_config_secret(
+            "github/development",
+            "PRIVATE_KEY_PEM",
+        ).replace("\\n", "\n")
+    except SecretError as exc:
+        infisical_error = exc
+
+    secret_ref = os.getenv("GITHUB_AGENT_PRIVATE_KEY_REF", "").strip()
     raw = os.getenv("GITHUB_AGENT_PRIVATE_KEY", "").strip()
+    encoded = os.getenv("GITHUB_AGENT_PRIVATE_KEY_B64", "").strip()
+
+    if secret_ref:
+        try:
+            return resolve_secret(secret_ref).replace("\\n", "\n")
+        except SecretError as exc:
+            if not raw and not encoded:
+                raise GitHubAgentError(
+                    "unable to resolve GITHUB_AGENT_PRIVATE_KEY_REF: "
+                    f"{exc}"
+                ) from exc
+
     if raw:
         return raw.replace("\\n", "\n")
 
-    encoded = os.getenv("GITHUB_AGENT_PRIVATE_KEY_B64", "").strip()
     if encoded:
         try:
             return base64.b64decode(encoded).decode("utf-8")
-        except Exception as exc:  # pragma: no cover - defensive configuration error path
+        except Exception as exc:
             raise GitHubAgentError(
                 "GITHUB_AGENT_PRIVATE_KEY_B64 is not valid base64 UTF-8"
             ) from exc
 
+    if infisical_error is not None:
+        raise GitHubAgentError(
+            "unable to load GitHub development PRIVATE_KEY_PEM from Infisical: "
+            f"{infisical_error}"
+        ) from infisical_error
     raise GitHubAgentError("GitHub agent private key is not configured")
-
 
 @dataclass
 class GitHubAppClient:
@@ -53,14 +108,39 @@ class GitHubAppClient:
     private_key: str
     _installation_ids: dict[str, int] = field(default_factory=dict)
     _tokens: dict[int, tuple[str, float]] = field(default_factory=dict)
+    repository_cache_ttl_seconds: float = 30.0
+    max_connections: int = 8
+    _connection_pool: queue.LifoQueue[http.client.HTTPSConnection] = field(
+        default_factory=queue.LifoQueue,
+        init=False,
+        repr=False,
+    )
+    _connection_count: int = field(default=0, init=False, repr=False)
+    _pool_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+    )
+    _cache_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+    )
+    _credential_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+    )
+    _repository_cache: dict[str, tuple[float, dict[str, object]]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     @classmethod
     def from_env(cls) -> GitHubAppClient:
-        app_id = os.getenv("GITHUB_AGENT_APP_ID", "").strip()
-        if not app_id:
-            raise GitHubAgentError("GITHUB_AGENT_APP_ID is not configured")
         return cls(
-            app_id=app_id,
+            app_id=_development_app_id(),
             private_key=_private_key_from_env(),
         )
 
@@ -73,16 +153,30 @@ class GitHubAppClient:
         return repository
 
     def _app_jwt(self) -> str:
+        app_id = self.app_id.strip()
+        if not app_id.isdigit() or int(app_id) <= 0:
+            raise GitHubAgentError(
+                "GitHub APP_ID must be a positive numeric App ID; "
+                f"got {app_id!r}"
+            )
+
         now = int(time.time())
-        token = jwt.encode(
-            {
-                "iat": now - 60,
-                "exp": now + 9 * 60,
-                "iss": self.app_id,
-            },
-            self.private_key,
-            algorithm="RS256",
-        )
+        try:
+            token = jwt.encode(
+                {
+                    "iat": now - 60,
+                    "exp": now + 9 * 60,
+                    "iss": app_id,
+                },
+                self.private_key,
+                algorithm="RS256",
+            )
+        except Exception as exc:
+            raise GitHubAgentError(
+                "GitHub App PRIVATE_KEY_PEM is not a usable RSA private key; "
+                "check that the PEM belongs to the configured APP_ID and was not "
+                "stored as base64 or truncated text"
+            ) from exc
         return str(token)
 
     @staticmethod
@@ -90,6 +184,89 @@ class GitHubAppClient:
         if not data:
             return {}
         return json.loads(data.decode("utf-8"))
+
+    @staticmethod
+    def _request_target(url: str) -> str:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme != "https" or parsed.netloc != "api.github.com":
+            raise GitHubAgentError("GitHub API request must target https://api.github.com")
+        target = parsed.path or "/"
+        if parsed.query:
+            target += "?" + parsed.query
+        return target
+
+    def _new_connection(self) -> http.client.HTTPSConnection:
+        return http.client.HTTPSConnection(
+            "api.github.com",
+            timeout=30,
+            context=ssl.create_default_context(),
+        )
+
+    def _acquire_connection(self) -> http.client.HTTPSConnection:
+        try:
+            return self._connection_pool.get_nowait()
+        except queue.Empty:
+            pass
+
+        create_new = False
+        with self._pool_lock:
+            if self._connection_count < max(1, self.max_connections):
+                self._connection_count += 1
+                create_new = True
+
+        if create_new:
+            try:
+                return self._new_connection()
+            except Exception:
+                with self._pool_lock:
+                    self._connection_count -= 1
+                raise
+
+        try:
+            return self._connection_pool.get(timeout=30)
+        except queue.Empty as exc:
+            raise GitHubAgentError(
+                "timed out waiting for an available GitHub API connection"
+            ) from exc
+
+    def _release_connection(
+        self,
+        connection: http.client.HTTPSConnection,
+        *,
+        reusable: bool,
+    ) -> None:
+        if reusable:
+            self._connection_pool.put(connection)
+            return
+        try:
+            connection.close()
+        finally:
+            with self._pool_lock:
+                self._connection_count = max(0, self._connection_count - 1)
+
+    @staticmethod
+    def _github_error_message(status: int, url: str, data: bytes) -> str:
+        detail = data[:4096].decode("utf-8", "replace")
+        path = urllib.parse.urlsplit(url).path
+        if status == 401:
+            if path == "/app" or path.endswith("/installation") or (
+                path.startswith("/app/installations/")
+                and path.endswith("/access_tokens")
+            ):
+                return (
+                    "GitHub App authentication failed (HTTP 401); check that APP_ID "
+                    "matches PRIVATE_KEY_PEM and that the GitHub App private key is active"
+                )
+            return (
+                "GitHub installation authentication failed (HTTP 401); the installation "
+                "token may be expired/revoked or the App installation may have changed"
+            )
+        if status == 403:
+            return (
+                "GitHub API denied the operation (HTTP 403); check GitHub App repository "
+                f"permissions/rate limits for {path}: {detail}"
+            )
+        return f"GitHub API HTTP {status}: {detail}"
 
     def _request(
         self,
@@ -111,64 +288,103 @@ class GitHubAppClient:
         if body is not None:
             headers["Content-Type"] = "application/json"
 
-        request = urllib.request.Request(url, data=body, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return response.status, self._decode_json(response.read())
-        except urllib.error.HTTPError as exc:
-            data = exc.read()
-            if allowed_errors and exc.code in allowed_errors:
+        target = self._request_target(url)
+        data = b""
+        status = 0
+        for attempt in range(2):
+            connection = self._acquire_connection()
+            try:
+                connection.request(method, target, body=body, headers=headers)
+                response = connection.getresponse()
+                data = response.read()
+                status = response.status
+                self._release_connection(
+                    connection,
+                    reusable=not response.will_close,
+                )
+                break
+            except (OSError, http.client.HTTPException) as exc:
+                self._release_connection(connection, reusable=False)
+                if attempt:
+                    raise GitHubAgentError(
+                        f"GitHub API transport error after reconnect: {exc}"
+                    ) from exc
+
+        if status >= 400:
+            if allowed_errors and status in allowed_errors:
                 try:
                     parsed = self._decode_json(data)
                 except Exception:
                     parsed = {"message": data.decode("utf-8", "replace")}
-                return exc.code, parsed
-            detail = data[:4096].decode("utf-8", "replace")
-            raise GitHubAgentError(f"GitHub API HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise GitHubAgentError(f"GitHub API transport error: {exc.reason}") from exc
+                return status, parsed
+            raise GitHubAgentError(self._github_error_message(status, url, data))
+
+        return status, self._decode_json(data)
 
     def _installation_id(self, repository: str) -> int:
         repository = self._assert_allowed(repository)
-        cached = self._installation_ids.get(repository.casefold())
+        key = repository.casefold()
+        cached = self._installation_ids.get(key)
         if cached is not None:
             return cached
 
-        status, result = self._request(
-            "GET",
-            f"{_GITHUB_API}/repos/{repository}/installation",
-            token=self._app_jwt(),
-            allowed_errors={404},
-        )
-        if status == 404:
-            raise GitHubAgentError(
-                f"repository is not installed for GitHub App {self.app_id}: {repository}"
+        with self._credential_lock:
+            cached = self._installation_ids.get(key)
+            if cached is not None:
+                return cached
+            status, result = self._request(
+                "GET",
+                f"{_GITHUB_API}/repos/{repository}/installation",
+                token=self._app_jwt(),
+                allowed_errors={404},
             )
-        if not isinstance(result, dict) or not isinstance(result.get("id"), int):
-            raise GitHubAgentError("GitHub did not return an installation id")
-        installation_id = int(result["id"])
-        self._installation_ids[repository.casefold()] = installation_id
-        return installation_id
+            if status == 404:
+                raise GitHubAgentError(
+                    f"repository {repository!r} is not installed for GitHub App "
+                    f"{self.app_id}; add it to the App installation or use the correct App"
+                )
+            if not isinstance(result, dict) or not isinstance(result.get("id"), int):
+                raise GitHubAgentError("GitHub did not return an installation id")
+            installation_id = int(result["id"])
+            self._installation_ids[key] = installation_id
+            return installation_id
 
     def _installation_token_for_id(self, installation_id: int) -> str:
         cached = self._tokens.get(installation_id)
         if cached is not None and cached[1] > time.time() + 120:
             return cached[0]
 
-        _, result = self._request(
-            "POST",
-            f"{_GITHUB_API}/app/installations/{installation_id}/access_tokens",
-            token=self._app_jwt(),
-        )
-        if not isinstance(result, dict):
-            raise GitHubAgentError("GitHub did not return an installation token payload")
-        token = str(result.get("token", ""))
-        expires_at = str(result.get("expires_at", ""))
-        if not token or not expires_at:
-            raise GitHubAgentError("GitHub installation token response is incomplete")
-        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00")).timestamp()
-        self._tokens[installation_id] = (token, expiry)
-        return token
+        with self._credential_lock:
+            cached = self._tokens.get(installation_id)
+            if cached is not None and cached[1] > time.time() + 120:
+                return cached[0]
+
+            _, result = self._request(
+                "POST",
+                f"{_GITHUB_API}/app/installations/{installation_id}/access_tokens",
+                token=self._app_jwt(),
+            )
+            if not isinstance(result, dict):
+                raise GitHubAgentError(
+                    "GitHub did not return an installation token payload"
+                )
+            token = str(result.get("token", ""))
+            expires_at = str(result.get("expires_at", ""))
+            if not token or not expires_at:
+                raise GitHubAgentError(
+                    "GitHub installation token response is incomplete; check App "
+                    "installation state and permissions"
+                )
+            try:
+                expiry = datetime.fromisoformat(
+                    expires_at.replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError as exc:
+                raise GitHubAgentError(
+                    "GitHub installation token response has invalid expires_at"
+                ) from exc
+            self._tokens[installation_id] = (token, expiry)
+            return token
 
     def _installation_token(self, repository: str) -> str:
         return self._installation_token_for_id(self._installation_id(repository))
@@ -236,7 +452,21 @@ class GitHubAppClient:
                     if not full_name or full_name.casefold() in seen:
                         continue
                     seen.add(full_name.casefold())
-                    self._installation_ids[full_name.casefold()] = installation_id
+                    cache_key = full_name.casefold()
+                    self._installation_ids[cache_key] = installation_id
+                    if self.repository_cache_ttl_seconds > 0:
+                        metadata = {
+                            "repository": full_name,
+                            "default_branch": str(item.get("default_branch", "")),
+                            "private": bool(item.get("private", False)),
+                            "archived": bool(item.get("archived", False)),
+                            "fork": bool(item.get("fork", False)),
+                        }
+                        with self._cache_lock:
+                            self._repository_cache[cache_key] = (
+                                time.monotonic() + self.repository_cache_ttl_seconds,
+                                metadata,
+                            )
                     permissions = (
                         item.get("permissions")
                         if isinstance(item.get("permissions"), dict)
@@ -263,15 +493,46 @@ class GitHubAppClient:
             "repositories": repositories,
         }
 
-    def status(self, repository: str) -> dict[str, object]:
+    def _repository_metadata(
+        self,
+        repository: str,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, object]:
         repository = self._assert_allowed(repository)
+        key = repository.casefold()
+        now = time.monotonic()
+        if not refresh and self.repository_cache_ttl_seconds > 0:
+            with self._cache_lock:
+                cached = self._repository_cache.get(key)
+                if cached is not None and cached[0] > now:
+                    return dict(cached[1])
+
         _, result = self._repo_request(repository, "GET", f"/repos/{repository}")
         if not isinstance(result, dict):
             raise GitHubAgentError("unexpected repository response")
-        return {
+        metadata: dict[str, object] = {
             "repository": str(result.get("full_name", repository)),
             "default_branch": str(result.get("default_branch", "")),
             "private": bool(result.get("private", False)),
+            "archived": bool(result.get("archived", False)),
+            "fork": bool(result.get("fork", False)),
+        }
+        if self.repository_cache_ttl_seconds > 0:
+            with self._cache_lock:
+                self._repository_cache[key] = (
+                    time.monotonic() + self.repository_cache_ttl_seconds,
+                    dict(metadata),
+                )
+        return metadata
+
+    def status(self, repository: str) -> dict[str, object]:
+        repository = self._assert_allowed(repository)
+        result = self._repository_metadata(repository)
+        return {
+            "repository": str(result["repository"]),
+            "default_branch": str(result["default_branch"]),
+            "private": bool(result["private"]),
             "app_id": self.app_id,
             "installation_id": self._installation_id(repository),
             "status": "ok",

@@ -6,6 +6,7 @@ import pytest
 from fastmcp import Client, FastMCP
 from mcp.types import ToolAnnotations
 
+import koba_mcp_bridge.github_reviewer as github_reviewer
 from koba_mcp_bridge.github_agent import GitHubAgentError
 from koba_mcp_bridge.github_collab import GitHubCollabClient
 from koba_mcp_bridge.github_reviewer import (
@@ -67,6 +68,25 @@ def test_reviewer_config_requires_only_distinct_app_credentials(
     assert client.app_id == "456"
     assert client.private_key == "reviewer-key"
 
+
+
+def test_reviewer_loads_convention_config_from_infisical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github_reviewer_client_from_env.cache_clear()
+    monkeypatch.setattr(
+        github_reviewer,
+        "resolve_config_secret",
+        lambda path, name: {
+            ("github/reviewer", "APP_ID"): "888",
+            ("github/reviewer", "PRIVATE_KEY_PEM"): "reviewer-pem",
+        }[(path, name)],
+    )
+
+    client = github_reviewer_client_from_env()
+
+    assert client.app_id == "888"
+    assert client.private_key == "reviewer-pem"
 
 def test_reviewer_private_key_can_be_loaded_from_base64(
     monkeypatch: pytest.MonkeyPatch,
@@ -175,3 +195,25 @@ async def test_reviewer_tool_surface_excludes_development_mutations() -> None:
     assert not any("merge_pull" in name for name in names)
     assert not any("create_branch" in name for name in names)
     assert not any("delete_branch" in name for name in names)
+
+def test_reviewer_infisical_failure_preserves_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github_reviewer_client_from_env.cache_clear()
+
+    def fail_secret(path: str, name: str) -> str:
+        del path, name
+        raise github_reviewer.SecretError("Infisical API HTTP 403: denied")
+
+    monkeypatch.setattr(github_reviewer, "resolve_config_secret", fail_secret)
+    monkeypatch.delenv("GITHUB_REVIEWER_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_REVIEWER_PRIVATE_KEY_REF", raising=False)
+    monkeypatch.delenv("GITHUB_REVIEWER_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_REVIEWER_PRIVATE_KEY_B64", raising=False)
+
+    with pytest.raises(GitHubAgentError, match="Infisical API HTTP 403"):
+        github_reviewer._reviewer_app_id()
+
+    with pytest.raises(GitHubAgentError, match="Infisical API HTTP 403"):
+        github_reviewer._reviewer_private_key_from_env()
+

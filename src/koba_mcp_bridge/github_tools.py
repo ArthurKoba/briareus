@@ -53,6 +53,32 @@ def register_github_workflow_tools(
             branch,
         )
 
+    @mcp.tool(
+        title="GitHub agent copy/move existing files",
+        annotations=destructive_annotations,
+    )
+    def github_agent_copy_files(
+        repository: str,
+        source_ref: str,
+        branch: str,
+        message: str,
+        copies: list[dict[str, Any]],
+        expected_head_sha: str | None = None,
+        operation: str = "copy",
+        overwrite: bool = False,
+    ) -> dict[str, object]:
+        """Copy or move existing Git blobs between paths/refs without transferring bytes."""
+        return client_factory().copy_files(
+            repository,
+            source_ref,
+            branch,
+            message,
+            copies,
+            expected_head_sha,
+            operation,
+            overwrite,
+        )
+
     @mcp.tool(title="GitHub agent atomic commit", annotations=write_annotations)
     def github_agent_commit_files(
         repository: str,
@@ -99,6 +125,29 @@ def register_github_workflow_tools(
     ) -> dict[str, object]:
         """Rename a non-protected branch to another non-protected name."""
         return client_factory().rename_branch(repository, branch, new_name)
+
+    @mcp.tool(title="GitHub agent reset branch", annotations=destructive_annotations)
+    def github_agent_reset_branch(
+        repository: str,
+        branch: str,
+        target_ref: str,
+        expected_head_sha: str,
+        allow_protected_branch: bool = False,
+        dry_run: bool = True,
+    ) -> dict[str, object]:
+        """Reset a branch to an existing ancestor commit after CAS validation.
+
+        Protected branches require explicit allow_protected_branch=true. The operation
+        defaults to dry-run and refuses non-ancestor targets.
+        """
+        return client_factory().reset_branch(
+            repository,
+            branch,
+            target_ref,
+            expected_head_sha,
+            allow_protected_branch,
+            dry_run,
+        )
 
     @mcp.tool(title="GitHub agent list tags", annotations=read_annotations)
     def github_agent_list_tags(
