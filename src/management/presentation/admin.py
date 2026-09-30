@@ -857,7 +857,10 @@ def _dashboard(
         return json_str(stats.get("size_display"), default="0 B", field="size_display")
 
     async def reverse_overview(request: Request) -> JsonObject:
-        task = getattr(request.state, "_reverse_overview_task", None)
+        task = cast(
+            asyncio.Task[JsonObject] | None,
+            getattr(request.state, "_reverse_overview_task", None),
+        )
         if task is None:
             task = asyncio.create_task(reverse.overview())
             request.state._reverse_overview_task = task
