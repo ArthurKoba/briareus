@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from collections.abc import Iterable, Mapping
 from typing import Protocol
@@ -11,6 +13,9 @@ from typing import Protocol
 from .account_contracts import InvocationEvent
 from .management_client import ManagementClient
 from .settings import ObservabilitySettings
+
+
+logger = logging.getLogger("mcp_bridge.observability")
 
 
 class ObservabilitySink(Protocol):
@@ -110,6 +115,14 @@ class OtlpHttpMetricsSink:
         self.resource_attributes = _parse_key_values(settings.resource_attributes)
         self.resource_attributes["service.name"] = settings.service_name
         self.resource_attributes["mcp.scope"] = scope
+        self._success_logged = False
+        self._last_error_log_at = 0.0
+        logger.info(
+            "OTLP metrics enabled scope=%s endpoint=%s service=%s",
+            self.scope,
+            self.endpoint,
+            settings.service_name,
+        )
 
     def _export(self, metrics: list[dict[str, object]]) -> None:
         if not self.endpoint or not metrics:
@@ -142,11 +155,42 @@ class OtlpHttpMetricsSink:
             method="POST",
             headers=headers,
         )
-        with urllib.request.urlopen(
-            request,
-            timeout=self.settings.timeout_seconds,
-        ) as response:
-            response.read(min(4096, int(response.headers.get("Content-Length", "0") or 0)))
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=self.settings.timeout_seconds,
+            ) as response:
+                response.read(
+                    min(
+                        4096,
+                        int(response.headers.get("Content-Length", "0") or 0),
+                    )
+                )
+            if not self._success_logged:
+                logger.info(
+                    "OTLP export active scope=%s endpoint=%s",
+                    self.scope,
+                    self.endpoint,
+                )
+                self._success_logged = True
+        except urllib.error.HTTPError as exc:
+            self._log_export_error(f"HTTP {exc.code}: {exc.reason}")
+        except urllib.error.URLError as exc:
+            self._log_export_error(str(exc.reason))
+        except OSError as exc:
+            self._log_export_error(str(exc))
+
+    def _log_export_error(self, detail: str) -> None:
+        now = time.monotonic()
+        if now - self._last_error_log_at < 60:
+            return
+        self._last_error_log_at = now
+        logger.warning(
+            "OTLP export failed scope=%s endpoint=%s error=%s",
+            self.scope,
+            self.endpoint,
+            detail,
+        )
     @staticmethod
     def _delta_counter(
         name: str,
