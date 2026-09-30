@@ -191,6 +191,15 @@ def register_github_reviewer_tools(
         """Verify configured required checks before approval."""
         return client_factory(account_id).assert_required_checks(repository, ref)
 
+    @mcp.tool(title="GitHub reviewer required reviews", annotations=read_annotations)
+    def github_reviewer_required_reviews(
+        account_id: str,
+        repository: str,
+        number: int,
+    ) -> JsonObject:
+        """Verify configured approvals against the current pull-request head."""
+        return client_factory(account_id).assert_required_reviews(repository, number)
+
     @mcp.tool(title="GitHub reviewer workflow runs", annotations=read_annotations)
     def github_reviewer_workflow_runs(
         account_id: str,
@@ -256,6 +265,20 @@ def register_github_reviewer_tools(
             commit_title,
             commit_message,
             expected_head_sha,
+        )
+
+    @mcp.tool(title="GitHub reviewer update review comment", annotations=write_annotations)
+    def github_reviewer_update_review_comment(
+        account_id: str,
+        repository: str,
+        comment_id: int,
+        body: str,
+    ) -> JsonObject:
+        """Replace the body of an inline review comment."""
+        return client_factory(account_id).update_review_comment(
+            repository,
+            comment_id,
+            body,
         )
 
     @mcp.tool(title="GitHub reviewer reply to comment", annotations=write_annotations)

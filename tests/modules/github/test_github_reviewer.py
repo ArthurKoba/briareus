@@ -80,3 +80,5 @@ async def test_reviewer_tool_surface_requires_account_id_and_excludes_mutations(
     assert not any("put_file" in name for name in by_name)
     assert not any("delete_file" in name for name in by_name)
     assert "github_reviewer_merge_pull_request" in by_name
+    assert "github_reviewer_required_reviews" in by_name
+    assert "github_reviewer_update_review_comment" in by_name

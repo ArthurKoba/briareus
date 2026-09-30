@@ -112,17 +112,3 @@ def register_github_pull_tools(
     def github_agent_required_checks(account_id: str, repository: str, ref: str) -> JsonObject:
         """Verify configured required check-runs are completed successfully."""
         return client_factory(account_id).assert_required_checks(repository, ref)
-
-    @mcp.tool(title="GitHub agent merge pull request", annotations=write_annotations)
-    def github_agent_merge_pull_request(
-        account_id: str,
-        repository: str,
-        number: int,
-        merge_method: str = "squash",
-        commit_title: str | None = None,
-        commit_message: str | None = None,
-    ) -> JsonObject:
-        """Merge a same-repository PR only after configured required checks pass."""
-        return client_factory(account_id).merge_pull_request(
-            repository, number, merge_method, commit_title, commit_message
-        )
