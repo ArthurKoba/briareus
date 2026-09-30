@@ -164,6 +164,8 @@ _TOOL_TOKENS: dict[str, str] = {
 }
 
 _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bfunction_address\b", re.IGNORECASE), "action_address"),
+    (re.compile(r"\bRE documentation\b", re.IGNORECASE), "analysis documentation"),
     (re.compile(r"add_function_tag", re.IGNORECASE), "add_action_tag"),
     (re.compile(r"delete_function_tag", re.IGNORECASE), "delete_action_tag"),
     (

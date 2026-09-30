@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import time
 from collections.abc import Sequence
 from typing import Protocol, cast
@@ -52,6 +53,39 @@ def _backend_tool_schema(tool: _BackendTool) -> JsonObject:
 def _backend_tool_title(tool: _BackendTool) -> str | None:
     value = getattr(tool, "title", None)
     return value if isinstance(value, str) else None
+
+
+def _rewrite_catalog_text(text: str, aliases: dict[str, str]) -> str:
+    value = text
+    for private_name, public_name in sorted(
+        aliases.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        if private_name == public_name:
+            continue
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_]){re.escape(private_name)}(?![A-Za-z0-9_])",
+            re.IGNORECASE,
+        )
+        value = pattern.sub(public_name, value)
+    return value
+
+
+def _rewrite_catalog_references(
+    value: JsonValue,
+    aliases: dict[str, str],
+) -> JsonValue:
+    if isinstance(value, dict):
+        return {
+            key: _rewrite_catalog_references(item, aliases)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_rewrite_catalog_references(item, aliases) for item in value]
+    if isinstance(value, str):
+        return _rewrite_catalog_text(value, aliases)
+    return value
 
 
 def _parameter_type(property_schema: JsonObject) -> object:
@@ -152,6 +186,10 @@ class AnalysisToolProvider(Provider):
     def _adapt_catalog(self, backend_tools: Sequence[_BackendTool]) -> list[Tool]:
         adapted: list[Tool] = []
         owners: dict[str, str] = {}
+        aliases = {
+            backend_tool.name: analysis_tool_name(backend_tool.name)
+            for backend_tool in backend_tools
+        }
         for backend_tool in backend_tools:
             if backend_tool.name in {"search_tools", "check_tools"}:
                 continue
@@ -163,7 +201,7 @@ class AnalysisToolProvider(Provider):
                     f"{backend_tool.name!r} -> {alias!r}"
                 )
             owners[alias] = backend_tool.name
-            adapted.append(self._adapt_tool(backend_tool, alias))
+            adapted.append(self._adapt_tool(backend_tool, alias, aliases))
         return adapted
 
     @staticmethod
@@ -268,11 +306,21 @@ class AnalysisToolProvider(Provider):
                 "analysis public vocabulary leak: " + "; ".join(violations[:12])
             )
 
-    def _adapt_tool(self, backend_tool: _BackendTool, analysis_name: str) -> Tool:
+    def _adapt_tool(
+        self,
+        backend_tool: _BackendTool,
+        analysis_name: str,
+        aliases: dict[str, str] | None = None,
+    ) -> Tool:
         ghidra_name = backend_tool.name
         ghidra_schema = _backend_tool_schema(backend_tool)
         exposed_schema = analysis_schema(ghidra_schema, ghidra_name)
         exposed_schema["title"] = f"{analysis_name}Arguments"
+        if aliases:
+            exposed_schema = json_object(
+                _rewrite_catalog_references(exposed_schema, aliases),
+                context=f"{analysis_name} public schema",
+            )
 
         async def invoke(**arguments: JsonValue) -> JsonValue | None:
             canonical = normalize_arguments(
@@ -295,6 +343,10 @@ class AnalysisToolProvider(Provider):
         signature_target.__annotations__["return"] = signature.return_annotation
         description = analysis_text(backend_tool.description or "")
         title = _backend_tool_title(backend_tool)
+        if aliases:
+            description = _rewrite_catalog_text(description, aliases)
+            if title:
+                title = _rewrite_catalog_text(analysis_text(title), aliases)
         tool = FunctionTool.from_function(
             invoke,
             name=analysis_name,
