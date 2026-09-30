@@ -4,8 +4,8 @@ import json
 import logging
 import threading
 import time
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Mapping
 from typing import Protocol
