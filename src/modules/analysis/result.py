@@ -4,6 +4,8 @@ from typing import cast
 
 from common.models import JsonValue, json_loads, json_value
 
+from .terminology import analysis_result_key, analysis_result_text
+
 
 def decode_result(data: object) -> JsonValue:
     """Recursively unwrap backend result envelopes and JSON strings."""
@@ -48,3 +50,19 @@ def decode_call_result(result: object) -> JsonValue | None:
         if decoded is not None:
             return decoded
     return None
+
+
+
+def adapt_analysis_result(value: JsonValue, parent_key: str | None = None) -> JsonValue:
+    """Translate backend result structure into the public Analysis vocabulary."""
+    if isinstance(value, dict):
+        translated: dict[str, JsonValue] = {}
+        for raw_key, raw_value in value.items():
+            key = analysis_result_key(str(raw_key))
+            translated[key] = adapt_analysis_result(raw_value, key)
+        return translated
+    if isinstance(value, list):
+        return [adapt_analysis_result(item, parent_key) for item in value]
+    if isinstance(value, str):
+        return analysis_result_text(value, parent_key)
+    return value

@@ -14,12 +14,13 @@ from fastmcp.utilities.components import FastMCPComponent
 from common.models import JsonObject, JsonValue, json_object
 from common.settings import AnalysisSettings
 
-from .result import decode_call_result
+from .result import adapt_analysis_result, decode_call_result
 from .terminology import (
     analysis_schema,
     analysis_text,
     analysis_tool_name,
     normalize_arguments,
+    analysis_surface_violations,
 )
 
 
@@ -104,7 +105,7 @@ def _analysis_signature(input_schema: JsonObject, tool_name: str) -> inspect.Sig
 
 
 class AnalysisToolProvider(Provider):
-    """Expose the live Ghidra tool catalog through behavior-analysis terminology."""
+    """Expose the private backend through a fully separated Analysis vocabulary."""
 
     def __init__(self, settings: AnalysisSettings) -> None:
         super().__init__()
@@ -139,6 +140,7 @@ class AnalysisToolProvider(Provider):
                 backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
 
             tools = self._adapt_catalog(backend_tools)
+            self._validate_public_catalog(tools)
             if ttl > 0:
                 self._cache = (now + ttl, tools)
             return list(tools)
@@ -162,6 +164,7 @@ class AnalysisToolProvider(Provider):
         ghidra_name = backend_tool.name
         ghidra_schema = _backend_tool_schema(backend_tool)
         exposed_schema = analysis_schema(ghidra_schema, ghidra_name)
+        exposed_schema["title"] = f"{analysis_name}Arguments"
 
         async def invoke(**arguments: JsonValue) -> JsonValue | None:
             canonical = normalize_arguments(
@@ -171,7 +174,8 @@ class AnalysisToolProvider(Provider):
             )
             async with Client(self._backend_url()) as client:
                 result = await client.call_tool(ghidra_name, canonical)
-            return decode_call_result(result)
+            decoded = decode_call_result(result)
+            return adapt_analysis_result(decoded) if decoded is not None else None
 
         signature_target = cast(_SignatureTarget, invoke)
         signature = _analysis_signature(ghidra_schema, ghidra_name)
