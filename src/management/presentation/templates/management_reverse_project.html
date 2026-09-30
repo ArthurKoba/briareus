@@ -1,0 +1,108 @@
+{% extends "layout.html" %}
+{% block header %}
+<div class="d-flex justify-content-between align-items-center">
+  <h1>Reverse Project</h1>
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/reverse">Reverse</a></li>
+    <li class="breadcrumb-item active">{{ session.get("name", project_id) }}</li>
+  </ol>
+</div>
+{% endblock %}
+{% block content %}
+  {% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+  {% endif %}
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-3"><div class="text-secondary">Project</div><div class="fw-bold">{{ session.get("name", "—") }}</div></div>
+        <div class="col-md-3"><div class="text-secondary">Session</div><div>{{ session.get("session", "unknown") }}</div></div>
+        <div class="col-md-2"><div class="text-secondary">Worker</div><div>{% if session.get("worker_index") is not none %}#{{ session.get("worker_index") }}{% else %}—{% endif %}</div></div>
+        <div class="col-md-2"><div class="text-secondary">Queued</div><div>{{ session.get("queued", 0) }}</div></div>
+        <div class="col-md-2"><div class="text-secondary">Running</div><div>{{ "yes" if session.get("running") else "no" }}</div></div>
+      </div>
+      <div class="mt-3">
+        <span class="text-secondary">Current operation:</span>
+        <code>{{ session.get("current_operation") or "—" }}</code>
+        <span class="text-secondary ms-3">Last used:</span>
+        {{ session.get("last_used_at") or "—" }}
+      </div>
+      <div class="mt-3">
+        {% if session.get("session") == "active" %}
+        <form method="post" action="/admin/reverse/release/{{ project_id }}" style="display:inline">
+          {{ csrf_input(request) }}
+          <button class="btn btn-warning" type="submit">Release session</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/reverse/open/{{ project_id }}" style="display:inline">
+          {{ csrf_input(request) }}
+          <button class="btn btn-primary" type="submit">Open session</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if session.get("session") == "active" %}
+  <div class="card mb-3">
+    <div class="card-header"><h3 class="card-title">Open programs</h3></div>
+    <div class="table-responsive">
+      <table class="table table-vcenter card-table">
+        <thead><tr><th>Name / path</th><th>State</th></tr></thead>
+        <tbody>
+        {% for program in programs %}
+          <tr>
+            {% if program is mapping %}
+            <td><code>{{ program.get("path") or program.get("name") or program }}</code></td>
+            <td>{{ "open" if program.get("open", true) else "closed" }}</td>
+            {% else %}
+            <td><code>{{ program }}</code></td><td>open</td>
+            {% endif %}
+          </tr>
+        {% else %}
+          <tr><td colspan="2" class="text-secondary">No open programs.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h3 class="card-title">Project files — {{ folder }}</h3>
+      {% if parent_folder %}
+      <a class="btn" href="/admin/reverse/project/{{ project_id }}?folder={{ parent_folder | urlencode }}">Up</a>
+      {% endif %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-vcenter card-table">
+        <thead><tr><th>Name</th><th>Kind</th><th>Content type</th><th>Version</th></tr></thead>
+        <tbody>
+        {% for item in folder_links %}
+          <tr>
+            <td><a href="/admin/reverse/project/{{ project_id }}?folder={{ item['path'] | urlencode }}">{{ item["name"] }}/</a></td>
+            <td>folder</td><td>—</td><td>—</td>
+          </tr>
+        {% endfor %}
+        {% for item in files.get("files", []) %}
+          <tr>
+            <td><code>{{ item.get("path") or item.get("name") }}</code></td>
+            <td>file</td>
+            <td>{{ item.get("content_type", "—") }}</td>
+            <td>{{ item.get("version", "—") }}</td>
+          </tr>
+        {% else %}
+          {% if not folder_links %}
+          <tr><td colspan="4" class="text-secondary">No project files in this folder.</td></tr>
+          {% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="alert alert-info">Open the project session to inspect programs and files.</div>
+  {% endif %}
+{% endblock %}
