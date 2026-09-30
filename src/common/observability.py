@@ -15,6 +15,12 @@ from .management_client import ManagementClient
 from .settings import ObservabilitySettings
 
 logger = logging.getLogger("mcp_bridge.observability")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 class ObservabilitySink(Protocol):
@@ -367,6 +373,11 @@ def build_observability(
         sinks.append(ManagementAuditSink(management))
     if configured.enabled:
         sinks.append(OtlpHttpMetricsSink(scope, configured))
+    else:
+        logger.info(
+            "OTLP metrics disabled scope=%s reason=endpoint_not_configured",
+            scope,
+        )
     return CompositeObservabilitySink(sinks)
 
 

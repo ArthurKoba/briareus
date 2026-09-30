@@ -161,7 +161,7 @@ Coolify when the collector is ready:
 
 ```text
 OTEL_SERVICE_NAME=mcp-bridge
-OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.kobanexus.ru
+OTEL_EXPORTER_OTLP_ENDPOINT=<otlp-endpoint>
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20<token>
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
 OTEL_EXPORTER_OTLP_TIMEOUT=10000
