@@ -16,6 +16,7 @@ from common.settings import (
     GitLabSettings,
     ManagementClientSettings,
     ManagementSettings,
+    ObservabilitySettings,
 )
 
 
@@ -186,3 +187,24 @@ def test_auth_service_requires_public_base_url(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="MCP_PUBLIC_BASE_URL"):
         AuthServiceSettings().validate_bootstrap()
+
+
+def test_observability_settings_resolve_standard_otlp_metrics_endpoint() -> None:
+    settings = ObservabilitySettings(
+        service_name="mcp-bridge",
+        endpoint="https://telemetry.kobanexus.ru/",
+        headers="Authorization=Bearer%20token",
+        resource_attributes="deployment.environment.name=production",
+        timeout_ms=2500,
+    )
+
+    assert settings.enabled is True
+    assert settings.metrics_endpoint == "https://telemetry.kobanexus.ru/v1/metrics"
+    assert settings.timeout_seconds == 2.5
+
+
+def test_observability_settings_are_disabled_without_otlp_endpoint() -> None:
+    settings = ObservabilitySettings()
+
+    assert settings.enabled is False
+    assert settings.metrics_endpoint == ""

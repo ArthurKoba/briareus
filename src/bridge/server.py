@@ -18,6 +18,7 @@ from common.mcp_surfaces import (
     surface_base_url,
 )
 from common.models import JsonObject
+from common.observability import announce_runtime_started, build_observability
 from common.runtime_annotations import (
     DESTRUCTIVE_EXTERNAL,
     READ_EXTERNAL,
@@ -36,6 +37,8 @@ from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 from .reverse_proxy import ReverseProxy
 
 _STARTED_AT = datetime.now(UTC).isoformat()
+_observability = build_observability("gateway")
+announce_runtime_started(_observability, "gateway")
 _AUTH_BACKEND_URL = "http://auth:8000"
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _AUTH_PROXY_PATHS = (

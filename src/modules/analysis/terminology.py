@@ -516,7 +516,11 @@ def analysis_schema(input_schema: JsonObject, tool_name: str | None = None) -> J
         if isinstance(title, str):
             property_schema["title"] = analysis_text(title)
         if "default" in property_schema:
-            property_schema["default"] = _typed_default(property_schema)
+            typed_default = _typed_default(property_schema)
+            if typed_default is None and property_schema.get("default") == "":
+                property_schema.pop("default", None)
+            else:
+                property_schema["default"] = typed_default
         renamed[alias] = property_schema
     schema["properties"] = renamed
     schema_title = schema.get("title")
@@ -551,7 +555,10 @@ def normalize_arguments(
 ) -> JsonObject:
     model = _argument_model(_schema_cache_key(input_schema), tool_name)
     validated = model.model_validate(_prefer_analysis_aliases(input_schema, arguments, tool_name))
-    return json_object(validated.model_dump(mode="json"), context="normalized tool arguments")
+    return json_object(
+        validated.model_dump(mode="json", exclude_none=True),
+        context="normalized tool arguments",
+    )
 
 
 def arguments_for_surface(
@@ -563,7 +570,11 @@ def arguments_for_surface(
     model = _argument_model(_schema_cache_key(input_schema), tool_name)
     validated = model.model_validate(_prefer_analysis_aliases(input_schema, arguments, tool_name))
     return json_object(
-        validated.model_dump(mode="json", by_alias=surface == "analysis"),
+        validated.model_dump(
+            mode="json",
+            by_alias=surface == "analysis",
+            exclude_none=True,
+        ),
         context=f"{surface} tool arguments",
     )
 
@@ -625,6 +636,8 @@ def _typed_default(property_schema: JsonObject) -> JsonValue:
     raw_type = property_schema.get("type")
     if not isinstance(value, str) or not isinstance(raw_type, str):
         return value
+    if raw_type in {"integer", "number", "boolean"} and value == "":
+        return None
     if raw_type == "integer":
         try:
             return int(value)

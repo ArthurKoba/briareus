@@ -93,6 +93,33 @@ def register_gitlab_merge_request_tools(
             squash,
         )
 
+
+    @mcp.tool(title="GitLab merge request diffs", annotations=read_annotations)
+    def list_merge_request_diffs(
+        account_id: str,
+        project: str,
+        iid: int,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        """List changed-file diffs for one merge request."""
+        return client_factory(account_id).list_merge_request_diffs(
+            project,
+            iid,
+            page,
+            per_page,
+        )
+
+    @mcp.tool(title="GitLab merge request note", annotations=write_annotations)
+    def add_merge_request_note(
+        account_id: str,
+        project: str,
+        iid: int,
+        body: str,
+    ) -> JsonObject:
+        """Add a discussion note/comment to one merge request."""
+        return client_factory(account_id).add_merge_request_note(project, iid, body)
+
     @mcp.tool(title="GitLab merge merge request", annotations=write_annotations)
     def merge_merge_request(
         account_id: str,

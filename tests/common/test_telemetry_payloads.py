@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from common.telemetry_payloads import (
+from common.audit_payloads import (
     MAX_PAYLOAD_CHARS,
     REDACTED,
     render_error,

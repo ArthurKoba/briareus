@@ -80,3 +80,43 @@ async def test_reviewer_tool_surface_requires_account_id_and_excludes_mutations(
     assert not any("put_file" in name for name in by_name)
     assert not any("delete_file" in name for name in by_name)
     assert "github_reviewer_merge_pull_request" in by_name
+    assert "github_reviewer_required_reviews" in by_name
+    assert "github_reviewer_update_review_comment" in by_name
+
+
+@pytest.mark.asyncio
+async def test_agent_surface_excludes_reviewer_write_operations() -> None:
+    from fastmcp import Client, FastMCP
+    from mcp.types import ToolAnnotations
+
+    from modules.github.github_collab_tools import register_github_collab_tools
+    from modules.github.github_review_tools import register_github_review_tools
+    from modules.github.pull_tools import register_github_pull_tools
+
+    agent_mcp = FastMCP("agent-surface-test")
+    read = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+    write = ToolAnnotations(read_only_hint=False, open_world_hint=True)
+
+    def factory(account_id: str):
+        assert account_id
+        return GitHubPrettyIdentityClient.from_account(
+            _account(),
+            GitHubPolicySettings(),
+        )
+
+    register_github_pull_tools(agent_mcp, factory, read, write)
+    register_github_review_tools(agent_mcp, factory, read, write)
+    register_github_collab_tools(agent_mcp, factory, read, write)
+
+    async with Client(agent_mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "github_agent_create_pull_request" in names
+    assert "github_agent_request_reviewers" in names
+    assert "github_agent_mark_pull_ready_for_review" in names
+    assert "github_agent_merge_pull_request" not in names
+    assert "github_agent_create_review" not in names
+    assert "github_agent_create_review_with_comments" not in names
+    assert "github_agent_update_review_comment" not in names
+    assert "github_agent_reply_to_review_comment" not in names
+    assert "github_agent_set_review_thread_resolved" not in names

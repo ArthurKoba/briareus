@@ -89,22 +89,30 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
 
 def test_compose_exposes_only_external_bootstrap_environment() -> None:
     services = _services()
+    observability = {
+        "OTEL_SERVICE_NAME",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "OTEL_EXPORTER_OTLP_TIMEOUT",
+    }
     expected = {
-        "management": {
+        "management": observability | {
             "MANAGEMENT_ENCRYPTION_KEY",
             "MANAGEMENT_SERVICE_TOKEN",
             "MANAGEMENT_ADMIN_USERNAME",
             "MANAGEMENT_ADMIN_PASSWORD",
             "MANAGEMENT_SESSION_SECRET",
         },
-        "auth": {
+        "auth": observability | {
             "MCP_PUBLIC_BASE_URL",
             "GITHUB_OAUTH_CLIENT_ID",
             "GITHUB_OAUTH_CLIENT_SECRET",
             "GITHUB_OAUTH_JWT_SIGNING_KEY",
             "GITHUB_OAUTH_ALLOWED_USERS",
         },
-        "gateway": {
+        "gateway": observability | {
             "OAUTH_ENABLED",
             "MCP_PUBLIC_BASE_URL",
             "GITHUB_OAUTH_JWT_SIGNING_KEY",
@@ -112,12 +120,12 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
             "MCP_ALLOWED_HOSTS",
             "MCP_ALLOWED_ORIGINS",
         },
-        "github": {"MANAGEMENT_SERVICE_TOKEN"},
-        "gitlab": {"MANAGEMENT_SERVICE_TOKEN"},
-        "files": {"MANAGEMENT_SERVICE_TOKEN"},
-        "curl": {"MANAGEMENT_SERVICE_TOKEN"},
-        "analysis": {"MANAGEMENT_SERVICE_TOKEN"},
-        "ghidra": {"MANAGEMENT_SERVICE_TOKEN"},
+        "github": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "curl": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
     }
 
     for name, service in services.items():
@@ -184,3 +192,18 @@ def test_compose_keeps_oauth_enablement_optional() -> None:
     serialized = COMPOSE_FILE.read_text()
     assert "${OAUTH_ENABLED:-true}" in serialized
     assert "${OAUTH_ENABLED:?}" not in serialized
+
+
+def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
+    services = _services()
+    required = {
+        "OTEL_SERVICE_NAME",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "OTEL_EXPORTER_OTLP_TIMEOUT",
+    }
+
+    for name, service in services.items():
+        assert required.issubset(service.get("environment", {})), name

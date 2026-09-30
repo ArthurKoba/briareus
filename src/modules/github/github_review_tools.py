@@ -8,7 +8,6 @@ from mcp.types import ToolAnnotations
 from common.models import JsonObject
 
 from .github_review import GitHubReviewClient
-from .models import ReviewComment
 
 
 def register_github_review_tools(
@@ -33,26 +32,6 @@ def register_github_review_tools(
             number,
             method,
             expected_head_sha,
-        )
-
-    @mcp.tool(title="GitHub agent rich pull review", annotations=write_annotations)
-    def github_agent_create_review_with_comments(
-        account_id: str,
-        repository: str,
-        number: int,
-        event: str,
-        body: str,
-        comments: list[ReviewComment] | None = None,
-        commit_id: str | None = None,
-    ) -> JsonObject:
-        """Submit a PR review with optional inline file/line comments."""
-        return client_factory(account_id).create_review_with_comments(
-            repository,
-            number,
-            event,
-            body,
-            comments,
-            commit_id,
         )
 
     @mcp.tool(title="GitHub agent conversation comments", annotations=read_annotations)
