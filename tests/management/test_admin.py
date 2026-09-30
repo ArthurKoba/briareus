@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from cryptography.fernet import Fernet
 from starlette.datastructures import FormData
+from starlette_admin import DateTimeField
 
 pytest.importorskip("starlette_admin")
 
@@ -82,6 +83,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
         "status",
     ]
     assert invocation_view.fields_default_sort == [("occurred_at", True)]
+    assert isinstance(invocation_view.fields[2], DateTimeField)
     engine.dispose()
 
 

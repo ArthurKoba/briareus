@@ -59,6 +59,41 @@
       </div>
     </div>
     <div class="col-12">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Reverse / worker lifecycle</h3></div>
+        <div class="card-body">
+          {% if reverse_error %}
+          <div class="alert alert-warning">Unable to read live Reverse settings: {{ reverse_error }}</div>
+          {% endif %}
+          <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-5">
+              <label class="form-label">Idle session release timeout (seconds)</label>
+              <input
+                class="form-control"
+                type="number"
+                min="0"
+                max="86400"
+                step="1"
+                name="reverse_idle_timeout_seconds"
+                value="{{ reverse_settings.get('idle_timeout_seconds', 900) }}"
+              >
+              <div class="form-hint">
+                Project session is released after this much idle time when no call is running or queued. Set 0 to disable automatic release.
+              </div>
+            </div>
+            <div class="col-12 col-md-4">
+              <div class="text-secondary">Auto release</div>
+              <div class="fw-bold">{{ "enabled" if reverse_settings.get("auto_release_enabled") else "disabled" }}</div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="text-secondary">Setting source</div>
+              <div class="fw-bold">{{ reverse_settings.get("source", "unknown") }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12">
       <div class="d-flex gap-2 justify-content-end">
         <button class="btn btn-primary" type="submit">Save settings</button>
       </div>
