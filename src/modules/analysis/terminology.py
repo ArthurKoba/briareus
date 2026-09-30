@@ -209,6 +209,10 @@ def analysis_schema(input_schema: JsonObject, tool_name: str | None = None) -> J
             )
             for name in required
         ]
+    if tool_name in _COLLAPSED_ACTION_SELECTOR_TOOLS:
+        required = schema.setdefault("required", [])
+        if isinstance(required, list) and "action" not in required:
+            required.append("action")
     return json_object(schema, context="analysis tool schema")
 
 
