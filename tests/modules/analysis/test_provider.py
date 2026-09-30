@@ -378,3 +378,36 @@ def test_provider_rewrites_internal_argument_references_everywhere() -> None:
         assert leaked not in encoded
     assert "min_links" in encoded
     assert "is_forwarder" in encoded
+
+
+def test_provider_fills_missing_public_description() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    backend = SimpleNamespace(
+        name="list_instances",
+        title="List Instances",
+        description=None,
+        input_schema={"type": "object", "properties": {}},
+    )
+
+    tool = provider._adapt_tool(backend, "list_instances")
+    provider._validate_public_catalog([tool])
+
+    assert tool.description == "Run the list instances analysis operation."
+
+
+def test_public_catalog_rejects_missing_description() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    tool = provider._vocabulary_tool().model_copy(update={"description": ""})
+
+    with pytest.raises(AnalysisProviderError, match="missing public description"):
+        provider._validate_public_catalog([tool])
