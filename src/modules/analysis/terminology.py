@@ -70,6 +70,7 @@ _TOOL_ARGUMENT_ALIASES: dict[str, dict[str, str]] = {
     "get_function_by_address": {"address": "action"},
     "audit_globals_in_function": {"address": "action"},
     "force_decompile": {"address": "action"},
+    "get_comment": {"address": "action"},
 }
 
 _COLLAPSED_ACTION_SELECTOR_TOOLS = frozenset(
