@@ -14,7 +14,6 @@ from .account_contracts import InvocationEvent
 from .management_client import ManagementClient
 from .settings import ObservabilitySettings
 
-
 logger = logging.getLogger("mcp_bridge.observability")
 
 
