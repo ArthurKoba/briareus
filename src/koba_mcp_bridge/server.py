@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import os
+import platform
+from datetime import UTC, datetime
+
+from fastmcp import FastMCP
+from fastmcp.server import create_proxy
+from fastmcp.server.auth import AuthContext
+from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.middleware import AuthMiddleware
+from mcp.types import ToolAnnotations
+
+from . import __version__
+
+_STARTED_AT = datetime.now(UTC).isoformat()
+_READ_ONLY_LOCAL = ToolAnnotations(
+    read_only_hint=True,
+    open_world_hint=False,
+)
+_CHATGPT_OAUTH_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is required when OAuth is enabled")
+    return value
+
+
+def _allowed_github_users() -> set[str]:
+    raw = _required_env("OAUTH_ALLOWED_GITHUB_USERS")
+    return {item.strip().casefold() for item in raw.split(",") if item.strip()}
+
+
+def _github_user_allowed(ctx: AuthContext) -> bool:
+    if ctx.token is None:
+        return False
+    login = str(ctx.token.claims.get("login", "")).casefold()
+    return bool(login) and login in _allowed_github_users()
+
+
+def _build_auth() -> tuple[GitHubProvider | None, list[AuthMiddleware]]:
+    if not _env_bool("OAUTH_ENABLED"):
+        return None, []
+
+    provider = GitHubProvider(
+        client_id=_required_env("OAUTH_GITHUB_CLIENT_ID"),
+        client_secret=_required_env("OAUTH_GITHUB_CLIENT_SECRET"),
+        base_url=os.getenv("OAUTH_BASE_URL", "https://mcp.koba-nexus.ru"),
+        required_scopes=["read:user"],
+        jwt_signing_key=_required_env("OAUTH_JWT_SIGNING_KEY"),
+        allowed_client_redirect_uris=[_CHATGPT_OAUTH_REDIRECT],
+        require_authorization_consent="external",
+        enable_cimd=False,
+        fallback_refresh_token_expiry_seconds=30 * 24 * 60 * 60,
+        fastmcp_access_token_expiry_seconds=30 * 60,
+    )
+    return provider, [AuthMiddleware(auth=_github_user_allowed)]
+
+
+def _configured_backends() -> dict[str, str]:
+    backends: dict[str, str] = {}
+    ghidra_url = os.getenv("GHIDRA_MCP_URL", "").strip()
+    if ghidra_url:
+        backends["ghidra"] = ghidra_url
+    return backends
+
+
+def _mount_backends(server: FastMCP) -> dict[str, str]:
+    backends = _configured_backends()
+    for namespace, url in backends.items():
+        proxy = create_proxy(url, name=f"{namespace}-backend")
+        server.mount(server=proxy, namespace=namespace)
+    return backends
+
+
+_auth, _auth_middleware = _build_auth()
+
+mcp = FastMCP(
+    "koba-mcp-bridge",
+    version=__version__,
+    instructions=(
+        "Koba MCP Bridge is the authenticated gateway for Koba infrastructure, "
+        "local tools, and mounted MCP backends."
+    ),
+    auth=_auth,
+    middleware=_auth_middleware,
+)
+
+
+@mcp.tool(
+    title="Bridge ping",
+    annotations=_READ_ONLY_LOCAL,
+)
+def bridge_ping() -> dict[str, str]:
+    """Check that the bridge is alive and reachable."""
+    return {
+        "status": "ok",
+        "service": "koba-mcp-bridge",
+        "version": __version__,
+        "time": datetime.now(UTC).isoformat(),
+    }
+
+
+@mcp.tool(
+    title="Bridge build info",
+    annotations=_READ_ONLY_LOCAL,
+)
+def bridge_build_info() -> dict[str, str]:
+    """Return build metadata for the currently running bridge instance."""
+    return {
+        "service": "koba-mcp-bridge",
+        "version": __version__,
+        "commit": os.getenv("BUILD_SHA", "unknown"),
+        "built_at": os.getenv("BUILD_TIME", "unknown"),
+        "started_at": _STARTED_AT,
+        "python": platform.python_version(),
+    }
+
+
+@mcp.tool(
+    title="Bridge capabilities",
+    annotations=_READ_ONLY_LOCAL,
+)
+def bridge_capabilities() -> dict[str, object]:
+    """Return the currently enabled high-level bridge capabilities."""
+    features = ["mcp", "streamable-http", "opentelemetry", "gateway"]
+    if _auth is not None:
+        features.append("github-oauth")
+    return {
+        "backends": sorted(_MOUNTED_BACKENDS),
+        "workers": [],
+        "features": features,
+        "status": "active",
+    }
+
+
+def _split_env(name: str, default: str) -> list[str]:
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+_MOUNTED_BACKENDS = _mount_backends(mcp)
+
+app = mcp.http_app(
+    path="/mcp",
+    allowed_hosts=_split_env(
+        "MCP_ALLOWED_HOSTS",
+        "localhost:*,127.0.0.1:*,[::1]:*",
+    ),
+    allowed_origins=_split_env(
+        "MCP_ALLOWED_ORIGINS",
+        "http://localhost:*,http://127.0.0.1:*,http://[::1]:*",
+    ),
+)
