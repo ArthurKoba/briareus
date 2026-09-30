@@ -62,6 +62,8 @@ async def test_provider_adapts_live_backend_catalog(monkeypatch) -> None:
     assert seen_urls == ["http://ghidra.internal/mcp"]
     assert {tool.name for tool in tools} == {
         "inspect_action_behavior",
+        "search_tools",
+        "check_tools",
         "get_analysis_vocabulary",
     }
 
