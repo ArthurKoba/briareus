@@ -18,6 +18,8 @@ class ObservabilitySink(Protocol):
 
     def record_runtime_started(self, scope: str) -> None: ...
 
+    def record_runtime_heartbeat(self, scope: str) -> None: ...
+
     def record_invocation(self, event: InvocationEvent) -> None: ...
 
 
@@ -31,6 +33,13 @@ class CompositeObservabilitySink:
         for sink in self.sinks:
             try:
                 sink.record_runtime_started(scope)
+            except Exception:
+                continue
+
+    def record_runtime_heartbeat(self, scope: str) -> None:
+        for sink in self.sinks:
+            try:
+                sink.record_runtime_heartbeat(scope)
             except Exception:
                 continue
 
@@ -49,6 +58,9 @@ class ManagementAuditSink:
         self.management = management
 
     def record_runtime_started(self, scope: str) -> None:
+        del scope
+
+    def record_runtime_heartbeat(self, scope: str) -> None:
         del scope
 
     def record_invocation(self, event: InvocationEvent) -> None:
@@ -244,6 +256,21 @@ class OtlpHttpMetricsSink:
             ]
         )
 
+    def record_runtime_heartbeat(self, scope: str) -> None:
+        now = str(time.time_ns())
+        self._export(
+            [
+                self._gauge(
+                    "mcp.runtime.up",
+                    "Runtime availability at observation time.",
+                    "1",
+                    1.0,
+                    {"mcp.scope": scope},
+                    now,
+                )
+            ]
+        )
+
     def record_invocation(self, event: InvocationEvent) -> None:
         now = str(time.time_ns())
         attrs: dict[str, object] = {
@@ -301,12 +328,17 @@ def build_observability(
 
 
 def announce_runtime_started(sink: ObservabilitySink, scope: str) -> None:
-    """Emit startup observation without delaying process initialization."""
+    """Start best-effort runtime lifecycle/heartbeat export in a daemon thread."""
+
+    def run() -> None:
+        sink.record_runtime_started(scope)
+        while True:
+            time.sleep(60)
+            sink.record_runtime_heartbeat(scope)
 
     thread = threading.Thread(
-        target=sink.record_runtime_started,
-        args=(scope,),
-        name=f"observability-{scope}-startup",
+        target=run,
+        name=f"observability-{scope}-runtime",
         daemon=True,
     )
     thread.start()

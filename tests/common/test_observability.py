@@ -15,12 +15,19 @@ class _RecordingSink:
     def record_runtime_started(self, scope: str) -> None:
         self.runtime_scopes.append(scope)
 
+    def record_runtime_heartbeat(self, scope: str) -> None:
+        self.runtime_scopes.append(f"heartbeat:{scope}")
+
     def record_invocation(self, event: InvocationEvent) -> None:
         self.events.append(event)
 
 
 class _FailingSink:
     def record_runtime_started(self, scope: str) -> None:
+        del scope
+        raise RuntimeError("sink unavailable")
+
+    def record_runtime_heartbeat(self, scope: str) -> None:
         del scope
         raise RuntimeError("sink unavailable")
 
@@ -40,9 +47,10 @@ def test_composite_observability_isolates_sink_failures() -> None:
     )
 
     sink.record_runtime_started("github")
+    sink.record_runtime_heartbeat("github")
     sink.record_invocation(event)
 
-    assert recording.runtime_scopes == ["github"]
+    assert recording.runtime_scopes == ["github", "heartbeat:github"]
     assert recording.events == [event]
 
 
