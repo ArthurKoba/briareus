@@ -387,3 +387,27 @@ def test_internal_variable_type_name_is_neutralized() -> None:
     )
     assert "set_behavior_variable_type" in public
     assert not analysis_surface_violations(public)
+
+
+
+def test_internal_tool_names_are_removed_from_public_text() -> None:
+    source = (
+        "Use add_function_tag, delete_function_tag, analyze_function_completeness, "
+        "rename_function, set_function_this_type, and add_memory_reference."
+    )
+    public = analysis_text(source)
+    for internal_name in (
+        "add_function_tag",
+        "delete_function_tag",
+        "analyze_function_completeness",
+        "rename_function",
+        "set_function_this_type",
+        "add_memory_reference",
+    ):
+        assert internal_name not in public
+    assert "add_action_tag" in public
+    assert "delete_action_tag" in public
+    assert "analyze_action_completeness" in public
+    assert "name_action" in public
+    assert "set_action_this_type" in public
+    assert "add_data_link" in public
