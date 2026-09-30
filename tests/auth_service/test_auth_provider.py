@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from auth_service.provider import MultiResourceGitHubProvider
+from auth_service.provider import (
+    _ACCESS_TOKEN_TTL_SECONDS,
+    _REFRESH_TOKEN_TTL_SECONDS,
+    MultiResourceGitHubProvider,
+)
 from common.mcp_surfaces import allowed_resource_urls, resource_url
 from common.settings import AuthServiceSettings
 
@@ -68,3 +72,8 @@ async def test_upstream_claims_embed_only_allowed_identity() -> None:
     claims = await provider._extract_upstream_claims({"access_token": "upstream"})
 
     assert claims == {"login": "arthurkoba", "sub": "42"}
+
+
+def test_oauth_token_lifetimes_are_client_resilient() -> None:
+    assert _ACCESS_TOKEN_TTL_SECONDS == 24 * 60 * 60
+    assert _REFRESH_TOKEN_TTL_SECONDS == 30 * 24 * 60 * 60
