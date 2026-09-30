@@ -62,3 +62,15 @@ def test_adapt_analysis_result_preserves_opaque_payloads() -> None:
     payload = {"decompiled": "Ghidra P-code assembly text belongs to payload"}
     result = adapt_analysis_result(payload)
     assert result["behavior"] == payload["decompiled"]
+
+
+
+def test_adapt_analysis_result_translates_suffixed_metadata() -> None:
+    result = adapt_analysis_result(
+        {"return_type_warning": "Do not trust decompiler display in Ghidra."}
+    )
+    warning = result["return_type_warning"]
+    assert isinstance(warning, str)
+    assert "decompiler" not in warning.casefold()
+    assert "ghidra" not in warning.casefold()
+    assert "behavior engine" in warning.casefold()

@@ -382,7 +382,19 @@ def analysis_result_text(text: str, key: str | None = None) -> str:
         return text
     if key == "classification" and text.casefold() == "thunk":
         return "forwarder"
-    if key is None or key in _RESULT_METADATA_KEYS:
+    metadata_suffixes = (
+        "_error",
+        "_message",
+        "_warning",
+        "_note",
+        "_suggestion",
+        "_diagnostic",
+    )
+    if (
+        key is None
+        or key in _RESULT_METADATA_KEYS
+        or (key is not None and key.endswith(metadata_suffixes))
+    ):
         return analysis_text(text)
     return text
 
