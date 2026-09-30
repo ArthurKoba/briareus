@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 from datetime import UTC, datetime
+from functools import lru_cache
 
 from fastmcp import FastMCP
 from fastmcp.server import create_proxy
@@ -12,11 +13,35 @@ from fastmcp.server.middleware import AuthMiddleware
 from mcp.types import ToolAnnotations
 
 from . import __version__
+from .github_actions import GitHubActionsClient
+from .github_actions_tools import register_github_actions_tools
+from .github_agent import github_agent_configured
+from .github_collab_tools import register_github_collab_tools
+from .github_review_tools import register_github_review_tools
+from .github_reviewer import github_reviewer_client_from_env, github_reviewer_configured
+from .github_reviewer_tools import register_github_reviewer_tools
+from .github_tools import register_github_workflow_tools
 
 _STARTED_AT = datetime.now(UTC).isoformat()
 _READ_ONLY_LOCAL = ToolAnnotations(
     read_only_hint=True,
     open_world_hint=False,
+)
+_READ_EXTERNAL = ToolAnnotations(
+    read_only_hint=True,
+    open_world_hint=True,
+)
+_WRITE_EXTERNAL = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=True,
+)
+_DESTRUCTIVE_EXTERNAL = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=True,
+    idempotent_hint=False,
+    open_world_hint=True,
 )
 _CHATGPT_OAUTH_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 
@@ -77,9 +102,14 @@ def _configured_backends() -> dict[str, str]:
 def _mount_backends(server: FastMCP) -> dict[str, str]:
     backends = _configured_backends()
     for namespace, url in backends.items():
-        proxy = create_proxy(url, name=f"{namespace}-backend")
+        proxy = create_proxy(url, name=f"{namespace}-backend", mode="auto")
         server.mount(server=proxy, namespace=namespace)
     return backends
+
+
+@lru_cache(maxsize=1)
+def _github_agent_client() -> GitHubActionsClient:
+    return GitHubActionsClient.from_env()
 
 
 _auth, _auth_middleware = _build_auth()
@@ -135,12 +165,134 @@ def bridge_capabilities() -> dict[str, object]:
     features = ["mcp", "streamable-http", "opentelemetry", "gateway"]
     if _auth is not None:
         features.append("github-oauth")
+    if github_agent_configured():
+        features.extend(
+            [
+                "github-app-agent",
+                "github-development-workflow",
+                "github-rebase-review",
+                "github-review-threads",
+                "github-actions-diagnostics",
+                "github-installation-repository-discovery",
+            ]
+        )
+    if github_reviewer_configured():
+        features.append("github-independent-reviewer")
     return {
         "backends": sorted(_MOUNTED_BACKENDS),
         "workers": [],
         "features": features,
         "status": "active",
     }
+
+
+@mcp.tool(title="GitHub agent list repositories", annotations=_READ_EXTERNAL)
+def github_agent_list_repositories() -> dict[str, object]:
+    """List repositories currently granted to the development GitHub App installation."""
+    return _github_agent_client().list_repositories()
+
+
+@mcp.tool(title="GitHub agent status", annotations=_READ_EXTERNAL)
+def github_agent_status(repository: str) -> dict[str, object]:
+    """Verify development GitHub App installation access to one repository."""
+    return _github_agent_client().status(repository)
+
+
+@mcp.tool(title="GitHub agent get file", annotations=_READ_EXTERNAL)
+def github_agent_get_file(repository: str, path: str, ref: str | None = None) -> dict[str, object]:
+    """Read one UTF-8 repository file through the development GitHub App."""
+    return _github_agent_client().get_file(repository, path, ref)
+
+
+@mcp.tool(title="GitHub agent list branches", annotations=_READ_EXTERNAL)
+def github_agent_list_branches(repository: str) -> dict[str, object]:
+    """List branches in a repository installed for the development GitHub App."""
+    return _github_agent_client().list_branches(repository)
+
+
+@mcp.tool(title="GitHub agent create branch", annotations=_WRITE_EXTERNAL)
+def github_agent_create_branch(
+    repository: str,
+    branch: str,
+    from_branch: str = "main",
+) -> dict[str, object]:
+    """Create a new branch from an existing branch in an installed repository."""
+    return _github_agent_client().create_branch(repository, branch, from_branch)
+
+
+@mcp.tool(title="GitHub agent put file", annotations=_WRITE_EXTERNAL)
+def github_agent_put_file(
+    repository: str,
+    path: str,
+    content: str,
+    message: str,
+    branch: str,
+) -> dict[str, object]:
+    """Create or fully replace one UTF-8 file on a non-protected branch."""
+    return _github_agent_client().put_file(repository, path, content, message, branch)
+
+
+@mcp.tool(title="GitHub agent delete file", annotations=_DESTRUCTIVE_EXTERNAL)
+def github_agent_delete_file(
+    repository: str,
+    path: str,
+    message: str,
+    branch: str,
+) -> dict[str, object]:
+    """Delete one file and commit the deletion on a non-protected branch."""
+    return _github_agent_client().delete_file(repository, path, message, branch)
+
+
+@mcp.tool(title="GitHub agent compare refs", annotations=_READ_EXTERNAL)
+def github_agent_compare(repository: str, base: str, head: str) -> dict[str, object]:
+    """Compare two branches, tags, or commit refs in an installed repository."""
+    return _github_agent_client().compare(repository, base, head)
+
+
+@mcp.tool(title="GitHub agent fast-forward branch", annotations=_WRITE_EXTERNAL)
+def github_agent_fast_forward(
+    repository: str,
+    branch: str,
+    to_ref: str,
+) -> dict[str, object]:
+    """Fast-forward a non-protected branch to another ref without force updates."""
+    return _github_agent_client().fast_forward(repository, branch, to_ref)
+
+
+register_github_workflow_tools(
+    mcp,
+    _github_agent_client,
+    _READ_EXTERNAL,
+    _WRITE_EXTERNAL,
+    _DESTRUCTIVE_EXTERNAL,
+)
+register_github_review_tools(
+    mcp,
+    _github_agent_client,
+    _READ_EXTERNAL,
+    _WRITE_EXTERNAL,
+)
+register_github_collab_tools(
+    mcp,
+    _github_agent_client,
+    _READ_EXTERNAL,
+    _WRITE_EXTERNAL,
+)
+register_github_actions_tools(
+    mcp,
+    _github_agent_client,
+    _READ_EXTERNAL,
+    _WRITE_EXTERNAL,
+    _DESTRUCTIVE_EXTERNAL,
+)
+
+if github_reviewer_configured():
+    register_github_reviewer_tools(
+        mcp,
+        github_reviewer_client_from_env,
+        _READ_EXTERNAL,
+        _WRITE_EXTERNAL,
+    )
 
 
 def _split_env(name: str, default: str) -> list[str]:

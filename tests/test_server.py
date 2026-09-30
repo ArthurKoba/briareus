@@ -1,7 +1,8 @@
 import pytest
 from fastmcp import Client
 
-from koba_mcp_bridge.server import _configured_backends, mcp
+import koba_mcp_bridge.server as server_module
+from koba_mcp_bridge.server import _configured_backends, _mount_backends, mcp
 
 
 @pytest.mark.asyncio
@@ -28,6 +29,15 @@ async def test_bridge_build_info() -> None:
     assert result.data["python"]
 
 
+@pytest.mark.asyncio
+async def test_browser_write_probe_is_retired() -> None:
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+
+    names = {tool.name for tool in tools}
+    assert "github_write_probe" not in names
+
+
 def test_configured_backends_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GHIDRA_MCP_URL", raising=False)
     assert _configured_backends() == {}
@@ -36,3 +46,27 @@ def test_configured_backends_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_configured_backends_ghidra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GHIDRA_MCP_URL", "http://ghidra-mcp:8081/mcp")
     assert _configured_backends() == {"ghidra": "http://ghidra-mcp:8081/mcp"}
+
+
+def test_mounted_backend_negotiates_protocol_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "http://ghidra-mcp:8081/mcp"
+    calls: list[tuple[str, dict[str, str]]] = []
+    mounted: list[tuple[object, str]] = []
+    proxy = object()
+
+    def fake_create_proxy(target: str, **settings: str) -> object:
+        calls.append((target, settings))
+        return proxy
+
+    class DummyServer:
+        def mount(self, *, server: object, namespace: str) -> None:
+            mounted.append((server, namespace))
+
+    monkeypatch.setenv("GHIDRA_MCP_URL", url)
+    monkeypatch.setattr(server_module, "create_proxy", fake_create_proxy)
+
+    assert _mount_backends(DummyServer()) == {"ghidra": url}  # type: ignore[arg-type]
+    assert calls == [(url, {"name": "ghidra-backend", "mode": "auto"})]
+    assert mounted == [(proxy, "ghidra")]
