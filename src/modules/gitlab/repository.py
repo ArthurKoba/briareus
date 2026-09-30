@@ -101,6 +101,58 @@ class GitLabRepositoryClient(GitLabApiClient):
             "next_page": response.headers.get("X-Next-Page", ""),
         }
 
+
+    def list_commits(
+        self,
+        project: str | int,
+        ref: str = "",
+        path: str = "",
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        selector = self.project_selector(project)
+        response = self.request(
+            "GET",
+            f"/projects/{selector}/repository/commits",
+            query={
+                "ref_name": ref or None,
+                "path": path or None,
+                "page": page,
+                "per_page": per_page,
+            },
+        )
+        if not isinstance(response.data, list):
+            raise GitLabError("unexpected GitLab commit list response")
+        return {
+            "profile_id": self.profile.profile_id,
+            "project": str(project),
+            "commits": response.data,
+            "next_page": response.headers.get("X-Next-Page", ""),
+        }
+
+    def get_commit(
+        self,
+        project: str | int,
+        sha: str,
+    ) -> JsonObject:
+        selector = self.project_selector(project)
+        commit = self.request(
+            "GET",
+            f"/projects/{selector}/repository/commits/{urllib.parse.quote(sha, safe='')}",
+        ).data
+        diff = self.request(
+            "GET",
+            f"/projects/{selector}/repository/commits/{urllib.parse.quote(sha, safe='')}/diff",
+        ).data
+        if not isinstance(diff, list):
+            raise GitLabError("unexpected GitLab commit diff response")
+        return {
+            "profile_id": self.profile.profile_id,
+            "project": str(project),
+            "commit": commit,
+            "diff": diff,
+        }
+
     def put_file(
         self,
         project: str | int,

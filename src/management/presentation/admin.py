@@ -45,8 +45,8 @@ from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
+    InvocationAuditService,
     ManagementConfigService,
-    TelemetryService,
 )
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
@@ -307,14 +307,14 @@ class InvocationView(ModelView):
     exclude_fields_from_list = ("arguments_json", "result_json", "error_message")
     actions = ("clear_all", "delete")
 
-    def __init__(self, model: type[InvocationRecord], telemetry: TelemetryService) -> None:
+    def __init__(self, model: type[InvocationRecord], audit: InvocationAuditService) -> None:
         super().__init__(
             model,
             icon="fa fa-chart-line",
             menu_label="MCP Calls",
             display_name="MCP Call",
         )
-        self.telemetry = telemetry
+        self.audit = audit
         self.page_size_options = [25, 50, 100]
 
     def can_create(self, _request: Request) -> bool:
@@ -331,7 +331,7 @@ class InvocationView(ModelView):
         dedicated_button=True,
     )
     async def clear_all(self, request: Request, _selection: object) -> None:
-        removed = await asyncio.to_thread(self.telemetry.clear)
+        removed = await asyncio.to_thread(self.audit.clear)
         flash(request, f"Deleted {removed} invocation log records", "success")
 
 
@@ -343,11 +343,11 @@ class SettingsView(CustomView):
     def __init__(
         self,
         config: ManagementConfigService,
-        telemetry: TelemetryService,
+        audit: InvocationAuditService,
     ) -> None:
         super().__init__()
         self.config = config
-        self.telemetry = telemetry
+        self.audit = audit
 
     @staticmethod
     def _form_config(form: FormData) -> ManagementConfig:
@@ -385,7 +385,7 @@ class SettingsView(CustomView):
 
     @route("/cleanup-logs", methods=["POST"])
     async def cleanup_logs(self, request: Request) -> Response:
-        removed = await asyncio.to_thread(self.telemetry.cleanup)
+        removed = await asyncio.to_thread(self.audit.cleanup)
         flash(request, f"Removed {removed} expired MCP call records", "success")
         return RedirectResponse("/admin/settings", status_code=303)
 
@@ -645,7 +645,7 @@ def build_admin(
     settings: ManagementSettings,
     cipher: FernetCredentialCipher,
     accounts: AccountService,
-    telemetry: TelemetryService,
+    audit: InvocationAuditService,
     config: ManagementConfigService,
     files: FileAdminStore,
 ) -> Admin:
@@ -678,6 +678,6 @@ def build_admin(
             menu_label="GitLab Accounts",
         )
     )
-    admin.add_view(InvocationView(InvocationRecord, telemetry))
-    admin.add_view(SettingsView(config, telemetry))
+    admin.add_view(InvocationView(InvocationRecord, audit))
+    admin.add_view(SettingsView(config, audit))
     return admin

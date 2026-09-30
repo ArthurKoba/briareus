@@ -82,17 +82,6 @@ def register_github_pull_tools(
         """List submitted reviews for a pull request."""
         return client_factory(account_id).list_reviews(repository, number)
 
-    @mcp.tool(title="GitHub agent create review", annotations=write_annotations)
-    def github_agent_create_review(
-        account_id: str,
-        repository: str,
-        number: int,
-        event: str,
-        body: str,
-    ) -> JsonObject:
-        """Submit APPROVE, REQUEST_CHANGES, or COMMENT review feedback."""
-        return client_factory(account_id).create_review(repository, number, event, body)
-
     @mcp.tool(title="GitHub agent update pull branch", annotations=write_annotations)
     def github_agent_update_pull_branch(
         account_id: str,
@@ -112,17 +101,3 @@ def register_github_pull_tools(
     def github_agent_required_checks(account_id: str, repository: str, ref: str) -> JsonObject:
         """Verify configured required check-runs are completed successfully."""
         return client_factory(account_id).assert_required_checks(repository, ref)
-
-    @mcp.tool(title="GitHub agent merge pull request", annotations=write_annotations)
-    def github_agent_merge_pull_request(
-        account_id: str,
-        repository: str,
-        number: int,
-        merge_method: str = "squash",
-        commit_title: str | None = None,
-        commit_message: str | None = None,
-    ) -> JsonObject:
-        """Merge a same-repository PR only after configured required checks pass."""
-        return client_factory(account_id).merge_pull_request(
-            repository, number, merge_method, commit_title, commit_message
-        )

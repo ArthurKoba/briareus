@@ -83,6 +83,28 @@ class _GitLabHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/v4/projects/group%2Fproject/repository/commits":
+            self._json(200, [{"id": "abc", "title": "test commit"}])
+            return
+        if path == "/api/v4/projects/group%2Fproject/repository/commits/abc":
+            self._json(200, {"id": "abc", "title": "test commit"})
+            return
+        if path == "/api/v4/projects/group%2Fproject/repository/commits/abc/diff":
+            self._json(200, [{"old_path": "a.py", "new_path": "a.py", "diff": "@@ test"}])
+            return
+        if path == "/api/v4/projects/group%2Fproject/merge_requests/7/diffs":
+            self._json(200, [{"old_path": "a.py", "new_path": "a.py", "diff": "@@ mr"}])
+            return
+        self._json(404, {"message": "not found", "path": path})
+
+
+    def do_POST(self):
+        path = urlsplit(self.path).path
+        if path == "/api/v4/projects/group%2Fproject/merge_requests/7/notes":
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            self._json(201, {"id": 99, "body": payload.get("body", "")})
+            return
         self._json(404, {"message": "not found", "path": path})
 
 
@@ -232,3 +254,27 @@ def test_gitlab_account_list_exposes_potential_capabilities(gitlab_server: str) 
     listed = result["accounts"][0]
     assert listed["permission_scope"] == "project-dependent"
     assert "personal_access_token_scoped_access" in listed["potential_capabilities"]
+
+
+def test_gitlab_single_account_commit_and_merge_request_review_helpers(
+    gitlab_server: str,
+) -> None:
+    client = GitLabClient(_profile("a", "alice", gitlab_server, "token-a"))
+
+    commits = client.list_commits("group/project")
+    commit = client.get_commit("group/project", "abc")
+    diffs = client.list_merge_request_diffs("group/project", 7)
+    note = client.add_merge_request_note("group/project", 7, "reviewed")
+
+    assert commits["commits"][0]["id"] == "abc"
+    assert commit["commit"]["id"] == "abc"
+    assert commit["diff"][0]["new_path"] == "a.py"
+    assert diffs["diffs"][0]["diff"] == "@@ mr"
+    assert note["note"]["body"] == "reviewed"
+
+
+def test_gitlab_merge_request_note_rejects_empty_body(gitlab_server: str) -> None:
+    client = GitLabClient(_profile("a", "alice", gitlab_server, "token-a"))
+
+    with pytest.raises(GitLabError, match="note body is required"):
+        client.add_merge_request_note("group/project", 7, "   ")

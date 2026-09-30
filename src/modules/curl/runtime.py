@@ -18,7 +18,7 @@ _management = management_client(ManagementClientSettings())
 _file_settings = FileSettings()
 _curl_settings = CurlSettings()
 
-mcp = build_private_mcp("curl", _management)
+mcp = build_private_mcp("curl", _management, observability_scope="web")
 _store = FileStore(settings=_file_settings)
 _curl_binary = resolve_curl_binary(_curl_settings)
 

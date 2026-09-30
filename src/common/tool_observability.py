@@ -8,18 +8,18 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
 
 from .account_contracts import InvocationEvent
-from .management_client import ManagementClient
-from .telemetry_payloads import render_error, render_payload
+from .audit_payloads import render_error, render_payload
+from .observability import ObservabilitySink
 
 
-class ToolTelemetryMiddleware(Middleware):
-    """Record bounded, secret-redacted MCP calls into the management service."""
+class ToolObservabilityMiddleware(Middleware):
+    """Measure one MCP call once, then fan the observation out to configured sinks."""
 
     _MAX_PENDING_EVENTS = 128
 
-    def __init__(self, module: str, management: ManagementClient) -> None:
+    def __init__(self, module: str, sink: ObservabilitySink) -> None:
         self.module = module
-        self.management = management
+        self.sink = sink
         self._tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
@@ -36,10 +36,7 @@ class ToolTelemetryMiddleware(Middleware):
         return str(fastmcp_context.request_id)
 
     async def _record(self, event: InvocationEvent) -> None:
-        try:
-            await asyncio.to_thread(self.management.record_invocation, event)
-        except Exception:
-            return
+        await asyncio.to_thread(self.sink.record_invocation, event)
 
     def _submit(self, event: InvocationEvent) -> None:
         if len(self._tasks) >= self._MAX_PENDING_EVENTS:

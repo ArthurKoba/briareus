@@ -465,3 +465,49 @@ def test_backend_implementation_markers_are_neutralized() -> None:
     assert "runtime repair command" in lowered
     assert "runtime command thread" in lowered
     assert "source code" in lowered
+
+
+def test_enhanced_action_search_omits_invalid_empty_backend_defaults() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string"},
+            "name_pattern": {"type": "string", "default": ""},
+            "min_xrefs": {"type": "integer", "default": ""},
+            "max_xrefs": {"type": "integer", "default": ""},
+            "calling_convention": {"type": "string", "default": ""},
+            "has_custom_name": {"type": "boolean", "default": ""},
+            "is_thunk": {"type": "boolean", "default": ""},
+            "is_external": {"type": "boolean", "default": ""},
+            "regex": {"type": "boolean", "default": False},
+            "sort_by": {"type": "string", "default": "address"},
+            "offset": {"type": "integer", "default": 0},
+            "limit": {"type": "integer", "default": 100},
+            "program": {"type": "string", "default": ""},
+        },
+        "required": ["project_id"],
+    }
+
+    exposed = analysis_schema(schema, "search_functions_enhanced")
+    assert "default" not in exposed["properties"]["min_links"]
+    assert "default" not in exposed["properties"]["max_links"]
+    assert "default" not in exposed["properties"]["has_custom_name"]
+    assert "default" not in exposed["properties"]["is_forwarder"]
+    assert "default" not in exposed["properties"]["is_external"]
+
+    normalized = normalize_arguments(
+        schema,
+        {"project_id": "project-1", "has_custom_name": True},
+        "search_functions_enhanced",
+    )
+
+    assert normalized["project_id"] == "project-1"
+    assert normalized["has_custom_name"] is True
+    assert "min_xrefs" not in normalized
+    assert "max_xrefs" not in normalized
+    assert "is_thunk" not in normalized
+    assert "is_external" not in normalized
+    assert normalized["regex"] is False
+    assert normalized["sort_by"] == "address"
+    assert normalized["offset"] == 0
+    assert normalized["limit"] == 100

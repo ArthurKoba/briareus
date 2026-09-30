@@ -6,7 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import inspect, select
 
-from management.application.services import AccountService, TelemetryService
+from management.application.services import AccountService, InvocationAuditService
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -45,12 +45,12 @@ def _services(tmp_path: Path):
         engine,
         sessions,
         AccountService(account_repository, cipher, _Verifier()),
-        TelemetryService(invocation_repository),
+        InvocationAuditService(invocation_repository),
     )
 
 
 def test_accounts_are_provider_specific_and_credentials_are_encrypted(tmp_path: Path) -> None:
-    engine, sessions, accounts, _telemetry = _services(tmp_path)
+    engine, sessions, accounts, _audit = _services(tmp_path)
 
     github = accounts.create(
         Account(
@@ -101,7 +101,7 @@ def test_accounts_are_provider_specific_and_credentials_are_encrypted(tmp_path: 
 
 
 def test_account_discovery_includes_disabled_but_resolve_rejects_them(tmp_path: Path) -> None:
-    engine, _sessions, accounts, _telemetry = _services(tmp_path)
+    engine, _sessions, accounts, _audit = _services(tmp_path)
     disabled = accounts.create(
         Account(
             alias="github-disabled",
@@ -122,7 +122,7 @@ def test_account_discovery_includes_disabled_but_resolve_rejects_them(tmp_path: 
 
 
 def test_github_token_account_does_not_require_app_id(tmp_path: Path) -> None:
-    engine, _sessions, accounts, _telemetry = _services(tmp_path)
+    engine, _sessions, accounts, _audit = _services(tmp_path)
     account = accounts.create(
         Account(
             alias="github-user",
@@ -137,7 +137,7 @@ def test_github_token_account_does_not_require_app_id(tmp_path: Path) -> None:
 
 
 def test_replace_credential_invalidates_old_value(tmp_path: Path) -> None:
-    engine, _sessions, accounts, _telemetry = _services(tmp_path)
+    engine, _sessions, accounts, _audit = _services(tmp_path)
     account = accounts.create(
         Account(
             alias="gitlab-local",
@@ -154,9 +154,9 @@ def test_replace_credential_invalidates_old_value(tmp_path: Path) -> None:
     engine.dispose()
 
 
-def test_invocation_telemetry_captures_payloads_and_can_be_disabled(tmp_path: Path) -> None:
-    engine, sessions, _accounts, telemetry = _services(tmp_path)
-    telemetry.record(
+def test_invocation_audit_captures_payloads_and_can_be_disabled(tmp_path: Path) -> None:
+    engine, sessions, _accounts, audit = _services(tmp_path)
+    audit.record(
         Invocation(
             request_id="request-1",
             module="github",
@@ -169,7 +169,7 @@ def test_invocation_telemetry_captures_payloads_and_can_be_disabled(tmp_path: Pa
             result_json='{"ok":true}',
         )
     )
-    events = telemetry.recent()
+    events = audit.recent()
     assert len(events) == 1
     assert events[0].arguments_json.startswith("{")
     assert events[0].result_json.startswith("{")
@@ -179,7 +179,7 @@ def test_invocation_telemetry_captures_payloads_and_can_be_disabled(tmp_path: Pa
         assert config is not None
         config.logging_enabled = False
 
-    telemetry.record(
+    audit.record(
         Invocation(
             module="gitlab",
             tool="gitlab_projects",
@@ -187,7 +187,7 @@ def test_invocation_telemetry_captures_payloads_and_can_be_disabled(tmp_path: Pa
             duration_ms=1,
         )
     )
-    assert len(telemetry.recent()) == 1
+    assert len(audit.recent()) == 1
     engine.dispose()
 
 

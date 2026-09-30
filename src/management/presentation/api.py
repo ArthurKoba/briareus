@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from common.account_contracts import AccountList, InvocationEvent
 from common.models import JsonObject
-from management.application.services import AccountService, TelemetryService
+from management.application.services import AccountService, InvocationAuditService
 from management.domain.accounts import Provider
 from management.domain.telemetry import Invocation
 
@@ -16,11 +16,11 @@ class ApiServices:
     def __init__(
         self,
         accounts: AccountService,
-        telemetry: TelemetryService,
+        audit: InvocationAuditService,
         service_token: str,
     ) -> None:
         self.accounts = accounts
-        self.telemetry = telemetry
+        self.audit = audit
         self.service_token = service_token
 
 
@@ -56,14 +56,14 @@ def build_internal_router(services: ApiServices) -> APIRouter:
         event: InvocationEvent,
         _authorized: None = Depends(authorize),
     ) -> None:
-        services.telemetry.record(Invocation.model_validate(event.model_dump()))
+        services.audit.record(Invocation.model_validate(event.model_dump()))
 
     @router.get("/events/recent")
     def recent_events(
         limit: Annotated[int, Query(ge=1, le=1000)] = 100,
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        events = services.telemetry.recent(limit=limit)
+        events = services.audit.recent(limit=limit)
         return {
             "events": [event.model_dump(mode="json") for event in events],
             "count": len(events),

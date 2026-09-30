@@ -5,15 +5,17 @@ from types import SimpleNamespace
 
 import pytest
 from cryptography.fernet import Fernet
+from starlette.datastructures import FormData
 
 pytest.importorskip("starlette_admin")
 
 from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
+    InvocationAuditService,
     ManagementConfigService,
-    TelemetryService,
 )
+from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
     Base,
@@ -27,7 +29,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
 )
-from management.presentation.admin import _display_invocation_tool, build_admin
+from management.presentation.admin import SettingsView, _display_invocation_tool, build_admin
 
 
 def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) -> None:
@@ -53,11 +55,11 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
         cipher,
         ProviderConnectionVerifier(),
     )
-    telemetry = TelemetryService(SqlAlchemyInvocationRepository(sessions))
+    audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
     config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
     files = FileAdminStore(FileSettings(root=tmp_path / "files"))
 
-    admin = build_admin(engine, settings, cipher, accounts, telemetry, config, files)
+    admin = build_admin(engine, settings, cipher, accounts, audit, config, files)
 
     assert admin.base_url == "/admin"
     assert admin.index_view.path == "/"
@@ -78,3 +80,50 @@ def test_analysis_invocation_tool_uses_public_semantic_name() -> None:
     assert _display_invocation_tool(None, old) == "analyze_byte_region"
     assert _display_invocation_tool(None, current) == "analyze_byte_region"
     assert _display_invocation_tool(None, other) == "file_list"
+
+
+def test_invocation_audit_service_records_and_clears_admin_history(tmp_path: Path) -> None:
+    database = tmp_path / "audit.sqlite3"
+    engine, sessions = create_database(f"sqlite:///{database}")
+    Base.metadata.create_all(engine)
+    with sessions.begin() as session:
+        session.add(ManagementConfigRecord(id=1))
+
+    audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
+    audit.record(
+        Invocation(
+            module="analysis",
+            tool="analyze_byte_region",
+            status="success",
+            duration_ms=5.5,
+        )
+    )
+
+    recent = audit.recent()
+    assert len(recent) == 1
+    assert recent[0].tool == "analyze_byte_region"
+    assert audit.clear() == 1
+    assert audit.recent() == []
+    engine.dispose()
+
+
+def test_admin_settings_parse_invocation_audit_controls() -> None:
+    config = SettingsView._form_config(
+        FormData(
+            {
+                "logging_enabled": "on",
+                "logging_capture_payloads": "on",
+                "logging_retention_days": "14",
+                "logging_max_records": "5000",
+                "file_retention_days": "30",
+                "file_cleanup_limit": "1000",
+                "maintenance_interval_minutes": "15",
+            }
+        )
+    )
+
+    assert config.logging_enabled is True
+    assert config.logging_capture_payloads is True
+    assert config.logging_retention_days == 14
+    assert config.logging_max_records == 5000
+    assert config.maintenance_interval_minutes == 15

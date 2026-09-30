@@ -147,3 +147,31 @@ management have no public domains. Gateway routes the public MCP surfaces and Ad
 to the corresponding private service.
 
 Native Ghidra remains private; ChatGPT uses `/analysis/mcp`.
+
+
+## OpenTelemetry / OTLP metrics
+
+Every runtime exports the same service name (`mcp-bridge`) and a distinct
+instrumentation/resource scope: `auth`, `gateway`, `management`, `github`,
+`gitlab`, `files`, `web`, `analysis`, or `ghidra`.
+
+OTLP metrics are optional. With no endpoint configured the exporter is disabled
+and runtime behavior is unchanged. Configure these shared environment values in
+Coolify when the collector is ready:
+
+```text
+OTEL_SERVICE_NAME=mcp-bridge
+OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.kobanexus.ru
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20<token>
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
+OTEL_EXPORTER_OTLP_TIMEOUT=10000
+```
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` is a base URL and `/v1/metrics` is appended.
+Use `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` instead when the receiver requires an
+exact metrics URL. Header values use the standard OTLP environment key/value
+format and may be percent-encoded.
+
+Invocation arguments, results, account IDs, credentials and error messages are
+not exported to OTLP. The Management invocation audit remains a separate,
+redacted local operator log under MCP Calls.

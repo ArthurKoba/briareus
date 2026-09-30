@@ -298,6 +298,8 @@ class AnalysisToolProvider(Provider):
                 "description": tool.description,
                 "parameters": tool.parameters,
             }
+            if not (tool.description or "").strip():
+                violations.append(f"{tool.name}: missing public description")
             encoded = json.dumps(public_metadata, ensure_ascii=False, default=str)
             leaked = analysis_surface_violations(encoded)
             if leaked:
@@ -348,8 +350,14 @@ class AnalysisToolProvider(Provider):
             for name, parameter in signature.parameters.items()
         }
         signature_target.__annotations__["return"] = signature.return_annotation
-        description = analysis_text(backend_tool.description or "")
+        description = analysis_text(backend_tool.description or "").strip()
         title = _backend_tool_title(backend_tool)
+        if not description:
+            description = (
+                "Run the "
+                + analysis_name.replace("_", " ")
+                + " analysis operation."
+            )
         if argument_aliases:
             description = _rewrite_catalog_text(description, argument_aliases)
             if title:

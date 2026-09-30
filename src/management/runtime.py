@@ -9,11 +9,12 @@ from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from common.observability import announce_runtime_started, build_observability
 from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
+    InvocationAuditService,
     ManagementConfigService,
-    TelemetryService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 settings = ManagementSettings()
 settings.validate_bootstrap()
+_observability = build_observability("management")
+announce_runtime_started(_observability, "management")
 settings.database_path.parent.mkdir(parents=True, exist_ok=True)
 engine, sessions = create_database(settings.database_url)
 if ensure_zero_state_schema(engine):
@@ -46,7 +49,7 @@ config_repository = SqlAlchemyManagementConfigRepository(sessions)
 config_service = ManagementConfigService(config_repository)
 config_service.get()
 accounts = AccountService(account_repository, cipher, ProviderConnectionVerifier())
-telemetry = TelemetryService(invocation_repository)
+audit = InvocationAuditService(invocation_repository)
 files = FileAdminStore(FileSettings())
 
 
@@ -56,7 +59,7 @@ async def _maintenance_loop() -> None:
         try:
             config = await asyncio.to_thread(config_service.get)
             interval_seconds = config.maintenance_interval_minutes * 60
-            await asyncio.to_thread(telemetry.cleanup)
+            await asyncio.to_thread(audit.cleanup)
             if config.file_auto_cleanup_enabled:
                 await asyncio.to_thread(
                     files.cleanup,
@@ -97,7 +100,7 @@ app.include_router(
     build_internal_router(
         ApiServices(
             accounts=accounts,
-            telemetry=telemetry,
+            audit=audit,
             service_token=settings.service_token,
         )
     )
@@ -109,5 +112,5 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-admin = build_admin(engine, settings, cipher, accounts, telemetry, config_service, files)
+admin = build_admin(engine, settings, cipher, accounts, audit, config_service, files)
 admin.mount_to(app)
