@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from common.observability import announce_runtime_started, build_observability
 from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 settings = ManagementSettings()
 settings.validate_bootstrap()
+_observability = build_observability("management")
+announce_runtime_started(_observability, "management")
 settings.database_path.parent.mkdir(parents=True, exist_ok=True)
 engine, sessions = create_database(settings.database_url)
 if ensure_zero_state_schema(engine):
