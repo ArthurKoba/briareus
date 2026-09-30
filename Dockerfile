@@ -12,7 +12,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 
@@ -21,7 +21,7 @@ FROM dependencies AS runtime-base
 ARG BUILD_SHA=unknown
 ARG BUILD_TIME=unknown
 
-ENV FASTMCP_HOME=/data/fastmcp \
+ENV FASTMCP_HOME=/auth \
     FILE_ROOT=/files \
     HOME=/home/bridge \
     BUILD_SHA=${BUILD_SHA} \
@@ -29,8 +29,8 @@ ENV FASTMCP_HOME=/data/fastmcp \
 
 COPY docker-entrypoint.sh /usr/local/bin/bridge-entrypoint
 RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
-    && mkdir -p /data/fastmcp /files/objects/sha256 /files/tmp /management /home/bridge \
-    && chown -R 1000:1000 /data /files /management /home/bridge
+    && mkdir -p /auth /files/objects/sha256 /files/tmp /management /home/bridge \
+    && chown -R 1000:1000 /auth /files /management /home/bridge
 
 COPY src/common ./src/common
 

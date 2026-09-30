@@ -185,7 +185,6 @@ class AuthServiceSettings(ProcessSettings):
         (),
         validation_alias="GITHUB_OAUTH_ALLOWED_USERS",
     )
-    service_token: str = Field("", validation_alias="AUTH_SERVICE_TOKEN")
     github_token_cache_ttl_seconds: int = Field(
         300,
         ge=0,
@@ -198,7 +197,6 @@ class AuthServiceSettings(ProcessSettings):
         "oauth_client_id",
         "oauth_client_secret",
         "oauth_jwt_signing_key",
-        "service_token",
         mode="before",
     )
     @classmethod
@@ -221,7 +219,6 @@ class AuthServiceSettings(ProcessSettings):
                 ("GITHUB_OAUTH_CLIENT_SECRET", self.oauth_client_secret),
                 ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
                 ("GITHUB_OAUTH_ALLOWED_USERS", self.oauth_allowed_users),
-                ("AUTH_SERVICE_TOKEN", self.service_token),
             )
             if not value
         ]
@@ -229,25 +226,33 @@ class AuthServiceSettings(ProcessSettings):
             raise ValueError("missing auth bootstrap settings: " + ", ".join(missing))
 
 
-class AuthClientSettings(ProcessSettings):
+class GatewayAuthSettings(ProcessSettings):
     enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
-    url: str = Field("http://auth:8000", validation_alias="AUTH_URL")
-    service_token: str = Field("", validation_alias="AUTH_SERVICE_TOKEN")
     public_base_url: str = Field(
         "https://mcp.koba-nexus.ru",
         validation_alias="OAUTH_BASE_URL",
     )
-    timeout_seconds: float = Field(
-        10,
-        gt=0,
-        le=60,
-        validation_alias="AUTH_TIMEOUT_SECONDS",
+    oauth_jwt_signing_key: str = Field(
+        "",
+        validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY",
+    )
+    oauth_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(
+        (),
+        validation_alias="GITHUB_OAUTH_ALLOWED_USERS",
     )
 
-    @field_validator("url", "service_token", "public_base_url", mode="before")
+    @field_validator("public_base_url", "oauth_jwt_signing_key", mode="before")
     @classmethod
     def _strip_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("oauth_allowed_users", mode="before")
+    @classmethod
+    def _parse_oauth_users(cls, value: object) -> object:
+        parsed = _tuple_value(value)
+        if isinstance(parsed, tuple):
+            return tuple(item.casefold() for item in parsed)
+        return parsed
 
     def validate_bootstrap(self) -> None:
         if not self.enabled:
@@ -255,8 +260,8 @@ class AuthClientSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("AUTH_URL", self.url),
-                ("AUTH_SERVICE_TOKEN", self.service_token),
+                ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
+                ("GITHUB_OAUTH_ALLOWED_USERS", self.oauth_allowed_users),
                 ("OAUTH_BASE_URL", self.public_base_url),
             )
             if not value

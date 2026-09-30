@@ -1,40 +1,55 @@
 from __future__ import annotations
 
-import httpx
 from fastmcp.server.auth import AccessToken, TokenVerifier
-from common.settings import AuthClientSettings
+from fastmcp.server.auth.jwt_issuer import JWTIssuer, derive_jwt_key
+from pydantic import AnyHttpUrl
+
+from common.settings import GatewayAuthSettings
 
 
-class AuthServiceTokenVerifier(TokenVerifier):
-    """Validate one exact MCP resource through the private auth runtime."""
+class LocalAuthTokenVerifier(TokenVerifier):
+    """Validate FastMCP access tokens locally without calling the auth runtime."""
 
-    def __init__(self, settings: AuthClientSettings, resource: str) -> None:
+    def __init__(self, settings: GatewayAuthSettings, resource: str) -> None:
         super().__init__(required_scopes=["read:user"])
-        self.settings = settings
         self.resource = resource
+        self.allowed_users = frozenset(settings.oauth_allowed_users)
+        signing_key = derive_jwt_key(
+            low_entropy_material=settings.oauth_jwt_signing_key,
+            salt="fastmcp-jwt-signing-key",
+        )
+        self._issuer = JWTIssuer(
+            issuer=str(AnyHttpUrl(settings.public_base_url)),
+            audience=resource,
+            signing_key=signing_key,
+        )
 
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
-            async with httpx.AsyncClient(
-                timeout=self.settings.timeout_seconds,
-            ) as client:
-                response = await client.post(
-                    f"{self.settings.url.rstrip('/')}/internal/verify",
-                    headers={
-                        "Authorization": f"Bearer {self.settings.service_token}",
-                    },
-                    json={
-                        "token": token,
-                        "resource": self.resource,
-                    },
-                )
-        except httpx.RequestError:
+            payload = self._issuer.verify_token(token)
+        except Exception:
             return None
 
-        if response.status_code != 200:
+        upstream_claims = payload.get("upstream_claims")
+        if not isinstance(upstream_claims, dict):
             return None
 
-        try:
-            return AccessToken.model_validate(response.json())
-        except (ValueError, TypeError):
+        login = str(upstream_claims.get("login", "")).casefold()
+        if not login or login not in self.allowed_users:
             return None
+
+        scope = payload.get("scope", "")
+        scopes = scope.split() if isinstance(scope, str) and scope else []
+        required = set(self.required_scopes)
+        if not required.issubset(scopes):
+            return None
+
+        return AccessToken(
+            token=token,
+            client_id=str(payload.get("client_id", "")),
+            scopes=scopes,
+            expires_at=int(payload["exp"]) if payload.get("exp") is not None else None,
+            subject=str(upstream_claims.get("sub") or "") or None,
+            resource=self.resource,
+            claims=payload,
+        )

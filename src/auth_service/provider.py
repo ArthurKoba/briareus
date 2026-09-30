@@ -3,16 +3,19 @@ from __future__ import annotations
 import base64
 import json
 from contextvars import ContextVar
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from fastmcp.server.auth import AccessToken
+from fastmcp.server.auth import AccessToken as FastMCPAccessToken
 from fastmcp.server.auth.jwt_issuer import JWTIssuer
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.adapters.pydantic import PydanticAdapter
+from mcp.server.auth.provider import AccessToken as SDKAccessToken
 from mcp.server.auth.provider import (
     AuthorizationCode,
     AuthorizationParams,
     RefreshToken,
+    TokenError,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
@@ -127,6 +130,28 @@ class MultiResourceGitHubProvider(GitHubProvider):
             return audience[0]
         return None
 
+    async def _extract_upstream_claims(
+        self,
+        idp_tokens: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        access_token = idp_tokens.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise TokenError("invalid_grant", "GitHub access token is missing")
+
+        validated = await self._token_validator.verify_token(access_token)
+        if validated is None:
+            raise TokenError("invalid_grant", "GitHub access token is invalid")
+
+        claims = dict(validated.claims or {})
+        login = str(claims.get("login", "")).casefold()
+        if not login or login not in self.settings.oauth_allowed_users:
+            raise TokenError("invalid_grant", "GitHub user is not allowed")
+
+        return {
+            "login": login,
+            "sub": validated.subject or claims.get("sub"),
+        }
+
     async def authorize(
         self,
         client: OAuthClientInformationFull,
@@ -234,7 +259,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
 
     async def revoke_token(
         self,
-        token: AccessToken | RefreshToken,
+        token: SDKAccessToken | RefreshToken,
     ) -> None:
         audience = self._jwt_audience_unverified(token.token)
         try:
@@ -248,7 +273,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
         finally:
             self._resource_context.reset(context)
 
-    async def load_access_token(self, token: str) -> AccessToken | None:
+    async def load_access_token(self, token: str) -> FastMCPAccessToken | None:
         audience = self._jwt_audience_unverified(token)
         try:
             resource = self.canonical_resource(audience)
@@ -263,9 +288,12 @@ class MultiResourceGitHubProvider(GitHubProvider):
 
         if access is None:
             return None
-        return access.model_copy(
-            update={
-                "token": token,
-                "resource": resource,
-            }
+        return FastMCPAccessToken(
+            token=token,
+            client_id=access.client_id,
+            scopes=list(access.scopes),
+            expires_at=access.expires_at,
+            resource=resource,
+            subject=access.subject,
+            claims=dict(access.claims or {}),
         )
