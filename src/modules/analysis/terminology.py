@@ -194,7 +194,10 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bdecompilation\b", re.IGNORECASE), "behavior inspection"),
     (re.compile(r"\bdecompiled\b", re.IGNORECASE), "behavior view"),
     (re.compile(r"\bdecompile\b", re.IGNORECASE), "inspect behavior"),
-    (re.compile(r"\bre-disassembl(?:e|es|ed|y)\b", re.IGNORECASE), "re-analyze low-level operations"),
+    (
+        re.compile(r"\bre-disassembl(?:e|es|ed|y)\b", re.IGNORECASE),
+        "re-analyze low-level operations",
+    ),
     (re.compile(r"\bdisassembled\b", re.IGNORECASE), "decoded low-level"),
     (re.compile(r"\bdisassemble\b", re.IGNORECASE), "analyze low-level operations"),
     (re.compile(r"\bdisassembly\b", re.IGNORECASE), "low-level action view"),
