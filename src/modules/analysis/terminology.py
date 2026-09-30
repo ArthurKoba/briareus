@@ -164,6 +164,22 @@ _TOOL_TOKENS: dict[str, str] = {
 }
 
 _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"GHIDRA_MCP_ALLOW_SCRIPTS", re.IGNORECASE),
+        "analysis scripting setting",
+    ),
+    (
+        re.compile(r"GhidraServerManager", re.IGNORECASE),
+        "repository manager",
+    ),
+    (
+        re.compile(r"set_decompiler_comment", re.IGNORECASE),
+        "set_behavior_annotation",
+    ),
+    (
+        re.compile(r"set_disassembly_comment", re.IGNORECASE),
+        "set_low_level_annotation",
+    ),
     (re.compile(r"\bGhidra Server\b", re.IGNORECASE), "repository service"),
     (re.compile(r"\bGhidra GUI\b", re.IGNORECASE), "desktop analysis client"),
     (re.compile(r"\bGhidra-native\b", re.IGNORECASE), "native analysis"),
@@ -194,6 +210,7 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bdecompilation\b", re.IGNORECASE), "behavior inspection"),
     (re.compile(r"\bdecompiled\b", re.IGNORECASE), "behavior view"),
     (re.compile(r"\bdecompile\b", re.IGNORECASE), "inspect behavior"),
+    (re.compile(r"\bdisasm\b", re.IGNORECASE), "low-level view"),
     (
         re.compile(r"\bre-disassembl(?:e|es|ed|y)\b", re.IGNORECASE),
         "re-analyze low-level operations",
@@ -202,6 +219,9 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bdisassemble\b", re.IGNORECASE), "analyze low-level operations"),
     (re.compile(r"\bdisassembly\b", re.IGNORECASE), "low-level action view"),
     (re.compile(r"\bassembly\b", re.IGNORECASE), "low-level operations"),
+    (re.compile(r"\bmemory\b", re.IGNORECASE), "data space"),
+    (re.compile(r"\binstructions\b", re.IGNORECASE), "low-level operations"),
+    (re.compile(r"\binstruction\b", re.IGNORECASE), "low-level operation"),
     (re.compile(r"\bcall graph\b", re.IGNORECASE), "link map"),
     (re.compile(r"\bcross[- ]references?\b", re.IGNORECASE), "links"),
     (re.compile(r"\bxrefs?\b", re.IGNORECASE), "links"),
@@ -217,10 +237,10 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 _FORBIDDEN_ANALYSIS_TERMS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bghidra\b", re.IGNORECASE),
+    re.compile(r"ghidra", re.IGNORECASE),
     re.compile(r"\breverse(?:\s+engineering)?\b", re.IGNORECASE),
-    re.compile(r"\bdecompil\w*\b", re.IGNORECASE),
-    re.compile(r"\bdisassembl\w*\b", re.IGNORECASE),
+    re.compile(r"decomp", re.IGNORECASE),
+    re.compile(r"disasm", re.IGNORECASE),
     re.compile(r"\bassembly\b", re.IGNORECASE),
     re.compile(r"\bp[- ]?code\b", re.IGNORECASE),
     re.compile(r"\bopcode\b", re.IGNORECASE),
@@ -229,6 +249,8 @@ _FORBIDDEN_ANALYSIS_TERMS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bdbgeng\b", re.IGNORECASE),
     re.compile(r"\bWinDbg\b", re.IGNORECASE),
     re.compile(r"\bJython\b", re.IGNORECASE),
+    re.compile(r"\bmemory\b", re.IGNORECASE),
+    re.compile(r"\binstructions?\b", re.IGNORECASE),
 )
 
 _RESULT_KEY_ALIASES: dict[str, str] = {

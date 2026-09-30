@@ -346,3 +346,34 @@ def test_plural_backend_terms_are_neutralized() -> None:
     assert not analysis_surface_violations(public)
     assert "re-analyze low-level operations" in public
     assert "behavior engines" in public
+
+
+
+def test_public_metadata_hardening_terms_are_neutralized() -> None:
+    source = (
+        "GhidraServerManager requires GHIDRA_MCP_ALLOW_SCRIPTS. "
+        "Include Disasm, inspect memory, decode instructions, "
+        "and replace set_decompiler_comment / set_disassembly_comment."
+    )
+    public = analysis_text(source)
+    assert not analysis_surface_violations(public)
+    lowered = public.casefold()
+    assert "repository manager" in lowered
+    assert "analysis scripting setting" in lowered
+    assert "low-level view" in lowered
+    assert "data space" in lowered
+    assert "low-level operations" in lowered
+    assert "set_behavior_annotation" in public
+    assert "set_low_level_annotation" in public
+
+
+def test_hardening_guard_rejects_embedded_backend_identifiers() -> None:
+    for leaked in (
+        "GHIDRA_MCP_ALLOW_SCRIPTS",
+        "GhidraServerManager",
+        "Include Disasm",
+        "memory bytes",
+        "instructions",
+        "set_decompiler_comment",
+    ):
+        assert analysis_surface_violations(leaked)
