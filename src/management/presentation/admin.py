@@ -374,7 +374,7 @@ class ReverseView(CustomView):
         for raw in project_items:
             if not isinstance(raw, dict):
                 continue
-            item = cast(JsonObject, raw)
+            item = raw
             group = str(item.get("group") or "Root")
             if group_filter and group != group_filter:
                 continue

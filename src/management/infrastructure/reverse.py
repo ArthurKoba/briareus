@@ -272,14 +272,14 @@ class ReverseAdminClient:
                 )
 
         scores = [
-            float(item["effective_score"])
+            float(score)
             for item in results
-            if isinstance(item.get("effective_score"), (int, float))
+            if isinstance((score := item.get("effective_score")), (int, float))
         ]
         raw_scores = [
-            float(item["completeness_score"])
+            float(score)
             for item in results
-            if isinstance(item.get("completeness_score"), (int, float))
+            if isinstance((score := item.get("completeness_score")), (int, float))
         ]
 
         complete = sum(score >= 80 for score in scores)
