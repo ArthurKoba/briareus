@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import mcp.types as mt
@@ -55,11 +56,24 @@ class ToolObservabilityMiddleware(Middleware):
         provider = self.module if self.module in {"github", "gitlab"} else ""
         request_id = self._request_id(context)
         arguments_json = render_payload(context.message.arguments or {})
-        try:
-            result = await call_next(context)
-        except Exception as exc:
-            self._submit(
-                InvocationEvent(
+        span_attributes: dict[str, object] = {
+            "mcp.scope": self.module,
+            "mcp.tool": context.message.name,
+        }
+        if provider:
+            span_attributes["mcp.provider"] = provider
+        if request_id:
+            span_attributes["mcp.request.id"] = request_id
+
+        tool_logger = logging.getLogger(f"mcp_bridge.{self.module}")
+        with self.sink.trace_span(
+            f"mcp.tool.{context.message.name}",
+            span_attributes,
+        ):
+            try:
+                result = await call_next(context)
+            except Exception as exc:
+                event = InvocationEvent(
                     request_id=request_id,
                     module=self.module,
                     tool=context.message.name,
@@ -71,19 +85,30 @@ class ToolObservabilityMiddleware(Middleware):
                     arguments_json=arguments_json,
                     error_message=render_error(exc),
                 )
+                self._submit(event)
+                tool_logger.exception(
+                    "MCP tool call failed scope=%s tool=%s",
+                    self.module,
+                    context.message.name,
+                    extra={
+                        "mcp.scope": self.module,
+                        "mcp.tool": context.message.name,
+                        "mcp.request.id": request_id,
+                    },
+                )
+                raise
+
+            self._submit(
+                InvocationEvent(
+                    request_id=request_id,
+                    module=self.module,
+                    tool=context.message.name,
+                    account_id=account_id,
+                    provider=provider,
+                    status="success",
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    arguments_json=arguments_json,
+                    result_json=render_payload(result),
+                )
             )
-            raise
-        self._submit(
-            InvocationEvent(
-                request_id=request_id,
-                module=self.module,
-                tool=context.message.name,
-                account_id=account_id,
-                provider=provider,
-                status="success",
-                duration_ms=(time.monotonic() - started) * 1000,
-                arguments_json=arguments_json,
-                result_json=render_payload(result),
-            )
-        )
-        return result
+            return result
