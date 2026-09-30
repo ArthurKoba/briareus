@@ -100,6 +100,7 @@ class GitHubCollabClient(GitHubReviewClient, GitHubPullClient):
         merge_method: str = "squash",
         commit_title: str | None = None,
         commit_message: str | None = None,
+        expected_head_sha: str | None = None,
     ) -> JsonObject:
         self.assert_required_reviews(repository, number)
         return super().merge_pull_request(
@@ -108,6 +109,7 @@ class GitHubCollabClient(GitHubReviewClient, GitHubPullClient):
             merge_method,
             commit_title,
             commit_message,
+            expected_head_sha,
         )
 
     def merge_branch(

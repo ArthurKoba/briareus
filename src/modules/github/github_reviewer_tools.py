@@ -238,6 +238,26 @@ def register_github_reviewer_tools(
             commit_id,
         )
 
+    @mcp.tool(title="GitHub reviewer merge pull request", annotations=write_annotations)
+    def github_reviewer_merge_pull_request(
+        account_id: str,
+        repository: str,
+        number: int,
+        merge_method: str = "squash",
+        commit_title: str | None = None,
+        commit_message: str | None = None,
+        expected_head_sha: str | None = None,
+    ) -> JsonObject:
+        """Merge a same-repository PR after validating its current head and required checks."""
+        return client_factory(account_id).merge_pull_request(
+            repository,
+            number,
+            merge_method,
+            commit_title,
+            commit_message,
+            expected_head_sha,
+        )
+
     @mcp.tool(title="GitHub reviewer reply to comment", annotations=write_annotations)
     def github_reviewer_reply_to_review_comment(
         account_id: str,

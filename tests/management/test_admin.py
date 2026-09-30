@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from cryptography.fernet import Fernet
@@ -26,7 +27,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
 )
-from management.presentation.admin import build_admin
+from management.presentation.admin import _display_invocation_tool, build_admin
 
 
 def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) -> None:
@@ -67,3 +68,13 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     assert "Settings" in labels
     assert "Files" in labels
     engine.dispose()
+
+
+def test_analysis_invocation_tool_uses_public_semantic_name() -> None:
+    old = SimpleNamespace(module="analysis", tool="disassemble_bytes")
+    current = SimpleNamespace(module="analysis", tool="analyze_byte_region")
+    other = SimpleNamespace(module="files", tool="file_list")
+
+    assert _display_invocation_tool(None, old) == "analyze_byte_region"
+    assert _display_invocation_tool(None, current) == "analyze_byte_region"
+    assert _display_invocation_tool(None, other) == "file_list"

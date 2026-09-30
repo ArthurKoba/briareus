@@ -9,6 +9,7 @@ from pydantic import AliasChoices, ConfigDict, Field, create_model
 from pydantic.fields import FieldInfo
 
 from common.models import JsonObject, JsonValue, StrictModel, json_object
+from common.public_tool_names import analysis_public_tool_name
 
 Surface = Literal["ghidra", "analysis"]
 
@@ -60,6 +61,8 @@ _ARGUMENT_ALIASES: dict[str, str] = {
     "disassemble_first": "analyze_low_level_first",
     "include_assembly_patterns": "include_low_level_patterns",
     "context_instructions": "context_operations",
+    "gzf_path": "package_path",
+    "gar_path": "archive_path",
 }
 
 _TOOL_ARGUMENT_ALIASES: dict[str, dict[str, str]] = {
@@ -102,42 +105,13 @@ _ARGUMENT_TOKENS: dict[str, str] = {
     "malware": "behavior",
     "instructions": "operations",
     "instruction": "operation",
+    "functions": "actions",
+    "function": "action",
+    "xrefs": "links",
+    "xref": "link",
+    "thunks": "forwarders",
+    "thunk": "forwarder",
 }
-
-_TOOL_NAME_ALIASES: dict[str, str] = {
-    "disassemble_bytes": "analyze_byte_region",
-    "force_decompile": "refresh_action_behavior",
-    "get_assembly_context": "get_low_level_context",
-    "get_action_pcode": "get_action_ir",
-    "detect_malware_behaviors": "detect_behavior_patterns",
-    "run_ghidra_script": "run_analysis_script",
-    "run_script_inline": "run_analysis_script_inline",
-    "exit_ghidra": "stop_analysis_runtime",
-    "read_memory": "read_data_region",
-    "inspect_memory_content": "inspect_data_region",
-    "create_memory_block": "create_data_block",
-    "add_memory_reference": "add_data_link",
-    "remove_reference": "remove_link",
-    "get_address_spaces": "get_data_spaces",
-    "list_segments": "list_data_regions",
-    "search_instructions": "search_low_level_operations",
-    "server_connect": "connect_repository_service",
-    "server_disconnect": "disconnect_repository_service",
-}
-
-_TOOL_PHRASES: tuple[tuple[str, str], ...] = (
-    ("analyze_call_graph", "analyze_link_map"),
-    ("get_function_callers", "get_inbound_actions"),
-    ("get_function_callees", "get_outbound_actions"),
-    ("decompile_function", "inspect_action_behavior"),
-    ("disassemble_function", "inspect_low_level_action"),
-    ("rename_function", "name_action"),
-    ("function_callers", "inbound_actions"),
-    ("function_callees", "outbound_actions"),
-    ("call_graph", "link_map"),
-    ("cross_references", "links"),
-    ("cross_reference", "link"),
-)
 
 _TOOL_TOKENS: dict[str, str] = {
     "ghidra": "analysis",
@@ -163,7 +137,40 @@ _TOOL_TOKENS: dict[str, str] = {
     "xref": "link",
 }
 
+_GROUP_ALIASES: dict[str, str] = {
+    "function": "actions",
+    "xref": "links",
+    "malware": "behavior patterns",
+    "headless": "project runtime",
+    "server": "repository",
+    "getter": "context",
+    "comment": "annotations",
+}
+
+
 _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"re_kb\.action nodes on bsim Postgres", re.IGNORECASE),
+        "analysis records in archive storage",
+    ),
+    (
+        re.compile(r"DAT_\*-style autogen", re.IGNORECASE),
+        "auto-generated placeholders",
+    ),
+    (re.compile(r"FUN_\*", re.IGNORECASE), "default-named"),
+    (re.compile(r"\bxrefed\b", re.IGNORECASE), "linked"),
+    (re.compile(r"\bDomainFile\b", re.IGNORECASE), "project file"),
+    (
+        re.compile(r"\bClearFlowAndRepairCmd\b", re.IGNORECASE),
+        "runtime repair command",
+    ),
+    (re.compile(r"\bSwing thread\b", re.IGNORECASE), "runtime command thread"),
+    (re.compile(r"\bJava source\b", re.IGNORECASE), "source code"),
+    (re.compile(r"\bheadless\b", re.IGNORECASE), "isolated"),
+    (re.compile(r"\bBSim\b", re.IGNORECASE), "archive storage"),
+    (re.compile(r"\bbatch_remove_function_tags\b", re.IGNORECASE), "remove_action_tag"),
+    (re.compile(r"\bthunks\b", re.IGNORECASE), "forwarders"),
+    (re.compile(r"\bthunk\b", re.IGNORECASE), "forwarder"),
     (re.compile(r"\bfunction_address\b", re.IGNORECASE), "action_address"),
     (re.compile(r"\bRE documentation\b", re.IGNORECASE), "analysis documentation"),
     (re.compile(r"add_function_tag", re.IGNORECASE), "add_action_tag"),
@@ -266,6 +273,29 @@ _FORBIDDEN_ANALYSIS_TERMS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bJython\b", re.IGNORECASE),
     re.compile(r"\bmemory\b", re.IGNORECASE),
     re.compile(r"\binstructions?\b", re.IGNORECASE),
+    re.compile(
+        r"(?<![A-Za-z0-9])functions?(?:_|(?![A-Za-z0-9]))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9])xrefs?(?:_|(?![A-Za-z0-9]))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9])thunks?(?:_|(?![A-Za-z0-9]))",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bxrefed\b", re.IGNORECASE),
+    re.compile(r"\bheadless\b", re.IGNORECASE),
+    re.compile(r"\bBSim\b", re.IGNORECASE),
+    re.compile(r"\bDomainFile\b", re.IGNORECASE),
+    re.compile(r"\bClearFlowAndRepairCmd\b", re.IGNORECASE),
+    re.compile(r"\bSwing\b", re.IGNORECASE),
+    re.compile(r"\bJava source\b", re.IGNORECASE),
+    re.compile(r"FUN_\*", re.IGNORECASE),
+    re.compile(r"DAT_\*", re.IGNORECASE),
+    re.compile(r"(?<![A-Za-z0-9])gzf_path(?![A-Za-z0-9])", re.IGNORECASE),
+    re.compile(r"(?<![A-Za-z0-9])gar_path(?![A-Za-z0-9])", re.IGNORECASE),
 )
 
 _RESULT_KEY_ALIASES: dict[str, str] = {
@@ -387,15 +417,12 @@ def analysis_argument_name(
 
 
 def analysis_tool_name(ghidra_name: str) -> str:
-    direct = _TOOL_NAME_ALIASES.get(ghidra_name)
-    if direct is not None:
-        return direct
-    value = ghidra_name
-    for source, target in _TOOL_PHRASES:
-        value = value.replace(source, target)
-    parts = value.split("_")
-    translated = [_TOOL_TOKENS.get(part, part) for part in parts]
-    return "_".join(translated)
+    return analysis_public_tool_name(ghidra_name)
+
+
+def analysis_group_name(group_name: str) -> str:
+    direct = _GROUP_ALIASES.get(group_name.strip().casefold())
+    return direct if direct is not None else analysis_text(group_name)
 
 
 def analysis_text(text: str) -> str:

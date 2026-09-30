@@ -13,7 +13,7 @@ def _backend_tool(name: str = "decompile_function"):
     return SimpleNamespace(
         name=name,
         title="Behavior view",
-        description="Decompile function and inspect callers",
+        description="Decompile function via function_name and inspect callers",
         input_schema={
             "type": "object",
             "properties": {
@@ -71,6 +71,8 @@ async def test_provider_adapts_live_backend_catalog(monkeypatch) -> None:
     assert tool.name == "inspect_action_behavior"
     assert "inspect behavior" in tool.description
     assert "inbound actions" in tool.description
+    assert "function_name" not in tool.description
+    assert "action_name" in tool.description
 
     properties = tool.parameters["properties"]
     assert set(properties) == {
@@ -329,3 +331,50 @@ def test_catalog_references_use_public_tool_names() -> None:
     assert "analyze_action_completeness" in encoded
     assert "action_address" in encoded
     assert "analysis documentation" in encoded
+
+
+def test_provider_rewrites_internal_argument_references_everywhere() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    backend = SimpleNamespace(
+        name="search_functions_enhanced",
+        title="Search Functions Enhanced",
+        description="Filter by min_xrefs/max_xrefs and is_thunk across max_functions.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "min_xrefs": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Minimum min_xrefs threshold",
+                },
+                "max_xrefs": {"type": "integer", "default": 10},
+                "is_thunk": {"type": "boolean", "default": False},
+                "max_functions": {"type": "integer", "default": 100},
+            },
+        },
+    )
+    tool = provider._adapt_tool(backend, "search_actions_enhanced")
+    provider._validate_public_catalog([tool])
+
+    assert set(tool.parameters["properties"]) == {
+        "min_links",
+        "max_links",
+        "is_forwarder",
+        "max_actions",
+    }
+    encoded = str(
+        {
+            "title": tool.title,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        }
+    ).casefold()
+    for leaked in ("function", "xref", "thunk"):
+        assert leaked not in encoded
+    assert "min_links" in encoded
+    assert "is_forwarder" in encoded
