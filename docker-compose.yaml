@@ -1,29 +1,135 @@
-services:
-  bridge:
-    build: .
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      OTEL_SERVICE_NAME: koba-mcp-bridge
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-      OTEL_TRACES_EXPORTER: otlp
-      OTEL_METRICS_EXPORTER: otlp
-      OTEL_LOGS_EXPORTER: otlp
-      OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
-    volumes:
-      - koba-artifacts:/artifacts
-    depends_on:
-      - otel-collector
+x-infisical: &infisical
+  INFISICAL_HOST: ${INFISICAL_HOST}
+  INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID}
+  INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
+  INFISICAL_BASE_PATH: ${INFISICAL_BASE_PATH:-/}
+  INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID}
+  INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET}
+  INFISICAL_VERIFY_TLS: ${INFISICAL_VERIFY_TLS:-true}
 
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
-    restart: unless-stopped
-    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+x-runtime: &runtime
+  image: ghcr.io/arthurkoba/mcp-bridge:latest
+  restart: unless-stopped
+
+services:
+  gateway:
+    <<: *runtime
+    expose:
+      - "8000"
+    command:
+      - /app/.venv/bin/uvicorn
+      - bridge.server:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      <<: *infisical
+      OAUTH_ENABLED: "true"
+      OAUTH_BASE_URL: ${OAUTH_BASE_URL:-https://mcp.koba-nexus.ru}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-mcp.koba-nexus.ru,localhost:*,127.0.0.1:*}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://mcp.koba-nexus.ru}
     volumes:
-      - ./deploy/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - fastmcp-data:/data/fastmcp
+    depends_on:
+      - github
+      - gitlab
+      - files
+      - curl
+      - analysis
+    networks:
+      - default
+      - coolify
+
+  github:
+    <<: *runtime
+    expose:
+      - "8000"
+    command:
+      - /app/.venv/bin/uvicorn
+      - modules.github.runtime:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      <<: *infisical
+
+  gitlab:
+    <<: *runtime
+    expose:
+      - "8000"
+    command:
+      - /app/.venv/bin/uvicorn
+      - modules.gitlab.runtime:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      <<: *infisical
+
+  files:
+    <<: *runtime
+    expose:
+      - "8000"
+    command:
+      - /app/.venv/bin/uvicorn
+      - modules.files.runtime:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      FILE_ROOT: /files
+    volumes:
+      - files-data:/files
+
+  curl:
+    <<: *runtime
+    expose:
+      - "8000"
+    command:
+      - /app/.venv/bin/uvicorn
+      - modules.curl.runtime:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      FILE_ROOT: /files
+    volumes:
+      - files-data:/files
+
+  analysis:
+    <<: *runtime
+    expose:
+      - "8000"
+    command:
+      - /app/.venv/bin/uvicorn
+      - modules.analysis.runtime:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      FILE_ROOT: /files
+      GHIDRA_MCP_URL: ${GHIDRA_MCP_URL:-http://bridge:8081/mcp}
+    volumes:
+      - files-data:/files
+    networks:
+      - default
+      - coolify
 
 volumes:
-  koba-artifacts:
-    name: koba-artifacts
+  files-data:
+    external: true
+    name: files-data
+  fastmcp-data:
+    external: true
+    name: fastmcp-data
+
+networks:
+  coolify:
+    external: true
+    name: coolify

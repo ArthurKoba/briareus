@@ -1,83 +1,49 @@
 # Architecture overview
 
-## Current platform
-
-The current Koba platform scope is intentionally narrow:
-
-- Secrets;
-- GitHub;
-- GitLab;
-- Ghidra;
-- Files/artifact storage;
-- HTTP/curl.
-
-Other future platform ideas are explicitly outside the current stabilization pass.
-
-```mermaid
-flowchart LR
-    C[ChatGPT / MCP clients] -->|OAuth + MCP| B[koba-mcp-bridge]
-
-    B --> S[Secrets resolver]
-    S --> I[Infisical]
-
-    B --> GH[GitHub]
-    B --> GL[GitLab]
-    B --> HTTP[HTTP / curl]
-    B --> F[Files / artifact store]
-    B --> GA[Ghidra adapters]
-    B -->|mounted MCP| GM[ghidra-mcp]
-
-    GH --> GitHub[GitHub API]
-    GL --> GitLab[GitLab instances]
-    HTTP --> Internet[HTTP endpoints]
-    F --> Store[(content-addressed storage)]
-    GM --> Ghidra[Ghidra workers]
-```
-
-## Stabilization direction
-
-The repository may remain a monorepo, but connector/runtime failure domains should become independent.
+MCP Bridge is a small public gateway that composes independent private modules.
 
 ```mermaid
 flowchart TB
-    Client[ChatGPT / MCP clients]
+    Client[ChatGPT / MCP clients] -->|OAuth + MCP| GW[gateway]
 
-    GW[gateway-mcp]
-    GH[github-mcp]
-    GL[gitlab-mcp]
-    FI[files-mcp]
-    HT[http-mcp]
-    GD[ghidra-mcp]
-    SEC[Infisical]
+    GW --> GH[github]
+    GW --> GL[gitlab]
+    GW --> FI[files]
+    GW --> CU[curl]
+    GW --> AN[analysis]
 
-    Client --> GW
-    Client --> GH
-    Client --> GL
-    Client --> FI
-    Client --> HT
-    Client --> GD
-
-    GW -. optional aggregation .-> GH
-    GW -. optional aggregation .-> GL
-    GW -. optional aggregation .-> FI
-    GW -. optional aggregation .-> HT
-    GW -. optional aggregation .-> GD
-
-    GH --> SEC
+    GH --> SEC[Infisical]
     GL --> SEC
-    HT --> SEC
+    GW --> SEC
+
+    FI --> STORE[(files-data)]
+    CU --> STORE
+    AN --> STORE
+    AN --> GD[native Ghidra bridge :8081]
 ```
 
-The aggregate gateway may remain for compatibility, while dedicated endpoints let a client attach only the capabilities it needs.
+## Source ownership
 
-## Design principles
+- `bridge` — public OAuth boundary and routing only.
+- `common` — shared provider-neutral runtime/secrets primitives.
+- `modules.github` — GitHub development/reviewer workflow.
+- `modules.gitlab` — GitLab profiles, repositories, MRs and CI.
+- `modules.files` — persistent content-addressed Files data plane.
+- `modules.curl` — structured HTTP request/download/stream support.
+- `modules.analysis` — Files-oriented analysis boundary over native Ghidra.
 
-- No process-global current account/project/provider state.
-- Explicit selectors such as `profile_id` and `project_id`.
-- Provider secrets are resolved internally and are never model-visible.
-- Infisical machine identities replace scattered provider credentials.
-- Connectors should fail and deploy independently.
-- Provider-side permissions remain authoritative; Koba adds guardrails.
-- Shared libraries are preferred over duplicated provider logic.
-- Files are the user-facing concept; immutable artifact IDs can remain an internal/public compatibility primitive.
-- Migrations are incremental: old credential env variables remain until each secret reference is accepted in production.
+Only `gateway` is public. Provider modules remain private Docker services.
+
+## Public surfaces
+
+```text
+/mcp
+/github/mcp
+/gitlab/mcp
+/files/mcp
+/http/mcp
+/analysis/mcp
+```
+
+Raw Ghidra remains a separate native backend. The analysis module translates between
+the Files model and native Ghidra contracts.
