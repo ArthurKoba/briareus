@@ -189,17 +189,19 @@ def test_auth_service_requires_public_base_url(monkeypatch) -> None:
         AuthServiceSettings().validate_bootstrap()
 
 
-def test_observability_settings_resolve_standard_otlp_metrics_endpoint() -> None:
+def test_observability_settings_resolve_standard_otlp_signal_endpoints() -> None:
     settings = ObservabilitySettings(
         service_name="mcp-bridge",
-        endpoint="https://telemetry.kobanexus.ru/",
+        endpoint="https://otel.example.test/",
         headers="Authorization=Bearer%20token",
         resource_attributes="deployment.environment.name=production",
         timeout_ms=2500,
     )
 
     assert settings.enabled is True
-    assert settings.metrics_endpoint == "https://telemetry.kobanexus.ru/v1/metrics"
+    assert settings.signal_endpoint("logs") == "https://otel.example.test/v1/logs"
+    assert settings.signal_endpoint("traces") == "https://otel.example.test/v1/traces"
+    assert settings.signal_endpoint("metrics") == "https://otel.example.test/v1/metrics"
     assert settings.timeout_seconds == 2.5
 
 
@@ -207,4 +209,6 @@ def test_observability_settings_are_disabled_without_otlp_endpoint() -> None:
     settings = ObservabilitySettings()
 
     assert settings.enabled is False
-    assert settings.metrics_endpoint == ""
+    assert settings.signal_endpoint("logs") == ""
+    assert settings.signal_endpoint("traces") == ""
+    assert settings.signal_endpoint("metrics") == ""
