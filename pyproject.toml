@@ -19,6 +19,8 @@ dependencies = [
   "cryptography>=46,<47",
   "PyJWT[crypto]>=2.10,<3",
   "uvicorn>=0.35,<1",
+  "opentelemetry-sdk>=1.45,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
 ]
 
 [project.scripts]
