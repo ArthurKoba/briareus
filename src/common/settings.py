@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from os import getenv
 from pathlib import Path
 from typing import Annotated
 
@@ -175,26 +176,50 @@ class BridgeSettings(ProcessSettings):
 
 class ObservabilitySettings(ProcessSettings):
     service_name: str = Field("mcp-bridge", validation_alias="OTEL_SERVICE_NAME")
+    service_version: str = Field("0.1.0", validation_alias="OTEL_SERVICE_VERSION")
+    service_instance_id: str = Field("", validation_alias="OTEL_SERVICE_INSTANCE_ID")
+    environment: str = Field("production", validation_alias="OTEL_ENVIRONMENT")
     endpoint: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT")
+    logs_endpoint_override: str = Field(
+        "",
+        validation_alias="OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    )
+    traces_endpoint_override: str = Field(
+        "",
+        validation_alias="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    )
     metrics_endpoint_override: str = Field(
         "",
         validation_alias="OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
     )
     headers: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_HEADERS")
     resource_attributes: str = Field("", validation_alias="OTEL_RESOURCE_ATTRIBUTES")
+    log_level: str = Field("INFO", validation_alias="OTEL_LOG_LEVEL")
     timeout_ms: int = Field(
         10_000,
         ge=100,
         le=120_000,
         validation_alias="OTEL_EXPORTER_OTLP_TIMEOUT",
     )
+    metric_export_interval_ms: int = Field(
+        30_000,
+        ge=1_000,
+        le=300_000,
+        validation_alias="OTEL_METRIC_EXPORT_INTERVAL",
+    )
 
     @field_validator(
         "service_name",
+        "service_version",
+        "service_instance_id",
+        "environment",
         "endpoint",
+        "logs_endpoint_override",
+        "traces_endpoint_override",
         "metrics_endpoint_override",
         "headers",
         "resource_attributes",
+        "log_level",
         mode="before",
     )
     @classmethod
@@ -203,15 +228,36 @@ class ObservabilitySettings(ProcessSettings):
 
     @property
     def enabled(self) -> bool:
-        return bool(self.metrics_endpoint_override or self.endpoint)
+        return bool(
+            self.endpoint
+            or self.logs_endpoint_override
+            or self.traces_endpoint_override
+            or self.metrics_endpoint_override
+        )
 
     @property
-    def metrics_endpoint(self) -> str:
-        if self.metrics_endpoint_override:
-            return self.metrics_endpoint_override
+    def resolved_instance_id(self) -> str:
+        return self.service_instance_id or getenv("HOSTNAME") or "unknown"
+
+    def signal_endpoint(self, signal: str) -> str:
+        overrides = {
+            "logs": self.logs_endpoint_override,
+            "traces": self.traces_endpoint_override,
+            "metrics": self.metrics_endpoint_override,
+        }
+        if signal not in overrides:
+            raise ValueError(f"unsupported OTLP signal: {signal}")
+        override = overrides[signal]
+        if override:
+            return override
         if not self.endpoint:
             return ""
-        return self.endpoint.rstrip("/") + "/v1/metrics"
+        endpoint = self.endpoint.rstrip("/")
+        for suffix in ("/v1/logs", "/v1/traces", "/v1/metrics"):
+            if endpoint.endswith(suffix):
+                endpoint = endpoint[: -len(suffix)]
+                break
+        return f"{endpoint}/v1/{signal}"
 
     @property
     def timeout_seconds(self) -> float:
