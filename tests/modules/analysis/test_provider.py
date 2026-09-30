@@ -60,9 +60,12 @@ async def test_provider_adapts_live_backend_catalog(monkeypatch) -> None:
     tools = await provider._list_tools()
 
     assert seen_urls == ["http://ghidra.internal/mcp"]
-    assert len(tools) == 1
+    assert {tool.name for tool in tools} == {
+        "inspect_action_behavior",
+        "get_analysis_vocabulary",
+    }
 
-    tool = tools[0]
+    tool = next(tool for tool in tools if tool.name == "inspect_action_behavior")
     assert tool.name == "inspect_action_behavior"
     assert "inspect behavior" in tool.description
     assert "inbound actions" in tool.description
