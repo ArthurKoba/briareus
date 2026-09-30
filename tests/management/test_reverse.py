@@ -213,6 +213,7 @@ async def test_reverse_quick_coverage_marks_large_program_approximate() -> None:
         "program.bin",
         full=False,
         sample_size=4,
+        batch_size=2,
     )
 
     assert coverage["approximate"] is True
@@ -245,3 +246,9 @@ async def test_reverse_session_settings_use_private_backend_tools() -> None:
         ("project_session_settings", {}),
         ("set_project_idle_timeout", {"idle_timeout_seconds": 120}),
     ]
+
+
+def test_reverse_client_uses_long_private_mcp_timeout() -> None:
+    client = ReverseAdminClient("http://example.test/mcp")
+
+    assert client.timeout_seconds == 180.0
