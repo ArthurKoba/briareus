@@ -45,8 +45,8 @@ from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
-    ManagementConfigService,
     InvocationAuditService,
+    ManagementConfigService,
 )
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig

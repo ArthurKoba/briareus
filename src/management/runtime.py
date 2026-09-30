@@ -13,8 +13,8 @@ from common.observability import announce_runtime_started, build_observability
 from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
-    ManagementConfigService,
     InvocationAuditService,
+    ManagementConfigService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (

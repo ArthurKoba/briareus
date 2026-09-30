@@ -12,8 +12,8 @@ pytest.importorskip("starlette_admin")
 from common.settings import FileSettings, ManagementSettings
 from management.application.services import (
     AccountService,
-    ManagementConfigService,
     InvocationAuditService,
+    ManagementConfigService,
 )
 from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher

@@ -83,7 +83,7 @@ def _otlp_attributes(values: dict[str, object]) -> list[dict[str, object]]:
     return [
         {"key": key, "value": _otlp_value(value)}
         for key, value in sorted(values.items())
-        if value not in {"", None}
+        if value is not None and value != ""
     ]
 
 
@@ -102,7 +102,6 @@ class OtlpHttpMetricsSink:
     def _export(self, metrics: list[dict[str, object]]) -> None:
         if not self.endpoint or not metrics:
             return
-        now = str(time.time_ns())
         payload = {
             "resourceMetrics": [
                 {
@@ -136,8 +135,6 @@ class OtlpHttpMetricsSink:
             timeout=self.settings.timeout_seconds,
         ) as response:
             response.read(min(4096, int(response.headers.get("Content-Length", "0") or 0)))
-        del now
-
     @staticmethod
     def _delta_counter(
         name: str,
@@ -187,6 +184,44 @@ class OtlpHttpMetricsSink:
             },
         }
 
+    @staticmethod
+    def _histogram(
+        name: str,
+        description: str,
+        unit: str,
+        value: float,
+        attributes: dict[str, object],
+        now: str,
+    ) -> dict[str, object]:
+        bounds = [10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0]
+        bucket_counts = [0] * (len(bounds) + 1)
+        bucket_index = next(
+            (index for index, bound in enumerate(bounds) if value <= bound),
+            len(bounds),
+        )
+        bucket_counts[bucket_index] = 1
+        return {
+            "name": name,
+            "description": description,
+            "unit": unit,
+            "histogram": {
+                "aggregationTemporality": 1,
+                "dataPoints": [
+                    {
+                        "attributes": _otlp_attributes(attributes),
+                        "startTimeUnixNano": now,
+                        "timeUnixNano": now,
+                        "count": "1",
+                        "sum": value,
+                        "bucketCounts": [str(count) for count in bucket_counts],
+                        "explicitBounds": bounds,
+                        "min": value,
+                        "max": value,
+                    }
+                ],
+            },
+        }
+
     def record_runtime_started(self, scope: str) -> None:
         now = str(time.time_ns())
         attrs = {"mcp.scope": scope}
@@ -229,7 +264,7 @@ class OtlpHttpMetricsSink:
                 attrs,
                 now,
             ),
-            self._gauge(
+            self._histogram(
                 "mcp.tool.duration",
                 "Observed MCP tool call duration.",
                 "ms",
