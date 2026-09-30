@@ -57,6 +57,9 @@ _ARGUMENT_ALIASES: dict[str, str] = {
     "include_disasm": "include_low_level_view",
     "decompiler_comments": "behavior_annotations",
     "disassembly_comments": "low_level_annotations",
+    "disassemble_first": "analyze_low_level_first",
+    "include_assembly_patterns": "include_low_level_patterns",
+    "context_instructions": "context_operations",
 }
 
 _TOOL_ARGUMENT_ALIASES: dict[str, dict[str, str]] = {
@@ -71,6 +74,9 @@ _TOOL_ARGUMENT_ALIASES: dict[str, dict[str, str]] = {
     "audit_globals_in_function": {"address": "action"},
     "force_decompile": {"address": "action"},
     "get_comment": {"address": "action"},
+    "disassemble_bytes": {
+        "include_instructions": "include_low_level_operations",
+    },
 }
 
 _COLLAPSED_ACTION_SELECTOR_TOOLS = frozenset(
@@ -81,6 +87,43 @@ _COLLAPSED_ACTION_SELECTOR_TOOLS = frozenset(
         "get_function_xrefs",
     }
 )
+
+_ARGUMENT_TOKENS: dict[str, str] = {
+    "ghidra": "analysis",
+    "binary": "program",
+    "memory": "data",
+    "assembly": "low_level",
+    "disassembly": "low_level_view",
+    "disassemble": "analyze_low_level",
+    "decompiler": "behavior",
+    "decompile": "behavior",
+    "pcode": "ir",
+    "opcode": "operation",
+    "malware": "behavior",
+    "instructions": "operations",
+    "instruction": "operation",
+}
+
+_TOOL_NAME_ALIASES: dict[str, str] = {
+    "disassemble_bytes": "analyze_byte_region",
+    "force_decompile": "refresh_action_behavior",
+    "get_assembly_context": "get_low_level_context",
+    "get_action_pcode": "get_action_ir",
+    "detect_malware_behaviors": "detect_behavior_patterns",
+    "run_ghidra_script": "run_analysis_script",
+    "run_script_inline": "run_analysis_script_inline",
+    "exit_ghidra": "stop_analysis_runtime",
+    "read_memory": "read_data_region",
+    "inspect_memory_content": "inspect_data_region",
+    "create_memory_block": "create_data_block",
+    "add_memory_reference": "add_data_link",
+    "remove_reference": "remove_link",
+    "get_address_spaces": "get_data_spaces",
+    "list_segments": "list_data_regions",
+    "search_instructions": "search_low_level_operations",
+    "server_connect": "connect_repository_service",
+    "server_disconnect": "disconnect_repository_service",
+}
 
 _TOOL_PHRASES: tuple[tuple[str, str], ...] = (
     ("analyze_call_graph", "analyze_link_map"),
@@ -97,6 +140,19 @@ _TOOL_PHRASES: tuple[tuple[str, str], ...] = (
 )
 
 _TOOL_TOKENS: dict[str, str] = {
+    "ghidra": "analysis",
+    "decompile": "inspect",
+    "decompiler": "behavior",
+    "disassemble": "analyze",
+    "disassembly": "low_level",
+    "assembly": "low_level",
+    "pcode": "ir",
+    "opcode": "operation",
+    "malware": "behavior",
+    "binary": "program",
+    "memory": "data",
+    "instructions": "operations",
+    "instruction": "operation",
     "functions": "actions",
     "function": "action",
     "callers": "inbound_actions",
@@ -108,20 +164,164 @@ _TOOL_TOKENS: dict[str, str] = {
 }
 
 _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bGhidra Server\b", re.IGNORECASE), "repository service"),
+    (re.compile(r"\bGhidra GUI\b", re.IGNORECASE), "desktop analysis client"),
+    (re.compile(r"\bGhidra-native\b", re.IGNORECASE), "native analysis"),
+    (re.compile(r"\bGhidra projects?\b", re.IGNORECASE), "analysis projects"),
+    (re.compile(r"\bGhidra tools?\b", re.IGNORECASE), "analysis tools"),
+    (re.compile(r"\bGhidra's\b", re.IGNORECASE), "analysis runtime's"),
+    (re.compile(r"\bGhidra(?:MCP)?\b", re.IGNORECASE), "analysis runtime"),
+    (re.compile(r"\bTraceRmi\b", re.IGNORECASE), "runtime trace interface"),
+    (re.compile(r"\bdbgeng\b", re.IGNORECASE), "runtime debug engine"),
+    (re.compile(r"\bWinDbg\b", re.IGNORECASE), "runtime debugger"),
+    (re.compile(r"\bJython\b", re.IGNORECASE), "scripting runtime"),
     (re.compile(r"\breverse engineering\b", re.IGNORECASE), "behavior analysis"),
     (re.compile(r"\breversing\b", re.IGNORECASE), "behavior recovery"),
+    (re.compile(r"\bcross[- ]binary\b", re.IGNORECASE), "cross-program"),
+    (re.compile(r"\bbinary files?\b", re.IGNORECASE), "program files"),
+    (re.compile(r"\bbinary versions?\b", re.IGNORECASE), "program versions"),
+    (re.compile(r"\bbinaries\b", re.IGNORECASE), "programs"),
+    (re.compile(r"\bbinary\b", re.IGNORECASE), "program"),
+    (re.compile(r"\bP[- ]?code\b", re.IGNORECASE), "intermediate representation"),
+    (re.compile(r"\bHighFunction\b", re.IGNORECASE), "high-level behavior graph"),
+    (re.compile(r"\bvarnodes?\b", re.IGNORECASE), "value nodes"),
+    (re.compile(r"\bopcode\b", re.IGNORECASE), "operation"),
+    (re.compile(r"\bmalware behaviors?\b", re.IGNORECASE), "behavior patterns"),
+    (re.compile(r"\bmalware\b", re.IGNORECASE), "behavior"),
+    (re.compile(r"\bdecompiler's\b", re.IGNORECASE), "behavior engine's"),
+    (re.compile(r"\bdecompiler\b", re.IGNORECASE), "behavior engine"),
+    (re.compile(r"\bdecompilation\b", re.IGNORECASE), "behavior inspection"),
+    (re.compile(r"\bdecompiled\b", re.IGNORECASE), "behavior view"),
+    (re.compile(r"\bdecompile\b", re.IGNORECASE), "inspect behavior"),
+    (re.compile(r"\bre-disassembl(?:e|ed|y)\b", re.IGNORECASE), "re-analyze low-level operations"),
+    (re.compile(r"\bdisassembled\b", re.IGNORECASE), "decoded low-level"),
+    (re.compile(r"\bdisassemble\b", re.IGNORECASE), "analyze low-level operations"),
+    (re.compile(r"\bdisassembly\b", re.IGNORECASE), "low-level action view"),
+    (re.compile(r"\bassembly\b", re.IGNORECASE), "low-level operations"),
     (re.compile(r"\bcall graph\b", re.IGNORECASE), "link map"),
     (re.compile(r"\bcross[- ]references?\b", re.IGNORECASE), "links"),
     (re.compile(r"\bxrefs?\b", re.IGNORECASE), "links"),
-    (re.compile(r"\bdecompil(?:e|ation|er view)\b", re.IGNORECASE), "inspect behavior"),
-    (re.compile(r"\bdisassembly\b", re.IGNORECASE), "low-level action view"),
     (re.compile(r"\bcallers\b", re.IGNORECASE), "inbound actions"),
     (re.compile(r"\bcaller\b", re.IGNORECASE), "inbound action"),
     (re.compile(r"\bcallees\b", re.IGNORECASE), "outbound actions"),
     (re.compile(r"\bcallee\b", re.IGNORECASE), "outbound action"),
     (re.compile(r"\bfunctions\b", re.IGNORECASE), "action nodes"),
     (re.compile(r"\bfunction\b", re.IGNORECASE), "action node"),
+    (re.compile(r"\.gzf\b", re.IGNORECASE), " program package"),
+    (re.compile(r"\bGZF\b", re.IGNORECASE), "program package"),
+    (re.compile(r"\.gar\b", re.IGNORECASE), " project archive"),
 )
+
+_FORBIDDEN_ANALYSIS_TERMS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bghidra\b", re.IGNORECASE),
+    re.compile(r"\breverse(?:\s+engineering)?\b", re.IGNORECASE),
+    re.compile(r"\bdecompil\w*\b", re.IGNORECASE),
+    re.compile(r"\bdisassembl\w*\b", re.IGNORECASE),
+    re.compile(r"\bassembly\b", re.IGNORECASE),
+    re.compile(r"\bp[- ]?code\b", re.IGNORECASE),
+    re.compile(r"\bopcode\b", re.IGNORECASE),
+    re.compile(r"\bmalware\b", re.IGNORECASE),
+    re.compile(r"\bTraceRmi\b", re.IGNORECASE),
+    re.compile(r"\bdbgeng\b", re.IGNORECASE),
+    re.compile(r"\bWinDbg\b", re.IGNORECASE),
+    re.compile(r"\bJython\b", re.IGNORECASE),
+)
+
+_RESULT_KEY_ALIASES: dict[str, str] = {
+    "function": "action",
+    "functions": "actions",
+    "function_name": "action_name",
+    "function_address": "action_address",
+    "caller": "inbound_action",
+    "callers": "inbound_actions",
+    "callee": "outbound_action",
+    "callees": "outbound_actions",
+    "xrefs": "links",
+    "xref_count": "link_count",
+    "cross_references": "links",
+    "cross_reference": "link",
+    "decompiled": "behavior",
+    "decompiled_code": "behavior",
+    "disassembly": "low_level_view",
+    "instructions": "low_level_operations",
+    "instruction": "operation",
+    "isThunk": "is_forwarder",
+    "isExternal": "is_external",
+    "pcode": "ir",
+    "high_pcode": "high_ir",
+    "low_pcode": "low_ir",
+    "opcode": "operation",
+    "ghidra_version": "runtime_version",
+}
+
+_RESULT_METADATA_KEYS = frozenset(
+    {
+        "error",
+        "message",
+        "warning",
+        "warnings",
+        "note",
+        "notes",
+        "suggestion",
+        "suggestions",
+        "status",
+        "classification",
+        "reason",
+        "details",
+        "diagnostic",
+        "diagnostics",
+    }
+)
+
+_RESULT_OPAQUE_KEYS = frozenset(
+    {
+        "behavior",
+        "code",
+        "source",
+        "bytes",
+        "data",
+        "data_base64",
+        "value",
+        "comment",
+        "plate",
+        "pre",
+        "eol",
+        "post",
+        "repeatable",
+        "path",
+        "file_path",
+        "executable_path",
+        "output",
+        "stdout",
+        "stderr",
+    }
+)
+
+
+ANALYSIS_VOCABULARY: JsonObject = {
+    "action": "A named behavior unit that can be addressed and inspected.",
+    "actions": "A collection of behavior units.",
+    "inbound_action": "An action that links into the selected action.",
+    "outbound_action": "An action reached from the selected action.",
+    "link": "A relationship between locations, data, or actions.",
+    "link_map": "A graph of inbound and outbound action relationships.",
+    "behavior": "A high-level behavioral representation of an action.",
+    "low_level_view": "An ordered view of low-level operations for an action or data region.",
+    "low_level_operation": "One decoded operation in a low-level view.",
+    "ir": "An intermediate representation used for value-flow and behavior inspection.",
+    "program": "A loaded analysis target within a project.",
+    "project": "A persistent analysis workspace containing programs and metadata.",
+    "data_region": "A bounded region of program data addressed within a program.",
+    "data_link": "A relationship between data locations.",
+    "data_space": "A named address space used by a program.",
+    "forwarder": "A small action whose primary behavior is forwarding control to another action.",
+    "behavior_annotation": "A semantic annotation attached to a behavior view.",
+    "low_level_annotation": "An annotation attached to a low-level operation view.",
+}
+
+
+def analysis_vocabulary() -> JsonObject:
+    return json_object(dict(ANALYSIS_VOCABULARY), context="analysis vocabulary")
 
 
 def analysis_argument_name(
@@ -137,10 +337,18 @@ def analysis_argument_name(
         tool_alias = _TOOL_ARGUMENT_ALIASES.get(tool_name, {}).get(ghidra_name)
         if tool_alias is not None:
             return tool_alias
-    return _ARGUMENT_ALIASES.get(ghidra_name, ghidra_name)
+    direct = _ARGUMENT_ALIASES.get(ghidra_name)
+    if direct is not None:
+        return direct
+    parts = ghidra_name.split("_")
+    translated = [_ARGUMENT_TOKENS.get(part, part) for part in parts]
+    return "_".join(translated)
 
 
 def analysis_tool_name(ghidra_name: str) -> str:
+    direct = _TOOL_NAME_ALIASES.get(ghidra_name)
+    if direct is not None:
+        return direct
     value = ghidra_name
     for source, target in _TOOL_PHRASES:
         value = value.replace(source, target)
@@ -154,6 +362,36 @@ def analysis_text(text: str) -> str:
     for pattern, replacement in _TEXT_TERMS:
         value = pattern.sub(replacement, value)
     return value
+
+
+def analysis_result_key(key: str) -> str:
+    direct = _RESULT_KEY_ALIASES.get(key)
+    if direct is not None:
+        return direct
+    parts = key.split("_")
+    translated = [_TOOL_TOKENS.get(part, part) for part in parts]
+    return "_".join(translated)
+
+
+def analysis_result_text(text: str, key: str | None = None) -> str:
+    if key in _RESULT_OPAQUE_KEYS:
+        return text
+    if key == "classification" and text.casefold() == "thunk":
+        return "forwarder"
+    if key is None or key in _RESULT_METADATA_KEYS:
+        return analysis_text(text)
+    return text
+
+
+def analysis_surface_violations(text: str) -> list[str]:
+    return sorted(
+        {
+            match.group(0)
+            for pattern in _FORBIDDEN_ANALYSIS_TERMS
+            for match in pattern.finditer(text)
+        },
+        key=str.casefold,
+    )
 
 
 def tool_alias(ghidra_name: str, input_schema: JsonObject) -> ToolAlias:
@@ -194,10 +432,19 @@ def analysis_schema(input_schema: JsonObject, tool_name: str | None = None) -> J
         description = property_schema.get("description")
         if isinstance(description, str):
             property_schema["description"] = analysis_text(description)
+        title = property_schema.get("title")
+        if isinstance(title, str):
+            property_schema["title"] = analysis_text(title)
         if "default" in property_schema:
             property_schema["default"] = _typed_default(property_schema)
         renamed[alias] = property_schema
     schema["properties"] = renamed
+    schema_title = schema.get("title")
+    if isinstance(schema_title, str):
+        schema["title"] = analysis_text(schema_title)
+    schema_description = schema.get("description")
+    if isinstance(schema_description, str):
+        schema["description"] = analysis_text(schema_description)
 
     required = schema.get("required")
     if isinstance(required, list):

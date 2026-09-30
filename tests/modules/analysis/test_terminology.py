@@ -4,9 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from modules.analysis.terminology import (
+    analysis_result_key,
+    analysis_result_text,
     analysis_schema,
+    analysis_surface_violations,
     analysis_text,
     analysis_tool_name,
+    analysis_vocabulary,
     arguments_for_surface,
     normalize_arguments,
     tool_alias,
@@ -263,3 +267,72 @@ def test_comment_read_accepts_semantic_action_selector() -> None:
         "get_comment",
     )
     assert normalized["address"] == "RomLoaderStubEntry"
+
+
+
+def test_low_level_backend_tool_names_are_neutralized() -> None:
+    expected = {
+        "disassemble_bytes": "analyze_byte_region",
+        "force_decompile": "refresh_action_behavior",
+        "get_assembly_context": "get_low_level_context",
+        "get_action_pcode": "get_action_ir",
+        "detect_malware_behaviors": "detect_behavior_patterns",
+        "run_ghidra_script": "run_analysis_script",
+        "run_script_inline": "run_analysis_script_inline",
+        "exit_ghidra": "stop_analysis_runtime",
+        "read_memory": "read_data_region",
+        "search_instructions": "search_low_level_operations",
+    }
+    for backend_name, public_name in expected.items():
+        assert analysis_tool_name(backend_name) == public_name
+        assert not analysis_surface_violations(public_name)
+
+
+def test_analysis_text_removes_backend_specific_vocabulary() -> None:
+    source = (
+        "Ghidra reverse engineering decompiler disassembly assembly P-code opcode "
+        "malware binary"
+    )
+    public = analysis_text(source)
+    assert not analysis_surface_violations(public)
+    assert "analysis runtime" in public
+    assert "behavior" in public
+    assert "program" in public
+
+
+def test_result_keys_use_analysis_vocabulary() -> None:
+    assert analysis_result_key("functions") == "actions"
+    assert analysis_result_key("callees") == "outbound_actions"
+    assert analysis_result_key("callers") == "inbound_actions"
+    assert analysis_result_key("decompiled_code") == "behavior"
+    assert analysis_result_key("disassembly") == "low_level_view"
+    assert analysis_result_key("pcode") == "ir"
+    assert analysis_result_text("thunk", "classification") == "forwarder"
+
+
+
+def test_argument_names_neutralize_backend_tokens() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "ghidra_path": {"type": "string"},
+            "binary_name": {"type": "string"},
+            "pcode_mode": {"type": "string"},
+            "assembly_context": {"type": "integer"},
+        },
+    }
+    exposed = analysis_schema(schema, "synthetic_backend_tool")
+    assert set(exposed["properties"]) == {
+        "analysis_path",
+        "program_name",
+        "ir_mode",
+        "low_level_context",
+    }
+
+
+def test_analysis_vocabulary_is_public_only() -> None:
+    vocabulary = analysis_vocabulary()
+    assert "action" in vocabulary
+    assert "behavior" in vocabulary
+    assert "ir" in vocabulary
+    assert not analysis_surface_violations(str(vocabulary))

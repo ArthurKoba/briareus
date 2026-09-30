@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 from collections.abc import Sequence
 from typing import Protocol, cast
@@ -14,11 +15,13 @@ from fastmcp.utilities.components import FastMCPComponent
 from common.models import JsonObject, JsonValue, json_object
 from common.settings import AnalysisSettings
 
-from .result import decode_call_result
+from .result import adapt_analysis_result, decode_call_result
 from .terminology import (
     analysis_schema,
+    analysis_surface_violations,
     analysis_text,
     analysis_tool_name,
+    analysis_vocabulary,
     normalize_arguments,
 )
 
@@ -104,7 +107,7 @@ def _analysis_signature(input_schema: JsonObject, tool_name: str) -> inspect.Sig
 
 
 class AnalysisToolProvider(Provider):
-    """Expose the live Ghidra tool catalog through behavior-analysis terminology."""
+    """Expose the private backend through a fully separated Analysis vocabulary."""
 
     def __init__(self, settings: AnalysisSettings) -> None:
         super().__init__()
@@ -139,6 +142,8 @@ class AnalysisToolProvider(Provider):
                 backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
 
             tools = self._adapt_catalog(backend_tools)
+            tools.append(self._vocabulary_tool())
+            self._validate_public_catalog(tools)
             if ttl > 0:
                 self._cache = (now + ttl, tools)
             return list(tools)
@@ -158,10 +163,45 @@ class AnalysisToolProvider(Provider):
             adapted.append(self._adapt_tool(backend_tool, alias))
         return adapted
 
+    @staticmethod
+    def _vocabulary_tool() -> Tool:
+        async def get_analysis_vocabulary() -> JsonObject:
+            return analysis_vocabulary()
+
+        return FunctionTool.from_function(
+            get_analysis_vocabulary,
+            name="get_analysis_vocabulary",
+            title="Analysis Vocabulary",
+            description=(
+                "Return the canonical public terminology for this analysis workspace. "
+                "Use these terms consistently when selecting tools and interpreting results."
+            ),
+        )
+
+    @staticmethod
+    def _validate_public_catalog(tools: Sequence[Tool]) -> None:
+        violations: list[str] = []
+        for tool in tools:
+            public_metadata = {
+                "name": tool.name,
+                "title": tool.title,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+            encoded = json.dumps(public_metadata, ensure_ascii=False, default=str)
+            leaked = analysis_surface_violations(encoded)
+            if leaked:
+                violations.append(f"{tool.name}: {', '.join(leaked)}")
+        if violations:
+            raise AnalysisProviderError(
+                "analysis public vocabulary leak: " + "; ".join(violations[:12])
+            )
+
     def _adapt_tool(self, backend_tool: _BackendTool, analysis_name: str) -> Tool:
         ghidra_name = backend_tool.name
         ghidra_schema = _backend_tool_schema(backend_tool)
         exposed_schema = analysis_schema(ghidra_schema, ghidra_name)
+        exposed_schema["title"] = f"{analysis_name}Arguments"
 
         async def invoke(**arguments: JsonValue) -> JsonValue | None:
             canonical = normalize_arguments(
@@ -171,7 +211,8 @@ class AnalysisToolProvider(Provider):
             )
             async with Client(self._backend_url()) as client:
                 result = await client.call_tool(ghidra_name, canonical)
-            return decode_call_result(result)
+            decoded = decode_call_result(result)
+            return adapt_analysis_result(decoded) if decoded is not None else None
 
         signature_target = cast(_SignatureTarget, invoke)
         signature = _analysis_signature(ghidra_schema, ghidra_name)
