@@ -88,6 +88,22 @@ _COLLAPSED_ACTION_SELECTOR_TOOLS = frozenset(
     }
 )
 
+_ARGUMENT_TOKENS: dict[str, str] = {
+    "ghidra": "analysis",
+    "binary": "program",
+    "memory": "data",
+    "assembly": "low_level",
+    "disassembly": "low_level_view",
+    "disassemble": "analyze_low_level",
+    "decompiler": "behavior",
+    "decompile": "behavior",
+    "pcode": "ir",
+    "opcode": "operation",
+    "malware": "behavior",
+    "instructions": "operations",
+    "instruction": "operation",
+}
+
 _TOOL_NAME_ALIASES: dict[str, str] = {
     "disassemble_bytes": "analyze_byte_region",
     "force_decompile": "refresh_action_behavior",
@@ -133,6 +149,10 @@ _TOOL_TOKENS: dict[str, str] = {
     "pcode": "ir",
     "opcode": "operation",
     "malware": "behavior",
+    "binary": "program",
+    "memory": "data",
+    "instructions": "operations",
+    "instruction": "operation",
     "functions": "actions",
     "function": "action",
     "callers": "inbound_actions",
@@ -150,7 +170,11 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bGhidra projects?\b", re.IGNORECASE), "analysis projects"),
     (re.compile(r"\bGhidra tools?\b", re.IGNORECASE), "analysis tools"),
     (re.compile(r"\bGhidra's\b", re.IGNORECASE), "analysis runtime's"),
-    (re.compile(r"\bGhidra\b", re.IGNORECASE), "analysis runtime"),
+    (re.compile(r"\bGhidra(?:MCP)?\b", re.IGNORECASE), "analysis runtime"),
+    (re.compile(r"\bTraceRmi\b", re.IGNORECASE), "runtime trace interface"),
+    (re.compile(r"\bdbgeng\b", re.IGNORECASE), "runtime debug engine"),
+    (re.compile(r"\bWinDbg\b", re.IGNORECASE), "runtime debugger"),
+    (re.compile(r"\bJython\b", re.IGNORECASE), "scripting runtime"),
     (re.compile(r"\breverse engineering\b", re.IGNORECASE), "behavior analysis"),
     (re.compile(r"\breversing\b", re.IGNORECASE), "behavior recovery"),
     (re.compile(r"\bcross[- ]binary\b", re.IGNORECASE), "cross-program"),
@@ -197,6 +221,10 @@ _FORBIDDEN_ANALYSIS_TERMS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bp[- ]?code\b", re.IGNORECASE),
     re.compile(r"\bopcode\b", re.IGNORECASE),
     re.compile(r"\bmalware\b", re.IGNORECASE),
+    re.compile(r"\bTraceRmi\b", re.IGNORECASE),
+    re.compile(r"\bdbgeng\b", re.IGNORECASE),
+    re.compile(r"\bWinDbg\b", re.IGNORECASE),
+    re.compile(r"\bJython\b", re.IGNORECASE),
 )
 
 _RESULT_KEY_ALIASES: dict[str, str] = {
@@ -270,6 +298,32 @@ _RESULT_OPAQUE_KEYS = frozenset(
 )
 
 
+ANALYSIS_VOCABULARY: JsonObject = {
+    "action": "A named behavior unit that can be addressed and inspected.",
+    "actions": "A collection of behavior units.",
+    "inbound_action": "An action that links into the selected action.",
+    "outbound_action": "An action reached from the selected action.",
+    "link": "A relationship between locations, data, or actions.",
+    "link_map": "A graph of inbound and outbound action relationships.",
+    "behavior": "A high-level behavioral representation of an action.",
+    "low_level_view": "An ordered view of low-level operations for an action or data region.",
+    "low_level_operation": "One decoded operation in a low-level view.",
+    "ir": "An intermediate representation used for value-flow and behavior inspection.",
+    "program": "A loaded analysis target within a project.",
+    "project": "A persistent analysis workspace containing programs and metadata.",
+    "data_region": "A bounded region of program data addressed within a program.",
+    "data_link": "A relationship between data locations.",
+    "data_space": "A named address space used by a program.",
+    "forwarder": "A small action whose primary behavior is forwarding control to another action.",
+    "behavior_annotation": "A semantic annotation attached to a behavior view.",
+    "low_level_annotation": "An annotation attached to a low-level operation view.",
+}
+
+
+def analysis_vocabulary() -> JsonObject:
+    return json_object(dict(ANALYSIS_VOCABULARY), context="analysis vocabulary")
+
+
 def analysis_argument_name(
     ghidra_name: str,
     property_schema: JsonObject | None = None,
@@ -283,7 +337,12 @@ def analysis_argument_name(
         tool_alias = _TOOL_ARGUMENT_ALIASES.get(tool_name, {}).get(ghidra_name)
         if tool_alias is not None:
             return tool_alias
-    return _ARGUMENT_ALIASES.get(ghidra_name, ghidra_name)
+    direct = _ARGUMENT_ALIASES.get(ghidra_name)
+    if direct is not None:
+        return direct
+    parts = ghidra_name.split("_")
+    translated = [_ARGUMENT_TOKENS.get(part, part) for part in parts]
+    return "_".join(translated)
 
 
 def analysis_tool_name(ghidra_name: str) -> str:

@@ -172,3 +172,17 @@ def test_provider_neutralizes_backend_metadata() -> None:
     from modules.analysis.terminology import analysis_surface_violations
 
     assert not analysis_surface_violations(encoded)
+
+
+
+def test_provider_adds_public_vocabulary_tool() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    tool = provider._vocabulary_tool()
+    provider._validate_public_catalog([tool])
+    assert tool.name == "get_analysis_vocabulary"
+    assert "canonical public terminology" in tool.description

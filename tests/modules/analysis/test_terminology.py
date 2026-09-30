@@ -10,6 +10,7 @@ from modules.analysis.terminology import (
     analysis_surface_violations,
     analysis_text,
     analysis_tool_name,
+    analysis_vocabulary,
     arguments_for_surface,
     normalize_arguments,
     tool_alias,
@@ -307,3 +308,31 @@ def test_result_keys_use_analysis_vocabulary() -> None:
     assert analysis_result_key("disassembly") == "low_level_view"
     assert analysis_result_key("pcode") == "ir"
     assert analysis_result_text("thunk", "classification") == "forwarder"
+
+
+
+def test_argument_names_neutralize_backend_tokens() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "ghidra_path": {"type": "string"},
+            "binary_name": {"type": "string"},
+            "pcode_mode": {"type": "string"},
+            "assembly_context": {"type": "integer"},
+        },
+    }
+    exposed = analysis_schema(schema, "synthetic_backend_tool")
+    assert set(exposed["properties"]) == {
+        "analysis_path",
+        "program_name",
+        "ir_mode",
+        "low_level_context",
+    }
+
+
+def test_analysis_vocabulary_is_public_only() -> None:
+    vocabulary = analysis_vocabulary()
+    assert "action" in vocabulary
+    assert "behavior" in vocabulary
+    assert "ir" in vocabulary
+    assert not analysis_surface_violations(str(vocabulary))

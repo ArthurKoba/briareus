@@ -20,6 +20,7 @@ from .terminology import (
     analysis_schema,
     analysis_surface_violations,
     analysis_text,
+    analysis_vocabulary,
     analysis_tool_name,
     normalize_arguments,
 )
@@ -141,6 +142,7 @@ class AnalysisToolProvider(Provider):
                 backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
 
             tools = self._adapt_catalog(backend_tools)
+            tools.append(self._vocabulary_tool())
             self._validate_public_catalog(tools)
             if ttl > 0:
                 self._cache = (now + ttl, tools)
@@ -160,6 +162,21 @@ class AnalysisToolProvider(Provider):
             owners[alias] = backend_tool.name
             adapted.append(self._adapt_tool(backend_tool, alias))
         return adapted
+
+    @staticmethod
+    def _vocabulary_tool() -> Tool:
+        async def get_analysis_vocabulary() -> JsonObject:
+            return analysis_vocabulary()
+
+        return FunctionTool.from_function(
+            get_analysis_vocabulary,
+            name="get_analysis_vocabulary",
+            title="Analysis Vocabulary",
+            description=(
+                "Return the canonical public terminology for this analysis workspace. "
+                "Use these terms consistently when selecting tools and interpreting results."
+            ),
+        )
 
     @staticmethod
     def _validate_public_catalog(tools: Sequence[Tool]) -> None:
