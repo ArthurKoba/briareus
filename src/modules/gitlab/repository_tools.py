@@ -55,6 +55,34 @@ def register_gitlab_repository_tools(
         """Search repository blobs inside one project."""
         return client_factory(account_id).search_code(project, search, ref, page, per_page)
 
+
+    @mcp.tool(title="GitLab list commits", annotations=read_annotations)
+    def list_commits(
+        account_id: str,
+        project: str,
+        ref: str = "",
+        path: str = "",
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        """List repository commit history, optionally filtered by ref and path."""
+        return client_factory(account_id).list_commits(
+            project,
+            ref,
+            path,
+            page,
+            per_page,
+        )
+
+    @mcp.tool(title="GitLab get commit", annotations=read_annotations)
+    def get_commit(
+        account_id: str,
+        project: str,
+        sha: str,
+    ) -> JsonObject:
+        """Read one commit together with its repository diff."""
+        return client_factory(account_id).get_commit(project, sha)
+
     @mcp.tool(title="GitLab put file", annotations=write_annotations)
     def put_file(
         account_id: str,

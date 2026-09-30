@@ -120,6 +120,51 @@ class GitLabMergeRequestClient(GitLabApiClient):
             "merge_request": data,
         }
 
+
+    def list_merge_request_diffs(
+        self,
+        project: str | int,
+        iid: int,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        selector = self.project_selector(project)
+        response = self.request(
+            "GET",
+            f"/projects/{selector}/merge_requests/{iid}/diffs",
+            query={"page": page, "per_page": per_page},
+        )
+        if not isinstance(response.data, list):
+            raise GitLabError("unexpected GitLab merge request diff response")
+        return {
+            "profile_id": self.profile.profile_id,
+            "project": str(project),
+            "iid": iid,
+            "diffs": response.data,
+            "next_page": response.headers.get("X-Next-Page", ""),
+        }
+
+    def add_merge_request_note(
+        self,
+        project: str | int,
+        iid: int,
+        body: str,
+    ) -> JsonObject:
+        selector = self.project_selector(project)
+        if not body.strip():
+            raise GitLabError("merge request note body is required")
+        data = self.request(
+            "POST",
+            f"/projects/{selector}/merge_requests/{iid}/notes",
+            payload={"body": body},
+        ).data
+        return {
+            "profile_id": self.profile.profile_id,
+            "project": str(project),
+            "iid": iid,
+            "note": data,
+        }
+
     def merge_merge_request(
         self,
         project: str | int,
