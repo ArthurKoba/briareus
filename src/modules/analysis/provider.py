@@ -20,8 +20,8 @@ from .terminology import (
     analysis_schema,
     analysis_surface_violations,
     analysis_text,
-    analysis_vocabulary,
     analysis_tool_name,
+    analysis_vocabulary,
     normalize_arguments,
 )
 
