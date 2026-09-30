@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from common.settings import (
     AnalysisSettings,
     AsgiServerSettings,
+    AuthClientSettings,
+    AuthServiceSettings,
     BridgeSettings,
     FileSettings,
     GitHubPolicySettings,
@@ -83,18 +85,37 @@ def test_bridge_build_sha_uses_coolify_source_commit(monkeypatch) -> None:
     assert BridgeSettings().build_sha == "abc123"
 
 
-def test_gateway_oauth_bootstrap_is_typed(monkeypatch) -> None:
+def test_auth_service_bootstrap_is_typed(monkeypatch) -> None:
+    monkeypatch.setenv("OAUTH_BASE_URL", " https://mcp.example.test ")
     monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", " client ")
     monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", " secret ")
     monkeypatch.setenv("GITHUB_OAUTH_JWT_SIGNING_KEY", " jwt ")
     monkeypatch.setenv("GITHUB_OAUTH_ALLOWED_USERS", "ArthurKoba, ReviewerBot")
+    monkeypatch.setenv("AUTH_SERVICE_TOKEN", " service ")
 
-    settings = BridgeSettings()
+    settings = AuthServiceSettings()
 
+    assert settings.public_base_url == "https://mcp.example.test"
     assert settings.oauth_client_id == "client"
     assert settings.oauth_client_secret == "secret"
     assert settings.oauth_jwt_signing_key == "jwt"
     assert settings.oauth_allowed_users == ("arthurkoba", "reviewerbot")
+    assert settings.service_token == "service"
+
+
+def test_gateway_auth_client_settings_do_not_own_github_secrets(monkeypatch) -> None:
+    monkeypatch.setenv("OAUTH_ENABLED", "true")
+    monkeypatch.setenv("OAUTH_BASE_URL", "https://mcp.example.test")
+    monkeypatch.setenv("AUTH_URL", " http://auth:8000 ")
+    monkeypatch.setenv("AUTH_SERVICE_TOKEN", " service ")
+
+    settings = AuthClientSettings()
+    settings.validate_bootstrap()
+
+    assert settings.enabled is True
+    assert settings.url == "http://auth:8000"
+    assert settings.public_base_url == "https://mcp.example.test"
+    assert settings.service_token == "service"
 
 
 def test_management_client_settings_allow_import_without_bootstrap(monkeypatch) -> None:

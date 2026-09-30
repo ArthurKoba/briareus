@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Literal, cast
 
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from management.domain.accounts import Account, AuthType, Provider
@@ -63,15 +65,21 @@ class SqlAlchemyAccountRepository:
         accounts: list[Account] = []
         with self.sessions() as session:
             if provider in {None, Provider.GITHUB}:
-                stmt = select(GitHubAccountRecord)
+                github_stmt = select(GitHubAccountRecord)
                 if enabled_only:
-                    stmt = stmt.where(GitHubAccountRecord.enabled.is_(True))
-                accounts.extend(self._github_domain(row) for row in session.scalars(stmt).all())
+                    github_stmt = github_stmt.where(GitHubAccountRecord.enabled.is_(True))
+                accounts.extend(
+                    self._github_domain(row)
+                    for row in session.scalars(github_stmt).all()
+                )
             if provider in {None, Provider.GITLAB}:
-                stmt = select(GitLabAccountRecord)
+                gitlab_stmt = select(GitLabAccountRecord)
                 if enabled_only:
-                    stmt = stmt.where(GitLabAccountRecord.enabled.is_(True))
-                accounts.extend(self._gitlab_domain(row) for row in session.scalars(stmt).all())
+                    gitlab_stmt = gitlab_stmt.where(GitLabAccountRecord.enabled.is_(True))
+                accounts.extend(
+                    self._gitlab_domain(row)
+                    for row in session.scalars(gitlab_stmt).all()
+                )
         return sorted(accounts, key=lambda item: (item.provider.value, item.alias))
 
     def get(
@@ -86,58 +94,62 @@ class SqlAlchemyAccountRepository:
             raise KeyError("account selector is required")
         with self.sessions() as session:
             if provider is Provider.GITHUB:
-                stmt = select(GitHubAccountRecord).where(
+                github_stmt = select(GitHubAccountRecord).where(
                     or_(
                         GitHubAccountRecord.id == value,
                         GitHubAccountRecord.alias == value.casefold(),
                     )
                 )
                 if enabled_only:
-                    stmt = stmt.where(GitHubAccountRecord.enabled.is_(True))
-                record = session.scalar(stmt)
-                if record is None:
+                    github_stmt = github_stmt.where(GitHubAccountRecord.enabled.is_(True))
+                github_record = session.scalar(github_stmt)
+                if github_record is None:
                     raise KeyError(f"GitHub account not found: {selector}")
-                return self._github_domain(record)
+                return self._github_domain(github_record)
 
-            stmt = select(GitLabAccountRecord).where(
+            gitlab_stmt = select(GitLabAccountRecord).where(
                 or_(
                     GitLabAccountRecord.id == value,
                     GitLabAccountRecord.alias == value.casefold(),
                 )
             )
             if enabled_only:
-                stmt = stmt.where(GitLabAccountRecord.enabled.is_(True))
-            record = session.scalar(stmt)
-            if record is None:
+                gitlab_stmt = gitlab_stmt.where(GitLabAccountRecord.enabled.is_(True))
+            gitlab_record = session.scalar(gitlab_stmt)
+            if gitlab_record is None:
                 raise KeyError(f"GitLab account not found: {selector}")
-            return self._gitlab_domain(record)
+            return self._gitlab_domain(gitlab_record)
 
     def save(self, account: Account, *, encrypted_credential: str | None = None) -> Account:
         with self.sessions.begin() as session:
             if account.provider is Provider.GITHUB:
-                record = session.get(GitHubAccountRecord, account.id)
-                if record is None:
-                    record = GitHubAccountRecord(id=account.id)
-                    session.add(record)
-                record.alias = account.alias
-                record.auth_type = account.auth_type.value
-                record.app_id = account.external_id
-                record.enabled = account.enabled
+                github_record = session.get(GitHubAccountRecord, account.id)
+                if github_record is None:
+                    github_record = GitHubAccountRecord(id=account.id)
+                    session.add(github_record)
+                github_record.alias = account.alias
+                github_record.auth_type = account.auth_type.value
+                github_record.app_id = account.external_id
+                github_record.enabled = account.enabled
+                github_record.created_at = account.created_at
+                github_record.updated_at = account.updated_at
+                if encrypted_credential is not None:
+                    github_record.encrypted_credential = encrypted_credential
             else:
-                record = session.get(GitLabAccountRecord, account.id)
-                if record is None:
-                    record = GitLabAccountRecord(id=account.id)
-                    session.add(record)
-                record.alias = account.alias
-                record.auth_type = account.auth_type.value
-                record.base_url = account.base_url
-                record.verify_tls = account.verify_tls
-                record.ca_cert_pem = account.ca_cert_pem
-                record.enabled = account.enabled
-            record.created_at = account.created_at
-            record.updated_at = account.updated_at
-            if encrypted_credential is not None:
-                record.encrypted_credential = encrypted_credential
+                gitlab_record = session.get(GitLabAccountRecord, account.id)
+                if gitlab_record is None:
+                    gitlab_record = GitLabAccountRecord(id=account.id)
+                    session.add(gitlab_record)
+                gitlab_record.alias = account.alias
+                gitlab_record.auth_type = account.auth_type.value
+                gitlab_record.base_url = account.base_url
+                gitlab_record.verify_tls = account.verify_tls
+                gitlab_record.ca_cert_pem = account.ca_cert_pem
+                gitlab_record.enabled = account.enabled
+                gitlab_record.created_at = account.created_at
+                gitlab_record.updated_at = account.updated_at
+                if encrypted_credential is not None:
+                    gitlab_record.encrypted_credential = encrypted_credential
         return account
 
     def delete(self, account_id: str, *, provider: Provider) -> None:
@@ -147,21 +159,38 @@ class SqlAlchemyAccountRepository:
             if record is not None:
                 session.delete(record)
 
-    def set_credential(self, account_id: str, encrypted_value: str, *, provider: Provider) -> None:
-        model = GitHubAccountRecord if provider is Provider.GITHUB else GitLabAccountRecord
+    def set_credential(
+        self,
+        account_id: str,
+        encrypted_value: str,
+        *,
+        provider: Provider,
+    ) -> None:
         with self.sessions.begin() as session:
-            record = session.get(model, account_id)
-            if record is None:
+            if provider is Provider.GITHUB:
+                github_record = session.get(GitHubAccountRecord, account_id)
+                if github_record is None:
+                    raise KeyError(f"account not found: {account_id}")
+                github_record.encrypted_credential = encrypted_value
+                return
+
+            gitlab_record = session.get(GitLabAccountRecord, account_id)
+            if gitlab_record is None:
                 raise KeyError(f"account not found: {account_id}")
-            record.encrypted_credential = encrypted_value
+            gitlab_record.encrypted_credential = encrypted_value
 
     def credential(self, account_id: str, *, provider: Provider) -> str:
-        model = GitHubAccountRecord if provider is Provider.GITHUB else GitLabAccountRecord
         with self.sessions() as session:
-            record = session.get(model, account_id)
-            if record is None or not record.encrypted_credential:
+            if provider is Provider.GITHUB:
+                github_record = session.get(GitHubAccountRecord, account_id)
+                if github_record is None or not github_record.encrypted_credential:
+                    raise KeyError(f"credential not configured for account: {account_id}")
+                return github_record.encrypted_credential
+
+            gitlab_record = session.get(GitLabAccountRecord, account_id)
+            if gitlab_record is None or not gitlab_record.encrypted_credential:
                 raise KeyError(f"credential not configured for account: {account_id}")
-            return record.encrypted_credential
+            return gitlab_record.encrypted_credential
 
 
 class SqlAlchemyInvocationRepository:
@@ -180,9 +209,13 @@ class SqlAlchemyInvocationRepository:
     @staticmethod
     def _cleanup_in_session(session: Session, config: ManagementConfigRecord) -> int:
         cutoff = datetime.now(UTC) - timedelta(days=max(config.logging_retention_days, 1))
-        removed = session.execute(
-            delete(InvocationRecord).where(InvocationRecord.occurred_at < cutoff)
-        ).rowcount or 0
+        removed_result = cast(
+            CursorResult[object],
+            session.execute(
+                delete(InvocationRecord).where(InvocationRecord.occurred_at < cutoff)
+            ),
+        )
+        removed = removed_result.rowcount or 0
         count = session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
         overflow = count - max(config.logging_max_records, 100)
         if overflow > 0:
@@ -191,9 +224,13 @@ class SqlAlchemyInvocationRepository:
                 .order_by(InvocationRecord.occurred_at.asc())
                 .limit(overflow)
             )
-            removed += session.execute(
-                delete(InvocationRecord).where(InvocationRecord.id.in_(stale_ids))
-            ).rowcount or 0
+            overflow_result = cast(
+                CursorResult[object],
+                session.execute(
+                    delete(InvocationRecord).where(InvocationRecord.id.in_(stale_ids))
+                ),
+            )
+            removed += overflow_result.rowcount or 0
         return int(removed)
 
     def append(self, invocation: Invocation) -> None:
@@ -235,7 +272,7 @@ class SqlAlchemyInvocationRepository:
                     tool=row.tool,
                     account_id=row.account_id,
                     provider=row.provider,
-                    status=row.status,
+                    status=cast(Literal["success", "error"], row.status),
                     duration_ms=row.duration_ms,
                     error_type=row.error_type,
                     arguments_json=row.arguments_json,

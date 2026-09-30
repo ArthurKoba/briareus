@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import pytest
 from fastmcp import Client
+from starlette.testclient import TestClient
 
 from bridge.server import app, mcp
+from common.mcp_surfaces import MCP_SURFACE_PATHS
 
 
 @pytest.mark.asyncio
@@ -35,21 +39,15 @@ async def test_bridge_root_is_map_not_backend_namespace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bridge_capabilities_publish_single_origin_paths() -> None:
+async def test_bridge_capabilities_publish_only_supported_public_surfaces() -> None:
     async with Client(mcp) as client:
         result = await client.call_tool("bridge_capabilities", {})
 
     assert result.data is not None
-    assert {
-        "/mcp",
-        "/github/mcp",
-        "/gitlab/mcp",
-        "/files/mcp",
-        "/web/mcp",
-        "/analysis/mcp",
-        "/ghidra/mcp",
-        "/admin",
-    } <= set(result.data["public_surfaces"])
+    surfaces = set(result.data["public_surfaces"])
+    assert set(MCP_SURFACE_PATHS.values()) <= surfaces
+    assert "/admin" in surfaces
+    assert "/ghidra/mcp" not in surfaces
 
 
 def test_http_app_mounts_expected_public_surfaces() -> None:
@@ -60,9 +58,34 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
         "/files",
         "/web",
         "/analysis",
-        "/ghidra",
         "/admin",
         "/admin/{path:path}",
     } <= paths
-    assert "/http" not in paths
+    assert "/ghidra" not in paths
     assert "/curl" not in paths
+
+
+def test_mounted_analysis_http_app_runs_fastmcp_lifespan() -> None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1"},
+        },
+    }
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/analysis/mcp",
+            json=payload,
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "Task group is not initialized" not in response.text

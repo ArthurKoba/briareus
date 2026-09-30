@@ -31,19 +31,27 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
         credential = account.credential.replace("\\n", "\n").strip()
         if not credential:
             raise GitHubAgentError("GitHub account has no credential")
-        kwargs = {
-            "account_id": account.id,
-            "protected_branches": policy.protected_branches,
-            "required_checks": policy.required_checks,
-            "required_reviewers": policy.required_reviewers,
-            "auth_type": account.auth_type,
-        }
         if account.auth_type == "github_token":
-            return cls(token=credential, **kwargs)
+            return cls(
+                account_id=account.id,
+                token=credential,
+                auth_type=account.auth_type,
+                protected_branches=policy.protected_branches,
+                required_checks=policy.required_checks,
+                required_reviewers=policy.required_reviewers,
+            )
         app_id = (account.external_id or "").strip()
         if not app_id:
             raise GitHubAgentError("GitHub App account has no APP_ID")
-        return cls(app_id=app_id, private_key=credential, **kwargs)
+        return cls(
+            app_id=app_id,
+            private_key=credential,
+            account_id=account.id,
+            auth_type=account.auth_type,
+            protected_branches=policy.protected_branches,
+            required_checks=policy.required_checks,
+            required_reviewers=policy.required_reviewers,
+        )
 
     """Use the GitHub App display name for Git-authored objects.
 
@@ -70,7 +78,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             email = json_str(app.get("email")).strip() or (
                 f"{user_id}+{login}@users.noreply.github.com"
             )
-            identity: JsonObject = {
+            token_identity: JsonObject = {
                 "source": "github_token",
                 "display_name": display_name,
                 "login": login,
@@ -79,8 +87,8 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 "name": display_name,
                 "email": email,
             }
-            self._app_identity_cache = dict(identity)
-            return identity
+            self._app_identity_cache = dict(token_identity)
+            return token_identity
 
         _, app = self._request(
             "GET",
@@ -110,7 +118,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             raise GitHubAgentError("unable to resolve GitHub App bot identity") from exc
         if bot_id <= 0:
             raise GitHubAgentError("unable to resolve GitHub App bot identity")
-        identity: JsonObject = {
+        app_identity: JsonObject = {
             "source": "current_agent_app",
             "app_id": self.app_id,
             "slug": slug,
@@ -121,8 +129,8 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             "name": display_name,
             "email": f"{bot_id}+{login}@users.noreply.github.com",
         }
-        self._app_identity_cache = dict(identity)
-        return identity
+        self._app_identity_cache = dict(app_identity)
+        return app_identity
 
     def _agent_app_identity(self) -> JsonObject:
         """Compatibility hook used by history/admin policy code."""

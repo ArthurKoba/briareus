@@ -22,6 +22,8 @@ _GITHUB_API = "https://api.github.com"
 
 class _GitHubHistoryHost(Protocol):
     app_id: str
+    auth_type: str
+    token: str
     protected_branches: frozenset[str]
 
     def _assert_allowed(self, repository: str) -> str: ...
@@ -60,11 +62,6 @@ class GitHubHistoryMixin:
 
     def _history_host(self) -> _GitHubHistoryHost:
         return cast(_GitHubHistoryHost, self)
-
-
-
-
-
 
 
     def _agent_app_identity(self) -> JsonObject:

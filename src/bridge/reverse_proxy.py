@@ -19,9 +19,10 @@ _HOP_BY_HOP = {
 }
 
 
-class AdminProxy:
-    def __init__(self, base_url: str) -> None:
+class ReverseProxy:
+    def __init__(self, base_url: str, *, backend_name: str) -> None:
         self.base_url = base_url.rstrip("/")
+        self.backend_name = backend_name
 
     @staticmethod
     def _request_headers(request: Request) -> dict[str, str]:
@@ -68,7 +69,13 @@ class AdminProxy:
         if normalized == query:
             return rewritten
         return urlunsplit(
-            (parsed.scheme, parsed.netloc, parsed.path, urlencode(normalized), parsed.fragment)
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urlencode(normalized),
+                parsed.fragment,
+            )
         )
 
     def _response_headers(self, headers: Mapping[str, str]) -> dict[str, str]:
@@ -95,7 +102,10 @@ class AdminProxy:
                     headers=self._request_headers(request),
                 )
         except httpx.RequestError:
-            return PlainTextResponse("admin backend unavailable", status_code=502)
+            return PlainTextResponse(
+                f"{self.backend_name} backend unavailable",
+                status_code=502,
+            )
 
         return Response(
             content=response.content,

@@ -16,6 +16,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "curl:*",
     "analysis:*",
     "ghidra:*",
+    "auth:*",
 )
 _DEFAULT_PRIVATE_ORIGINS = (
     "http://localhost:*",
@@ -107,18 +108,6 @@ class PrivateRuntimeSettings(ProcessSettings):
 
 
 class BridgeSettings(ProcessSettings):
-    oauth_enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
-    oauth_base_url: str = Field(
-        "https://mcp.koba-nexus.ru",
-        validation_alias="OAUTH_BASE_URL",
-    )
-    oauth_client_id: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_ID")
-    oauth_client_secret: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_SECRET")
-    oauth_jwt_signing_key: str = Field("", validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY")
-    oauth_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(
-        (),
-        validation_alias="GITHUB_OAUTH_ALLOWED_USERS",
-    )
     github_url: str = Field("http://github:8000/mcp", validation_alias="GITHUB_URL")
     gitlab_url: str = Field("http://gitlab:8000/mcp", validation_alias="GITLAB_URL")
     files_url: str = Field("http://files:8000/mcp", validation_alias="FILES_URL")
@@ -146,10 +135,6 @@ class BridgeSettings(ProcessSettings):
     )
 
     @field_validator(
-        "oauth_base_url",
-        "oauth_client_id",
-        "oauth_client_secret",
-        "oauth_jwt_signing_key",
         "github_url",
         "gitlab_url",
         "files_url",
@@ -163,14 +148,6 @@ class BridgeSettings(ProcessSettings):
     @classmethod
     def _strip_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
-
-    @field_validator("oauth_allowed_users", mode="before")
-    @classmethod
-    def _parse_oauth_users(cls, value: object) -> object:
-        parsed = _tuple_value(value)
-        if isinstance(parsed, tuple):
-            return tuple(item.casefold() for item in parsed)
-        return parsed
 
     @field_validator("allowed_hosts", "allowed_origins", mode="before")
     @classmethod
@@ -194,6 +171,98 @@ class BridgeSettings(ProcessSettings):
             allowed_hosts=self.allowed_hosts,
             allowed_origins=self.allowed_origins,
         )
+
+
+class AuthServiceSettings(ProcessSettings):
+    public_base_url: str = Field(
+        "https://mcp.koba-nexus.ru",
+        validation_alias="OAUTH_BASE_URL",
+    )
+    oauth_client_id: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_ID")
+    oauth_client_secret: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_SECRET")
+    oauth_jwt_signing_key: str = Field("", validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY")
+    oauth_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(
+        (),
+        validation_alias="GITHUB_OAUTH_ALLOWED_USERS",
+    )
+    service_token: str = Field("", validation_alias="AUTH_SERVICE_TOKEN")
+    github_token_cache_ttl_seconds: int = Field(
+        300,
+        ge=0,
+        le=3600,
+        validation_alias="AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS",
+    )
+
+    @field_validator(
+        "public_base_url",
+        "oauth_client_id",
+        "oauth_client_secret",
+        "oauth_jwt_signing_key",
+        "service_token",
+        mode="before",
+    )
+    @classmethod
+    def _strip_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("oauth_allowed_users", mode="before")
+    @classmethod
+    def _parse_oauth_users(cls, value: object) -> object:
+        parsed = _tuple_value(value)
+        if isinstance(parsed, tuple):
+            return tuple(item.casefold() for item in parsed)
+        return parsed
+
+    def validate_bootstrap(self) -> None:
+        missing = [
+            name
+            for name, value in (
+                ("GITHUB_OAUTH_CLIENT_ID", self.oauth_client_id),
+                ("GITHUB_OAUTH_CLIENT_SECRET", self.oauth_client_secret),
+                ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
+                ("GITHUB_OAUTH_ALLOWED_USERS", self.oauth_allowed_users),
+                ("AUTH_SERVICE_TOKEN", self.service_token),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError("missing auth bootstrap settings: " + ", ".join(missing))
+
+
+class AuthClientSettings(ProcessSettings):
+    enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
+    url: str = Field("http://auth:8000", validation_alias="AUTH_URL")
+    service_token: str = Field("", validation_alias="AUTH_SERVICE_TOKEN")
+    public_base_url: str = Field(
+        "https://mcp.koba-nexus.ru",
+        validation_alias="OAUTH_BASE_URL",
+    )
+    timeout_seconds: float = Field(
+        10,
+        gt=0,
+        le=60,
+        validation_alias="AUTH_TIMEOUT_SECONDS",
+    )
+
+    @field_validator("url", "service_token", "public_base_url", mode="before")
+    @classmethod
+    def _strip_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    def validate_bootstrap(self) -> None:
+        if not self.enabled:
+            return
+        missing = [
+            name
+            for name, value in (
+                ("AUTH_URL", self.url),
+                ("AUTH_SERVICE_TOKEN", self.service_token),
+                ("OAUTH_BASE_URL", self.public_base_url),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError("missing gateway auth settings: " + ", ".join(missing))
 
 
 class ManagementClientSettings(ProcessSettings):

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
-from common.models import JsonObject
+from common.models import JsonObject, json_array
 from common.settings import FileSettings
 from modules.files.file_primitives import FileError
 from modules.files.file_store import FileStore
@@ -76,7 +76,11 @@ class FileAdminStore:
                     candidates.append(file_id)
 
         if dry_run:
-            return {"dry_run": True, "count": len(candidates), "candidates": candidates}
+            return {
+                "dry_run": True,
+                "count": len(candidates),
+                "candidates": json_array(candidates, context="cleanup candidates"),
+            }
 
         deleted: list[str] = []
         for file_id in candidates:
@@ -85,4 +89,8 @@ class FileAdminStore:
             except FileError:
                 continue
             deleted.append(file_id)
-        return {"dry_run": False, "count": len(deleted), "deleted": deleted}
+        return {
+            "dry_run": False,
+            "count": len(deleted),
+            "deleted": json_array(deleted, context="deleted files"),
+        }

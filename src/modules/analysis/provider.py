@@ -8,8 +8,8 @@ from typing import Protocol, cast
 
 from fastmcp import Client
 from fastmcp.server.providers import Provider
-from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.tools import FunctionTool, Tool
+from fastmcp.utilities.components import FastMCPComponent
 
 from common.models import JsonObject, JsonValue, json_object
 from common.settings import AnalysisSettings

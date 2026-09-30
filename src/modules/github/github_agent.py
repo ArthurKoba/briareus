@@ -344,7 +344,7 @@ class GitHubAppClient:
     def list_repositories(self) -> JsonObject:
         """List repositories available to the configured GitHub identity."""
         if self.token:
-            repositories: list[JsonObject] = []
+            token_repositories: list[JsonObject] = []
             page = 1
             while True:
                 _, result = self._request(
@@ -363,7 +363,7 @@ class GitHubAppClient:
                     full_name = json_str(item.get("full_name"))
                     if not full_name:
                         continue
-                    repositories.append({
+                    token_repositories.append({
                         "full_name": full_name,
                         "private": json_bool(item.get("private")),
                         "default_branch": json_str(item.get("default_branch")),
@@ -374,14 +374,17 @@ class GitHubAppClient:
                 if len(result) < 100:
                     break
                 page += 1
-            repositories.sort(key=lambda item: str(item["full_name"]).casefold())
+            token_repositories.sort(key=lambda item: str(item["full_name"]).casefold())
             return {
                 "auth_type": self.auth_type,
-                "count": len(repositories),
-                "repositories": repositories,
+                "count": len(token_repositories),
+                "repositories": json_array(
+                    token_repositories,
+                    context="GitHub token repositories",
+                ),
             }
 
-        repositories: list[JsonObject] = []
+        app_repositories: list[JsonObject] = []
         seen: set[str] = set()
         for installation_id in self._installation_ids_from_github():
             token = self._installation_token_for_id(installation_id)
@@ -401,7 +404,7 @@ class GitHubAppClient:
                         continue
                     seen.add(full_name.casefold())
                     self._installation_ids[full_name.casefold()] = installation_id
-                    repositories.append({
+                    app_repositories.append({
                         "full_name": full_name,
                         "private": json_bool(item.get("private")),
                         "default_branch": json_str(item.get("default_branch")),
@@ -413,12 +416,15 @@ class GitHubAppClient:
                 if len(items) < 100:
                     break
                 page += 1
-        repositories.sort(key=lambda item: str(item["full_name"]).casefold())
+        app_repositories.sort(key=lambda item: str(item["full_name"]).casefold())
         return {
             "auth_type": self.auth_type,
             "app_id": self.app_id,
-            "count": len(repositories),
-            "repositories": repositories,
+            "count": len(app_repositories),
+            "repositories": json_array(
+                app_repositories,
+                context="GitHub App repositories",
+            ),
         }
 
     def _repository_metadata(
