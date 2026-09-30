@@ -7,14 +7,12 @@ from common.settings import GitHubPolicySettings
 from modules.github.github_identity import GitHubPrettyIdentityClient
 
 
-def _account(role: str = "reviewer") -> ResolvedAccount:
+def _account() -> ResolvedAccount:
     return ResolvedAccount(
         id="11111111-1111-1111-1111-111111111111",
         alias="github-reviewer",
         provider="github",
-        role=role,
         auth_type="github_app",
-        label="Reviewer",
         base_url="https://api.github.com",
         external_id="888",
         verify_tls=True,
@@ -78,7 +76,7 @@ async def test_reviewer_tool_surface_requires_account_id_and_excludes_mutations(
     assert "github_reviewer_list_repositories" in by_name
     assert "github_reviewer_create_review" in by_name
     assert "github_reviewer_get_file" in by_name
-    assert "account_id" in by_name["github_reviewer_get_file"].inputSchema["properties"]
+    assert "account_id" in by_name["github_reviewer_get_file"].input_schema["properties"]
     assert not any("put_file" in name for name in by_name)
     assert not any("delete_file" in name for name in by_name)
     assert not any("merge_pull" in name for name in by_name)

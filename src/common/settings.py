@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _DEFAULT_PRIVATE_HOSTS = (
@@ -15,6 +15,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "files:*",
     "curl:*",
     "analysis:*",
+    "ghidra:*",
 )
 _DEFAULT_PRIVATE_ORIGINS = (
     "http://localhost:*",
@@ -67,6 +68,21 @@ class ProcessSettings(BaseSettings):
     )
 
 
+class AsgiServerSettings(ProcessSettings):
+    app: str = Field("bridge.server:app", validation_alias="ASGI_APP")
+    host: str = Field("0.0.0.0", validation_alias="ASGI_HOST")
+    port: int = Field(8000, ge=1, le=65535, validation_alias="ASGI_PORT")
+    forwarded_allow_ips: str = Field(
+        "127.0.0.1",
+        validation_alias="ASGI_FORWARDED_ALLOW_IPS",
+    )
+
+    @field_validator("app", "host", "forwarded_allow_ips", mode="before")
+    @classmethod
+    def _strip_values(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
 class PrivateRuntimeSettings(ProcessSettings):
     allowed_hosts: Annotated[tuple[str, ...], NoDecode] = Field(
         _DEFAULT_PRIVATE_HOSTS,
@@ -112,10 +128,13 @@ class BridgeSettings(ProcessSettings):
         validation_alias="ANALYSIS_URL",
     )
     ghidra_url: str = Field(
-        "http://bridge:8081/mcp",
-        validation_alias="GHIDRA_MCP_URL",
+        "http://ghidra:8000/mcp",
+        validation_alias="GHIDRA_URL",
     )
-    build_sha: str = Field("unknown", validation_alias="BUILD_SHA")
+    build_sha: str = Field(
+        "unknown",
+        validation_alias=AliasChoices("BUILD_SHA", "SOURCE_COMMIT"),
+    )
     build_time: str = Field("unknown", validation_alias="BUILD_TIME")
     allowed_hosts: Annotated[tuple[str, ...], NoDecode] = Field(
         _DEFAULT_PUBLIC_HOSTS,
@@ -166,7 +185,7 @@ class BridgeSettings(ProcessSettings):
             "files": self.files_url or "http://files:8000/mcp",
             "web": self.curl_url or "http://curl:8000/mcp",
             "analysis": self.analysis_url or "http://analysis:8000/mcp",
-            "ghidra": self.ghidra_url or "http://bridge:8081/mcp",
+            "ghidra": self.ghidra_url or "http://ghidra:8000/mcp",
         }
 
     @property
@@ -177,14 +196,14 @@ class BridgeSettings(ProcessSettings):
         )
 
 
-class ControlPlaneClientSettings(ProcessSettings):
-    url: str = Field("http://control-plane:8000", validation_alias="CONTROL_PLANE_URL")
-    service_token: str = Field("", validation_alias="CONTROL_PLANE_SERVICE_TOKEN")
+class ManagementClientSettings(ProcessSettings):
+    url: str = Field("http://management:8000", validation_alias="MANAGEMENT_URL")
+    service_token: str = Field("", validation_alias="MANAGEMENT_SERVICE_TOKEN")
     timeout_seconds: float = Field(
         10,
         gt=0,
         le=60,
-        validation_alias="CONTROL_PLANE_TIMEOUT_SECONDS",
+        validation_alias="MANAGEMENT_TIMEOUT_SECONDS",
     )
 
     @field_validator("url", "service_token", mode="before")
@@ -193,19 +212,19 @@ class ControlPlaneClientSettings(ProcessSettings):
         return value.strip() if isinstance(value, str) else value
 
 
-class ControlPlaneSettings(ProcessSettings):
+class ManagementSettings(ProcessSettings):
     database_path: Path = Field(
-        Path("/control-plane/control-plane.sqlite3"),
-        validation_alias="CONTROL_PLANE_DATABASE_PATH",
+        Path("/management/management.sqlite3"),
+        validation_alias="MANAGEMENT_DATABASE_PATH",
     )
-    encryption_key: str = Field("", validation_alias="CONTROL_PLANE_ENCRYPTION_KEY")
-    service_token: str = Field("", validation_alias="CONTROL_PLANE_SERVICE_TOKEN")
-    admin_username: str = Field("admin", validation_alias="CONTROL_PLANE_ADMIN_USERNAME")
-    admin_password: str = Field("", validation_alias="CONTROL_PLANE_ADMIN_PASSWORD")
-    session_secret: str = Field("", validation_alias="CONTROL_PLANE_SESSION_SECRET")
+    encryption_key: str = Field("", validation_alias="MANAGEMENT_ENCRYPTION_KEY")
+    service_token: str = Field("", validation_alias="MANAGEMENT_SERVICE_TOKEN")
+    admin_username: str = Field("admin", validation_alias="MANAGEMENT_ADMIN_USERNAME")
+    admin_password: str = Field("", validation_alias="MANAGEMENT_ADMIN_PASSWORD")
+    session_secret: str = Field("", validation_alias="MANAGEMENT_SESSION_SECRET")
     session_https_only: bool = Field(
         True,
-        validation_alias="CONTROL_PLANE_SESSION_HTTPS_ONLY",
+        validation_alias="MANAGEMENT_SESSION_HTTPS_ONLY",
     )
 
     @field_validator(
@@ -224,7 +243,7 @@ class ControlPlaneSettings(ProcessSettings):
     @classmethod
     def _absolute_database_path(cls, value: Path) -> Path:
         if not value.is_absolute():
-            raise ValueError("CONTROL_PLANE_DATABASE_PATH must be absolute")
+            raise ValueError("MANAGEMENT_DATABASE_PATH must be absolute")
         return value.resolve(strict=False)
 
     @property
@@ -235,24 +254,39 @@ class ControlPlaneSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("CONTROL_PLANE_ENCRYPTION_KEY", self.encryption_key),
-                ("CONTROL_PLANE_SERVICE_TOKEN", self.service_token),
-                ("CONTROL_PLANE_ADMIN_PASSWORD", self.admin_password),
-                ("CONTROL_PLANE_SESSION_SECRET", self.session_secret),
+                ("MANAGEMENT_ENCRYPTION_KEY", self.encryption_key),
+                ("MANAGEMENT_SERVICE_TOKEN", self.service_token),
+                ("MANAGEMENT_ADMIN_PASSWORD", self.admin_password),
+                ("MANAGEMENT_SESSION_SECRET", self.session_secret),
             )
             if not value
         ]
         if missing:
-            raise ValueError("missing control-plane bootstrap settings: " + ", ".join(missing))
+            raise ValueError("missing management bootstrap settings: " + ", ".join(missing))
 
 
 class AnalysisSettings(ProcessSettings):
-    backend_url: str = Field("", validation_alias="GHIDRA_MCP_URL")
+    backend_url: str = Field(
+        "http://ghidra:8000/mcp",
+        validation_alias="GHIDRA_URL",
+    )
     schema_cache_ttl_seconds: float = Field(
         30,
         ge=0,
         le=3600,
         validation_alias="ANALYSIS_SCHEMA_CACHE_TTL_SECONDS",
+    )
+
+    @field_validator("backend_url", mode="before")
+    @classmethod
+    def _strip_backend_url(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class GhidraSettings(ProcessSettings):
+    backend_url: str = Field(
+        "http://bridge:8081/mcp",
+        validation_alias="GHIDRA_MCP_URL",
     )
 
     @field_validator("backend_url", mode="before")

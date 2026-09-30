@@ -7,18 +7,19 @@ import mcp.types as mt
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
 
-from .account_client import ControlPlaneClient
 from .account_contracts import InvocationEvent
+from .management_client import ManagementClient
+from .telemetry_payloads import render_error, render_payload
 
 
 class ToolTelemetryMiddleware(Middleware):
-    """Record MCP tool execution metadata without storing argument values."""
+    """Record bounded, secret-redacted MCP calls into the management service."""
 
     _MAX_PENDING_EVENTS = 128
 
-    def __init__(self, module: str, control_plane: ControlPlaneClient) -> None:
+    def __init__(self, module: str, management: ManagementClient) -> None:
         self.module = module
-        self.control_plane = control_plane
+        self.management = management
         self._tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
@@ -36,7 +37,7 @@ class ToolTelemetryMiddleware(Middleware):
 
     async def _record(self, event: InvocationEvent) -> None:
         try:
-            await asyncio.to_thread(self.control_plane.record_invocation, event)
+            await asyncio.to_thread(self.management.record_invocation, event)
         except Exception:
             return
 
@@ -56,6 +57,7 @@ class ToolTelemetryMiddleware(Middleware):
         account_id = self._account_id(context)
         provider = self.module if self.module in {"github", "gitlab"} else ""
         request_id = self._request_id(context)
+        arguments_json = render_payload(context.message.arguments or {})
         try:
             result = await call_next(context)
         except Exception as exc:
@@ -69,6 +71,8 @@ class ToolTelemetryMiddleware(Middleware):
                     status="error",
                     duration_ms=(time.monotonic() - started) * 1000,
                     error_type=type(exc).__name__,
+                    arguments_json=arguments_json,
+                    error_message=render_error(exc),
                 )
             )
             raise
@@ -81,6 +85,8 @@ class ToolTelemetryMiddleware(Middleware):
                 provider=provider,
                 status="success",
                 duration_ms=(time.monotonic() - started) * 1000,
+                arguments_json=arguments_json,
+                result_json=render_payload(result),
             )
         )
         return result

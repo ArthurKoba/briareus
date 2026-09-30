@@ -4,11 +4,10 @@
 mcp-bridge/
 ├── .github/
 ├── docs/
-├── migrations/                 # Alembic control-plane schema
 ├── src/
 │   ├── bridge/                 # public gateway only
 │   ├── common/                 # shared contracts/settings/runtime primitives
-│   ├── control_plane/
+│   ├── management/
 │   │   ├── domain/
 │   │   ├── application/
 │   │   ├── infrastructure/
@@ -22,9 +21,8 @@ mcp-bridge/
 ├── tests/
 │   ├── bridge/
 │   ├── common/
-│   ├── control_plane/
+│   ├── management/
 │   └── modules/
-├── alembic.ini
 ├── Dockerfile
 ├── docker-compose.yaml
 ├── docker-entrypoint.sh
@@ -32,7 +30,7 @@ mcp-bridge/
 └── README.md
 ```
 
-`bridge` owns only OAuth, public MCP surfaces and composition. `control_plane` owns dynamic
+`bridge` owns only OAuth, public MCP surfaces and composition. `management` owns dynamic
 provider account persistence and encrypted credentials. Each provider module owns its API
 semantics and consumes account data only through the common account port/client.
 

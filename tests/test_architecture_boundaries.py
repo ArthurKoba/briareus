@@ -29,23 +29,23 @@ def test_common_layer_is_provider_neutral() -> None:
                 violations.append(f"{path.relative_to(_SRC)} -> {imported}")
             if imported == "bridge" or imported.startswith("bridge."):
                 violations.append(f"{path.relative_to(_SRC)} -> {imported}")
-            if imported.startswith("control_plane."):
+            if imported.startswith("management."):
                 violations.append(f"{path.relative_to(_SRC)} -> {imported}")
     assert violations == []
 
 
-def test_bridge_does_not_import_provider_or_control_plane_implementation() -> None:
+def test_bridge_does_not_import_provider_or_management_implementation() -> None:
     violations: list[str] = []
     for path in _python_files(_SRC / "bridge"):
         for imported in _imports(path):
             if imported == "modules" or imported.startswith("modules."):
                 violations.append(f"{path.relative_to(_SRC)} -> {imported}")
-            if imported.startswith("control_plane."):
+            if imported.startswith("management."):
                 violations.append(f"{path.relative_to(_SRC)} -> {imported}")
     assert violations == []
 
 
-def test_provider_packages_do_not_import_each_other_or_control_plane_implementation() -> None:
+def test_provider_packages_do_not_import_each_other_or_management_implementation() -> None:
     violations: list[str] = []
     provider_roots = {
         "github": _SRC / "modules" / "github",
@@ -53,6 +53,7 @@ def test_provider_packages_do_not_import_each_other_or_control_plane_implementat
         "files": _SRC / "modules" / "files",
         "curl": _SRC / "modules" / "curl",
         "analysis": _SRC / "modules" / "analysis",
+        "ghidra": _SRC / "modules" / "ghidra",
     }
     for provider, root in provider_roots.items():
         forbidden = {
@@ -62,7 +63,7 @@ def test_provider_packages_do_not_import_each_other_or_control_plane_implementat
         }
         for path in _python_files(root):
             for imported in _imports(path):
-                if imported.startswith("control_plane."):
+                if imported.startswith("management."):
                     violations.append(f"{path.relative_to(_SRC)} -> {imported}")
                 if any(
                     imported == prefix or imported.startswith(prefix + ".")
@@ -72,21 +73,21 @@ def test_provider_packages_do_not_import_each_other_or_control_plane_implementat
     assert violations == []
 
 
-def test_control_plane_layers_depend_inward() -> None:
+def test_management_layers_depend_inward() -> None:
     violations: list[str] = []
-    domain = _SRC / "control_plane" / "domain"
-    application = _SRC / "control_plane" / "application"
+    domain = _SRC / "management" / "domain"
+    application = _SRC / "management" / "application"
     forbidden_domain = (
-        "control_plane.application",
-        "control_plane.infrastructure",
-        "control_plane.presentation",
+        "management.application",
+        "management.infrastructure",
+        "management.presentation",
         "fastapi",
         "sqlalchemy",
         "starlette_admin",
     )
     forbidden_application = (
-        "control_plane.infrastructure",
-        "control_plane.presentation",
+        "management.infrastructure",
+        "management.presentation",
         "fastapi",
         "sqlalchemy",
         "starlette_admin",
@@ -119,7 +120,7 @@ def _environment_accesses(path: Path) -> list[str]:
 
 def test_process_environment_is_not_read_inside_application_or_provider_code() -> None:
     violations: list[str] = []
-    for root in (_SRC / "bridge", _SRC / "modules", _SRC / "control_plane"):
+    for root in (_SRC / "bridge", _SRC / "modules", _SRC / "management"):
         for path in _python_files(root):
             violations.extend(_environment_accesses(path))
     assert violations == []
@@ -130,15 +131,16 @@ def test_process_settings_are_created_only_in_composition_roots() -> None:
     settings_types = {
         "AnalysisSettings",
         "BridgeSettings",
-        "ControlPlaneClientSettings",
-        "ControlPlaneSettings",
+        "ManagementClientSettings",
+        "ManagementSettings",
         "CurlSettings",
         "FileSettings",
         "GitHubPolicySettings",
         "GitLabSettings",
+        "GhidraSettings",
         "PrivateRuntimeSettings",
     }
-    allowed = {_SRC / "bridge" / "server.py", _SRC / "control_plane" / "runtime.py"}
+    allowed = {_SRC / "bridge" / "server.py", _SRC / "management" / "runtime.py"}
     allowed.update((_SRC / "modules").glob("*/runtime.py"))
 
     for path in _python_files(_SRC):
@@ -197,3 +199,48 @@ def test_provider_tools_use_explicit_account_id() -> None:
                         f"{function.name} first={first!r}"
                     )
     assert violations == []
+
+
+def test_provider_tool_catalog_is_not_conditionally_registered() -> None:
+    violations: list[str] = []
+
+    def visit(node: ast.AST, path: Path, conditional: bool = False) -> None:
+        now_conditional = conditional or isinstance(
+            node,
+            (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.Match),
+        )
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            is_tool = any(
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "tool"
+                for decorator in node.decorator_list
+            )
+            if is_tool and conditional:
+                violations.append(
+                    f"{path.relative_to(_SRC)}:{node.lineno} {node.name} is conditional"
+                )
+        for child in ast.iter_child_nodes(node):
+            visit(child, path, now_conditional)
+
+    for provider in ("github", "gitlab"):
+        root = _SRC / "modules" / provider
+        for path in sorted(root.glob("*tools.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            visit(tree, path)
+
+    assert violations == []
+
+
+def test_github_actions_tools_use_one_account_selected_client_factory() -> None:
+    path = _SRC / "modules" / "github" / "github_actions_tools.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    registrar = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "register_github_actions_tools"
+    )
+    parameters = [argument.arg for argument in registrar.args.args]
+    assert "client_factory" in parameters
+    assert "reviewer_client_factory" not in parameters
+    assert "reviewer_available" not in parameters
