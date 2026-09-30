@@ -196,15 +196,26 @@ async def test_reverse_quick_coverage_marks_large_program_approximate() -> None:
         {
             "get_function_count": {"function_count": 10},
             "list_functions_enhanced": {"functions": functions},
-            "analyze_function_completeness": {
-                "results": [
-                    {
-                        "effective_score": 80,
-                        "completeness_score": 80,
-                    }
-                    for _ in range(4)
-                ]
-            },
+            "analyze_function_completeness": [
+                {
+                    "results": [
+                        {
+                            "effective_score": 80,
+                            "completeness_score": 80,
+                        }
+                        for _ in range(2)
+                    ]
+                },
+                {
+                    "results": [
+                        {
+                            "effective_score": 80,
+                            "completeness_score": 80,
+                        }
+                        for _ in range(2)
+                    ]
+                },
+            ],
         }
     )
 
