@@ -129,5 +129,13 @@ class ReverseAdminClient:
             context="reverse project files",
         )
 
-    async def open_programs(self, project_id: str) -> JsonValue:
-        return await self._call("list_open_programs", {"project_id": project_id})
+    async def open_programs(self, project_id: str) -> list[JsonValue]:
+        value = await self._call("list_open_programs", {"project_id": project_id})
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for key in ("programs", "open_programs"):
+                items = value.get(key)
+                if isinstance(items, list):
+                    return items
+        return []

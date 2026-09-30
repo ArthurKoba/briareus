@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import posixpath
 import urllib.parse
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -40,7 +41,7 @@ from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
 
-from common.models import json_int, json_str
+from common.models import JsonObject, json_int, json_str
 from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
 from management.application.services import (
@@ -409,6 +410,8 @@ class ReverseView(CustomView):
 
         files: JsonObject = {}
         programs: list[object] = []
+        folder_links: list[dict[str, str]] = []
+        parent_folder: str | None = None
         if session.get("session") == "active" and not error:
             try:
                 files, programs = await asyncio.gather(
@@ -417,6 +420,21 @@ class ReverseView(CustomView):
                 )
             except Exception as exc:
                 error = str(exc)
+
+        raw_folders = files.get("folders")
+        if isinstance(raw_folders, list):
+            base = folder.rstrip("/")
+            for raw_name in raw_folders:
+                if not isinstance(raw_name, str) or not raw_name:
+                    continue
+                folder_links.append(
+                    {
+                        "name": raw_name,
+                        "path": f"/{raw_name}" if not base else f"{base}/{raw_name}",
+                    }
+                )
+        if folder != "/":
+            parent_folder = posixpath.dirname(folder.rstrip("/")) or "/"
 
         return _view_templates(self).TemplateResponse(
             request=request,
@@ -428,6 +446,8 @@ class ReverseView(CustomView):
                 "session": session,
                 "files": files,
                 "programs": programs,
+                "folder_links": folder_links,
+                "parent_folder": parent_folder,
                 "error": error,
             },
         )
