@@ -243,3 +243,23 @@ def test_single_reference_read_tools_use_action_selector() -> None:
             {"action": "ParseHeader"},
             tool_name,
         )["address"] == "ParseHeader"
+
+
+def test_comment_read_accepts_semantic_action_selector() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "address": {"type": "string"},
+            "program": {"type": "string", "default": ""},
+        },
+        "required": ["address"],
+    }
+    exposed = analysis_schema(schema, "get_comment")
+    assert set(exposed["properties"]) == {"action", "program"}
+    assert exposed["required"] == ["action"]
+    normalized = normalize_arguments(
+        schema,
+        {"action": "RomLoaderStubEntry", "program": "loader.bin"},
+        "get_comment",
+    )
+    assert normalized["address"] == "RomLoaderStubEntry"
