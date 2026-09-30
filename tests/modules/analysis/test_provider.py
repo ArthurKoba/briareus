@@ -62,6 +62,8 @@ async def test_provider_adapts_live_backend_catalog(monkeypatch) -> None:
     assert seen_urls == ["http://ghidra.internal/mcp"]
     assert {tool.name for tool in tools} == {
         "inspect_action_behavior",
+        "search_tools",
+        "check_tools",
         "get_analysis_vocabulary",
     }
 
@@ -189,3 +191,89 @@ def test_provider_adds_public_vocabulary_tool() -> None:
     provider._validate_public_catalog([tool])
     assert tool.name == "get_analysis_vocabulary"
     assert "canonical public terminology" in tool.description
+
+
+
+@pytest.mark.asyncio
+async def test_public_catalog_search_and_check_use_semantic_names() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    backend_tools = [
+        SimpleNamespace(
+            name="get_function_callees",
+            title="Get Function Callees",
+            description="Get functions called by a function",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "default": ""},
+                    "address": {"type": "string", "default": ""},
+                },
+            },
+        ),
+        SimpleNamespace(
+            name="analyze_function_complete",
+            title="Analyze Function Complete",
+            description="Comprehensive function analysis",
+            input_schema={
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        ),
+        SimpleNamespace(
+            name="search_tools",
+            title="Search Tools",
+            description="Search private tools",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        SimpleNamespace(
+            name="check_tools",
+            title="Check Tools",
+            description="Check private tools",
+            input_schema={"type": "object", "properties": {}},
+        ),
+    ]
+    public = provider._adapt_catalog(backend_tools)
+    search_tool, check_tool = provider._catalog_tools(public)
+
+    search = await search_tool.fn(query="outbound actions", limit=10)
+    assert search["matches"][0]["name"] == "get_outbound_actions"
+    assert "get_function_callees" not in str(search)
+
+    checked = await check_tool.fn(
+        tools="get_outbound_actions,get_function_callees,analyze_action_complete"
+    )
+    assert checked["results"]["get_outbound_actions"]["status"] == "callable"
+    assert checked["results"]["analyze_action_complete"]["status"] == "callable"
+    assert checked["results"]["get_function_callees"]["status"] == "not_found"
+
+
+def test_private_registry_tools_are_not_adapted_directly() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    tools = provider._adapt_catalog(
+        [
+            SimpleNamespace(
+                name="search_tools",
+                title="Search Tools",
+                description="Search private tools",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            SimpleNamespace(
+                name="check_tools",
+                title="Check Tools",
+                description="Check private tools",
+                input_schema={"type": "object", "properties": {}},
+            ),
+        ]
+    )
+    assert tools == []
