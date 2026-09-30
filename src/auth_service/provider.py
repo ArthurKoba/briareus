@@ -27,6 +27,8 @@ from common.settings import AuthServiceSettings
 
 _RESOURCE_BINDING_TTL_SECONDS = 10 * 60
 _TRANSACTION_TTL_SECONDS = 15 * 60
+_FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS = 24 * 60 * 60
+_FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
 
 
 class ResourceBinding(StrictModel):
@@ -59,8 +61,8 @@ class MultiResourceGitHubProvider(GitHubProvider):
             enable_cimd=False,
             forward_resource=False,
             cache_ttl_seconds=settings.github_token_cache_ttl_seconds,
-            fallback_refresh_token_expiry_seconds=30 * 24 * 60 * 60,
-            fastmcp_access_token_expiry_seconds=30 * 60,
+            fallback_refresh_token_expiry_seconds=_FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS,
+            fastmcp_access_token_expiry_seconds=_FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS,
         )
 
         self._resource_bindings: PydanticAdapter[ResourceBinding] = PydanticAdapter[

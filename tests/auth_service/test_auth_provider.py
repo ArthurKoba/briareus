@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from auth_service.provider import MultiResourceGitHubProvider
+from auth_service.provider import (
+    _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS,
+    _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS,
+    MultiResourceGitHubProvider,
+)
 from common.mcp_surfaces import allowed_resource_urls, resource_url
 from common.settings import AuthServiceSettings
 
@@ -68,3 +72,23 @@ async def test_upstream_claims_embed_only_allowed_identity() -> None:
     claims = await provider._extract_upstream_claims({"access_token": "upstream"})
 
     assert claims == {"login": "arthurkoba", "sub": "42"}
+
+
+def test_fastmcp_token_lifetimes_are_client_friendly() -> None:
+    assert _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS == 24 * 60 * 60
+    assert _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS == 30 * 24 * 60 * 60
+
+
+def test_refresh_token_audience_is_recovered_from_token_claims() -> None:
+    settings = _settings()
+    provider = MultiResourceGitHubProvider(settings)
+    analysis = resource_url(settings.public_base_url, "analysis")
+
+    import base64
+    import json
+
+    payload = base64.urlsafe_b64encode(json.dumps({"aud": analysis}).encode()).decode().rstrip("=")
+    token = f"header.{payload}.signature"
+
+    assert provider._jwt_audience_unverified(token) == analysis
+    assert provider.canonical_resource(provider._jwt_audience_unverified(token)) == analysis
