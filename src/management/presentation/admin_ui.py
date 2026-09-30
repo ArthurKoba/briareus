@@ -13,3 +13,6 @@ class ManagementUiPlugin(BasePlugin):
 
     def css_links(self, request: Request) -> list[str]:
         return [static_url(request, "plugins/management-ui/admin.css", v=2)]
+
+    def js_links(self, request: Request) -> list[str]:
+        return [static_url(request, "plugins/management-ui/admin.js", v=1)]

@@ -64,7 +64,7 @@
             <td>{{ worker["project_name"] or "—" }}</td>
             <td>{{ worker["queued"] or 0 }}</td>
             <td><code>{{ worker["current_operation"] or "—" }}</code></td>
-            <td class="text-nowrap">{{ worker["last_used_at"] or "—" }}</td>
+            <td class="text-nowrap">{% if worker["last_used_at"] %}<time class="js-local-datetime" datetime="{{ worker['last_used_at'] }}">{{ worker["last_used_at"] }}</time>{% else %}—{% endif %}</td>
             <td>{% if worker["healthy"] %}<span class="badge bg-green-lt">healthy</span>{% else %}<span class="badge bg-red-lt">error</span>{% endif %}</td>
             <td class="text-nowrap">
               {% if enabled %}
@@ -122,7 +122,7 @@
             </td>
             <td>{% if project["worker_index"] is not none %}#{{ project["worker_index"] }}{% else %}—{% endif %}</td>
             <td>{{ project["queued"] or 0 }}{% if project["running"] %} / running{% endif %}</td>
-            <td class="text-nowrap">{{ project["last_used_at"] or "—" }}</td>
+            <td class="text-nowrap">{% if project["last_used_at"] %}<time class="js-local-datetime" datetime="{{ project['last_used_at'] }}">{{ project["last_used_at"] }}</time>{% else %}—{% endif %}</td>
             <td><code class="text-break">{{ project["path"] }}</code></td>
             <td class="text-nowrap">
               <a class="btn" href="/admin/reverse/project/{{ project['project_id'] }}">Inspect</a>

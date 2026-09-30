@@ -54,11 +54,17 @@ def _decode_call_result(result: object) -> JsonValue | None:
 class ReverseAdminClient:
     """Read/control project worker state through the private Ghidra MCP service."""
 
-    def __init__(self, url: str = _DEFAULT_GHIDRA_MCP_URL) -> None:
+    def __init__(
+        self,
+        url: str = _DEFAULT_GHIDRA_MCP_URL,
+        *,
+        timeout_seconds: float = 180.0,
+    ) -> None:
         self.url = url
+        self.timeout_seconds = timeout_seconds
 
     async def _call(self, tool: str, arguments: JsonObject | None = None) -> JsonValue:
-        async with Client(self.url) as client:
+        async with Client(self.url, timeout=self.timeout_seconds) as client:
             result = await client.call_tool(tool, arguments or {})
         decoded = _decode_call_result(result)
         if decoded is None:
@@ -201,8 +207,8 @@ class ReverseAdminClient:
         program: str,
         *,
         full: bool = False,
-        sample_size: int = 250,
-        batch_size: int = 100,
+        sample_size: int = 50,
+        batch_size: int = 20,
     ) -> JsonObject:
         count_payload = json_object(
             await self._call(
