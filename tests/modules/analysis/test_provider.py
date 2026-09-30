@@ -91,3 +91,33 @@ def test_provider_rejects_tool_alias_collisions() -> None:
                 _backend_tool("inspect_action_behavior"),
             ]
         )
+
+
+def test_provider_exposes_typed_defaults_and_semantic_selectors() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://ghidra.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    backend = SimpleNamespace(
+        name="get_function_callees",
+        title="Get Function Callees",
+        description="Get functions called by a function",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "default": ""},
+                "address": {"type": "string", "default": ""},
+                "offset": {"type": "integer", "default": "0"},
+                "limit": {"type": "integer", "default": "100"},
+                "program": {"type": "string", "default": ""},
+            },
+            "required": [],
+        },
+    )
+    tool = provider._adapt_tool(backend, "get_outbound_actions")
+    props = tool.parameters["properties"]
+    assert set(props) == {"action_name", "action_address", "offset", "limit", "program"}
+    assert props["offset"]["default"] == 0
+    assert props["limit"]["default"] == 100

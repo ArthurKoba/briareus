@@ -59,6 +59,15 @@ _ARGUMENT_ALIASES: dict[str, str] = {
     "disassembly_comments": "low_level_annotations",
 }
 
+_TOOL_ARGUMENT_ALIASES: dict[str, dict[str, str]] = {
+    "get_function_callees": {"name": "action_name", "address": "action_address"},
+    "get_function_callers": {"name": "action_name", "address": "action_address"},
+    "get_function_call_graph": {"name": "action_name", "address": "action_address"},
+    "analyze_function_complete": {"name": "action_name"},
+    "decompile_function": {"address": "action_address", "functions": "action_names"},
+    "disassemble_function": {"address": "action_address"},
+}
+
 _TOOL_PHRASES: tuple[tuple[str, str], ...] = (
     ("analyze_call_graph", "analyze_link_map"),
     ("get_function_callers", "get_inbound_actions"),
@@ -104,11 +113,16 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
 def analysis_argument_name(
     ghidra_name: str,
     property_schema: JsonObject | None = None,
+    tool_name: str | None = None,
 ) -> str:
     if property_schema is not None:
         schema_alias = property_schema.get("x-analysis-alias")
         if isinstance(schema_alias, str) and schema_alias.strip():
             return schema_alias.strip()
+    if tool_name is not None:
+        tool_alias = _TOOL_ARGUMENT_ALIASES.get(tool_name, {}).get(ghidra_name)
+        if tool_alias is not None:
+            return tool_alias
     return _ARGUMENT_ALIASES.get(ghidra_name, ghidra_name)
 
 
@@ -131,9 +145,9 @@ def analysis_text(text: str) -> str:
 def tool_alias(ghidra_name: str, input_schema: JsonObject) -> ToolAlias:
     properties = _schema_properties(input_schema)
     aliases = {
-        name: analysis_argument_name(name, property_schema)
+        name: analysis_argument_name(name, property_schema, ghidra_name)
         for name, property_schema in properties.items()
-        if analysis_argument_name(name, property_schema) != name
+        if analysis_argument_name(name, property_schema, ghidra_name) != name
     }
     return ToolAlias(
         ghidra_name=ghidra_name,
@@ -142,7 +156,7 @@ def tool_alias(ghidra_name: str, input_schema: JsonObject) -> ToolAlias:
     )
 
 
-def analysis_schema(input_schema: JsonObject) -> JsonObject:
+def analysis_schema(input_schema: JsonObject, tool_name: str | None = None) -> JsonObject:
     schema = json.loads(json.dumps(input_schema))
     properties = schema.get("properties")
     if not isinstance(properties, dict):
@@ -153,7 +167,7 @@ def analysis_schema(input_schema: JsonObject) -> JsonObject:
     for ghidra_name, raw_property in properties.items():
         canonical = str(ghidra_name)
         property_schema = json_object(raw_property, context="tool property schema")
-        alias = analysis_argument_name(canonical, property_schema)
+        alias = analysis_argument_name(canonical, property_schema, tool_name)
         owner = owners.get(alias)
         if owner is not None and owner != canonical:
             raise ValueError(
@@ -164,6 +178,8 @@ def analysis_schema(input_schema: JsonObject) -> JsonObject:
         description = property_schema.get("description")
         if isinstance(description, str):
             property_schema["description"] = analysis_text(description)
+        if "default" in property_schema:
+            property_schema["default"] = _typed_default(property_schema)
         renamed[alias] = property_schema
     schema["properties"] = renamed
 
@@ -174,15 +190,20 @@ def analysis_schema(input_schema: JsonObject) -> JsonObject:
             analysis_argument_name(
                 str(name),
                 source_properties.get(str(name)),
+                tool_name,
             )
             for name in required
         ]
     return json_object(schema, context="analysis tool schema")
 
 
-def normalize_arguments(input_schema: JsonObject, arguments: JsonObject) -> JsonObject:
-    model = _argument_model(_schema_cache_key(input_schema))
-    validated = model.model_validate(_prefer_analysis_aliases(input_schema, arguments))
+def normalize_arguments(
+    input_schema: JsonObject,
+    arguments: JsonObject,
+    tool_name: str | None = None,
+) -> JsonObject:
+    model = _argument_model(_schema_cache_key(input_schema), tool_name)
+    validated = model.model_validate(_prefer_analysis_aliases(input_schema, arguments, tool_name))
     return json_object(validated.model_dump(mode="json"), context="normalized tool arguments")
 
 
@@ -190,9 +211,10 @@ def arguments_for_surface(
     input_schema: JsonObject,
     arguments: JsonObject,
     surface: Surface,
+    tool_name: str | None = None,
 ) -> JsonObject:
-    model = _argument_model(_schema_cache_key(input_schema))
-    validated = model.model_validate(_prefer_analysis_aliases(input_schema, arguments))
+    model = _argument_model(_schema_cache_key(input_schema), tool_name)
+    validated = model.model_validate(_prefer_analysis_aliases(input_schema, arguments, tool_name))
     return json_object(
         validated.model_dump(mode="json", by_alias=surface == "analysis"),
         context=f"{surface} tool arguments",
@@ -215,7 +237,7 @@ def _schema_cache_key(input_schema: JsonObject) -> str:
 
 
 @lru_cache(maxsize=512)
-def _argument_model(schema_key: str) -> type[ToolArgumentsBase]:
+def _argument_model(schema_key: str, tool_name: str | None = None) -> type[ToolArgumentsBase]:
     schema = json_object(json.loads(schema_key), context="tool input schema")
     properties = _schema_properties(schema)
     required_raw = schema.get("required")
@@ -228,8 +250,8 @@ def _argument_model(schema_key: str) -> type[ToolArgumentsBase]:
         if ghidra_name in required and "default" not in property_schema:
             default = ...
         else:
-            default = property_schema.get("default")
-        analysis_name = analysis_argument_name(ghidra_name, property_schema)
+            default = _typed_default(property_schema)
+        analysis_name = analysis_argument_name(ghidra_name, property_schema, tool_name)
         if analysis_name == ghidra_name:
             field = cast(FieldInfo, Field(default=default))
         else:
@@ -249,6 +271,30 @@ def _argument_model(schema_key: str) -> type[ToolArgumentsBase]:
         __base__=ToolArgumentsBase,
         **fields,
     )
+
+
+def _typed_default(property_schema: JsonObject) -> JsonValue:
+    value = property_schema.get("default")
+    raw_type = property_schema.get("type")
+    if not isinstance(value, str) or not isinstance(raw_type, str):
+        return value
+    if raw_type == "integer":
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if raw_type == "number":
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    if raw_type == "boolean":
+        lowered = value.casefold()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return value
 
 
 def _python_type(property_schema: JsonObject) -> object:
@@ -275,10 +321,11 @@ def _python_type(property_schema: JsonObject) -> object:
 def _prefer_analysis_aliases(
     input_schema: JsonObject,
     arguments: JsonObject,
+    tool_name: str | None = None,
 ) -> JsonObject:
     normalized = dict(arguments)
     for ghidra_name, property_schema in _schema_properties(input_schema).items():
-        analysis_name = analysis_argument_name(ghidra_name, property_schema)
+        analysis_name = analysis_argument_name(ghidra_name, property_schema, tool_name)
         if analysis_name == ghidra_name or analysis_name not in normalized:
             continue
         normalized.pop(ghidra_name, None)
