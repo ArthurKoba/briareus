@@ -170,7 +170,7 @@ class AnalysisToolProvider(Provider):
     def _catalog_tools(public_tools: list[Tool]) -> list[Tool]:
         async def search_tools(query: str, limit: int = 15) -> JsonObject:
             tokens = [token.casefold() for token in query.split() if token.strip()]
-            matches: list[JsonObject] = []
+            matches: list[JsonValue] = []
             for tool in public_tools:
                 haystack = " ".join(
                     value
