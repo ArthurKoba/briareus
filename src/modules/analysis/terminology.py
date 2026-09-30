@@ -60,13 +60,26 @@ _ARGUMENT_ALIASES: dict[str, str] = {
 }
 
 _TOOL_ARGUMENT_ALIASES: dict[str, dict[str, str]] = {
-    "get_function_callees": {"name": "action_name", "address": "action_address"},
-    "get_function_callers": {"name": "action_name", "address": "action_address"},
-    "get_function_call_graph": {"name": "action_name", "address": "action_address"},
-    "analyze_function_complete": {"name": "action_name"},
-    "decompile_function": {"address": "action_address", "functions": "action_names"},
-    "disassemble_function": {"address": "action_address"},
+    "get_function_callees": {"name": "action"},
+    "get_function_callers": {"name": "action"},
+    "get_function_call_graph": {"name": "action"},
+    "get_function_xrefs": {"name": "action"},
+    "analyze_function_complete": {"name": "action"},
+    "decompile_function": {"address": "action", "functions": "actions"},
+    "disassemble_function": {"address": "action"},
+    "get_function_by_address": {"address": "action"},
+    "audit_globals_in_function": {"address": "action"},
+    "force_decompile": {"address": "action"},
 }
+
+_COLLAPSED_ACTION_SELECTOR_TOOLS = frozenset(
+    {
+        "get_function_callees",
+        "get_function_callers",
+        "get_function_call_graph",
+        "get_function_xrefs",
+    }
+)
 
 _TOOL_PHRASES: tuple[tuple[str, str], ...] = (
     ("analyze_call_graph", "analyze_link_map"),
@@ -166,6 +179,8 @@ def analysis_schema(input_schema: JsonObject, tool_name: str | None = None) -> J
     owners: dict[str, str] = {}
     for ghidra_name, raw_property in properties.items():
         canonical = str(ghidra_name)
+        if tool_name in _COLLAPSED_ACTION_SELECTOR_TOOLS and canonical == "address":
+            continue
         property_schema = json_object(raw_property, context="tool property schema")
         alias = analysis_argument_name(canonical, property_schema, tool_name)
         owner = owners.get(alias)
@@ -194,6 +209,10 @@ def analysis_schema(input_schema: JsonObject, tool_name: str | None = None) -> J
             )
             for name in required
         ]
+    if tool_name in _COLLAPSED_ACTION_SELECTOR_TOOLS:
+        required = schema.setdefault("required", [])
+        if isinstance(required, list) and "action" not in required:
+            required.append("action")
     return json_object(schema, context="analysis tool schema")
 
 

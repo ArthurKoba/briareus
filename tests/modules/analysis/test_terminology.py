@@ -204,16 +204,42 @@ def test_semantic_action_selector_aliases_are_tool_specific() -> None:
         },
     }
     exposed = analysis_schema(schema, "get_function_callees")
-    assert set(exposed["properties"]) == {"action_name", "action_address", "offset"}
+    assert set(exposed["properties"]) == {"action", "offset"}
     normalized = normalize_arguments(
         schema,
-        {"action_name": "ParseHeader", "action_address": "0x401000"},
+        {"action": "ParseHeader"},
         "get_function_callees",
     )
     assert normalized["name"] == "ParseHeader"
-    assert normalized["address"] == "0x401000"
+    assert normalized["address"] == ""
     assert set(analysis_schema(schema, "unrelated_tool")["properties"]) == {
         "name",
         "address",
         "offset",
     }
+
+
+def test_single_reference_read_tools_use_action_selector() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "address": {"type": "string"},
+            "program": {"type": "string", "default": ""},
+        },
+        "required": ["address"],
+    }
+    for tool_name in (
+        "decompile_function",
+        "disassemble_function",
+        "get_function_by_address",
+        "audit_globals_in_function",
+        "force_decompile",
+    ):
+        exposed = analysis_schema(schema, tool_name)
+        assert set(exposed["properties"]) == {"action", "program"}
+        assert exposed["required"] == ["action"]
+        assert normalize_arguments(
+            schema,
+            {"action": "ParseHeader"},
+            tool_name,
+        )["address"] == "ParseHeader"

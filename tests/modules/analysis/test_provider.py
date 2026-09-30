@@ -118,6 +118,7 @@ def test_provider_exposes_typed_defaults_and_semantic_selectors() -> None:
     )
     tool = provider._adapt_tool(backend, "get_outbound_actions")
     props = tool.parameters["properties"]
-    assert set(props) == {"action_name", "action_address", "offset", "limit", "program"}
+    assert set(props) == {"action", "offset", "limit", "program"}
     assert props["offset"]["default"] == 0
     assert props["limit"]["default"] == 100
+    assert props["action"]["default"] == ""
