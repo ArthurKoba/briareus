@@ -173,6 +173,10 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
         "repository manager",
     ),
     (
+        re.compile(r"set_decompiler_variable_type", re.IGNORECASE),
+        "set_behavior_variable_type",
+    ),
+    (
         re.compile(r"set_decompiler_comment", re.IGNORECASE),
         "set_behavior_annotation",
     ),

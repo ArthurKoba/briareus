@@ -377,3 +377,13 @@ def test_hardening_guard_rejects_embedded_backend_identifiers() -> None:
         "set_decompiler_comment",
     ):
         assert analysis_surface_violations(leaked)
+
+
+
+def test_internal_variable_type_name_is_neutralized() -> None:
+    public = analysis_text(
+        "Replaces set_local_variable_type / set_parameter_type / "
+        "set_decompiler_variable_type."
+    )
+    assert "set_behavior_variable_type" in public
+    assert not analysis_surface_violations(public)
