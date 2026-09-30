@@ -8,6 +8,14 @@ x-runtime: &runtime
 x-management-client: &management-client
   MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN:?}
 
+x-observability: &observability
+  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-mcp-bridge}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
+  OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+  OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
+  OTEL_EXPORTER_OTLP_TIMEOUT: ${OTEL_EXPORTER_OTLP_TIMEOUT:-10000}
+
 x-private-service: &private-service
   <<: *runtime
 
@@ -23,6 +31,7 @@ services:
       <<: *build
       target: management
     environment:
+      <<: *observability
       MANAGEMENT_ENCRYPTION_KEY: ${MANAGEMENT_ENCRYPTION_KEY:?}
       MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN:?}
       MANAGEMENT_ADMIN_USERNAME: ${MANAGEMENT_ADMIN_USERNAME:?}
@@ -38,6 +47,7 @@ services:
       <<: *build
       target: auth
     environment:
+      <<: *observability
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
@@ -52,6 +62,7 @@ services:
       <<: *build
       target: gateway
     environment:
+      <<: *observability
       OAUTH_ENABLED: ${OAUTH_ENABLED:-true}
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
       GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:?}
@@ -69,7 +80,7 @@ services:
       <<: *build
       target: github
     environment:
-      <<: *management-client
+      <<: [*management-client, *observability]
 
   gitlab:
     <<: *private-service
@@ -81,7 +92,7 @@ services:
       <<: *build
       target: gitlab
     environment:
-      <<: *management-client
+      <<: [*management-client, *observability]
 
   files:
     <<: *file-service
@@ -89,7 +100,7 @@ services:
       <<: *build
       target: files
     environment:
-      <<: *management-client
+      <<: [*management-client, *observability]
 
   curl:
     <<: *file-service
@@ -97,7 +108,7 @@ services:
       <<: *build
       target: curl
     environment:
-      <<: *management-client
+      <<: [*management-client, *observability]
 
   analysis:
     <<: *private-service
@@ -109,7 +120,7 @@ services:
       <<: *build
       target: analysis
     environment:
-      <<: *management-client
+      <<: [*management-client, *observability]
 
   ghidra:
     <<: *private-service
@@ -117,7 +128,7 @@ services:
       <<: *build
       target: ghidra
     environment:
-      <<: *management-client
+      <<: [*management-client, *observability]
     networks:
       - default
       - coolify
