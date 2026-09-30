@@ -1,16 +1,25 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from opentelemetry.trace import Span
 
 from common.account_contracts import InvocationEvent
-from common.observability import CompositeObservabilitySink, OtlpHttpMetricsSink
+from common.observability import (
+    CompositeObservabilitySink,
+    ObservabilitySink,
+    _parse_key_values,
+    _resource_attributes,
+)
 from common.settings import ObservabilitySettings
 
 
-class _RecordingSink:
+class _RecordingSink(ObservabilitySink):
     def __init__(self) -> None:
         self.runtime_scopes: list[str] = []
         self.events: list[InvocationEvent] = []
+        self.spans: list[tuple[str, dict[str, object]]] = []
 
     def record_runtime_started(self, scope: str) -> None:
         self.runtime_scopes.append(scope)
@@ -21,8 +30,17 @@ class _RecordingSink:
     def record_invocation(self, event: InvocationEvent) -> None:
         self.events.append(event)
 
+    @contextmanager
+    def trace_span(
+        self,
+        name: str,
+        attributes: dict[str, object] | None = None,
+    ) -> Iterator[Span | None]:
+        self.spans.append((name, attributes or {}))
+        yield None
 
-class _FailingSink:
+
+class _FailingSink(ObservabilitySink):
     def record_runtime_started(self, scope: str) -> None:
         del scope
         raise RuntimeError("sink unavailable")
@@ -34,6 +52,16 @@ class _FailingSink:
     def record_invocation(self, event: InvocationEvent) -> None:
         del event
         raise RuntimeError("sink unavailable")
+
+    @contextmanager
+    def trace_span(
+        self,
+        name: str,
+        attributes: dict[str, object] | None = None,
+    ) -> Iterator[Span | None]:
+        del name, attributes
+        raise RuntimeError("span unavailable")
+        yield None
 
 
 def test_composite_observability_isolates_sink_failures() -> None:
@@ -49,95 +77,71 @@ def test_composite_observability_isolates_sink_failures() -> None:
     sink.record_runtime_started("github")
     sink.record_runtime_heartbeat("github")
     sink.record_invocation(event)
+    with sink.trace_span("mcp.tool.github_agent_status", {"mcp.scope": "github"}):
+        pass
 
     assert recording.runtime_scopes == ["github", "heartbeat:github"]
     assert recording.events == [event]
+    assert recording.spans == [
+        ("mcp.tool.github_agent_status", {"mcp.scope": "github"})
+    ]
 
 
-def test_otlp_metrics_sink_uses_service_and_scope_without_payloads(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+def test_parse_otlp_headers_decodes_percent_encoding() -> None:
+    assert _parse_key_values("Authorization=Bearer%20test-token,x-scope=bridge") == {
+        "Authorization": "Bearer test-token",
+        "x-scope": "bridge",
+    }
 
-    class Response:
-        def __init__(self) -> None:
-            self.headers: dict[str, str] = {}
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        def read(self, size: int = -1) -> bytes:
-            del size
-            return b"{}"
-
-    def fake_urlopen(request, timeout: float):
-        captured["request"] = request
-        captured["timeout"] = timeout
-        return Response()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
+def test_resource_attributes_are_scoped_and_do_not_include_secrets(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOSTNAME", "container-123")
     settings = ObservabilitySettings(
         service_name="mcp-bridge",
-        endpoint="https://telemetry.kobanexus.ru",
-        headers="Authorization=Bearer%20test-token",
-        resource_attributes="deployment.environment.name=production",
-        timeout_ms=2500,
-    )
-    sink = OtlpHttpMetricsSink("github", settings)
-    sink.record_invocation(
-        InvocationEvent(
-            request_id="request-1",
-            module="github",
-            tool="github_reviewer_merge_pull_request",
-            account_id="secret-account-id",
-            provider="github",
-            status="error",
-            duration_ms=42.25,
-            error_type="GitHubAgentError",
-            arguments_json='{"token":"do-not-export"}',
-            result_json='{"secret":"do-not-export"}',
-            error_message="do-not-export",
-        )
+        service_version="1.2.3",
+        environment="production",
+        endpoint="https://otel.example.test",
+        headers="Authorization=Bearer%20secret",
+        resource_attributes="zone=infra",
     )
 
-    request = captured["request"]
-    assert request.full_url == "https://telemetry.kobanexus.ru/v1/metrics"
-    assert request.headers["Authorization"] == "Bearer test-token"
-    assert captured["timeout"] == 2.5
+    attributes = _resource_attributes(settings, "github")
 
-    payload = json.loads(request.data)
-    encoded = json.dumps(payload)
-    assert "do-not-export" not in encoded
-    assert "secret-account-id" not in encoded
-
-    resource = payload["resourceMetrics"][0]
-    attributes = {
-        item["key"]: next(iter(item["value"].values()))
-        for item in resource["resource"]["attributes"]
+    assert attributes == {
+        "zone": "infra",
+        "service.name": "mcp-bridge",
+        "service.version": "1.2.3",
+        "service.instance.id": "container-123",
+        "deployment.environment.name": "production",
+        "mcp.scope": "github",
     }
-    assert attributes["service.name"] == "mcp-bridge"
-    assert attributes["mcp.scope"] == "github"
-    assert attributes["deployment.environment.name"] == "production"
-    assert resource["scopeMetrics"][0]["scope"]["name"] == "mcp-bridge.github"
-
-    metric_names = {
-        metric["name"]
-        for metric in resource["scopeMetrics"][0]["metrics"]
-    }
-    assert metric_names == {
-        "mcp.tool.calls",
-        "mcp.tool.duration",
-        "mcp.tool.errors",
-    }
+    assert "secret" not in repr(attributes)
 
 
-def test_observability_settings_support_exact_metrics_endpoint() -> None:
+def test_observability_settings_resolve_all_signal_endpoints() -> None:
+    settings = ObservabilitySettings(endpoint="https://otel.example.test/base/")
+
+    assert settings.signal_endpoint("logs") == "https://otel.example.test/base/v1/logs"
+    assert settings.signal_endpoint("traces") == "https://otel.example.test/base/v1/traces"
+    assert settings.signal_endpoint("metrics") == "https://otel.example.test/base/v1/metrics"
+
+
+def test_observability_settings_normalize_signal_specific_base() -> None:
+    settings = ObservabilitySettings(endpoint="https://otel.example.test/v1/logs")
+
+    assert settings.signal_endpoint("traces") == "https://otel.example.test/v1/traces"
+
+
+def test_observability_settings_support_signal_overrides() -> None:
     settings = ObservabilitySettings(
-        endpoint="https://collector.example/base",
-        metrics_endpoint_override="https://collector.example/custom/metrics",
+        endpoint="https://otel.example.test",
+        logs_endpoint_override="https://logs.example.test/intake",
+        traces_endpoint_override="https://traces.example.test/intake",
+        metrics_endpoint_override="https://metrics.example.test/intake",
     )
 
-    assert settings.enabled is True
-    assert settings.metrics_endpoint == "https://collector.example/custom/metrics"
+    assert settings.signal_endpoint("logs") == "https://logs.example.test/intake"
+    assert settings.signal_endpoint("traces") == "https://traces.example.test/intake"
+    assert settings.signal_endpoint("metrics") == "https://metrics.example.test/intake"
