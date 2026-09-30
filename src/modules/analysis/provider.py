@@ -170,7 +170,7 @@ class AnalysisToolProvider(Provider):
     def _catalog_tools(public_tools: list[Tool]) -> list[Tool]:
         async def search_tools(query: str, limit: int = 15) -> JsonObject:
             tokens = [token.casefold() for token in query.split() if token.strip()]
-            matches: list[JsonValue] = []
+            matches: list[dict[str, JsonValue]] = []
             for tool in public_tools:
                 haystack = " ".join(
                     value
@@ -196,7 +196,7 @@ class AnalysisToolProvider(Provider):
                 "query": query,
                 "match_count": len(matches),
                 "returned": min(len(matches), bounded_limit),
-                "matches": matches[:bounded_limit],
+                "matches": cast(JsonValue, matches[:bounded_limit]),
             }
 
         async def check_tools(tools: str) -> JsonObject:
