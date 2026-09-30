@@ -277,3 +277,55 @@ def test_private_registry_tools_are_not_adapted_directly() -> None:
         ]
     )
     assert tools == []
+
+
+
+def test_catalog_references_use_public_tool_names() -> None:
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://private.internal/mcp",
+            schema_cache_ttl_seconds=30,
+        )
+    )
+    backend_tools = [
+        SimpleNamespace(
+            name="rename_function",
+            title="Rename Function",
+            description="Use rename_function after analyze_function_completeness.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "hint": {
+                        "type": "string",
+                        "description": "Call rename_function when ready.",
+                    }
+                },
+            },
+        ),
+        SimpleNamespace(
+            name="analyze_function_completeness",
+            title="Analyze Function Completeness",
+            description="Analyze function_address for RE documentation.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+    ]
+
+    public = provider._adapt_catalog(backend_tools)
+    encoded = str(
+        [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+            for tool in public
+        ]
+    )
+    assert "rename_function" not in encoded
+    assert "analyze_function_completeness" not in encoded
+    assert "function_address" not in encoded
+    assert "RE documentation" not in encoded
+    assert "name_action" in encoded
+    assert "analyze_action_completeness" in encoded
+    assert "action_address" in encoded
+    assert "analysis documentation" in encoded
