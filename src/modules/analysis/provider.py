@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 from collections.abc import Sequence
 from typing import Protocol, cast
@@ -17,10 +18,10 @@ from common.settings import AnalysisSettings
 from .result import adapt_analysis_result, decode_call_result
 from .terminology import (
     analysis_schema,
+    analysis_surface_violations,
     analysis_text,
     analysis_tool_name,
     normalize_arguments,
-    analysis_surface_violations,
 )
 
 
@@ -159,6 +160,25 @@ class AnalysisToolProvider(Provider):
             owners[alias] = backend_tool.name
             adapted.append(self._adapt_tool(backend_tool, alias))
         return adapted
+
+    @staticmethod
+    def _validate_public_catalog(tools: Sequence[Tool]) -> None:
+        violations: list[str] = []
+        for tool in tools:
+            public_metadata = {
+                "name": tool.name,
+                "title": tool.title,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+            encoded = json.dumps(public_metadata, ensure_ascii=False, default=str)
+            leaked = analysis_surface_violations(encoded)
+            if leaked:
+                violations.append(f"{tool.name}: {', '.join(leaked)}")
+        if violations:
+            raise AnalysisProviderError(
+                "analysis public vocabulary leak: " + "; ".join(violations[:12])
+            )
 
     def _adapt_tool(self, backend_tool: _BackendTool, analysis_name: str) -> Tool:
         ghidra_name = backend_tool.name

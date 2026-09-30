@@ -4,12 +4,12 @@ import pytest
 from pydantic import ValidationError
 
 from modules.analysis.terminology import (
-    analysis_schema,
-    analysis_text,
-    analysis_tool_name,
     analysis_result_key,
     analysis_result_text,
+    analysis_schema,
     analysis_surface_violations,
+    analysis_text,
+    analysis_tool_name,
     arguments_for_surface,
     normalize_arguments,
     tool_alias,
