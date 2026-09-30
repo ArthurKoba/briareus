@@ -77,8 +77,8 @@ def _parameter_type(property_schema: JsonObject) -> object:
     return base
 
 
-def _analysis_signature(input_schema: JsonObject) -> inspect.Signature:
-    schema = analysis_schema(input_schema)
+def _analysis_signature(input_schema: JsonObject, tool_name: str) -> inspect.Signature:
+    schema = analysis_schema(input_schema, tool_name)
     raw_properties = schema.get("properties")
     properties = raw_properties if isinstance(raw_properties, dict) else {}
     raw_required = schema.get("required")
@@ -161,19 +161,20 @@ class AnalysisToolProvider(Provider):
     def _adapt_tool(self, backend_tool: _BackendTool, analysis_name: str) -> Tool:
         ghidra_name = backend_tool.name
         ghidra_schema = _backend_tool_schema(backend_tool)
-        exposed_schema = analysis_schema(ghidra_schema)
+        exposed_schema = analysis_schema(ghidra_schema, ghidra_name)
 
         async def invoke(**arguments: JsonValue) -> JsonValue | None:
             canonical = normalize_arguments(
                 ghidra_schema,
                 json_object(arguments, context=f"{analysis_name} arguments"),
+                ghidra_name,
             )
             async with Client(self._backend_url()) as client:
                 result = await client.call_tool(ghidra_name, canonical)
             return decode_call_result(result)
 
         signature_target = cast(_SignatureTarget, invoke)
-        signature = _analysis_signature(ghidra_schema)
+        signature = _analysis_signature(ghidra_schema, ghidra_name)
         signature_target.__signature__ = signature
         signature_target.__annotations__ = {
             name: parameter.annotation

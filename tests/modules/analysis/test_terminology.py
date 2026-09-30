@@ -172,3 +172,48 @@ def test_backend_schema_alias_metadata_participates_in_collision_detection() -> 
     }
     with pytest.raises(ValueError, match="alias collision"):
         analysis_schema(schema)
+
+
+def test_numeric_and_boolean_schema_defaults_are_typed() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "offset": {"type": "integer", "default": "0"},
+            "limit": {"type": "integer", "default": "100"},
+            "enabled": {"type": "boolean", "default": "true"},
+        },
+    }
+    exposed = analysis_schema(schema, "search_functions")
+    assert exposed["properties"]["offset"]["default"] == 0
+    assert exposed["properties"]["limit"]["default"] == 100
+    assert exposed["properties"]["enabled"]["default"] is True
+    assert normalize_arguments(schema, {}, "search_functions") == {
+        "offset": 0,
+        "limit": 100,
+        "enabled": True,
+    }
+
+
+def test_semantic_action_selector_aliases_are_tool_specific() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "default": ""},
+            "address": {"type": "string", "default": ""},
+            "offset": {"type": "integer", "default": "0"},
+        },
+    }
+    exposed = analysis_schema(schema, "get_function_callees")
+    assert set(exposed["properties"]) == {"action_name", "action_address", "offset"}
+    normalized = normalize_arguments(
+        schema,
+        {"action_name": "ParseHeader", "action_address": "0x401000"},
+        "get_function_callees",
+    )
+    assert normalized["name"] == "ParseHeader"
+    assert normalized["address"] == "0x401000"
+    assert set(analysis_schema(schema, "unrelated_tool")["properties"]) == {
+        "name",
+        "address",
+        "offset",
+    }
