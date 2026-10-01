@@ -4,7 +4,6 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from common.models import JsonObject, JsonValue
-from modules.files.file_store import FileStore
 from modules.files.workspace_store import WorkspaceFileStore
 
 
@@ -13,8 +12,8 @@ def register_curl_tools(
     read_annotations: ToolAnnotations,
     write_annotations: ToolAnnotations,
     *,
-    store: FileStore,
     workspace: WorkspaceFileStore,
+    max_file_bytes: int,
     curl_binary: str,
 ) -> None:
     from .curl_tools import (
@@ -41,7 +40,7 @@ def register_curl_tools(
         body_json: JsonObject | list[JsonValue] | None = None,
         body_form: JsonObject | None = None,
         body_base64: str | None = None,
-        body_file_id: str | None = None,
+        body_workspace_path: str | None = None,
         body_content_type: str = "",
         preset: str = DEFAULT_CURL_PRESET,
         follow_redirects: bool = True,
@@ -56,9 +55,8 @@ def register_curl_tools(
     ) -> JsonObject:
         """Run a structured curl request with arbitrary HTTP method, headers, cookies and body.
 
-        For large or binary responses prefer curl_download. body_file_id sends
-        immutable file bytes directly from server-side storage without model-visible
-        base64. Chrome Desktop is the default preset. Browser presets reproduce HTTP
+        For large or binary responses prefer curl_download. body_workspace_path sends
+        an existing workspace file directly without model-visible base64. Chrome Desktop is the default preset. Browser presets reproduce HTTP
         headers only; they are not browser engines.
         """
         return curl_request_impl(
@@ -71,7 +69,7 @@ def register_curl_tools(
             body_json=body_json,
             body_form=body_form,
             body_base64=body_base64,
-            body_file_id=body_file_id,
+            body_workspace_path=body_workspace_path,
             body_content_type=body_content_type,
             preset=preset,
             follow_redirects=follow_redirects,
@@ -83,7 +81,6 @@ def register_curl_tools(
             max_response_bytes=max_response_bytes,
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
-            store=store,
             curl_binary=curl_binary,
         )
 
@@ -98,7 +95,7 @@ def register_curl_tools(
         body_json: JsonObject | list[JsonValue] | None = None,
         body_form: JsonObject | None = None,
         body_base64: str | None = None,
-        body_file_id: str | None = None,
+        body_workspace_path: str | None = None,
         body_content_type: str = "",
         file_name: str = "",
         workspace_path: str = "",
@@ -115,11 +112,11 @@ def register_curl_tools(
         forward_sensitive_headers_on_redirect: bool = False,
         preview_bytes: int = 4096,
     ) -> JsonObject:
-        """Stream an HTTP response into the immutable file store.
+        """Stream an HTTP response directly into the shared workspace.
 
         Supports arbitrary HTTP methods and the same request controls as curl_request.
         The response is never serialized through model context; the result contains
-        file_id plus HTTP metadata and a small text/hex preview.
+        workspace file metadata plus HTTP metadata and a small text/hex preview.
         """
         return curl_download_impl(
             url=url,
@@ -131,7 +128,7 @@ def register_curl_tools(
             body_json=body_json,
             body_form=body_form,
             body_base64=body_base64,
-            body_file_id=body_file_id,
+            body_workspace_path=body_workspace_path,
             body_content_type=body_content_type,
             file_name=file_name,
             workspace_path=workspace_path,
@@ -147,8 +144,9 @@ def register_curl_tools(
             store_http_errors=store_http_errors,
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
-            store=store,
             workspace=workspace,
+        max_file_bytes=max_file_bytes,
+            max_file_bytes=max_file_bytes,
             curl_binary=curl_binary,
         )
 
@@ -163,7 +161,7 @@ def register_curl_tools(
         body_json: JsonObject | list[JsonValue] | None = None,
         body_form: JsonObject | None = None,
         body_base64: str | None = None,
-        body_file_id: str | None = None,
+        body_workspace_path: str | None = None,
         body_content_type: str = "",
         file_name: str = "",
         workspace_path: str = "",
@@ -182,7 +180,7 @@ def register_curl_tools(
         """Observe/capture a response byte stream for a bounded duration or byte count.
 
         Useful for SSE, MJPEG, chunked telemetry and other long-lived byte streams.
-        Captured bytes are committed to the immutable file store.
+        Captured bytes are written directly into the shared workspace.
         """
         return curl_stream_capture_impl(
             url=url,
@@ -194,7 +192,7 @@ def register_curl_tools(
             body_json=body_json,
             body_form=body_form,
             body_base64=body_base64,
-            body_file_id=body_file_id,
+            body_workspace_path=body_workspace_path,
             body_content_type=body_content_type,
             file_name=file_name,
             workspace_path=workspace_path,
@@ -209,7 +207,8 @@ def register_curl_tools(
             max_bytes=max_bytes,
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
-            store=store,
             workspace=workspace,
+        max_file_bytes=max_file_bytes,
+            max_file_bytes=max_file_bytes,
             curl_binary=curl_binary,
         )
