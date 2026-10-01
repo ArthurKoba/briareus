@@ -88,6 +88,7 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     assert services["management"]["volumes"] == [
         "management:/management",
         "files:/files",
+        "terminal-workspace:/workspace",
     ]
     assert services["files"]["volumes"] == [
         "files:/files",

@@ -63,8 +63,8 @@ class TerminalManager:
         self.settings = settings
         self.workspace_root = settings.workspace_root
         self.projects_root = self.workspace_root / "projects"
-        self.jobs_root = self.workspace_root / ".terminal" / "jobs"
         self.home = settings.home
+        self.jobs_root = self.home / ".terminal" / "jobs"
         self._jobs: dict[str, Job] = {}
         self._prepare_storage()
         self._load_persisted_jobs()

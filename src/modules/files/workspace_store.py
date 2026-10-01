@@ -5,6 +5,7 @@ import hashlib
 import mimetypes
 import os
 import shutil
+import uuid
 from pathlib import Path
 from typing import BinaryIO
 
@@ -221,7 +222,9 @@ class WorkspaceFileStore:
         if target.exists() and not overwrite:
             raise WorkspaceFileError(f"destination already exists: {destination}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.parent / f".{target.name}.upload.part"
+        temporary = target.parent / (
+            f".{target.name}.upload-{uuid.uuid4().hex}.part"
+        )
         try:
             with temporary.open("wb") as handle:
                 shutil.copyfileobj(stream, handle, length=1024 * 1024)
