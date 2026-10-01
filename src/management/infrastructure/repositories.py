@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.engine import CursorResult
@@ -18,11 +18,13 @@ from management.domain.telemetry import Invocation
 
 from .database import (
     CachedSnapshotRecord,
+    CoolifyAccountRecord,
     GitHubAccountRecord,
     GitLabAccountRecord,
     InvocationRecord,
     ManagementConfigRecord,
     OAuthSessionRecord,
+    SigNozAccountRecord,
 )
 
 
@@ -54,7 +56,36 @@ class SqlAlchemyAccountRepository:
             provider=Provider.GITLAB,
             auth_type=AuthType(record.auth_type),
             base_url=record.base_url,
-            external_id="",
+            verify_tls=record.verify_tls,
+            ca_cert_pem=record.ca_cert_pem,
+            enabled=record.enabled,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+
+    @staticmethod
+    def _signoz_domain(record: SigNozAccountRecord) -> Account:
+        return Account(
+            id=record.id,
+            alias=record.alias,
+            provider=Provider.SIGNOZ,
+            auth_type=AuthType(record.auth_type),
+            base_url=record.base_url,
+            verify_tls=record.verify_tls,
+            ca_cert_pem=record.ca_cert_pem,
+            enabled=record.enabled,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+
+    @staticmethod
+    def _coolify_domain(record: CoolifyAccountRecord) -> Account:
+        return Account(
+            id=record.id,
+            alias=record.alias,
+            provider=Provider.COOLIFY,
+            auth_type=AuthType(record.auth_type),
+            base_url=record.base_url,
             verify_tls=record.verify_tls,
             ca_cert_pem=record.ca_cert_pem,
             enabled=record.enabled,
@@ -75,16 +106,28 @@ class SqlAlchemyAccountRepository:
                 if enabled_only:
                     github_stmt = github_stmt.where(GitHubAccountRecord.enabled.is_(True))
                 accounts.extend(
-                    self._github_domain(row)
-                    for row in session.scalars(github_stmt).all()
+                    self._github_domain(row) for row in session.scalars(github_stmt).all()
                 )
             if provider in {None, Provider.GITLAB}:
                 gitlab_stmt = select(GitLabAccountRecord)
                 if enabled_only:
                     gitlab_stmt = gitlab_stmt.where(GitLabAccountRecord.enabled.is_(True))
                 accounts.extend(
-                    self._gitlab_domain(row)
-                    for row in session.scalars(gitlab_stmt).all()
+                    self._gitlab_domain(row) for row in session.scalars(gitlab_stmt).all()
+                )
+            if provider in {None, Provider.SIGNOZ}:
+                signoz_stmt = select(SigNozAccountRecord)
+                if enabled_only:
+                    signoz_stmt = signoz_stmt.where(SigNozAccountRecord.enabled.is_(True))
+                accounts.extend(
+                    self._signoz_domain(row) for row in session.scalars(signoz_stmt).all()
+                )
+            if provider in {None, Provider.COOLIFY}:
+                coolify_stmt = select(CoolifyAccountRecord)
+                if enabled_only:
+                    coolify_stmt = coolify_stmt.where(CoolifyAccountRecord.enabled.is_(True))
+                accounts.extend(
+                    self._coolify_domain(row) for row in session.scalars(coolify_stmt).all()
                 )
         return sorted(accounts, key=lambda item: (item.provider.value, item.alias))
 
@@ -99,69 +142,112 @@ class SqlAlchemyAccountRepository:
         if not value:
             raise KeyError("account selector is required")
         with self.sessions() as session:
+            stmt: Any
+            record: Any
             if provider is Provider.GITHUB:
-                github_stmt = select(GitHubAccountRecord).where(
+                stmt = select(GitHubAccountRecord).where(
                     or_(
                         GitHubAccountRecord.id == value,
                         GitHubAccountRecord.alias == value.casefold(),
                     )
                 )
                 if enabled_only:
-                    github_stmt = github_stmt.where(GitHubAccountRecord.enabled.is_(True))
-                github_record = session.scalar(github_stmt)
-                if github_record is None:
+                    stmt = stmt.where(GitHubAccountRecord.enabled.is_(True))
+                record = session.scalar(stmt)
+                if record is None:
                     raise KeyError(f"GitHub account not found: {selector}")
-                return self._github_domain(github_record)
-
-            gitlab_stmt = select(GitLabAccountRecord).where(
+                return self._github_domain(record)
+            if provider is Provider.GITLAB:
+                stmt = select(GitLabAccountRecord).where(
+                    or_(
+                        GitLabAccountRecord.id == value,
+                        GitLabAccountRecord.alias == value.casefold(),
+                    )
+                )
+                if enabled_only:
+                    stmt = stmt.where(GitLabAccountRecord.enabled.is_(True))
+                record = session.scalar(stmt)
+                if record is None:
+                    raise KeyError(f"GitLab account not found: {selector}")
+                return self._gitlab_domain(record)
+            if provider is Provider.SIGNOZ:
+                stmt = select(SigNozAccountRecord).where(
+                    or_(
+                        SigNozAccountRecord.id == value,
+                        SigNozAccountRecord.alias == value.casefold(),
+                    )
+                )
+                if enabled_only:
+                    stmt = stmt.where(SigNozAccountRecord.enabled.is_(True))
+                record = session.scalar(stmt)
+                if record is None:
+                    raise KeyError(f"SigNoz account not found: {selector}")
+                return self._signoz_domain(record)
+            stmt = select(CoolifyAccountRecord).where(
                 or_(
-                    GitLabAccountRecord.id == value,
-                    GitLabAccountRecord.alias == value.casefold(),
+                    CoolifyAccountRecord.id == value, CoolifyAccountRecord.alias == value.casefold()
                 )
             )
             if enabled_only:
-                gitlab_stmt = gitlab_stmt.where(GitLabAccountRecord.enabled.is_(True))
-            gitlab_record = session.scalar(gitlab_stmt)
-            if gitlab_record is None:
-                raise KeyError(f"GitLab account not found: {selector}")
-            return self._gitlab_domain(gitlab_record)
+                stmt = stmt.where(CoolifyAccountRecord.enabled.is_(True))
+            record = session.scalar(stmt)
+            if record is None:
+                raise KeyError(f"Coolify account not found: {selector}")
+            return self._coolify_domain(record)
 
     def save(self, account: Account, *, encrypted_credential: str | None = None) -> Account:
         with self.sessions.begin() as session:
+            record: Any
             if account.provider is Provider.GITHUB:
-                github_record = session.get(GitHubAccountRecord, account.id)
-                if github_record is None:
-                    github_record = GitHubAccountRecord(id=account.id)
-                    session.add(github_record)
-                github_record.alias = account.alias
-                github_record.auth_type = account.auth_type.value
-                github_record.app_id = account.external_id
-                github_record.enabled = account.enabled
-                github_record.created_at = account.created_at
-                github_record.updated_at = account.updated_at
-                if encrypted_credential is not None:
-                    github_record.encrypted_credential = encrypted_credential
+                record = session.get(GitHubAccountRecord, account.id) or GitHubAccountRecord(
+                    id=account.id
+                )
+                session.add(record)
+                record.app_id = account.external_id
+            elif account.provider is Provider.GITLAB:
+                record = session.get(GitLabAccountRecord, account.id) or GitLabAccountRecord(
+                    id=account.id
+                )
+                session.add(record)
+                record.base_url = account.base_url
+                record.verify_tls = account.verify_tls
+                record.ca_cert_pem = account.ca_cert_pem
+            elif account.provider is Provider.SIGNOZ:
+                record = session.get(SigNozAccountRecord, account.id) or SigNozAccountRecord(
+                    id=account.id
+                )
+                session.add(record)
+                record.base_url = account.base_url
+                record.verify_tls = account.verify_tls
+                record.ca_cert_pem = account.ca_cert_pem
             else:
-                gitlab_record = session.get(GitLabAccountRecord, account.id)
-                if gitlab_record is None:
-                    gitlab_record = GitLabAccountRecord(id=account.id)
-                    session.add(gitlab_record)
-                gitlab_record.alias = account.alias
-                gitlab_record.auth_type = account.auth_type.value
-                gitlab_record.base_url = account.base_url
-                gitlab_record.verify_tls = account.verify_tls
-                gitlab_record.ca_cert_pem = account.ca_cert_pem
-                gitlab_record.enabled = account.enabled
-                gitlab_record.created_at = account.created_at
-                gitlab_record.updated_at = account.updated_at
-                if encrypted_credential is not None:
-                    gitlab_record.encrypted_credential = encrypted_credential
+                record = session.get(CoolifyAccountRecord, account.id) or CoolifyAccountRecord(
+                    id=account.id
+                )
+                session.add(record)
+                record.base_url = account.base_url
+                record.verify_tls = account.verify_tls
+                record.ca_cert_pem = account.ca_cert_pem
+            record.alias = account.alias
+            record.auth_type = account.auth_type.value
+            record.enabled = account.enabled
+            record.created_at = account.created_at
+            record.updated_at = account.updated_at
+            if encrypted_credential is not None:
+                record.encrypted_credential = encrypted_credential
         return account
 
     def delete(self, account_id: str, *, provider: Provider) -> None:
-        model = GitHubAccountRecord if provider is Provider.GITHUB else GitLabAccountRecord
         with self.sessions.begin() as session:
-            record = session.get(model, account_id)
+            record: Any
+            if provider is Provider.GITHUB:
+                record = session.get(GitHubAccountRecord, account_id)
+            elif provider is Provider.GITLAB:
+                record = session.get(GitLabAccountRecord, account_id)
+            elif provider is Provider.SIGNOZ:
+                record = session.get(SigNozAccountRecord, account_id)
+            else:
+                record = session.get(CoolifyAccountRecord, account_id)
             if record is not None:
                 session.delete(record)
 
@@ -173,30 +259,33 @@ class SqlAlchemyAccountRepository:
         provider: Provider,
     ) -> None:
         with self.sessions.begin() as session:
+            record: Any
             if provider is Provider.GITHUB:
-                github_record = session.get(GitHubAccountRecord, account_id)
-                if github_record is None:
-                    raise KeyError(f"account not found: {account_id}")
-                github_record.encrypted_credential = encrypted_value
-                return
-
-            gitlab_record = session.get(GitLabAccountRecord, account_id)
-            if gitlab_record is None:
+                record = session.get(GitHubAccountRecord, account_id)
+            elif provider is Provider.GITLAB:
+                record = session.get(GitLabAccountRecord, account_id)
+            elif provider is Provider.SIGNOZ:
+                record = session.get(SigNozAccountRecord, account_id)
+            else:
+                record = session.get(CoolifyAccountRecord, account_id)
+            if record is None:
                 raise KeyError(f"account not found: {account_id}")
-            gitlab_record.encrypted_credential = encrypted_value
+            record.encrypted_credential = encrypted_value
 
     def credential(self, account_id: str, *, provider: Provider) -> str:
         with self.sessions() as session:
+            record: Any
             if provider is Provider.GITHUB:
-                github_record = session.get(GitHubAccountRecord, account_id)
-                if github_record is None or not github_record.encrypted_credential:
-                    raise KeyError(f"credential not configured for account: {account_id}")
-                return github_record.encrypted_credential
-
-            gitlab_record = session.get(GitLabAccountRecord, account_id)
-            if gitlab_record is None or not gitlab_record.encrypted_credential:
+                record = session.get(GitHubAccountRecord, account_id)
+            elif provider is Provider.GITLAB:
+                record = session.get(GitLabAccountRecord, account_id)
+            elif provider is Provider.SIGNOZ:
+                record = session.get(SigNozAccountRecord, account_id)
+            else:
+                record = session.get(CoolifyAccountRecord, account_id)
+            if record is None or not record.encrypted_credential:
                 raise KeyError(f"credential not configured for account: {account_id}")
-            return gitlab_record.encrypted_credential
+            return str(record.encrypted_credential)
 
 
 class SqlAlchemyInvocationRepository:
@@ -217,9 +306,7 @@ class SqlAlchemyInvocationRepository:
         cutoff = datetime.now(UTC) - timedelta(days=max(config.logging_retention_days, 1))
         removed_result = cast(
             CursorResult[object],
-            session.execute(
-                delete(InvocationRecord).where(InvocationRecord.occurred_at < cutoff)
-            ),
+            session.execute(delete(InvocationRecord).where(InvocationRecord.occurred_at < cutoff)),
         )
         removed = removed_result.rowcount or 0
         count = session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
@@ -232,9 +319,7 @@ class SqlAlchemyInvocationRepository:
             )
             overflow_result = cast(
                 CursorResult[object],
-                session.execute(
-                    delete(InvocationRecord).where(InvocationRecord.id.in_(stale_ids))
-                ),
+                session.execute(delete(InvocationRecord).where(InvocationRecord.id.in_(stale_ids))),
             )
             removed += overflow_result.rowcount or 0
         return int(removed)

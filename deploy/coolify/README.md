@@ -16,6 +16,8 @@ Traefik -> gateway
              +-- files
              +-- curl
              +-- terminal
+             +-- signoz (read-only MCP adapter)
+             +-- coolify (read-only MCP adapter)
              +-- analysis -> ghidra
 ```
 
@@ -205,3 +207,17 @@ call/error counters and tool duration histograms. Invocation arguments,
 results, account IDs, credentials and authorization headers are never added to
 OpenTelemetry attributes. The Management invocation audit remains a separate,
 redacted local operator log under MCP Calls.
+
+
+## Managed SigNoz and Coolify connections
+
+SigNoz and Coolify instance credentials are **not** Coolify deployment environment variables
+for `mcp-bridge`. Do not add `SIGNOZ_URL`, `SIGNOZ_API_KEY`, `COOLIFY_URL`, or
+`COOLIFY_API_TOKEN` to this Compose application. Multiple instances are configured at runtime
+through Management Admin (`SigNoz Accounts` / `Coolify Accounts`), where credentials are
+encrypted with `MANAGEMENT_ENCRYPTION_KEY`.
+
+The private `signoz` and `coolify` containers receive only the normal Management service token
+and OpenTelemetry bootstrap environment. They resolve the account explicitly requested by the
+MCP caller. Coolify accounts should use a token with ordinary `Read` permission; the adapter
+does not expose sensitive log/environment/secret endpoints or any mutation/deployment action.

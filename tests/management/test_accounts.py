@@ -12,9 +12,11 @@ from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
     Base,
+    CoolifyAccountRecord,
     GitHubAccountRecord,
     GitLabAccountRecord,
     ManagementConfigRecord,
+    SigNozAccountRecord,
     create_database,
     ensure_zero_state_schema,
 )
@@ -215,6 +217,68 @@ def test_provider_contracts_are_separate() -> None:
         )
 
 
+def test_signoz_and_coolify_accounts_are_encrypted_and_resolved_by_alias(tmp_path: Path) -> None:
+    engine, sessions, accounts, _audit = _services(tmp_path)
+    signoz = accounts.create(
+        Account(
+            alias="SigNoz-Prod",
+            provider=Provider.SIGNOZ,
+            auth_type=AuthType.SIGNOZ_API_KEY,
+            base_url="https://signoz.example.test",
+        ),
+        credential="signoz-secret",
+    )
+    coolify = accounts.create(
+        Account(
+            alias="Coolify-Main",
+            provider=Provider.COOLIFY,
+            auth_type=AuthType.COOLIFY_API_TOKEN,
+            base_url="https://coolify.example.test/",
+        ),
+        credential="coolify-secret",
+    )
+
+    assert signoz.alias == "signoz-prod"
+    assert coolify.alias == "coolify-main"
+    assert coolify.base_url == "https://coolify.example.test"
+    assert accounts.resolve("SIGNOZ-PROD", provider=Provider.SIGNOZ).credential == "signoz-secret"
+    assert (
+        accounts.resolve("coolify-main", provider=Provider.COOLIFY).credential == "coolify-secret"
+    )
+
+    with sessions() as session:
+        signoz_secret = session.scalar(
+            select(SigNozAccountRecord.encrypted_credential).where(
+                SigNozAccountRecord.id == signoz.id
+            )
+        )
+        coolify_secret = session.scalar(
+            select(CoolifyAccountRecord.encrypted_credential).where(
+                CoolifyAccountRecord.id == coolify.id
+            )
+        )
+    assert signoz_secret and signoz_secret != "signoz-secret"
+    assert coolify_secret and coolify_secret != "coolify-secret"
+    engine.dispose()
+
+
+def test_external_provider_auth_contracts_are_provider_specific() -> None:
+    with pytest.raises(ValueError, match="SigNoz auth_type"):
+        Account(
+            alias="bad-signoz",
+            provider=Provider.SIGNOZ,
+            auth_type=AuthType.COOLIFY_API_TOKEN,
+            base_url="https://signoz.example.test",
+        )
+    with pytest.raises(ValueError, match="Coolify auth_type"):
+        Account(
+            alias="bad-coolify",
+            provider=Provider.COOLIFY,
+            auth_type=AuthType.SIGNOZ_API_KEY,
+            base_url="https://coolify.example.test",
+        )
+
+
 def test_schema_mismatch_fails_without_destroying_data(tmp_path: Path) -> None:
     database = tmp_path / "legacy.sqlite3"
     engine, _sessions = create_database(f"sqlite:///{database}")
@@ -230,9 +294,7 @@ def test_schema_mismatch_fails_without_destroying_data(tmp_path: Path) -> None:
         ensure_zero_state_schema(engine)
 
     with engine.connect() as connection:
-        row = connection.exec_driver_sql(
-            "SELECT id, label FROM github_accounts"
-        ).one()
+        row = connection.exec_driver_sql("SELECT id, label FROM github_accounts").one()
     assert tuple(row) == ("keep-me", "legacy")
     engine.dispose()
 
@@ -264,8 +326,6 @@ def test_schema_tolerates_removed_legacy_columns_and_preserves_accounts(
         assert account is not None
         assert account.alias == "agent"
     inspector = inspect(engine)
-    columns = {
-        column["name"] for column in inspector.get_columns("management_config")
-    }
+    columns = {column["name"] for column in inspector.get_columns("management_config")}
     assert "legacy_cleanup" in columns
     engine.dispose()

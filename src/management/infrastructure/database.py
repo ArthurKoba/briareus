@@ -79,6 +79,58 @@ class GitLabAccountRecord(Base):
         self._credential_input = value
 
 
+class SigNozAccountRecord(Base):
+    __tablename__ = "signoz_accounts"
+    __allow_unmapped__ = True
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    alias: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    auth_type: Mapped[str] = mapped_column(String(32), default="signoz_api_key")
+    base_url: Mapped[str] = mapped_column(String(2048))
+    verify_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    ca_cert_pem: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    encrypted_credential: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    _credential_input: str = ""
+
+    @property
+    def credential_input(self) -> str:
+        return ""
+
+    @credential_input.setter
+    def credential_input(self, value: str) -> None:
+        self._credential_input = value
+
+
+class CoolifyAccountRecord(Base):
+    __tablename__ = "coolify_accounts"
+    __allow_unmapped__ = True
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    alias: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    auth_type: Mapped[str] = mapped_column(String(32), default="coolify_api_token")
+    base_url: Mapped[str] = mapped_column(String(2048))
+    verify_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    ca_cert_pem: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    encrypted_credential: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    _credential_input: str = ""
+
+    @property
+    def credential_input(self) -> str:
+        return ""
+
+    @credential_input.setter
+    def credential_input(self, value: str) -> None:
+        self._credential_input = value
+
+
 class InvocationRecord(Base):
     __tablename__ = "invocations"
 

@@ -161,6 +161,30 @@ services:
       - default
       - coolify
 
+  signoz:
+    <<: *private-service
+    depends_on:
+      management:
+        condition: service_healthy
+        required: true
+    build:
+      <<: *build
+      target: signoz
+    environment:
+      <<: [*management-client, *observability]
+
+  coolify:
+    <<: *private-service
+    depends_on:
+      management:
+        condition: service_healthy
+        required: true
+    build:
+      <<: *build
+      target: coolify
+    environment:
+      <<: [*management-client, *observability]
+
 volumes:
   management:
   auth:

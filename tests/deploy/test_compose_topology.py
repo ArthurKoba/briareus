@@ -16,6 +16,8 @@ EXPECTED_SERVICES = {
     "terminal",
     "analysis",
     "ghidra",
+    "signoz",
+    "coolify",
 }
 
 
@@ -39,15 +41,11 @@ def test_compose_declares_only_primary_runtime_dependencies() -> None:
     services = _services()
 
     expected = {
-        "github": {
-            "management": {"condition": "service_healthy", "required": True}
-        },
-        "gitlab": {
-            "management": {"condition": "service_healthy", "required": True}
-        },
-        "analysis": {
-            "ghidra": {"condition": "service_healthy", "required": True}
-        },
+        "github": {"management": {"condition": "service_healthy", "required": True}},
+        "gitlab": {"management": {"condition": "service_healthy", "required": True}},
+        "signoz": {"management": {"condition": "service_healthy", "required": True}},
+        "coolify": {"management": {"condition": "service_healthy", "required": True}},
+        "analysis": {"ghidra": {"condition": "service_healthy", "required": True}},
     }
 
     for name, service in services.items():
@@ -132,14 +130,16 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "OTEL_LOG_LEVEL",
     }
     expected = {
-        "management": observability | {
+        "management": observability
+        | {
             "MANAGEMENT_ENCRYPTION_KEY",
             "MANAGEMENT_SERVICE_TOKEN",
             "MANAGEMENT_ADMIN_USERNAME",
             "MANAGEMENT_ADMIN_PASSWORD",
             "MANAGEMENT_SESSION_SECRET",
         },
-        "auth": observability | {
+        "auth": observability
+        | {
             "MANAGEMENT_SERVICE_TOKEN",
             "MCP_PUBLIC_BASE_URL",
             "GITHUB_OAUTH_CLIENT_ID",
@@ -147,7 +147,8 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
             "GITHUB_OAUTH_JWT_SIGNING_KEY",
             "GITHUB_OAUTH_ALLOWED_USERS",
         },
-        "gateway": observability | {
+        "gateway": observability
+        | {
             "MANAGEMENT_SERVICE_TOKEN",
             "OAUTH_ENABLED",
             "MCP_PUBLIC_BASE_URL",
@@ -163,6 +164,8 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "signoz": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "coolify": observability | {"MANAGEMENT_SERVICE_TOKEN"},
     }
 
     for name, service in services.items():
@@ -185,6 +188,12 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "ANALYSIS_URL",
         "GHIDRA_URL",
         "TERMINAL_URL",
+        "SIGNOZ_MCP_URL",
+        "COOLIFY_MCP_URL",
+        "SIGNOZ_URL",
+        "SIGNOZ_API_KEY",
+        "COOLIFY_URL",
+        "COOLIFY_API_TOKEN",
         "TERMINAL_FILES_URL",
         "GHIDRA_MCP_URL",
         "GITHUB_AGENT_PROTECTED_BRANCHES",
@@ -217,7 +226,6 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
 
     for name, service in _services().items():
         assert forbidden.isdisjoint(service.get("environment", {})), name
-
 
 
 def test_compose_requires_all_external_bootstrap_values() -> None:

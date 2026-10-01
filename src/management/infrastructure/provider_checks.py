@@ -16,7 +16,11 @@ class ProviderConnectionVerifier:
     def verify(self, account: Account, credential: str) -> dict[str, object]:
         if account.provider is Provider.GITHUB:
             return self._verify_github(account, credential)
-        return self._verify_gitlab(account, credential)
+        if account.provider is Provider.GITLAB:
+            return self._verify_gitlab(account, credential)
+        if account.provider is Provider.SIGNOZ:
+            return self._verify_signoz(account, credential)
+        return self._verify_coolify(account, credential)
 
     @staticmethod
     def _verify_github(account: Account, credential: str) -> dict[str, object]:
@@ -64,6 +68,81 @@ class ProviderConnectionVerifier:
             "login": data.get("login"),
             "slug": data.get("slug"),
             "name": data.get("name"),
+        }
+
+    @staticmethod
+    def _context(account: Account) -> ssl.SSLContext | None:
+        parsed = urllib.parse.urlsplit(account.base_url)
+        if parsed.scheme != "https":
+            return None
+        if not account.verify_tls:
+            return ssl._create_unverified_context()
+        if account.ca_cert_pem:
+            return ssl.create_default_context(cadata=account.ca_cert_pem.replace("\\n", "\n"))
+        return ssl.create_default_context()
+
+    @classmethod
+    def _verify_signoz(cls, account: Account, token: str) -> dict[str, object]:
+        request = urllib.request.Request(
+            account.base_url.rstrip("/") + "/api/v1/service_accounts/me",
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "SIGNOZ-API-KEY": token.strip(),
+                "User-Agent": "mcp-bridge-management",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=15,
+                context=cls._context(account),
+            ) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:2048].decode("utf-8", "replace")
+            raise ValueError(f"SigNoz verification failed HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise ValueError(f"SigNoz verification transport error: {exc.reason}") from exc
+        data = json_object(json_loads(raw, context="SigNoz service account verification"))
+        return {
+            "ok": True,
+            "provider": "signoz",
+            "account": account.alias,
+            "base_url": account.base_url,
+            "service_account": data,
+        }
+
+    @classmethod
+    def _verify_coolify(cls, account: Account, token: str) -> dict[str, object]:
+        request = urllib.request.Request(
+            account.base_url.rstrip("/") + "/api/v1/teams/current",
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {token.strip()}",
+                "User-Agent": "mcp-bridge-management",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=15,
+                context=cls._context(account),
+            ) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:2048].decode("utf-8", "replace")
+            raise ValueError(f"Coolify verification failed HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise ValueError(f"Coolify verification transport error: {exc.reason}") from exc
+        data = json_object(json_loads(raw, context="Coolify team verification"))
+        return {
+            "ok": True,
+            "provider": "coolify",
+            "account": account.alias,
+            "base_url": account.base_url,
+            "team": data,
         }
 
     @staticmethod
