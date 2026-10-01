@@ -152,16 +152,10 @@ _backend_router = BackendRouter(
             "Persistent Linux workspaces, commands and long-running jobs",
         ),
         BackendDescriptor(
-            "signoz",
-            _BACKENDS["signoz"],
-            MCP_SURFACE_PATHS["signoz"],
-            "Read-only SigNoz logs, traces and metrics",
-        ),
-        BackendDescriptor(
-            "coolify",
-            _BACKENDS["coolify"],
-            MCP_SURFACE_PATHS["coolify"],
-            "Read-only Coolify application and deployment metadata",
+            "observability",
+            _BACKENDS["observability"],
+            MCP_SURFACE_PATHS["observability"],
+            "Unified read-only infrastructure state, logs, traces, metrics and deployments",
         ),
     )
 )
@@ -214,16 +208,10 @@ terminal_surface = _public_facade(
     _BACKENDS["terminal"],
     _auth_by_surface,
 )
-signoz_surface = _public_facade(
-    "signoz",
-    "signoz",
-    _BACKENDS["signoz"],
-    _auth_by_surface,
-)
-coolify_surface = _public_facade(
-    "coolify",
-    "coolify",
-    _BACKENDS["coolify"],
+observability_surface = _public_facade(
+    "observability",
+    "observability",
+    _BACKENDS["observability"],
     _auth_by_surface,
 )
 
@@ -290,8 +278,7 @@ def bridge_capabilities() -> JsonObject:
             "analysis",
             "terminal",
             "jobs",
-            "signoz",
-            "coolify",
+            "observability",
             "multi-account-signoz",
             "multi-account-coolify",
             "admin",
@@ -331,8 +318,7 @@ _files_http_app = _http_app(files_surface)
 _web_http_app = _http_app(web_surface)
 _analysis_http_app = _http_app(analysis_surface)
 _terminal_http_app = _http_app(terminal_surface)
-_signoz_http_app = _http_app(signoz_surface)
-_coolify_http_app = _http_app(coolify_surface)
+_observability_http_app = _http_app(observability_surface)
 
 _MCP_HTTP_APPS = (
     _root_http_app,
@@ -342,8 +328,7 @@ _MCP_HTTP_APPS = (
     _web_http_app,
     _analysis_http_app,
     _terminal_http_app,
-    _signoz_http_app,
-    _coolify_http_app,
+    _observability_http_app,
 )
 _MCP_LIFESPANS = tuple(mcp_app.router.lifespan_context for mcp_app in _MCP_HTTP_APPS)
 
@@ -376,6 +361,5 @@ app.mount("/files", _files_http_app)
 app.mount("/web", _web_http_app)
 app.mount("/analysis", _analysis_http_app)
 app.mount("/terminal", _terminal_http_app)
-app.mount("/signoz", _signoz_http_app)
-app.mount("/coolify", _coolify_http_app)
+app.mount("/observability", _observability_http_app)
 app.mount("/", _root_http_app)

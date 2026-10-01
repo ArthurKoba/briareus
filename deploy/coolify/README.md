@@ -16,8 +16,7 @@ Traefik -> gateway
              +-- files
              +-- curl
              +-- terminal
-             +-- signoz (read-only MCP adapter)
-             +-- coolify (read-only MCP adapter)
+             +-- observability (SigNoz + Coolify read-only MCP adapter)
              +-- analysis -> ghidra
 ```
 
@@ -217,7 +216,8 @@ for `mcp-bridge`. Do not add `SIGNOZ_URL`, `SIGNOZ_API_KEY`, `COOLIFY_URL`, or
 through Management Admin (`SigNoz Accounts` / `Coolify Accounts`), where credentials are
 encrypted with `MANAGEMENT_ENCRYPTION_KEY`.
 
-The private `signoz` and `coolify` containers receive only the normal Management service token
-and OpenTelemetry bootstrap environment. They resolve the account explicitly requested by the
-MCP caller. Coolify accounts should use a token with ordinary `Read` permission; the adapter
-does not expose sensitive log/environment/secret endpoints or any mutation/deployment action.
+The private `observability` container receives only the normal Management service token and
+OpenTelemetry bootstrap environment. It resolves the explicitly requested SigNoz or Coolify
+account through Management. Coolify accounts should use a token with ordinary `Read` permission;
+the unified adapter does not expose sensitive log/environment/secret endpoints or any
+mutation/deployment action.

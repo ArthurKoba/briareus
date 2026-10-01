@@ -161,7 +161,7 @@ services:
       - default
       - coolify
 
-  signoz:
+  observability:
     <<: *private-service
     depends_on:
       management:
@@ -169,19 +169,7 @@ services:
         required: true
     build:
       <<: *build
-      target: signoz
-    environment:
-      <<: [*management-client, *observability]
-
-  coolify:
-    <<: *private-service
-    depends_on:
-      management:
-        condition: service_healthy
-        required: true
-    build:
-      <<: *build
-      target: coolify
+      target: observability
     environment:
       <<: [*management-client, *observability]
 

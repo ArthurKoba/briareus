@@ -4,12 +4,11 @@ import pytest
 from fastmcp import Client
 
 from modules.analysis.runtime import mcp as analysis
-from modules.coolify.runtime import mcp as coolify
 from modules.curl.runtime import mcp as curl
 from modules.files.runtime import mcp as files
 from modules.github.runtime import mcp as github
 from modules.gitlab.runtime import mcp as gitlab
-from modules.signoz.runtime import mcp as signoz
+from modules.observability.runtime import mcp as observability
 
 
 async def _tool_names(mcp) -> set[str]:
@@ -132,32 +131,25 @@ async def test_terminal_runtime_surface_is_isolated(monkeypatch, tmp_path) -> No
 
 
 @pytest.mark.asyncio
-async def test_signoz_runtime_is_read_only_and_account_selected() -> None:
-    names = await _tool_names(signoz)
+async def test_observability_runtime_is_unified_read_only_surface() -> None:
+    names = await _tool_names(observability)
     assert {
-        "signoz_accounts",
-        "signoz_connection",
-        "signoz_whoami",
-        "signoz_search_logs",
-        "signoz_search_traces",
-        "signoz_query_range",
-        "signoz_list_services",
-        "signoz_field_keys",
-        "signoz_field_values",
+        "observability_sources",
+        "observability_connection",
+        "observability_search_logs",
+        "observability_search_traces",
+        "observability_query_telemetry",
+        "observability_list_services",
+        "observability_field_keys",
+        "observability_field_values",
+        "observability_current_team",
+        "observability_list_applications",
+        "observability_get_application",
+        "observability_list_deployments",
+        "observability_list_application_deployments",
+        "observability_get_deployment",
     } == names
-
-
-@pytest.mark.asyncio
-async def test_coolify_runtime_is_read_only_and_excludes_sensitive_logs() -> None:
-    names = await _tool_names(coolify)
-    assert {
-        "coolify_accounts",
-        "coolify_connection",
-        "coolify_current_team",
-        "coolify_list_applications",
-        "coolify_get_application",
-        "coolify_list_deployments",
-        "coolify_list_application_deployments",
-        "coolify_get_deployment",
-    } == names
-    assert not any("log" in name or "env" in name or "secret" in name for name in names)
+    assert not any(
+        token in name for name in names for token in ("secret", "env", "deploy_start", "restart")
+    )
+    assert not any(name.startswith(("signoz_", "coolify_")) for name in names)

@@ -18,8 +18,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "analysis:*",
     "ghidra:*",
     "terminal:*",
-    "signoz:*",
-    "coolify:*",
+    "observability:*",
     "auth:*",
 )
 _DEFAULT_PRIVATE_ORIGINS = (
@@ -128,8 +127,10 @@ class BridgeSettings(ProcessSettings):
         "http://terminal:8000/mcp",
         validation_alias="TERMINAL_URL",
     )
-    signoz_url: str = Field("http://signoz:8000/mcp", validation_alias="SIGNOZ_MCP_URL")
-    coolify_url: str = Field("http://coolify:8000/mcp", validation_alias="COOLIFY_MCP_URL")
+    observability_url: str = Field(
+        "http://observability:8000/mcp",
+        validation_alias="OBSERVABILITY_URL",
+    )
     build_sha: str = Field(
         "unknown",
         validation_alias=AliasChoices("BUILD_SHA", "SOURCE_COMMIT"),
@@ -152,8 +153,7 @@ class BridgeSettings(ProcessSettings):
         "analysis_url",
         "ghidra_url",
         "terminal_url",
-        "signoz_url",
-        "coolify_url",
+        "observability_url",
         "build_sha",
         "build_time",
         mode="before",
@@ -177,8 +177,7 @@ class BridgeSettings(ProcessSettings):
             "analysis": self.analysis_url or "http://analysis:8000/mcp",
             "ghidra": self.ghidra_url or "http://ghidra:8000/mcp",
             "terminal": self.terminal_url or "http://terminal:8000/mcp",
-            "signoz": self.signoz_url or "http://signoz:8000/mcp",
-            "coolify": self.coolify_url or "http://coolify:8000/mcp",
+            "observability": self.observability_url or "http://observability:8000/mcp",
         }
 
     @property

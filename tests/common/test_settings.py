@@ -67,8 +67,7 @@ def test_bridge_settings_use_canonical_backends_by_default(monkeypatch) -> None:
         "ANALYSIS_URL",
         "GHIDRA_URL",
         "TERMINAL_URL",
-        "SIGNOZ_MCP_URL",
-        "COOLIFY_MCP_URL",
+        "OBSERVABILITY_URL",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -80,8 +79,7 @@ def test_bridge_settings_use_canonical_backends_by_default(monkeypatch) -> None:
         "analysis": "http://analysis:8000/mcp",
         "ghidra": "http://ghidra:8000/mcp",
         "terminal": "http://terminal:8000/mcp",
-        "signoz": "http://signoz:8000/mcp",
-        "coolify": "http://coolify:8000/mcp",
+        "observability": "http://observability:8000/mcp",
     }
 
 

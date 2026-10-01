@@ -16,8 +16,7 @@ EXPECTED_SERVICES = {
     "terminal",
     "analysis",
     "ghidra",
-    "signoz",
-    "coolify",
+    "observability",
 }
 
 
@@ -43,8 +42,7 @@ def test_compose_declares_only_primary_runtime_dependencies() -> None:
     expected = {
         "github": {"management": {"condition": "service_healthy", "required": True}},
         "gitlab": {"management": {"condition": "service_healthy", "required": True}},
-        "signoz": {"management": {"condition": "service_healthy", "required": True}},
-        "coolify": {"management": {"condition": "service_healthy", "required": True}},
+        "observability": {"management": {"condition": "service_healthy", "required": True}},
         "analysis": {"ghidra": {"condition": "service_healthy", "required": True}},
     }
 
@@ -164,8 +162,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "signoz": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "coolify": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "observability": observability | {"MANAGEMENT_SERVICE_TOKEN"},
     }
 
     for name, service in services.items():
@@ -188,8 +185,7 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "ANALYSIS_URL",
         "GHIDRA_URL",
         "TERMINAL_URL",
-        "SIGNOZ_MCP_URL",
-        "COOLIFY_MCP_URL",
+        "OBSERVABILITY_URL",
         "SIGNOZ_URL",
         "SIGNOZ_API_KEY",
         "COOLIFY_URL",
