@@ -192,47 +192,41 @@ class TerminalManager:
             raise TerminalError("path escapes workspace")
         return candidate
 
-    def workspace_import_file(
+    async def workspace_import_file(
         self,
         workspace_id: str,
         file_id: str,
         path: str,
         overwrite: bool = False,
     ) -> JsonObject:
-        if self.file_store is None:
+        if self.files is None:
             raise TerminalError("Files integration is not configured")
         workspace_id = self._workspace_id(workspace_id)
         destination = self._workspace_file_path(workspace_id, path)
         if destination.exists() and not overwrite:
             raise TerminalError(f"destination already exists: {path}")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source = self.file_store.path_for(file_id)
-        shutil.copyfile(source, destination)
-        return {
-            "workspace_id": workspace_id,
-            "file_id": file_id,
-            "path": str(destination),
-            "size_bytes": destination.stat().st_size,
-        }
+        result = await self.files.import_to_path(file_id, destination)
+        result["workspace_id"] = workspace_id
+        result["path"] = str(destination)
+        return result
 
-    def workspace_export_file(
+    async def workspace_export_file(
         self,
         workspace_id: str,
         path: str,
         name: str = "",
         mime_type: str = "",
     ) -> JsonObject:
-        if self.file_store is None:
+        if self.files is None:
             raise TerminalError("Files integration is not configured")
         workspace_id = self._workspace_id(workspace_id)
         source = self._workspace_file_path(workspace_id, path)
         if not source.is_file():
             raise TerminalError(f"workspace file not found: {path}")
-        result = self.file_store.put_file(
+        result = await self.files.export_from_path(
             source,
             name=name.strip() or source.name,
             mime_type=mime_type,
-            source="terminal-workspace",
         )
         result["workspace_id"] = workspace_id
         result["workspace_path"] = str(source)
