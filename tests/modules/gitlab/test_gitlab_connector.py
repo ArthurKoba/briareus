@@ -341,3 +341,43 @@ def test_public_gitlab_capabilities_are_read_only(gitlab_server: str) -> None:
 
     assert result["auth_type"] == "public"
     assert result["provider_permissions"] == {"repository": "read"}
+
+
+def test_public_gitlab_checkout_skips_token(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_checkout(clone_url, destination, **kwargs):
+        captured["clone_url"] = clone_url
+        captured["destination"] = destination
+        captured.update(kwargs)
+        return {
+            "path": destination,
+            "mode": kwargs["mode"],
+            "ref": kwargs["ref"],
+            "git_metadata": False,
+            "auth_mode": "anonymous",
+        }
+
+    monkeypatch.setattr(
+        "modules.gitlab.repository.checkout_repository",
+        fake_checkout,
+    )
+    profile = GitLabProfile(
+        account_id="public",
+        alias="public",
+        base_url="https://gitlab.com",
+        auth_type="private_token",
+    )
+    client = GitLabClient(
+        profile,
+        anonymous_only=True,
+        workspace_root=tmp_path,
+    )
+
+    result = client.checkout_repository(
+        "gitlab-org/gitlab-test",
+        "repos/test",
+    )
+
+    assert result["project"] == "gitlab-org/gitlab-test"
+    assert captured["auth_header"] == ""
