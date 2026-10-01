@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from common.models import JsonObject
+from common.models import JsonObject, JsonValue
 from common.settings import TerminalSettings
 from modules.files.file_store import FileStore
 
@@ -119,7 +119,7 @@ class TerminalManager:
         }
 
     def workspace_list(self) -> JsonObject:
-        items = []
+        items: list[JsonValue] = []
         if self.projects_root.is_dir():
             for path in sorted(self.projects_root.iterdir(), key=lambda item: item.name.casefold()):
                 if not path.is_dir():
@@ -240,7 +240,7 @@ class TerminalManager:
 
     def status(self) -> JsonObject:
         usage = shutil.disk_usage(self.workspace_root)
-        states: dict[str, int] = {}
+        states: JsonObject = {}
         for job in self._jobs.values():
             states[job.state] = states.get(job.state, 0) + 1
         tool_names = (
@@ -592,7 +592,7 @@ class TerminalManager:
         if workspace:
             self._require_workspace(workspace)
         state_filter = state.strip()
-        jobs = [
+        jobs: list[JsonValue] = [
             self._job_public(job)
             for job in sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)
             if (not workspace or job.workspace_id == workspace)
