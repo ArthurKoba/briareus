@@ -123,11 +123,10 @@ services:
       <<: *build
       target: terminal
     environment:
-      <<: [*management-client, *observability]
+      <<: *observability
     volumes:
       - terminal-workspace:/workspace
       - terminal-home:/home/agent
-      - files:/files
 
   analysis:
     <<: *private-service
