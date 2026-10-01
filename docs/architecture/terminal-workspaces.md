@@ -1,16 +1,15 @@
 # Terminal workspace architecture
 
-Status: design baseline for `feat/terminal-workspaces`.
+Status: MVP design baseline for `feat/terminal-workspaces`.
 
 ## Goal
 
-Provide agents with a persistent, inspectable Linux workspace for local source work,
-builds and interactive hardware sessions without giving arbitrary shell code host root,
-Docker control or direct access to MCP provider credentials.
+Give agents a persistent Linux development environment that is fast to use for source
+inspection, patching, local Git workflows, builds, Python environments and interactive
+hardware work.
 
-The first implementation targets one server and a small number of concurrent agent
-sessions. It optimizes for deterministic behavior, persistence, auditability and a compact
-MCP surface rather than multi-tenant cloud scheduling.
+This is not a hostile multi-tenant sandbox. The MVP uses ordinary Linux/Docker permissions
+and a non-root runtime user as the practical safety boundary.
 
 ## Topology
 
@@ -22,29 +21,17 @@ ChatGPT / MCP client
 gateway
         |
         v
-terminal  -----------------> management
-   |  \--------------------> Files store/API
-   |
-   | HTTP/JSON over Unix socket
-   | shared control socket volume
-   v
-workspace
+terminal
    |
    +-- persistent /workspace
    +-- persistent /home/agent
-   +-- dedicated outbound-only Docker network
-   +-- optional explicitly-passed serial devices
-
-workspace is NOT attached to the normal provider network.
-terminal is NOT attached to the workspace egress network.
-workspace has NO Docker socket and NO sudo/root execution path.
+   +-- normal outbound network
+   +-- Files integration
+   +-- optional deployed UART/USB devices
 ```
 
-The terminal runtime is an ordinary MCP Bridge module. The workspace runtime is not a
-public MCP backend; it is an execution worker owned by the terminal module. Control calls
-use a Unix-domain socket (for example `/run/terminal/workspace.sock`) on a small shared
-volume instead of a Docker network. This keeps arbitrary workspace processes from gaining
-a network route to terminal, Management or provider runtimes.
+One persistent terminal service is sufficient for the MVP. There is no separate workspace
+executor/control-plane split.
 
 ## Workspace filesystem
 
@@ -52,232 +39,241 @@ Initial layout:
 
 ```text
 /workspace/
-  projects/      # cloned/created repositories
-  scratch/       # disposable but persistent working data
-  artifacts/     # build/export staging when useful
+  projects/
+  scratch/
+  artifacts/
 
 /home/agent/
   .cache/
   .config/
   .local/
-  .ssh/          # only if an explicit credential profile is later attached
+  .ssh/
 ```
 
-Both roots are persistent named volumes. The workspace process runs as a fixed non-root
-user. MCP path parameters are workspace-relative and are canonicalized before use.
+The container runs as a fixed non-root user. Source trees, virtual environments, package
+caches and build outputs survive container recreation through named volumes.
 
-Raw shell commands may navigate anywhere the workspace UID can read, so the image itself
-must not contain secrets and must not mount control-plane volumes.
+Named workspaces may simply be directories under `/workspace/projects`; we do not need
+per-workspace containers initially.
 
-## MCP surface: phase 1
+## MCP surface
 
-### Runtime / workspace
+### Status and workspace
 
 - `terminal_status`
-  - image/build identity, tool versions, disk usage, active jobs/sessions, serial aliases.
 - `workspace_list`
 - `workspace_create`
 - `workspace_info`
 - `workspace_delete`
-  - guarded; refuses while active jobs/sessions exist unless an explicit force policy is
-    later added.
-- `workspace_import_file`
-  - Files `file_id` -> confined workspace path.
-- `workspace_export_file`
-  - confined workspace path -> immutable Files `file_id`.
+- `workspace_import_file(file_id, path)`
+- `workspace_export_file(path)`
 
-A workspace is initially a directory-level project space within the single trusted
-workspace container. The API preserves an explicit `workspace_id` so execution can move
-to per-workspace containers/VMs later without changing callers.
+Keep these tools small and operational. Workspace deletion must refuse while jobs are
+using it unless an explicit force flag is supplied.
 
-### Short commands
+### Quick commands
 
-- `terminal_exec(workspace_id, command, cwd, env, timeout_seconds)`
-  - bounded non-PTY execution;
-  - stdout/stderr returned separately with byte limits and truncation metadata;
-  - exit code, signal, timestamps and duration are structured;
-  - environment overrides reject protected names and secrets are redacted from audit.
+`terminal_exec(workspace_id, command, cwd, env, timeout_seconds)`
 
-This is for grep, git status/diff, quick scripts and small tests.
+Use for grep, git status/diff, short scripts and quick tests.
 
-### Long-running jobs
+Return structured:
 
-- `job_start(..., kind="generic|build|test|server")`
+- exit code / signal;
+- stdout;
+- stderr;
+- timestamps/duration;
+- truncation metadata.
+
+### Jobs: universal process abstraction
+
+All long-running and interactive work uses jobs:
+
+- `job_start(workspace_id, command, cwd, env, interactive=false, label="")`
 - `job_status(job_id)`
-- `job_read(job_id, cursor, max_bytes)`
+- `job_read(job_id, cursor=0, max_bytes=..., wait_seconds=0)`
+- `job_write(job_id, data)`
+- `job_resize(job_id, cols, rows)`
 - `job_wait(job_id, timeout_seconds)`
 - `job_cancel(job_id, grace_seconds)`
-- `job_list(workspace_id, state, kind)`
+- `job_list(workspace_id, state)`
 
-Output is written incrementally to durable logs. MCP calls never need to hold an SSE
-request open for a long build. A disconnected ChatGPT session can later resume reading
-from a cursor.
+`job_write` and `job_resize` are valid only for interactive jobs.
 
-### Interactive PTY
+A build is simply a job. A shell is an interactive job. A development server is a job. A
+serial console is an interactive job running a serial utility.
 
-- `terminal_open(workspace_id, cwd, shell, cols, rows)`
-- `terminal_read(session_id, cursor, max_bytes, wait_seconds)`
-- `terminal_write(session_id, data)`
-- `terminal_resize(session_id, cols, rows)`
-- `terminal_close(session_id, signal)`
-- `terminal_list(workspace_id)`
+## Incremental log contract
 
-This supports interactive installers/debuggers, REPLs, `git rebase -i` style workflows
-when appropriate, and serial console tooling. The API is chunk/cursor based rather than
-trying to keep one MCP request open indefinitely.
+This is a first-class optimization, not an afterthought.
 
-## Build handling
+Each job output stream is append-only and addressed by a byte cursor.
 
-A build is a normal job with `kind=build`, not a separate execution engine. Admin can
-therefore show build state without parsing every build system.
+Example flow:
 
-Optional build metadata:
+```text
+job_start(...) -> job_id=abc
+job_read(abc, cursor=0)    -> output="...", next_cursor=1842
+job_read(abc, cursor=1842) -> output="only new bytes", next_cursor=2310
+job_read(abc, cursor=2310) -> output="", next_cursor=2310
+```
 
-- label;
-- expected artifact paths;
-- source revision at start;
-- environment/profile name.
+The response also reports:
 
-The workspace image should include Make/Buildroot prerequisites so OpenIPC builds can run
-without root package installation. Project-specific Python tooling should prefer `uv`
-and workspace-local virtual environments.
+- `eof` / process state;
+- whether older output was truncated by retention;
+- current total output size;
+- optional stdout/stderr stream identity when not PTY-backed.
 
-## Git
+This lets an agent poll a long build without repeatedly consuming the full log. A caller
+may explicitly request from cursor 0 when the complete retained log is needed.
 
-Raw `git` is available in the workspace for local history, branches, grep/log/blame,
-patch application, rebases and worktree operations.
+Logs remain available after process exit according to a simple retention policy.
 
-Provider-native network mutations remain better served by GitHub/GitLab MCP when possible.
-For raw authenticated Git transport, phase 2 adds explicit credential profiles rather
-than copying all Management provider tokens into the shell.
+## Interactive jobs
 
-Recommended local defaults:
+Interactive jobs allocate a PTY. The agent reads output through the same cursor-based
+`job_read`, writes stdin with `job_write`, and changes terminal size with `job_resize`.
 
-- no global credential embedded in the image;
-- workspace-local Git identity may be configured;
-- credential attachment is explicit and auditable;
-- SSH host keys are verified, not silently disabled.
+There is no separate terminal-session entity. The job itself is the session.
 
-## Patching and repository inspection
+This supports:
 
-The base image includes `git`, `patch`, `diff`, `grep`, `ripgrep`, `find`,
-`sed`, `awk`, `jq` and normal archive tools. This intentionally makes common source
-inspection cheaper than repeated provider API calls.
-
-The MCP layer should not reimplement each Unix tool. The structured boundary is around
-execution/session lifecycle, paths, artifacts, credentials and privilege.
-
-## Resource and safety controls
-
-Workspace container baseline:
-
-- non-root UID/GID;
-- no sudo;
-- `cap_drop: ALL`;
-- `security_opt: no-new-privileges:true`;
-- no Docker/Podman socket;
-- no host filesystem bind mounts;
-- dedicated egress network, separated from provider/control-plane services;
-- control-plane execution RPC over Unix socket, not TCP;
-- CPU/memory/PID limits configurable in Compose;
-- bounded exec output and job log retention;
-- explicit kill/cancel APIs;
-- root filesystem may become read-only once tool/cache write paths are proven.
-
-Outbound Internet remains enabled because builds and dependency resolution require it.
-Network egress policy/allowlists can be added later if there is a concrete need.
+- interactive shells;
+- REPL/debuggers;
+- installers;
+- text-mode tools where appropriate;
+- UART/serial programs.
 
 ## Serial/UART
 
-The serial contract is alias-based:
+Serial is deliberately not a separate MCP subsystem.
+
+The operator exposes a device to the terminal container using normal Docker/Linux device
+permissions. The image contains a normal serial utility.
+
+The agent then starts, for example, an interactive job conceptually equivalent to:
 
 ```text
-camera-uart -> /dev/uart0
+picocom <device> --baud <rate>
 ```
 
-The repository stores only the logical alias contract. Coolify/Compose deployment maps the
-real host device into the workspace.
+After that, all interaction is ordinary `job_read` / `job_write` / `job_cancel`.
 
-Planned tools:
+The same model also works for flashing/debug tooling that needs a passed-through USB
+device: it is just another command/job once Linux permissions permit access.
 
-- `serial_list`
-- `serial_open(alias, baudrate, data_bits, parity, stop_bits, flow_control)`
-- reuse `terminal_read/write/close` for the resulting session.
+## Base development image
 
-Serial transcript storage follows the same bounded durable log policy as PTYs. Flashing
-tools may run as ordinary jobs when the required USB device is explicitly passed through
-and accessible to the non-root workspace user.
+The image should be useful without package installation during routine work.
 
-## Privileged approval path: phase 3
+Baseline:
 
-Do not start with arbitrary privileged command execution.
+- bash/sh;
+- git + OpenSSH client;
+- curl/wget;
+- grep/ripgrep/find/sed/awk;
+- patch/diff/rsync;
+- jq;
+- tar/zip/unzip/xz;
+- make;
+- gcc/g++/binutils;
+- cmake/ninja/pkg-config;
+- Python + uv + pip/venv;
+- Buildroot/OpenIPC common prerequisites;
+- picocom and pyserial.
 
-The future flow is:
+Project-local dependencies are allowed under the normal user account.
 
-1. agent submits exact privileged action request;
-2. Management stores command/action, rationale, target, cwd and a content hash;
-3. Admin operator approves or rejects;
-4. approval creates a one-shot short-lived authorization bound to that hash;
-5. a dedicated privileged runner executes only that approved action;
-6. stdout/stderr/exit status and audit identity are persisted.
+If a system dependency is missing, the agent gets the real command error and reports the
+missing package instead of attempting privilege escalation.
 
-The privileged runner is a separate security domain from the normal workspace. A generic
-reusable root shell is explicitly out of scope.
+## Git
 
-## Admin UI
+Local Git should be fully usable because repository inspection through a filesystem is much
+cheaper than repeated provider API calls.
 
-Add a Terminal section with:
+Typical work:
 
-- Workspaces: storage, project/revision hints, last activity, delete/export controls;
-- Jobs: running/completed/failed/cancelled, kind, duration, exit status, log tail;
-- Terminals: PTY/serial type, workspace, cwd/device alias, last activity, close action;
-- Settings: output limits, job retention, idle/session policy, resource policy;
-- later: credential attachments and privileged approval queue.
+- clone/fetch where credentials permit;
+- status/diff/log/blame;
+- branches/worktrees;
+- apply patches;
+- rebase/cherry-pick when appropriate;
+- build/test from the working tree.
 
-Dashboard cards should include active workspaces, running jobs, failed jobs and open
-terminal/serial sessions.
+GitHub/GitLab MCP remains available for provider-native repository/PR/MR operations. We do
+not need to duplicate all of that inside Terminal.
+
+## Files integration
+
+Use the existing Files system for moving immutable artifacts into and out of the workspace:
+
+- Files -> workspace path;
+- workspace path -> Files object.
+
+This is useful for uploaded source archives, binaries, build artifacts and logs that need
+to leave the terminal environment.
+
+## Admin MVP
+
+Add one Terminal section, not a large configuration product.
+
+Show:
+
+- workspaces;
+- active/recent jobs;
+- interactive/non-interactive;
+- command/label and cwd;
+- state, exit code and duration;
+- last activity;
+- current output tail;
+- cancel/close action.
+
+Dashboard cards may show running jobs and failed recent jobs.
+
+Package lists, Linux permissions, device mappings and most resource settings remain in
+Docker/Linux configuration, not Admin forms.
+
+## Safety baseline
+
+Keep it intentionally simple:
+
+- run as non-root;
+- no sudo by default;
+- do not run the container privileged by default;
+- package/device permission failures are surfaced normally;
+- operator changes permissions or Compose configuration when a task genuinely needs it.
+
+Do not spend MVP time building a security system intended to resist a malicious agent that
+already has authorized repository/infrastructure mutation tools.
 
 ## Observability
 
-Reuse existing common observability middleware for MCP calls. Add workspace-side runtime
-metrics/logs without exporting command contents:
+Reuse current OpenTelemetry integration with `mcp.scope=terminal`.
 
-- runtime up/started;
-- exec/job/PTY counts and failures;
-- active/running job gauges;
-- command/job duration histograms;
-- bytes read/written;
-- workspace disk usage;
-- session last-activity.
+Useful metrics:
 
-Execution logs/transcripts are operational data and stay in the workspace/Management
-storage path, not OTLP attributes.
+- running/completed/failed jobs;
+- job duration;
+- command failures;
+- output bytes;
+- active interactive jobs;
+- workspace disk usage.
 
-## External designs reviewed
-
-Daytona demonstrates durable sandbox filesystems, process/session APIs and web terminal
-management. E2B demonstrates a stronger microVM boundary at much greater infrastructure
-cost. OpenHands uses dedicated runtime images and explicit workspace mounts. mcp-shell
-demonstrates the useful split between typed safe tools and an opt-in unrestricted shell.
-
-For this single-server stack, reusing those concepts is preferable to embedding an entire
-external sandbox platform. The MCP contract is intentionally designed so the workspace
-executor can later be replaced by containers/VMs without changing agent-facing tools.
+Do not export command bodies, stdin, credentials or full output as telemetry attributes.
 
 ## Implementation order
 
-1. terminal/workspace settings and isolated Compose topology;
-2. workspace execution API + persistent volumes;
-3. terminal MCP: status/workspace + bounded exec;
-4. job lifecycle with durable cursor-based logs;
-5. PTY lifecycle;
+1. terminal runtime + persistent volumes + non-root image/toolchain;
+2. workspace directory lifecycle;
+3. `terminal_exec`;
+4. jobs with durable cursor/delta logs;
+5. PTY input/resize on interactive jobs;
 6. Files import/export;
-7. Management/Admin views and settings;
-8. telemetry and architecture tests;
-9. serial/UART aliases and session integration;
-10. credential profiles;
-11. privileged approval runner only if still required.
+7. compact Management/Admin view;
+8. telemetry/tests;
+9. validate UART by passing one real device and running it as an interactive job.
 
-The first acceptance gate is phases 1-8: persistent source/build work without host
-privilege. UART and privileged execution are separate gates because they change the
-hardware/security boundary.
+That is the MVP acceptance gate. Stronger isolation, credential brokers and privileged
+approval workflows are deferred until actual usage proves they are necessary.
