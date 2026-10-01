@@ -253,6 +253,8 @@ def test_gitlab_account_list_exposes_potential_capabilities(gitlab_server: str) 
 
     listed = result["accounts"][0]
     assert listed["permission_scope"] == "project-dependent"
+    assert listed["preferred_selector"] == "local"
+    assert listed["selector_stability"] == "stable_alias"
     assert "personal_access_token_scoped_access" in listed["potential_capabilities"]
 
 
