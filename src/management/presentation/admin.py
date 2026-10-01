@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -42,6 +43,7 @@ from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
 
+from common.mcp_surfaces import MCP_SURFACE_PATHS
 from common.models import JsonObject, JsonValue, json_int, json_str
 from common.public_tool_names import public_tool_name
 from common.settings import ManagementSettings
@@ -346,6 +348,36 @@ class InvocationView(ModelView):
         flash(request, f"Deleted {removed} invocation log records", "success")
 
 
+_OAUTH_SURFACE_LABELS = {
+    "root": "Bridge / Root MCP",
+    "github": "GitHub",
+    "gitlab": "GitLab",
+    "files": "Files",
+    "web": "Web / Browser",
+    "analysis": "Analysis (Ghidra backend)",
+    "terminal": "Terminal",
+}
+
+
+def _oauth_surface_label(_request: Request, obj: OAuthSessionRecord) -> str:
+    path = urlsplit(obj.resource).path.rstrip("/") or "/"
+    for name, surface_path in MCP_SURFACE_PATHS.items():
+        if path == surface_path.rstrip("/"):
+            return _OAUTH_SURFACE_LABELS.get(name, name.title())
+    return obj.resource or "Unknown"
+
+
+def _oauth_client_label(_request: Request, obj: OAuthSessionRecord) -> str:
+    if obj.client_name:
+        return obj.client_name
+    if not obj.client_id:
+        return "Unknown"
+    value = obj.client_id
+    if len(value) <= 24:
+        return value
+    return f"{value[:8]}…{value[-6:]}"
+
+
 class OAuthSessionView(ModelView):
     row_actions_display_type = RowActionsDisplayType.KEBAB
     page_size = 50
@@ -353,15 +385,15 @@ class OAuthSessionView(ModelView):
         Sequence[BaseField],
         (
             "status",
+            StringField("resource", label="Surface", getter=_oauth_surface_label),
             "login",
-            "resource",
-            "client_name",
-            DateTimeField("updated_at", label="Last event"),
+            StringField("client_name", label="Client", getter=_oauth_client_label),
             DateTimeField("last_used_at", label="Last used"),
-            DateTimeField("last_refresh_at", label="Last refresh"),
             DateTimeField("access_expires_at", label="Access expires"),
-            DateTimeField("refresh_expires_at", label="Refresh expires"),
             "last_event",
+            DateTimeField("updated_at", label="Last event time"),
+            DateTimeField("last_refresh_at", label="Last refresh"),
+            DateTimeField("refresh_expires_at", label="Refresh expires"),
             "error_type",
             TextAreaField("error_message", label="Last error"),
             "client_id",
@@ -386,7 +418,12 @@ class OAuthSessionView(ModelView):
         "error_type",
     )
     exclude_fields_from_list = (
+        "updated_at",
+        "last_refresh_at",
+        "refresh_expires_at",
+        "error_type",
         "error_message",
+        "client_id",
         "subject",
         "scopes_json",
         "access_jti",

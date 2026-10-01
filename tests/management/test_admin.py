@@ -32,7 +32,13 @@ from management.infrastructure.repositories import (
     SqlAlchemyManagementConfigRepository,
     SqlAlchemyOAuthSessionRepository,
 )
-from management.presentation.admin import SettingsView, _display_invocation_tool, build_admin
+from management.presentation.admin import (
+    SettingsView,
+    _display_invocation_tool,
+    _oauth_client_label,
+    _oauth_surface_label,
+    build_admin,
+)
 
 
 def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) -> None:
@@ -147,3 +153,28 @@ def test_admin_settings_parse_invocation_audit_controls() -> None:
     assert config.logging_retention_days == 14
     assert config.logging_max_records == 5000
     assert config.maintenance_interval_minutes == 15
+
+
+def test_oauth_session_admin_uses_readable_surface_and_client_labels() -> None:
+    analysis = SimpleNamespace(
+        resource="https://mcp.example.test/analysis/mcp",
+        client_name="",
+        client_id="41e63a78-554f-4850-8468-c1e59991a658",
+    )
+    web = SimpleNamespace(
+        resource="https://mcp.example.test/web/mcp",
+        client_name="ChatGPT",
+        client_id="ignored-id",
+    )
+    root = SimpleNamespace(
+        resource="https://mcp.example.test/mcp",
+        client_name="",
+        client_id="short-client",
+    )
+
+    assert _oauth_surface_label(None, analysis) == "Analysis (Ghidra backend)"  # type: ignore[arg-type]
+    assert _oauth_surface_label(None, web) == "Web / Browser"  # type: ignore[arg-type]
+    assert _oauth_surface_label(None, root) == "Bridge / Root MCP"  # type: ignore[arg-type]
+    assert _oauth_client_label(None, web) == "ChatGPT"  # type: ignore[arg-type]
+    assert _oauth_client_label(None, root) == "short-client"  # type: ignore[arg-type]
+    assert _oauth_client_label(None, analysis) == "41e63a78…91a658"  # type: ignore[arg-type]
