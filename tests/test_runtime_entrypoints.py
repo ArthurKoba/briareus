@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastmcp import Client
 
@@ -8,6 +12,14 @@ from modules.curl.runtime import mcp as curl
 from modules.files.runtime import mcp as files
 from modules.github.runtime import mcp as github
 from modules.gitlab.runtime import mcp as gitlab
+# Terminal's production roots are absolute Docker volumes. Runtime-surface tests
+# run on an unprivileged hosted runner, so provide isolated composition-root paths
+# before importing the terminal runtime.
+_TERMINAL_TEST_ROOT = Path(tempfile.mkdtemp(prefix="mcp-terminal-runtime-"))
+os.environ["TERMINAL_WORKSPACE_ROOT"] = str(_TERMINAL_TEST_ROOT / "workspace")
+os.environ["TERMINAL_HOME"] = str(_TERMINAL_TEST_ROOT / "home")
+os.environ["FILE_ROOT"] = str(_TERMINAL_TEST_ROOT / "files")
+
 from modules.terminal.runtime import mcp as terminal
 
 
