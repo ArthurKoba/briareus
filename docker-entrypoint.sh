@@ -9,12 +9,10 @@ TERMINAL_HOME_DIR="${TERMINAL_HOME:-}"
 
 mkdir -p \
   "${FASTMCP_DIR}" \
-  "${FILE_DIR}/objects/sha256" \
-  "${FILE_DIR}/tmp" \
   "${MANAGEMENT_DIR}" \
   /home/bridge
 
-chown -R 1000:1000 "${FASTMCP_DIR}" "${FILE_DIR}" "${MANAGEMENT_DIR}" /home/bridge
+chown -R 1000:1000 "${FASTMCP_DIR}" "${MANAGEMENT_DIR}" /home/bridge
 
 if [ -n "${TERMINAL_WORKSPACE_DIR}" ]; then
   mkdir -p "${TERMINAL_WORKSPACE_DIR}"

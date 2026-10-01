@@ -249,3 +249,10 @@ def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
 
     for name, service in services.items():
         assert required.issubset(service.get("environment", {})), name
+
+
+def test_entrypoint_has_no_legacy_file_dir_dependency() -> None:
+    entrypoint = Path("docker-entrypoint.sh").read_text()
+    assert "FILE_DIR" not in entrypoint
+    assert "/files/objects" not in entrypoint
+    assert "/files/tmp" not in entrypoint

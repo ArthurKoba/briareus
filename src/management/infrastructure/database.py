@@ -8,7 +8,6 @@ from sqlalchemy import (
     Boolean,
     Float,
     Integer,
-    MetaData,
     String,
     Text,
     create_engine,
@@ -128,24 +127,32 @@ def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
 
 
 def ensure_zero_state_schema(engine: Engine) -> bool:
-    """Create the current schema, resetting incompatible pre-production state."""
-    inspector = inspect(engine)
-    actual_tables = set(inspector.get_table_names())
+    """Ensure the management schema exists without destroying persisted data.
+
+    Missing tables are created additively. Extra legacy tables/columns are tolerated so
+    a code rollout that removes fields cannot erase accounts or invocation history.
+    Missing required columns need an explicit migration and fail closed instead of
+    resetting the database.
+    """
+    before = inspect(engine)
+    existing_tables = set(before.get_table_names())
     expected_tables = set(Base.metadata.tables)
-    reset_required = actual_tables != expected_tables
-
-    if not reset_required:
-        for table_name, table in Base.metadata.tables.items():
-            actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
-            expected_columns = {column.name for column in table.columns}
-            if actual_columns != expected_columns:
-                reset_required = True
-                break
-
-    if reset_required and actual_tables:
-        reflected = MetaData()
-        reflected.reflect(bind=engine)
-        reflected.drop_all(engine)
+    created_tables = expected_tables - existing_tables
 
     Base.metadata.create_all(engine)
-    return reset_required
+
+    inspector = inspect(engine)
+    for table_name, table in Base.metadata.tables.items():
+        actual_columns = {
+            column["name"] for column in inspector.get_columns(table_name)
+        }
+        expected_columns = {column.name for column in table.columns}
+        missing_columns = expected_columns - actual_columns
+        if missing_columns:
+            missing = ", ".join(sorted(missing_columns))
+            raise RuntimeError(
+                f"management database migration required for {table_name}: "
+                f"missing columns: {missing}"
+            )
+
+    return bool(created_tables)
