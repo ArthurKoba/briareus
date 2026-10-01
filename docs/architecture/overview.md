@@ -22,10 +22,10 @@ flowchart TB
     CU --> CP
     AN --> GD[ghidra private runtime]
 
-    AU --> OAUTH[(fastmcp-data)]
+    AU --> OAUTH[(auth state)]
     CP --> DB[(management SQLite)]
-    FI --> STORE[(files-data)]
-    CU --> STORE
+    FI --> WS[(shared workspace)]
+    CU --> WS
 ```
 
 ## Source ownership
@@ -38,7 +38,7 @@ flowchart TB
 - `management` — provider account registry, encrypted credentials, Admin and telemetry.
 - `modules.github` — GitHub repository/review/actions capabilities.
 - `modules.gitlab` — GitLab project/repository/CI capabilities.
-- `modules.files` — immutable object storage.
+- `modules.files` — path-based shared workspace file management.
 - `modules.curl` — structured Web/curl operations.
 - `modules.analysis` — public structured-analysis facade.
 - `modules.ghidra` — private native backend adapter.
