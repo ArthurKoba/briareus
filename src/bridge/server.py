@@ -12,6 +12,7 @@ from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.routing import BaseRoute
 
+from common.management_client import ManagementClient
 from common.mcp_surfaces import (
     MCP_SURFACE_PATHS,
     resource_url,
@@ -63,6 +64,7 @@ def _build_auth_reverse_proxy() -> ReverseProxy:
 
 def _build_surface_auth(
     settings: GatewayAuthSettings,
+    management: ManagementClient | None,
 ) -> dict[str, RemoteAuthProvider]:
     if not settings.enabled:
         return {}
@@ -72,7 +74,7 @@ def _build_surface_auth(
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
         resource = resource_url(settings.public_base_url, surface)
-        verifier = LocalAuthTokenVerifier(settings, resource)
+        verifier = LocalAuthTokenVerifier(settings, resource, management)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
@@ -102,7 +104,8 @@ _settings = BridgeSettings()
 _auth_settings = GatewayAuthSettings()
 _management_settings = ManagementClientSettings()
 _BACKENDS = _settings.backends
-_auth_by_surface = _build_surface_auth(_auth_settings)
+_management = ManagementClient(_management_settings)
+_auth_by_surface = _build_surface_auth(_auth_settings, _management)
 
 _backend_router = BackendRouter(
     (
