@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from common.settings import TerminalSettings
 from modules.terminal.manager import TerminalError, TerminalManager
 
@@ -220,3 +222,58 @@ async def test_job_cleanup_emits_retention_reason_and_freed_bytes(
     assert "reason=retention_expired" in messages
     assert f"job cleanup deleted job_id={job_id}" in messages
     assert "job cleanup scan completed" in messages
+
+
+class _FakeManagement:
+    def __init__(self, policy: TerminalRuntimePolicy) -> None:
+        self.policy = policy
+
+    def terminal_runtime_policy(self) -> TerminalRuntimePolicy:
+        return self.policy
+
+
+@pytest.mark.asyncio
+async def test_terminal_exec_is_capped_by_runtime_policy(manager: TerminalManager) -> None:
+    manager.management = cast(
+        Any,
+        _FakeManagement(
+            TerminalRuntimePolicy(
+                max_exec_timeout_seconds=1,
+                max_job_runtime_seconds=10,
+            )
+        ),
+    )
+    manager.workspace_create("timeout-exec")
+
+    result = await manager.terminal_exec(
+        "timeout-exec",
+        "sleep 5",
+        timeout_seconds=60,
+    )
+
+    assert result["timed_out"] is True
+    assert result["timeout_seconds"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_background_job_is_auto_terminated_by_runtime_policy(
+    manager: TerminalManager,
+) -> None:
+    manager.management = cast(
+        Any,
+        _FakeManagement(
+            TerminalRuntimePolicy(
+                max_exec_timeout_seconds=10,
+                max_job_runtime_seconds=1,
+            )
+        ),
+    )
+    manager.workspace_create("timeout-job")
+
+    started = await manager.job_start("timeout-job", "sleep 30")
+    job_id = str(started["job_id"])
+    status = await manager.job_wait(job_id, timeout_seconds=4)
+
+    assert started["timeout_seconds"] == 1.0
+    assert status["state"] == "timed_out"
+    assert status["timeout_seconds"] == 1.0
