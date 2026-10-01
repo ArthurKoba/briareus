@@ -32,7 +32,7 @@ fi
 
 if [ -n "${BROWSER_PROFILE_PATH}" ]; then
   mkdir -p "${BROWSER_PROFILE_PATH}"
-  chown -R 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")"
+  chown 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")" "${BROWSER_PROFILE_PATH}"
 fi
 
 exec gosu 1000:1000 "$@"

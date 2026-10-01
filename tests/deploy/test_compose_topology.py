@@ -299,4 +299,7 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
 def test_entrypoint_owns_browser_profile_volume_before_dropping_privileges() -> None:
     entrypoint = Path("docker-entrypoint.sh").read_text()
     assert 'BROWSER_PROFILE_PATH="${BROWSER_PROFILE_PATH:-}"' in entrypoint
-    assert 'chown -R 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")"' in entrypoint
+    assert (
+        'chown 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")" "${BROWSER_PROFILE_PATH}"'
+        in entrypoint
+    )
