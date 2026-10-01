@@ -7,6 +7,7 @@ from common.models import JsonObject
 
 from .file_ingress import ingest_file
 from .file_store import FileStore
+from .migration import migrate_legacy_store
 from .models import ClientFile, FileReference, FileReferenceListResponse
 from .upload_manager import FileUploadManager
 from .workspace_ingress import ingest_workspace_file
@@ -30,6 +31,23 @@ def register_file_tools(
         result["active_uploads"] = upload_manager.active_count()
         result["workspace"] = workspace.status()
         return result
+
+    @mcp.tool(title="Migrate legacy file store", annotations=write_annotations)
+    def file_migrate_legacy_store(
+        destination_dir: str = "projects/migrated-files",
+        overwrite: bool = True,
+    ) -> JsonObject:
+        """Copy every legacy content-addressed file into normal workspace files.
+
+        This is a one-time migration tool. Each copied file is checksum-verified and
+        migration-manifest.json records the old file ID, metadata and references.
+        """
+        return migrate_legacy_store(
+            store,
+            workspace,
+            destination_dir=destination_dir,
+            overwrite=overwrite,
+        )
 
     @mcp.tool(title="Workspace list", annotations=read_annotations)
     def file_workspace_list(
