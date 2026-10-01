@@ -155,3 +155,68 @@ async def test_completed_jobs_can_be_cleaned_up(manager: TerminalManager) -> Non
     assert job_id in removed["job_ids"]
     with pytest.raises(TerminalError, match="job not found"):
         manager.job_status(job_id)
+
+
+@pytest.mark.asyncio
+async def test_workspace_delete_emits_cleanup_audit_log(
+    manager: TerminalManager,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    manager.workspace_create("demo")
+    path = manager.workspace_path("demo")
+    (path / "artifact.bin").write_bytes(b"x" * 32)
+
+    with caplog.at_level("INFO", logger="modules.terminal.manager"):
+        result = await manager.workspace_delete("demo")
+
+    assert result["freed_bytes"] == 32
+    assert result["reason"] == "manual_delete"
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "workspace cleanup decision workspace_id=demo" in messages
+    assert "reason=manual_delete" in messages
+    assert "workspace cleanup completed workspace_id=demo" in messages
+    assert "freed_bytes=32" in messages
+
+
+@pytest.mark.asyncio
+async def test_workspace_delete_logs_active_job_skip(
+    manager: TerminalManager,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    manager.workspace_create("demo")
+    started = await manager.job_start("demo", "sleep 30")
+    job_id = str(started["job_id"])
+
+    with (
+        caplog.at_level("INFO", logger="modules.terminal.manager"),
+        pytest.raises(TerminalError, match="active jobs"),
+    ):
+        await manager.workspace_delete("demo")
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "workspace cleanup skipped workspace_id=demo reason=active_jobs" in messages
+    await manager.job_cancel(job_id, grace_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_job_cleanup_emits_retention_reason_and_freed_bytes(
+    manager: TerminalManager,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    manager.workspace_create("demo")
+    started = await manager.job_start("demo", "printf cleanup-data")
+    job_id = str(started["job_id"])
+    await manager.job_wait(job_id, timeout_seconds=2)
+    manager._get_job(job_id).ended_at = 1
+
+    with caplog.at_level("INFO", logger="modules.terminal.manager"):
+        result = manager.job_cleanup(older_than_hours=1, dry_run=False)
+
+    assert result["reason"] == "retention_expired"
+    assert result["freed_bytes"] > 0
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "job cleanup scan started" in messages
+    assert f"job cleanup candidate job_id={job_id}" in messages
+    assert "reason=retention_expired" in messages
+    assert f"job cleanup deleted job_id={job_id}" in messages
+    assert "job cleanup scan completed" in messages
