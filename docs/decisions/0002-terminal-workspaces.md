@@ -80,9 +80,10 @@ updates the image or host/container permissions deliberately.
 ### Files integration
 
 Terminal integrates with the existing Files capability for explicit import/export between
-immutable Files objects and workspace paths. The exact implementation may reuse the
-canonical Files store inside the stack; the public contract remains file_id <-> workspace
-path rather than exposing storage internals to agents.
+immutable Files objects and workspace paths. Transfers go through the private Files MCP;
+the canonical Files storage volume is not mounted into the terminal shell runtime. The
+public contract remains file_id <-> workspace path and agents cannot accidentally mutate
+the immutable object store directly.
 
 ### Git and credentials
 
@@ -99,11 +100,14 @@ mechanisms appropriate to the deployment.
 There is no custom privileged approval service in the MVP.
 
 Normal privileged commands fail because the runtime user is non-root. The agent reports
-the blocker. The operator then decides whether to change a package, permission, device
-mapping or deployment configuration.
+the blocker. User-space dependencies and persistent Git/SSH setup can be changed without
+root. OS packages, supplemental groups, host device mappings and mounts are deployment
+changes and require an image/Compose update plus container recreation.
 
-A more structured approval mechanism may be added later only if real usage demonstrates a
-need.
+Admin surfaces tool availability, group membership and visible serial-device access so the
+operator can distinguish an agent/workspace problem from a deployment-level capability
+gap. A more structured privileged approval mechanism may be added later only if real usage
+demonstrates a need.
 
 ### Admin and observability
 
