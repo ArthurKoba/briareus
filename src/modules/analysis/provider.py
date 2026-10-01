@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Protocol, cast
 
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.providers import Provider
 from fastmcp.tools import FunctionTool, Tool
 from fastmcp.utilities.components import FastMCPComponent
@@ -156,6 +157,13 @@ class AnalysisToolProvider(Provider):
             raise AnalysisProviderError("analysis backend URL is not configured")
         return value
 
+    def _backend_client(self) -> Client:
+        transport = StreamableHttpTransport(
+            self._backend_url(),
+            headers={"X-Koba-Proxy-Origin": "analysis"},
+        )
+        return Client(transport)
+
     async def get_tasks(self) -> Sequence[FastMCPComponent]:
         """Analysis tools are dynamic RPC facades, not background-task registrations."""
         return []
@@ -173,7 +181,7 @@ class AnalysisToolProvider(Provider):
             if ttl > 0 and cached is not None and cached[0] > now:
                 return list(cached[1])
 
-            async with Client(self._backend_url()) as client:
+            async with self._backend_client() as client:
                 backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
 
             tools = self._adapt_catalog(backend_tools)
@@ -337,7 +345,7 @@ class AnalysisToolProvider(Provider):
                 json_object(arguments, context=f"{analysis_name} arguments"),
                 ghidra_name,
             )
-            async with Client(self._backend_url()) as client:
+            async with self._backend_client() as client:
                 result = await client.call_tool(ghidra_name, canonical)
             decoded = decode_call_result(result)
             return adapt_analysis_result(decoded) if decoded is not None else None

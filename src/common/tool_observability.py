@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import mcp.types as mt
+from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
 
@@ -35,13 +37,13 @@ class ToolObservabilityMiddleware(Middleware):
             return ""
         return str(fastmcp_context.request_id)
 
-    async def _record(self, event: InvocationEvent) -> None:
-        await asyncio.to_thread(self.sink.record_invocation, event)
+    async def _record(self, event: InvocationEvent, *, audit: bool) -> None:
+        await asyncio.to_thread(self.sink.record_invocation, event, audit=audit)
 
-    def _submit(self, event: InvocationEvent) -> None:
+    def _submit(self, event: InvocationEvent, *, audit: bool = True) -> None:
         if len(self._tasks) >= self._MAX_PENDING_EVENTS:
             return
-        task = asyncio.create_task(self._record(event))
+        task = asyncio.create_task(self._record(event, audit=audit))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -55,6 +57,9 @@ class ToolObservabilityMiddleware(Middleware):
         provider = self.module if self.module in {"github", "gitlab"} else ""
         request_id = self._request_id(context)
         arguments_json = render_payload(context.message.arguments or {})
+        headers = get_http_headers()
+        proxy_origin = headers.get("x-koba-proxy-origin", "").strip().casefold()
+        audit = not (self.module == "ghidra" and proxy_origin == "analysis")
         span_attributes: dict[str, object] = {
             "mcp.scope": self.module,
             "mcp.tool": context.message.name,
@@ -63,7 +68,10 @@ class ToolObservabilityMiddleware(Middleware):
             span_attributes["mcp.provider"] = provider
         if request_id:
             span_attributes["mcp.request.id"] = request_id
+        if proxy_origin:
+            span_attributes["mcp.proxy.origin"] = proxy_origin
 
+        tool_logger = logging.getLogger(f"mcp_bridge.{self.module}")
         with self.sink.trace_span(
             f"mcp.tool.{context.message.name}",
             span_attributes,
@@ -83,7 +91,17 @@ class ToolObservabilityMiddleware(Middleware):
                     arguments_json=arguments_json,
                     error_message=render_error(exc),
                 )
-                self._submit(event)
+                self._submit(event, audit=audit)
+                tool_logger.exception(
+                    "MCP tool call failed scope=%s tool=%s",
+                    self.module,
+                    context.message.name,
+                    extra={
+                        "mcp.scope": self.module,
+                        "mcp.tool": context.message.name,
+                        "mcp.request.id": request_id,
+                    },
+                )
                 raise
 
             self._submit(
@@ -97,6 +115,7 @@ class ToolObservabilityMiddleware(Middleware):
                     duration_ms=(time.monotonic() - started) * 1000,
                     arguments_json=arguments_json,
                     result_json=render_payload(result),
-                )
+                ),
+                audit=audit,
             )
             return result

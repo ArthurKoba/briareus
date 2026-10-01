@@ -44,7 +44,12 @@ class ObservabilitySink:
     def record_runtime_heartbeat(self, scope: str) -> None:
         raise NotImplementedError
 
-    def record_invocation(self, event: InvocationEvent) -> None:
+    def record_invocation(
+        self,
+        event: InvocationEvent,
+        *,
+        audit: bool = True,
+    ) -> None:
         raise NotImplementedError
 
     def trace_span(
@@ -75,10 +80,15 @@ class CompositeObservabilitySink(ObservabilitySink):
             except Exception:
                 logger.exception("Observability heartbeat sink failed scope=%s", scope)
 
-    def record_invocation(self, event: InvocationEvent) -> None:
+    def record_invocation(
+        self,
+        event: InvocationEvent,
+        *,
+        audit: bool = True,
+    ) -> None:
         for sink in self.sinks:
             try:
-                sink.record_invocation(event)
+                sink.record_invocation(event, audit=audit)
             except Exception:
                 logger.exception(
                     "Observability invocation sink failed scope=%s tool=%s",
@@ -116,8 +126,14 @@ class ManagementAuditSink(ObservabilitySink):
     def record_runtime_heartbeat(self, scope: str) -> None:
         del scope
 
-    def record_invocation(self, event: InvocationEvent) -> None:
-        self.management.record_invocation(event)
+    def record_invocation(
+        self,
+        event: InvocationEvent,
+        *,
+        audit: bool = True,
+    ) -> None:
+        if audit:
+            self.management.record_invocation(event)
 
     def trace_span(
         self,
@@ -316,7 +332,13 @@ class OpenTelemetrySink(ObservabilitySink):
     def record_runtime_heartbeat(self, scope: str) -> None:
         self.runtime_up.set(1, {"mcp.scope": scope})
 
-    def record_invocation(self, event: InvocationEvent) -> None:
+    def record_invocation(
+        self,
+        event: InvocationEvent,
+        *,
+        audit: bool = True,
+    ) -> None:
+        del audit
         attributes: dict[str, object] = {
             "mcp.scope": self.scope,
             "mcp.module": event.module,

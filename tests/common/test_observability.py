@@ -8,6 +8,7 @@ from opentelemetry.trace import Span
 from common.account_contracts import InvocationEvent
 from common.observability import (
     CompositeObservabilitySink,
+    ManagementAuditSink,
     ObservabilitySink,
     _parse_key_values,
     _resource_attributes,
@@ -27,7 +28,13 @@ class _RecordingSink(ObservabilitySink):
     def record_runtime_heartbeat(self, scope: str) -> None:
         self.runtime_scopes.append(f"heartbeat:{scope}")
 
-    def record_invocation(self, event: InvocationEvent) -> None:
+    def record_invocation(
+        self,
+        event: InvocationEvent,
+        *,
+        audit: bool = True,
+    ) -> None:
+        del audit
         self.events.append(event)
 
     @contextmanager
@@ -49,8 +56,13 @@ class _FailingSink(ObservabilitySink):
         del scope
         raise RuntimeError("sink unavailable")
 
-    def record_invocation(self, event: InvocationEvent) -> None:
-        del event
+    def record_invocation(
+        self,
+        event: InvocationEvent,
+        *,
+        audit: bool = True,
+    ) -> None:
+        del event, audit
         raise RuntimeError("sink unavailable")
 
     @contextmanager
@@ -145,3 +157,27 @@ def test_observability_settings_support_signal_overrides() -> None:
     assert settings.signal_endpoint("logs") == "https://logs.example.test/intake"
     assert settings.signal_endpoint("traces") == "https://traces.example.test/intake"
     assert settings.signal_endpoint("metrics") == "https://metrics.example.test/intake"
+
+
+def test_management_audit_can_be_suppressed_for_internal_proxy_calls() -> None:
+    class FakeManagement:
+        def __init__(self) -> None:
+            self.events: list[InvocationEvent] = []
+
+        def record_invocation(self, event: InvocationEvent) -> None:
+            self.events.append(event)
+
+    management = FakeManagement()
+    sink = ManagementAuditSink(management)  # type: ignore[arg-type]
+    event = InvocationEvent(
+        module="ghidra",
+        tool="list_projects",
+        status="success",
+        duration_ms=1.0,
+    )
+
+    sink.record_invocation(event, audit=False)
+    assert management.events == []
+
+    sink.record_invocation(event, audit=True)
+    assert management.events == [event]
