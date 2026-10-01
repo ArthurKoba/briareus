@@ -40,14 +40,14 @@ def register_terminal_tools(mcp: FastMCP, manager: TerminalManager) -> None:
         return await manager.workspace_delete(workspace_id, force=force)
 
     @mcp.tool(title="Workspace import file", annotations=WRITE_LOCAL)
-    def workspace_import_file(
+    async def workspace_import_file(
         workspace_id: str,
         file_id: str,
         path: str,
         overwrite: bool = False,
     ) -> JsonObject:
         """Copy one immutable Files object into a workspace path."""
-        return manager.workspace_import_file(
+        return await manager.workspace_import_file(
             workspace_id,
             file_id,
             path,
@@ -55,14 +55,14 @@ def register_terminal_tools(mcp: FastMCP, manager: TerminalManager) -> None:
         )
 
     @mcp.tool(title="Workspace export file", annotations=WRITE_LOCAL)
-    def workspace_export_file(
+    async def workspace_export_file(
         workspace_id: str,
         path: str,
         name: str = "",
         mime_type: str = "",
     ) -> JsonObject:
         """Commit one workspace file to immutable Files storage."""
-        return manager.workspace_export_file(
+        return await manager.workspace_export_file(
             workspace_id,
             path,
             name=name,
@@ -117,9 +117,37 @@ def register_terminal_tools(mcp: FastMCP, manager: TerminalManager) -> None:
         return manager.job_status(job_id)
 
     @mcp.tool(title="Job list", annotations=READ_ONLY_LOCAL)
-    def job_list(workspace_id: str = "", state: str = "") -> JsonObject:
-        """List jobs, optionally filtered by workspace and state."""
-        return manager.job_list(workspace_id=workspace_id, state=state)
+    def job_list(
+        workspace_id: str = "",
+        state: str = "",
+        offset: int = 0,
+        limit: int = 100,
+    ) -> JsonObject:
+        """List jobs with optional workspace/state filters and pagination."""
+        return manager.job_list(
+            workspace_id=workspace_id,
+            state=state,
+            offset=offset,
+            limit=limit,
+        )
+
+    @mcp.tool(title="Job delete", annotations=DESTRUCTIVE_LOCAL)
+    def job_delete(job_id: str) -> JsonObject:
+        """Delete retained metadata/logs for a completed job."""
+        return manager.job_delete(job_id)
+
+    @mcp.tool(title="Job cleanup", annotations=DESTRUCTIVE_LOCAL)
+    def job_cleanup(
+        older_than_hours: int = 168,
+        dry_run: bool = True,
+        limit: int = 1000,
+    ) -> JsonObject:
+        """Preview or remove completed job logs older than a retention threshold."""
+        return manager.job_cleanup(
+            older_than_hours=older_than_hours,
+            dry_run=dry_run,
+            limit=limit,
+        )
 
     @mcp.tool(title="Job read", annotations=READ_ONLY_LOCAL)
     async def job_read(
