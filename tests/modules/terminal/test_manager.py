@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from common.settings import FileSettings, TerminalSettings
-from modules.files.file_store import FileStore
+from common.settings import TerminalSettings
 from modules.terminal.manager import TerminalError, TerminalManager
 
 
@@ -127,31 +126,79 @@ def test_persisted_running_job_becomes_interrupted(tmp_path: Path) -> None:
     assert second.job_status("persisted")["state"] == "interrupted"
 
 
-def test_workspace_files_round_trip(tmp_path: Path) -> None:
-    store = FileStore(
-        FileSettings(
-            root=tmp_path / "files",
-            upload_max_bytes=1024 * 1024,
-        )
-    )
-    source = store.put_text("input.txt", "payload")
+class _FakeFiles:
+    async def import_to_path(self, file_id: str, destination: Path):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("payload", encoding="utf-8")
+        return {
+            "file_id": file_id,
+            "size_bytes": 7,
+            "bytes_copied": 7,
+        }
+
+    async def export_from_path(self, source: Path, *, name: str, mime_type: str = ""):
+        del mime_type
+        assert source.read_text(encoding="utf-8") == "payload"
+        return {
+            "file_id": "sha256:" + "a" * 64,
+            "name": name,
+            "size_bytes": source.stat().st_size,
+        }
+
+
+@pytest.mark.asyncio
+async def test_workspace_files_round_trip(tmp_path: Path) -> None:
     manager = TerminalManager(
         TerminalSettings(
             workspace_root=tmp_path / "workspace",
             home=tmp_path / "home",
             shell="/bin/bash",
         ),
-        store,
+        _FakeFiles(),
     )
     manager.workspace_create("demo")
 
-    imported = manager.workspace_import_file(
+    imported = await manager.workspace_import_file(
         "demo",
-        str(source["file_id"]),
+        "sha256:" + "b" * 64,
         "src/input.txt",
     )
     assert Path(str(imported["path"])).read_text(encoding="utf-8") == "payload"
 
-    exported = manager.workspace_export_file("demo", "src/input.txt", name="copy.txt")
+    exported = await manager.workspace_export_file(
+        "demo",
+        "src/input.txt",
+        name="copy.txt",
+    )
     assert str(exported["file_id"]).startswith("sha256:")
-    assert store.read(str(exported["file_id"]))["data_base64"]
+
+
+@pytest.mark.asyncio
+async def test_terminal_exec_bounds_captured_output(manager: TerminalManager) -> None:
+    manager.workspace_create("demo")
+    result = await manager.terminal_exec(
+        "demo",
+        "python -c \"print('x' * 10000)\"",
+        max_output_bytes=128,
+    )
+
+    assert result["exit_code"] == 0
+    assert result["stdout_truncated"] is True
+    assert len(str(result["stdout"]).encode()) <= 128
+
+
+@pytest.mark.asyncio
+async def test_completed_jobs_can_be_cleaned_up(manager: TerminalManager) -> None:
+    manager.workspace_create("demo")
+    started = await manager.job_start("demo", "printf done")
+    job_id = str(started["job_id"])
+    await manager.job_wait(job_id, timeout_seconds=2)
+
+    preview = manager.job_cleanup(older_than_hours=1, dry_run=True)
+    assert preview["count"] == 0
+
+    manager._get_job(job_id).ended_at = 1
+    removed = manager.job_cleanup(older_than_hours=1, dry_run=False)
+    assert job_id in removed["job_ids"]
+    with pytest.raises(TerminalError, match="job not found"):
+        manager.job_status(job_id)
