@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
+
+from fastmcp.server.auth.providers.github import GitHubProvider
+from mcp.server.auth.provider import RefreshToken
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from auth_service.provider import (
     _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS,
@@ -92,3 +99,78 @@ def test_refresh_token_audience_is_recovered_from_token_claims() -> None:
 
     assert provider._jwt_audience_unverified(token) == analysis
     assert provider.canonical_resource(provider._jwt_audience_unverified(token)) == analysis
+
+
+@pytest.mark.asyncio
+async def test_refresh_exchange_serializes_shared_upstream_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings()
+    provider = MultiResourceGitHubProvider(settings)
+    resource = resource_url(settings.public_base_url, "analysis")
+    issuer = provider.issuer_for_resource(resource)
+    refresh_jti = "refresh-jti"
+    token = issuer.issue_refresh_token(
+        client_id="mcp-client",
+        scopes=["read:user"],
+        jti=refresh_jti,
+        expires_in=3600,
+    )
+
+    class FakeMappingStore:
+        async def get(self, *, key: str):
+            assert key == refresh_jti
+            return SimpleNamespace(upstream_token_id="shared-upstream-token")
+
+    provider._jti_mapping_store = FakeMappingStore()  # type: ignore[assignment]
+
+    active = 0
+    max_active = 0
+
+    async def fake_parent_exchange(
+        _self,
+        client,
+        refresh_token,
+        scopes,
+    ) -> OAuthToken:
+        nonlocal active, max_active
+        del client, refresh_token, scopes
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        return OAuthToken(
+            access_token="access",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="refresh",
+            scope="read:user",
+        )
+
+    monkeypatch.setattr(
+        GitHubProvider,
+        "exchange_refresh_token",
+        fake_parent_exchange,
+    )
+
+    client = OAuthClientInformationFull(
+        client_id="mcp-client",
+        client_secret=None,
+        redirect_uris=["https://chatgpt.com/connector_platform_oauth_redirect"],
+    )
+    refresh = RefreshToken(
+        token=token,
+        client_id="mcp-client",
+        scopes=["read:user"],
+        expires_at=None,
+        resource=resource,
+    )
+
+    first, second = await asyncio.gather(
+        provider.exchange_refresh_token(client, refresh, ["read:user"]),
+        provider.exchange_refresh_token(client, refresh, ["read:user"]),
+    )
+
+    assert first.access_token == "access"
+    assert second.access_token == "access"
+    assert max_active == 1

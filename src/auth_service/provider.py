@@ -255,7 +255,43 @@ class MultiResourceGitHubProvider(GitHubProvider):
         resource = self.canonical_resource(refresh_token.resource)
         token = self._resource_context.set(resource)
         try:
-            return await super().exchange_refresh_token(client, refresh_token, scopes)
+            # FastMCP 4.0.10 serializes transparent upstream refreshes but its
+            # explicit OAuth refresh-token exchange does not take that lock.
+            # GitHub refresh tokens rotate, so concurrent exchanges that share
+            # one upstream token set can otherwise submit the same old refresh
+            # token twice; the second request then fails with bad_refresh_token.
+            try:
+                payload = self.jwt_issuer.verify_token(
+                    refresh_token.token,
+                    expected_token_use="refresh",
+                )
+                refresh_jti = str(payload["jti"])
+                mapping = await self._jti_mapping_store.get(key=refresh_jti)
+            except Exception:
+                # Preserve FastMCP's normal invalid-token diagnostics.
+                return await super().exchange_refresh_token(
+                    client,
+                    refresh_token,
+                    scopes,
+                )
+
+            if mapping is None:
+                return await super().exchange_refresh_token(
+                    client,
+                    refresh_token,
+                    scopes,
+                )
+
+            lock = self._get_refresh_lock(mapping.upstream_token_id)
+            async with lock:
+                # The parent re-reads the upstream token set after the lock is
+                # acquired, so a waiter observes any rotated refresh token
+                # written by the preceding exchange.
+                return await super().exchange_refresh_token(
+                    client,
+                    refresh_token,
+                    scopes,
+                )
         finally:
             self._resource_context.reset(token)
 
