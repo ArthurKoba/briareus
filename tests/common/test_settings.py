@@ -32,8 +32,8 @@ def test_provider_settings_parse_only_their_own_environment(monkeypatch) -> None
     monkeypatch.setenv("GITLAB_PROTECTED_BRANCHES", "main,stable")
     monkeypatch.setenv("GHIDRA_URL", " http://ghidra:8080/mcp ")
     monkeypatch.setenv("ANALYSIS_SCHEMA_CACHE_TTL_SECONDS", "45")
-    monkeypatch.setenv("FILE_ROOT", "/tmp/mcp-files")
-    monkeypatch.setenv("FILE_UPLOAD_CHUNK_BYTES", str(256 * 1024))
+    monkeypatch.setenv("FILE_WORKSPACE_ROOT", "/tmp/mcp-files")
+    monkeypatch.setenv("FILE_UPLOAD_MAX_BYTES", str(256 * 1024 * 1024))
 
     github = GitHubPolicySettings()
     gitlab = GitLabSettings()
@@ -45,15 +45,15 @@ def test_provider_settings_parse_only_their_own_environment(monkeypatch) -> None
     assert gitlab.protected_branches == {"main", "stable"}
     assert analysis.backend_url == "http://ghidra:8080/mcp"
     assert analysis.schema_cache_ttl_seconds == 45
-    assert files.root == Path("/tmp/mcp-files")
-    assert files.upload_chunk_bytes == 256 * 1024
+    assert files.workspace_root == Path("/tmp/mcp-files")
+    assert files.upload_max_bytes == 256 * 1024 * 1024
 
 
 def test_unrelated_invalid_environment_does_not_break_file_settings(monkeypatch) -> None:
     monkeypatch.setenv("GITLAB_REGISTRY_CACHE_TTL_SECONDS", "not-a-number")
-    monkeypatch.setenv("FILE_ROOT", "/tmp/mcp-files")
+    monkeypatch.setenv("FILE_WORKSPACE_ROOT", "/tmp/mcp-files")
 
-    assert FileSettings().root == Path("/tmp/mcp-files")
+    assert FileSettings().workspace_root == Path("/tmp/mcp-files")
     with pytest.raises(ValidationError):
         GitLabSettings()
 
@@ -155,13 +155,13 @@ def test_management_settings_reject_missing_bootstrap(monkeypatch) -> None:
 
 
 def test_file_settings_are_frozen_and_validate_limits() -> None:
-    settings = FileSettings(root=Path("/tmp/files"))
+    settings = FileSettings(workspace_root=Path("/tmp/files"))
 
     with pytest.raises(ValidationError):
         settings.upload_max_bytes = 1
 
     with pytest.raises(ValidationError):
-        FileSettings(root=Path("relative/path"))
+        FileSettings(workspace_root=Path("relative/path"))
 
 
 def test_public_runtime_defaults_are_deployment_agnostic(monkeypatch) -> None:
