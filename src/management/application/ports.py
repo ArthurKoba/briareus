@@ -6,6 +6,7 @@ from typing import Protocol
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
+from management.domain.snapshots import CachedSnapshot
 from management.domain.telemetry import Invocation
 
 
@@ -54,6 +55,36 @@ class OAuthSessionRepository(Protocol):
     def apply_event(self, event: object) -> OAuthSession: ...
 
     def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]: ...
+
+
+class SnapshotRepository(Protocol):
+    def ensure(
+        self,
+        key: str,
+        *,
+        category: str,
+        parameters: dict[str, object] | None = None,
+        refresh_after_seconds: int,
+    ) -> CachedSnapshot: ...
+
+    def get(self, key: str) -> CachedSnapshot | None: ...
+
+    def list_category(
+        self,
+        category: str,
+        *,
+        limit: int = 1000,
+    ) -> Sequence[CachedSnapshot]: ...
+
+    def mark_attempt(self, key: str, *, status: str = "refreshing") -> None: ...
+
+    def store_success(
+        self,
+        key: str,
+        payload: dict[str, object],
+    ) -> CachedSnapshot: ...
+
+    def store_error(self, key: str, exc: Exception) -> CachedSnapshot: ...
 
 
 class ManagementConfigRepository(Protocol):

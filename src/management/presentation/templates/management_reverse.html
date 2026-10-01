@@ -10,7 +10,19 @@
 {% endblock %}
 {% block content %}
   {% if error %}
-  <div class="alert alert-danger" role="alert">{{ error }}</div>
+  <div class="alert alert-warning" role="alert">Last background refresh failed: {{ error }}</div>
+  {% endif %}
+  {% if overview_meta %}
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-3 text-secondary">
+    <span>Cached overview:</span>
+    {% if overview_meta.get("updated_at") %}
+      <time class="js-local-datetime" datetime="{{ overview_meta.get('updated_at') }}">{{ overview_meta.get("updated_at") }}</time>
+    {% else %}
+      <span>waiting for first background refresh</span>
+    {% endif %}
+    {% if overview_meta.get("stale") %}<span class="badge bg-yellow-lt">stale</span>{% endif %}
+    {% if overview_meta.get("status") == "refreshing" %}<span class="badge bg-blue-lt">refreshing</span>{% endif %}
+  </div>
   {% endif %}
 
   <div class="row row-cards mb-3">

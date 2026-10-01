@@ -34,6 +34,14 @@ class FileAdminStore:
     ) -> JsonObject:
         return self.workspace.list(path, offset=offset, limit=limit)
 
+    def status(self) -> JsonObject:
+        status = self.workspace.status()
+        for field in ("free_bytes", "used_bytes", "total_bytes"):
+            raw = status.get(field)
+            if isinstance(raw, int):
+                status[field.removesuffix("_bytes") + "_display"] = _size_display(raw)
+        return status
+
     def stats(self) -> JsonObject:
         self.workspace.ensure()
         files = 0

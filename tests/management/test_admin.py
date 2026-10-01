@@ -16,6 +16,7 @@ from management.application.services import (
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    SnapshotService,
 )
 from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -31,7 +32,9 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
     SqlAlchemyOAuthSessionRepository,
+    SqlAlchemySnapshotRepository,
 )
+from management.infrastructure.reverse import ReverseAdminClient
 from management.presentation.admin import (
     SettingsView,
     _display_invocation_tool,
@@ -67,10 +70,21 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
     config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
     oauth_sessions = OAuthSessionService(SqlAlchemyOAuthSessionRepository(sessions))
+    snapshots = SnapshotService(SqlAlchemySnapshotRepository(sessions))
     files = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
+    reverse = ReverseAdminClient()
 
     admin = build_admin(
-        engine, settings, cipher, accounts, audit, oauth_sessions, config, files
+        engine,
+        settings,
+        cipher,
+        accounts,
+        audit,
+        oauth_sessions,
+        snapshots,
+        config,
+        files,
+        reverse,
     )
 
     assert admin.base_url == "/admin"

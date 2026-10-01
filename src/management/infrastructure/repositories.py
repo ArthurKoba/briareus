@@ -13,9 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
+from management.domain.snapshots import CachedSnapshot
 from management.domain.telemetry import Invocation
 
 from .database import (
+    CachedSnapshotRecord,
     GitHubAccountRecord,
     GitLabAccountRecord,
     InvocationRecord,
@@ -456,6 +458,122 @@ class SqlAlchemyOAuthSessionRepository:
                 .limit(size)
             ).all()
             return [self._domain(row) for row in rows]
+
+
+class SqlAlchemySnapshotRepository:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self.sessions = sessions
+
+    @staticmethod
+    def _decode_object(value: str) -> dict[str, object]:
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+
+    @classmethod
+    def _domain(cls, record: CachedSnapshotRecord) -> CachedSnapshot:
+        from common.models import json_object
+
+        return CachedSnapshot(
+            key=record.key,
+            category=record.category,
+            parameters=json_object(
+                cls._decode_object(record.parameters_json),
+                context="cached snapshot parameters",
+            ),
+            payload=json_object(
+                cls._decode_object(record.payload_json),
+                context="cached snapshot payload",
+            ),
+            refresh_after_seconds=record.refresh_after_seconds,
+            status=record.status,
+            updated_at=record.updated_at,
+            attempted_at=record.attempted_at,
+            error_type=record.error_type,
+            error_message=record.error_message,
+            created_at=record.created_at,
+        )
+
+    def ensure(
+        self,
+        key: str,
+        *,
+        category: str,
+        parameters: dict[str, object] | None = None,
+        refresh_after_seconds: int,
+    ) -> CachedSnapshot:
+        now = datetime.now(UTC)
+        with self.sessions.begin() as session:
+            record = session.get(CachedSnapshotRecord, key)
+            if record is None:
+                record = CachedSnapshotRecord(
+                    key=key,
+                    category=category,
+                    parameters_json=json.dumps(parameters or {}, ensure_ascii=False),
+                    refresh_after_seconds=refresh_after_seconds,
+                    created_at=now,
+                )
+                session.add(record)
+            else:
+                record.category = category
+                record.parameters_json = json.dumps(parameters or {}, ensure_ascii=False)
+                record.refresh_after_seconds = refresh_after_seconds
+            session.flush()
+            return self._domain(record)
+
+    def get(self, key: str) -> CachedSnapshot | None:
+        with self.sessions() as session:
+            record = session.get(CachedSnapshotRecord, key)
+            return self._domain(record) if record is not None else None
+
+    def list_category(self, category: str, *, limit: int = 1000) -> Sequence[CachedSnapshot]:
+        size = max(1, min(limit, 5000))
+        with self.sessions() as session:
+            rows = session.scalars(
+                select(CachedSnapshotRecord)
+                .where(CachedSnapshotRecord.category == category)
+                .order_by(CachedSnapshotRecord.created_at.asc())
+                .limit(size)
+            ).all()
+            return [self._domain(row) for row in rows]
+
+    def mark_attempt(self, key: str, *, status: str = "refreshing") -> None:
+        with self.sessions.begin() as session:
+            record = session.get(CachedSnapshotRecord, key)
+            if record is None:
+                raise KeyError(key)
+            record.attempted_at = datetime.now(UTC)
+            record.status = status
+
+    def store_success(self, key: str, payload: dict[str, object]) -> CachedSnapshot:
+        now = datetime.now(UTC)
+        with self.sessions.begin() as session:
+            record = session.get(CachedSnapshotRecord, key)
+            if record is None:
+                raise KeyError(key)
+            record.payload_json = json.dumps(payload, ensure_ascii=False)
+            record.status = "ready"
+            record.updated_at = now
+            record.attempted_at = now
+            record.error_type = ""
+            record.error_message = ""
+            session.flush()
+            return self._domain(record)
+
+    def store_error(self, key: str, exc: Exception) -> CachedSnapshot:
+        now = datetime.now(UTC)
+        with self.sessions.begin() as session:
+            record = session.get(CachedSnapshotRecord, key)
+            if record is None:
+                raise KeyError(key)
+            record.status = "error"
+            record.attempted_at = now
+            record.error_type = type(exc).__name__
+            record.error_message = str(exc)[:4096]
+            session.flush()
+            return self._domain(record)
 
 
 class SqlAlchemyManagementConfigRepository:

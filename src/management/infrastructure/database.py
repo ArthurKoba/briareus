@@ -125,6 +125,22 @@ class OAuthSessionRecord(Base):
     )
 
 
+class CachedSnapshotRecord(Base):
+    __tablename__ = "cached_snapshots"
+
+    key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    category: Mapped[str] = mapped_column(String(64), index=True)
+    parameters_json: Mapped[str] = mapped_column(Text, default="{}")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    refresh_after_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    attempted_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    error_type: Mapped[str] = mapped_column(String(256), default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
 class ManagementConfigRecord(Base):
     __tablename__ = "management_config"
 
