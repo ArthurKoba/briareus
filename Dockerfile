@@ -97,7 +97,10 @@ COPY src/modules/curl ./src/modules/curl
 ENV ASGI_APP=modules.curl.runtime:app \
     FILE_WORKSPACE_ROOT=/workspace \
     BROWSER_PROFILE_PATH=/browser/profile \
-    BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+    BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
+    XDG_CONFIG_HOME=/browser/config \
+    XDG_CACHE_HOME=/browser/cache \
+    BREAKPAD_DUMP_LOCATION=/browser/crash
 
 
 FROM runtime-base AS terminal
