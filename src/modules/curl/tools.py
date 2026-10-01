@@ -56,8 +56,9 @@ def register_curl_tools(
         """Run a structured curl request with arbitrary HTTP method, headers, cookies and body.
 
         For large or binary responses prefer curl_download. body_workspace_path sends
-        an existing workspace file directly without model-visible base64. Chrome Desktop is the default preset. Browser presets reproduce HTTP
-        headers only; they are not browser engines.
+        an existing workspace file directly without model-visible base64. Chrome Desktop
+        is the default preset. Browser presets reproduce HTTP headers only; they are not
+        browser engines.
         """
         return curl_request_impl(
             url=url,
@@ -81,6 +82,8 @@ def register_curl_tools(
             max_response_bytes=max_response_bytes,
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
+            workspace=workspace,
+            max_file_bytes=max_file_bytes,
             curl_binary=curl_binary,
         )
 
@@ -145,7 +148,6 @@ def register_curl_tools(
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
             workspace=workspace,
-        max_file_bytes=max_file_bytes,
             max_file_bytes=max_file_bytes,
             curl_binary=curl_binary,
         )
@@ -208,7 +210,6 @@ def register_curl_tools(
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
             workspace=workspace,
-        max_file_bytes=max_file_bytes,
             max_file_bytes=max_file_bytes,
             curl_binary=curl_binary,
         )
