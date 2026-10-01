@@ -6,6 +6,7 @@ import mimetypes
 import os
 import shutil
 from pathlib import Path
+from typing import BinaryIO
 
 from common.models import JsonObject, JsonValue
 
@@ -208,6 +209,32 @@ class WorkspaceFileStore:
         else:
             target.unlink()
         return {"path": path.strip().lstrip("/"), "deleted": True}
+
+    def put_stream(
+        self,
+        stream: BinaryIO,
+        destination: str,
+        *,
+        overwrite: bool = False,
+    ) -> JsonObject:
+        target = self._path(destination)
+        if target.exists() and not overwrite:
+            raise WorkspaceFileError(f"destination already exists: {destination}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.parent / f".{target.name}.upload.part"
+        try:
+            with temporary.open("wb") as handle:
+                shutil.copyfileobj(stream, handle, length=1024 * 1024)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if target.exists() and not overwrite:
+                raise WorkspaceFileError(
+                    f"destination already exists: {destination}"
+                )
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return self.info(self.relative(target))
 
     def place_file(
         self,
