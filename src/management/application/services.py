@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from common.account_contracts import AccountPublic, ResolvedAccount
 from common.models import JsonObject, json_object
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -18,6 +19,7 @@ from .ports import (
     InvocationRepository,
     ManagementConfigRepository,
     OAuthSessionRepository,
+    RuntimeSettingsRepository,
     SnapshotRepository,
 )
 
@@ -44,9 +46,7 @@ class AccountService:
 
     def resolve(self, selector: str, *, provider: Provider) -> ResolvedAccount:
         account = self.repository.get(selector, provider=provider)
-        credential = self.cipher.decrypt(
-            self.repository.credential(account.id, provider=provider)
-        )
+        credential = self.cipher.decrypt(self.repository.credential(account.id, provider=provider))
         return ResolvedAccount.model_validate({**account.public(), "credential": credential})
 
     def create(self, account: Account, *, credential: str) -> Account:
@@ -77,9 +77,7 @@ class AccountService:
 
     def verify(self, selector: str, *, provider: Provider) -> JsonObject:
         account = self.repository.get(selector, provider=provider)
-        credential = self.cipher.decrypt(
-            self.repository.credential(account.id, provider=provider)
-        )
+        credential = self.cipher.decrypt(self.repository.credential(account.id, provider=provider))
         return json_object(
             self.verifier.verify(account, credential),
             context="connection verification result",
@@ -195,3 +193,17 @@ class ManagementConfigService:
 
     def update(self, config: ManagementConfig) -> ManagementConfig:
         return self.repository.save(config)
+
+
+class RuntimeSettingsService:
+    def __init__(self, repository: RuntimeSettingsRepository) -> None:
+        self.repository = repository
+
+    def terminal_policy(self) -> TerminalRuntimePolicy:
+        return self.repository.get_terminal_policy()
+
+    def update_terminal_policy(
+        self,
+        policy: TerminalRuntimePolicy,
+    ) -> TerminalRuntimePolicy:
+        return self.repository.save_terminal_policy(policy)
