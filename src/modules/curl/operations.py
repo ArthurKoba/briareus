@@ -66,7 +66,6 @@ def curl_request_impl(
     preview_bytes: int = _DEFAULT_PREVIEW_BYTES,
     *,
     store: FileStore,
-    workspace: WorkspaceFileStore | None = None,
     curl_binary: str | None = None,
 ) -> JsonObject:
     curl_binary = curl_binary or _system_curl_binary()
@@ -140,6 +139,7 @@ def curl_download_impl(
     preview_bytes: int = _DEFAULT_PREVIEW_BYTES,
     *,
     store: FileStore,
+    workspace: WorkspaceFileStore | None = None,
     curl_binary: str | None = None,
 ) -> JsonObject:
     curl_binary = curl_binary or _system_curl_binary()
