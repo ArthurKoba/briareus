@@ -4,6 +4,7 @@ import base64
 import urllib.parse
 
 from common.models import JsonObject, json_object
+from common.repository_checkout import checkout_repository
 
 from .api import GitLabApiClient
 from .errors import GitLabError
@@ -12,6 +13,49 @@ from .policy import require_mutable_branch
 
 
 class GitLabRepositoryClient(GitLabApiClient):
+    def checkout_repository(
+        self,
+        project: str | int,
+        destination: str,
+        *,
+        mode: str = "snapshot",
+        ref: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        raw_project = str(project).strip().strip("/")
+        if not raw_project:
+            raise GitLabError("project is required")
+        encoded_project = urllib.parse.quote(raw_project, safe="/-._~")
+        clone_url = f"{self.profile.base_url.rstrip('/')}/{encoded_project}.git"
+
+        token = self.profile.token()
+        auth_header = ""
+        if self.profile.auth_type == "private_token":
+            encoded = base64.b64encode(f"oauth2:{token}".encode()).decode("ascii")
+            auth_header = f"Authorization: Basic {encoded}"
+        elif self.profile.auth_type == "bearer":
+            auth_header = f"Authorization: Bearer {token}"
+        else:
+            encoded = base64.b64encode(
+                f"gitlab-ci-token:{token}".encode()
+            ).decode("ascii")
+            auth_header = f"Authorization: Basic {encoded}"
+
+        result = checkout_repository(
+            clone_url,
+            destination,
+            workspace_root=self.workspace_root,
+            mode=mode,
+            ref=ref,
+            overwrite=overwrite,
+            auth_scope=self.profile.base_url.rstrip("/") + "/",
+            auth_header=auth_header,
+            fallback_without_auth=True,
+        )
+        result["project"] = raw_project
+        result["profile_id"] = self.profile.profile_id
+        return result
+
     def get_file(self, project: str | int, path: str, ref: str = "main") -> JsonObject:
         selector = self.project_selector(project)
         file_path = urllib.parse.quote(path.strip("/"), safe="")
