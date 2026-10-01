@@ -48,6 +48,7 @@ services:
     volumes:
       - management:/management
       - files:/files
+      - terminal-workspace:/workspace
 
   auth:
     <<: *runtime

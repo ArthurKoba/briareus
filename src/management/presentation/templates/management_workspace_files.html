@@ -1,0 +1,81 @@
+{% extends "layout.html" %}
+{% block header %}
+<div class="d-flex justify-content-between align-items-center">
+  <h1>Workspace Files</h1>
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/files">Artifacts</a></li>
+    <li class="breadcrumb-item active">Workspace</li>
+  </ol>
+</div>
+{% endblock %}
+{% block content %}
+  {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+  <div class="card mb-3"><div class="card-body">
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <a class="btn" href="/admin/files">Immutable artifacts</a>
+      {% if current_path %}
+      <a class="btn" href="/admin/files/workspace?{{ {'path': parent_path} | urlencode }}">Up</a>
+      {% endif %}
+      <code>/workspace{% if current_path %}/{{ current_path }}{% endif %}</code>
+    </div>
+
+    <div class="row g-2">
+      <div class="col-12 col-lg-7">
+        <form method="post" action="/admin/files/workspace/upload" enctype="multipart/form-data" class="input-group">
+          {{ csrf_input(request) }}
+          <input type="hidden" name="path" value="{{ current_path }}">
+          <input class="form-control" type="file" name="file" required>
+          <label class="input-group-text"><input type="checkbox" name="overwrite" class="form-check-input me-1">overwrite</label>
+          <button class="btn btn-primary" type="submit">Upload here</button>
+        </form>
+      </div>
+      <div class="col-12 col-lg-5">
+        <form method="post" action="/admin/files/workspace/mkdir" class="input-group">
+          {{ csrf_input(request) }}
+          <input type="hidden" name="path" value="{{ current_path }}">
+          <input class="form-control" name="name" placeholder="Directory name" required>
+          <button class="btn btn-primary" type="submit">Create directory</button>
+        </form>
+      </div>
+    </div>
+  </div></div>
+
+  <div class="card"><div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead>
+      <tbody>
+      {% for item in listing.get("entries", []) %}
+        <tr>
+          <td>
+            {% if item.get("type") == "directory" %}
+              <a href="/admin/files/workspace?{{ {'path': item.get('path', '')} | urlencode }}">{{ item.get("name") }}</a>
+            {% else %}
+              {{ item.get("name") }}
+            {% endif %}
+          </td>
+          <td>{{ item.get("type", "—") }}</td>
+          <td>{{ item.get("size_bytes", 0) }}</td>
+          <td class="text-nowrap">
+            {% if item.get("type") == "file" %}
+              <a class="btn btn-sm" href="/admin/files/workspace/download/{{ item.get('path') }}">Download</a>
+            {% endif %}
+            <form method="post" action="/admin/files/workspace/delete" style="display:inline">
+              {{ csrf_input(request) }}
+              <input type="hidden" name="current_path" value="{{ current_path }}">
+              <input type="hidden" name="path" value="{{ item.get('path') }}">
+              {% if item.get("type") == "directory" %}
+              <input type="hidden" name="recursive" value="true">
+              {% endif %}
+              <button class="btn btn-danger btn-sm" type="submit" onclick="return confirm('Delete {{ item.get('path') }}?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="text-secondary">Directory is empty.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div></div>
+{% endblock %}
