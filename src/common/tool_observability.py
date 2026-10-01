@@ -13,6 +13,14 @@ from .audit_payloads import render_error, render_payload
 from .observability import ObservabilitySink
 
 
+def management_audit_enabled(module: str, proxy_origin: str) -> bool:
+    """Persist user-visible calls, but suppress Analysis->Ghidra proxy duplicates."""
+    return not (
+        module.strip().casefold() == "ghidra"
+        and proxy_origin.strip().casefold() == "analysis"
+    )
+
+
 class ToolObservabilityMiddleware(Middleware):
     """Measure one MCP call once, then fan the observation out to configured sinks."""
 
@@ -58,7 +66,7 @@ class ToolObservabilityMiddleware(Middleware):
         arguments_json = render_payload(context.message.arguments or {})
         headers = get_http_headers()
         proxy_origin = headers.get("x-koba-proxy-origin", "").strip().casefold()
-        audit = not (self.module == "ghidra" and proxy_origin == "analysis")
+        audit = management_audit_enabled(self.module, proxy_origin)
         span_attributes: dict[str, object] = {
             "mcp.scope": self.module,
             "mcp.tool": context.message.name,

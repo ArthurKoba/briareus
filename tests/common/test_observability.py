@@ -14,6 +14,7 @@ from common.observability import (
     _resource_attributes,
 )
 from common.settings import ObservabilitySettings
+from common.tool_observability import management_audit_enabled
 
 
 class _RecordingSink(ObservabilitySink):
@@ -181,3 +182,11 @@ def test_management_audit_can_be_suppressed_for_internal_proxy_calls() -> None:
 
     sink.record_invocation(event, audit=True)
     assert management.events == [event]
+
+
+def test_analysis_and_ghidra_audit_visibility_contract() -> None:
+    assert management_audit_enabled("analysis", "") is True
+    assert management_audit_enabled("analysis", "analysis") is True
+    assert management_audit_enabled("ghidra", "") is True
+    assert management_audit_enabled("ghidra", "external-agent") is True
+    assert management_audit_enabled("ghidra", "analysis") is False
