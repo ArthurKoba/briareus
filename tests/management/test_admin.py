@@ -16,6 +16,7 @@ from management.application.services import (
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    RuntimeSettingsService,
     SnapshotService,
 )
 from management.domain.telemetry import Invocation
@@ -32,6 +33,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
     SqlAlchemyOAuthSessionRepository,
+    SqlAlchemyRuntimeSettingsRepository,
     SqlAlchemySnapshotRepository,
 )
 from management.infrastructure.reverse import ReverseAdminClient
@@ -69,6 +71,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     )
     audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
     config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
+    runtime_settings = RuntimeSettingsService(SqlAlchemyRuntimeSettingsRepository(sessions))
     oauth_sessions = OAuthSessionService(SqlAlchemyOAuthSessionRepository(sessions))
     snapshots = SnapshotService(SqlAlchemySnapshotRepository(sessions))
     files = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
@@ -83,6 +86,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
         oauth_sessions,
         snapshots,
         config,
+        runtime_settings,
         files,
         reverse,
     )
