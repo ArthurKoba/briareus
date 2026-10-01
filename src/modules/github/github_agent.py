@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import ssl
@@ -198,8 +199,8 @@ class GitHubAppClient:
                 target,
                 body=body,
                 headers=headers,
-                reconnect_retries=3 if normalized_method in {"GET", "HEAD"} else 1,
-                retry_backoff_seconds=0.1 if normalized_method in {"GET", "HEAD"} else 0.0,
+                reconnect_retries=6 if normalized_method in {"GET", "HEAD"} else 1,
+                retry_backoff_seconds=0.25 if normalized_method in {"GET", "HEAD"} else 0.0,
             )
         except HttpTransportError as exc:
             raise GitHubAgentError(f"GitHub API transport error: {exc}") from exc
@@ -338,6 +339,13 @@ class GitHubAppClient:
             allowed_errors=allowed_errors,
         )
 
+    @staticmethod
+    def _git_authorization_header(token: str) -> str:
+        if not token:
+            return ""
+        encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
+        return f"Authorization: Basic {encoded}"
+
     def checkout_repository(
         self,
         repository: str,
@@ -367,7 +375,7 @@ class GitHubAppClient:
             ref=ref,
             overwrite=overwrite,
             auth_scope="https://github.com/",
-            auth_header=f"Authorization: Bearer {token}" if token else "",
+            auth_header=self._git_authorization_header(token),
             fallback_without_auth=False,
         )
         result["repository"] = repository
