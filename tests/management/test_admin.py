@@ -15,6 +15,7 @@ from management.application.services import (
     AccountService,
     InvocationAuditService,
     ManagementConfigService,
+    OAuthSessionService,
 )
 from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -29,6 +30,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyAccountRepository,
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
+    SqlAlchemyOAuthSessionRepository,
 )
 from management.presentation.admin import SettingsView, _display_invocation_tool, build_admin
 
@@ -58,9 +60,12 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     )
     audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
     config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
+    oauth_sessions = OAuthSessionService(SqlAlchemyOAuthSessionRepository(sessions))
     files = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
 
-    admin = build_admin(engine, settings, cipher, accounts, audit, config, files)
+    admin = build_admin(
+        engine, settings, cipher, accounts, audit, oauth_sessions, config, files
+    )
 
     assert admin.base_url == "/admin"
     assert admin.index_view.path == "/"
@@ -68,6 +73,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     assert "GitHub Accounts" in labels
     assert "GitLab Accounts" in labels
     assert "MCP Calls" in labels
+    assert "OAuth Sessions" in labels
     assert "Reverse" in labels
     assert "Terminal" in labels
     assert "Settings" in labels

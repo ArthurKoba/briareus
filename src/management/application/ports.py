@@ -5,6 +5,7 @@ from typing import Protocol
 
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
+from management.domain.oauth_sessions import OAuthSession
 from management.domain.telemetry import Invocation
 
 
@@ -47,6 +48,12 @@ class InvocationRepository(Protocol):
     def clear(self) -> int: ...
 
     def cleanup(self) -> int: ...
+
+
+class OAuthSessionRepository(Protocol):
+    def apply_event(self, event: object) -> OAuthSession: ...
+
+    def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]: ...
 
 
 class ManagementConfigRepository(Protocol):

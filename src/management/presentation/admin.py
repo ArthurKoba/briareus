@@ -49,6 +49,7 @@ from management.application.services import (
     AccountService,
     InvocationAuditService,
     ManagementConfigService,
+    OAuthSessionService,
 )
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
@@ -57,6 +58,7 @@ from management.infrastructure.database import (
     GitHubAccountRecord,
     GitLabAccountRecord,
     InvocationRecord,
+    OAuthSessionRecord,
 )
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.reverse import ReverseAdminClient
@@ -342,6 +344,74 @@ class InvocationView(ModelView):
     async def clear_all(self, request: Request, _selection: object) -> None:
         removed = await asyncio.to_thread(self.audit.clear)
         flash(request, f"Deleted {removed} invocation log records", "success")
+
+
+class OAuthSessionView(ModelView):
+    row_actions_display_type = RowActionsDisplayType.KEBAB
+    page_size = 50
+    fields = cast(
+        Sequence[BaseField],
+        (
+            "status",
+            "login",
+            "resource",
+            "client_name",
+            DateTimeField("updated_at", label="Last event"),
+            DateTimeField("last_used_at", label="Last used"),
+            DateTimeField("last_refresh_at", label="Last refresh"),
+            DateTimeField("access_expires_at", label="Access expires"),
+            DateTimeField("refresh_expires_at", label="Refresh expires"),
+            "last_event",
+            "error_type",
+            TextAreaField("error_message", label="Last error"),
+            "client_id",
+            "subject",
+            TextAreaField("scopes_json", label="Scopes"),
+            "access_jti",
+            "refresh_jti",
+            "previous_refresh_jti",
+            DateTimeField("revoked_at", label="Revoked"),
+            DateTimeField("created_at", label="Created"),
+            "id",
+        ),
+    )
+    fields_default_sort = (("updated_at", True),)
+    searchable_fields = (
+        "status",
+        "login",
+        "resource",
+        "client_name",
+        "client_id",
+        "last_event",
+        "error_type",
+    )
+    exclude_fields_from_list = (
+        "error_message",
+        "subject",
+        "scopes_json",
+        "access_jti",
+        "refresh_jti",
+        "previous_refresh_jti",
+        "revoked_at",
+        "created_at",
+        "id",
+    )
+
+    def __init__(self, model: type[OAuthSessionRecord], service: OAuthSessionService) -> None:
+        super().__init__(
+            model,
+            icon="fa fa-key",
+            menu_label="OAuth Sessions",
+            display_name="OAuth Session",
+        )
+        self.service = service
+        self.page_size_options = [25, 50, 100]
+
+    def can_create(self, _request: Request) -> bool:
+        return False
+
+    def can_edit(self, _request: Request) -> bool:
+        return False
 
 
 class ReverseView(CustomView):
@@ -942,6 +1012,9 @@ def _dashboard(
     async def count_gitlab(_request: Request) -> int:
         return await count(GitLabAccountRecord, GitLabAccountRecord.enabled.is_(True))
 
+    async def count_oauth_sessions(_request: Request) -> int:
+        return await count(OAuthSessionRecord, OAuthSessionRecord.status == "active")
+
     async def count_calls(_request: Request) -> int:
         return await count(InvocationRecord)
 
@@ -1036,6 +1109,10 @@ def _dashboard(
                     breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
                 ),
                 Col(
+                    StatWidget(title="Active OAuth sessions", value_callback=count_oauth_sessions),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
+                Col(
                     StatWidget(title="MCP calls", value_callback=count_calls),
                     breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
                 ),
@@ -1094,6 +1171,7 @@ def build_admin(
     cipher: FernetCredentialCipher,
     accounts: AccountService,
     audit: InvocationAuditService,
+    oauth_sessions: OAuthSessionService,
     config: ManagementConfigService,
     files: FileAdminStore,
 ) -> Admin:
@@ -1130,6 +1208,7 @@ def build_admin(
     )
     admin.add_view(ReverseView(reverse))
     admin.add_view(TerminalView(terminal))
+    admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))
     admin.add_view(InvocationView(InvocationRecord, audit))
     admin.add_view(SettingsView(config, audit, reverse))
     return admin

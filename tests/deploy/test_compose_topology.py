@@ -140,6 +140,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
             "MANAGEMENT_SESSION_SECRET",
         },
         "auth": observability | {
+            "MANAGEMENT_SERVICE_TOKEN",
             "MCP_PUBLIC_BASE_URL",
             "GITHUB_OAUTH_CLIENT_ID",
             "GITHUB_OAUTH_CLIENT_SECRET",

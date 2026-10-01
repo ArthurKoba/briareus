@@ -161,3 +161,11 @@ snapshots return bounded page text plus short-lived interactive element refs so 
 click and fill without serializing full page HTML into model context. Browser page content
 and filled values are omitted from Management audit payloads; tool/status metadata remains
 observable.
+
+## OAuth sessions
+
+The authorization runtime reports safe OAuth session metadata to Management without
+copying access or refresh tokens. Management shows client/resource identity, last use,
+refresh activity, token expiry, revocation and the latest authentication error. Refresh
+rotation keeps a short bounded replay grace window so concurrent client refresh requests
+reuse the same rotated result instead of spuriously forcing a full reauthorization.

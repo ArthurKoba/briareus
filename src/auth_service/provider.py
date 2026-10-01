@@ -4,13 +4,16 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import time
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from fastmcp.server.auth import AccessToken as FastMCPAccessToken
 from fastmcp.server.auth.jwt_issuer import JWTIssuer
+from fastmcp.server.auth.oauth_proxy.models import RefreshTokenMetadata
 from fastmcp.server.auth.providers.github import GitHubProvider
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from mcp.server.auth.provider import AccessToken as SDKAccessToken
@@ -24,8 +27,10 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 
+from common.management_client import ManagementClient
 from common.mcp_surfaces import allowed_resource_urls, resource_url
 from common.models import StrictModel
+from common.oauth_session_contracts import OAuthSessionEvent
 from common.settings import AuthServiceSettings
 
 _RESOURCE_BINDING_TTL_SECONDS = 10 * 60
@@ -33,6 +38,9 @@ _TRANSACTION_TTL_SECONDS = 15 * 60
 _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS = 24 * 60 * 60
 _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
 _REFRESH_REPLAY_SECONDS = 5.0
+_SESSION_TOUCH_INTERVAL_SECONDS = 60.0
+
+logger = logging.getLogger(__name__)
 
 
 class ResourceBinding(StrictModel):
@@ -42,8 +50,14 @@ class ResourceBinding(StrictModel):
 class MultiResourceGitHubProvider(GitHubProvider):
     """One OAuth issuer serving multiple exact MCP resource audiences."""
 
-    def __init__(self, settings: AuthServiceSettings) -> None:
+    def __init__(
+        self,
+        settings: AuthServiceSettings,
+        management: ManagementClient | None = None,
+    ) -> None:
         self.settings = settings
+        self._management = management
+        self._session_touch_times: dict[str, float] = {}
         self._resource_context: ContextVar[str | None] = ContextVar(
             "oauth_resource",
             default=None,
@@ -88,6 +102,93 @@ class MultiResourceGitHubProvider(GitHubProvider):
             for resource in self._allowed_resources
         }
 
+    @staticmethod
+    def _jwt_payload_unverified(token: str) -> dict[str, Any]:
+        try:
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            decoded = json.loads(base64.urlsafe_b64decode(payload).decode())
+        except (IndexError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+
+    @staticmethod
+    def _claim_datetime(payload: dict[str, Any], name: str) -> datetime | None:
+        raw = payload.get(name)
+        if not isinstance(raw, (int, float)):
+            return None
+        return datetime.fromtimestamp(float(raw), tz=UTC)
+
+    @staticmethod
+    def _client_name(client: OAuthClientInformationFull) -> str:
+        value = getattr(client, "client_name", None)
+        return str(value) if value else ""
+
+    async def _session_id_from_jti(self, jti: str) -> str:
+        if not jti:
+            return ""
+        mapping = await self._jti_mapping_store.get(key=jti)
+        return mapping.upstream_token_id if mapping is not None else ""
+
+    async def _session_id_from_token(self, token: str | None) -> str:
+        if not token:
+            return ""
+        payload = self._jwt_payload_unverified(token)
+        jti = payload.get("jti")
+        return await self._session_id_from_jti(jti if isinstance(jti, str) else "")
+
+    async def _record_session(self, event: OAuthSessionEvent) -> None:
+        if self._management is None:
+            return
+        try:
+            await asyncio.to_thread(self._management.record_oauth_session, event)
+        except Exception as exc:
+            logger.warning(
+                "Management OAuth session event failed event=%s session=%s: %s",
+                event.event,
+                event.session_id[:16],
+                exc,
+            )
+
+    async def _record_token_result(
+        self,
+        *,
+        client: OAuthClientInformationFull,
+        resource: str,
+        result: OAuthToken,
+        event_name: str,
+        session_id: str = "",
+    ) -> str:
+        access_payload = self._jwt_payload_unverified(result.access_token)
+        refresh_payload = self._jwt_payload_unverified(result.refresh_token or "")
+        access_jti = access_payload.get("jti")
+        refresh_jti = refresh_payload.get("jti")
+        if not session_id:
+            token_for_lookup = result.refresh_token or result.access_token
+            session_id = await self._session_id_from_token(token_for_lookup)
+        upstream = access_payload.get("upstream_claims")
+        upstream_claims = upstream if isinstance(upstream, dict) else {}
+        login = upstream_claims.get("login")
+        subject = access_payload.get("sub") or upstream_claims.get("sub")
+        await self._record_session(
+            OAuthSessionEvent(
+                session_id=session_id,
+                client_id=client.client_id or "",
+                client_name=self._client_name(client),
+                resource=resource,
+                login=str(login) if login else "",
+                subject=str(subject) if subject else "",
+                scopes=(result.scope or "").split(),
+                status="active",
+                event=event_name,
+                access_jti=access_jti if isinstance(access_jti, str) else "",
+                refresh_jti=refresh_jti if isinstance(refresh_jti, str) else "",
+                access_expires_at=self._claim_datetime(access_payload, "exp"),
+                refresh_expires_at=self._claim_datetime(refresh_payload, "exp"),
+            )
+        )
+        return session_id
+
     @property
     def allowed_resources(self) -> frozenset[str]:
         return self._allowed_resources
@@ -119,15 +220,10 @@ class MultiResourceGitHubProvider(GitHubProvider):
                 return values[0]
         raise RuntimeError("OAuth transaction id missing from authorization redirect")
 
-    @staticmethod
-    def _jwt_audience_unverified(token: str) -> str | None:
-        try:
-            payload = token.split(".")[1]
-            payload += "=" * (-len(payload) % 4)
-            claims = json.loads(base64.urlsafe_b64decode(payload).decode())
-        except (IndexError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
-            return None
-        audience = claims.get("aud") if isinstance(claims, dict) else None
+    @classmethod
+    def _jwt_audience_unverified(cls, token: str) -> str | None:
+        claims = cls._jwt_payload_unverified(token)
+        audience = claims.get("aud")
         if isinstance(audience, str):
             return audience
         if (
@@ -232,7 +328,14 @@ class MultiResourceGitHubProvider(GitHubProvider):
         resource = self.canonical_resource(authorization_code.resource)
         token = self._resource_context.set(resource)
         try:
-            return await super().exchange_authorization_code(client, authorization_code)
+            result = await super().exchange_authorization_code(client, authorization_code)
+            await self._record_token_result(
+                client=client,
+                resource=resource,
+                result=result,
+                event_name="authorized",
+            )
+            return result
         finally:
             self._resource_context.reset(token)
             await self._resource_bindings.delete(key=authorization_code.code)
@@ -242,13 +345,36 @@ class MultiResourceGitHubProvider(GitHubProvider):
         client: OAuthClientInformationFull,
         refresh_token: str,
     ) -> RefreshToken | None:
-        loaded = await super().load_refresh_token(client, refresh_token)
-        if loaded is None:
-            return None
+        payload = self._jwt_payload_unverified(refresh_token)
+        refresh_jti = payload.get("jti")
+        session_id = await self._session_id_from_jti(
+            refresh_jti if isinstance(refresh_jti, str) else ""
+        )
         audience = self._jwt_audience_unverified(refresh_token)
         try:
             resource = self.canonical_resource(audience)
         except ValueError:
+            return None
+
+        loaded = await super().load_refresh_token(client, refresh_token)
+        if loaded is None:
+            await self._record_session(
+                OAuthSessionEvent(
+                    session_id=session_id,
+                    client_id=client.client_id or str(payload.get("client_id") or ""),
+                    client_name=self._client_name(client),
+                    resource=resource,
+                    status="invalid",
+                    event="refresh_missing",
+                    refresh_jti=(
+                        refresh_jti if isinstance(refresh_jti, str) else ""
+                    ),
+                    error_type="invalid_grant",
+                    error_message=(
+                        "Refresh token metadata is missing, rotated, expired, or revoked"
+                    ),
+                )
+            )
             return None
         return loaded.model_copy(update={"resource": resource})
 
@@ -275,19 +401,48 @@ class MultiResourceGitHubProvider(GitHubProvider):
             if lock is not None and not lock.locked():
                 self._refresh_exchange_locks.pop(key, None)
 
+        refresh_payload = self._jwt_payload_unverified(refresh_token.token)
+        refresh_jti = refresh_payload.get("jti")
+        old_refresh_jti = refresh_jti if isinstance(refresh_jti, str) else ""
+        session_id = await self._session_id_from_jti(old_refresh_jti)
+
         lock = self._refresh_exchange_locks.setdefault(replay_key, asyncio.Lock())
         async with lock:
             cached = self._refresh_exchange_replays.get(replay_key)
             if cached is not None and cached[0] > time.monotonic():
+                await self._record_token_result(
+                    client=client,
+                    resource=resource,
+                    result=cached[1],
+                    event_name="refresh_replay",
+                    session_id=session_id,
+                )
                 return cached[1]
 
             token = self._resource_context.set(resource)
             try:
-                result = await super().exchange_refresh_token(
-                    client,
-                    refresh_token,
-                    scopes,
-                )
+                try:
+                    result = await super().exchange_refresh_token(
+                        client,
+                        refresh_token,
+                        scopes,
+                    )
+                except Exception as exc:
+                    await self._record_session(
+                        OAuthSessionEvent(
+                            session_id=session_id,
+                            client_id=client.client_id or "",
+                            client_name=self._client_name(client),
+                            resource=resource,
+                            scopes=list(scopes),
+                            status="refresh_error",
+                            event="refresh_error",
+                            refresh_jti=old_refresh_jti,
+                            error_type=type(exc).__name__,
+                            error_message=str(exc)[:2048],
+                        )
+                    )
+                    raise
             finally:
                 self._resource_context.reset(token)
 
@@ -295,12 +450,44 @@ class MultiResourceGitHubProvider(GitHubProvider):
                 time.monotonic() + _REFRESH_REPLAY_SECONDS,
                 result,
             )
+
+            now_epoch = int(time.time())
+            if refresh_token.expires_at is None:
+                grace_seconds = _REFRESH_REPLAY_SECONDS
+                grace_expires_at = now_epoch + int(_REFRESH_REPLAY_SECONDS)
+            else:
+                remaining = max(0, int(refresh_token.expires_at) - now_epoch)
+                grace_seconds = min(_REFRESH_REPLAY_SECONDS, float(remaining))
+                grace_expires_at = int(refresh_token.expires_at)
+            if grace_seconds > 0:
+                await self._refresh_token_store.put(
+                    key=hashlib.sha256(refresh_token.token.encode()).hexdigest(),
+                    value=RefreshTokenMetadata(
+                        client_id=client.client_id or "",
+                        scopes=list(refresh_token.scopes),
+                        expires_at=grace_expires_at,
+                        created_at=time.time(),
+                    ),
+                    ttl=grace_seconds,
+                )
+
+            await self._record_token_result(
+                client=client,
+                resource=resource,
+                result=result,
+                event_name="refresh_success",
+                session_id=session_id,
+            )
             return result
 
     async def revoke_token(
         self,
         token: SDKAccessToken | RefreshToken,
     ) -> None:
+        payload = self._jwt_payload_unverified(token.token)
+        jti = payload.get("jti")
+        token_jti = jti if isinstance(jti, str) else ""
+        session_id = await self._session_id_from_jti(token_jti)
         audience = self._jwt_audience_unverified(token.token)
         try:
             resource = self.canonical_resource(audience)
@@ -313,7 +500,24 @@ class MultiResourceGitHubProvider(GitHubProvider):
         finally:
             self._resource_context.reset(context)
 
+        await self._record_session(
+            OAuthSessionEvent(
+                session_id=session_id,
+                client_id=token.client_id,
+                resource=resource,
+                scopes=list(token.scopes),
+                status="revoked",
+                event="revoked",
+                access_jti=token_jti if isinstance(token, SDKAccessToken) else "",
+                refresh_jti=token_jti if isinstance(token, RefreshToken) else "",
+            )
+        )
+
     async def load_access_token(self, token: str) -> FastMCPAccessToken | None:
+        payload = self._jwt_payload_unverified(token)
+        access_jti = payload.get("jti")
+        token_jti = access_jti if isinstance(access_jti, str) else ""
+        session_id = await self._session_id_from_jti(token_jti)
         audience = self._jwt_audience_unverified(token)
         try:
             resource = self.canonical_resource(audience)
@@ -326,8 +530,45 @@ class MultiResourceGitHubProvider(GitHubProvider):
         finally:
             self._resource_context.reset(context)
 
+        upstream = payload.get("upstream_claims")
+        upstream_claims = upstream if isinstance(upstream, dict) else {}
+        login = upstream_claims.get("login")
+        client_id = str(payload.get("client_id") or "")
         if access is None:
+            await self._record_session(
+                OAuthSessionEvent(
+                    session_id=session_id,
+                    client_id=client_id,
+                    resource=resource,
+                    login=str(login) if login else "",
+                    status="invalid",
+                    event="access_invalid",
+                    access_jti=token_jti,
+                    error_type="invalid_token",
+                    error_message="Access token validation or upstream session failed",
+                )
+            )
             return None
+
+        now = time.monotonic()
+        last_touch = self._session_touch_times.get(session_id, 0.0)
+        if session_id and now - last_touch >= _SESSION_TOUCH_INTERVAL_SECONDS:
+            self._session_touch_times[session_id] = now
+            await self._record_session(
+                OAuthSessionEvent(
+                    session_id=session_id,
+                    client_id=access.client_id,
+                    resource=resource,
+                    login=str(login) if login else "",
+                    subject=access.subject or "",
+                    scopes=list(access.scopes),
+                    status="active",
+                    event="access_used",
+                    access_jti=token_jti,
+                    access_expires_at=self._claim_datetime(payload, "exp"),
+                )
+            )
+
         return FastMCPAccessToken(
             token=token,
             client_id=access.client_id,

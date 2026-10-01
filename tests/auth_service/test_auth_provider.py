@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -128,7 +130,12 @@ async def test_concurrent_refresh_requests_are_coalesced(monkeypatch) -> None:
     monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fake_exchange)
 
     client = SimpleNamespace(client_id="chatgpt-client")
-    refresh = SimpleNamespace(token="old-refresh", resource=analysis)
+    refresh = SimpleNamespace(
+        token="old-refresh",
+        resource=analysis,
+        expires_at=int(time.time()) + 60,
+        scopes=["read:user"],
+    )
 
     first, second = await asyncio.gather(
         provider.exchange_refresh_token(client, refresh, ["read:user"]),  # type: ignore[arg-type]
@@ -139,3 +146,10 @@ async def test_concurrent_refresh_requests_are_coalesced(monkeypatch) -> None:
     assert first.access_token == "new-access"
     assert second.access_token == "new-access"
     assert first.refresh_token == second.refresh_token == "new-refresh"
+    grace = await provider._refresh_token_store.get(
+        key=hashlib.sha256(b"old-refresh").hexdigest()
+    )
+    assert grace is not None
+    assert grace.client_id == "chatgpt-client"
+    loaded_again = await provider.load_refresh_token(client, "old-refresh")  # type: ignore[arg-type]
+    assert loaded_again is not None
