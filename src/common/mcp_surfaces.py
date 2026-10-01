@@ -10,6 +10,8 @@ MCP_SURFACE_PATHS: dict[str, str] = {
     "web": "/web/mcp",
     "analysis": "/analysis/mcp",
     "terminal": "/terminal/mcp",
+    "signoz": "/signoz/mcp",
+    "coolify": "/coolify/mcp",
 }
 
 
@@ -37,7 +39,4 @@ def surface_base_url(public_base_url: str, surface: str) -> str:
 
 
 def allowed_resource_urls(public_base_url: str) -> frozenset[str]:
-    return frozenset(
-        resource_url(public_base_url, surface)
-        for surface in MCP_SURFACE_PATHS
-    )
+    return frozenset(resource_url(public_base_url, surface) for surface in MCP_SURFACE_PATHS)

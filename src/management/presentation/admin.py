@@ -58,10 +58,12 @@ from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
+    CoolifyAccountRecord,
     GitHubAccountRecord,
     GitLabAccountRecord,
     InvocationRecord,
     OAuthSessionRecord,
+    SigNozAccountRecord,
 )
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.reverse import ReverseAdminClient
@@ -74,6 +76,10 @@ from management.infrastructure.snapshot_worker import (
 )
 from management.infrastructure.terminal import TerminalAdminClient
 from management.presentation.admin_ui import ManagementUiPlugin
+
+type AccountRecord = (
+    GitHubAccountRecord | GitLabAccountRecord | SigNozAccountRecord | CoolifyAccountRecord
+)
 
 
 class ManagementAuthProvider(AuthProvider):
@@ -117,7 +123,7 @@ class _BaseAccountView(ModelView):
 
     def __init__(
         self,
-        model: type[GitHubAccountRecord] | type[GitLabAccountRecord],
+        model: type[AccountRecord],
         cipher: FernetCredentialCipher,
         accounts: AccountService,
         *,
@@ -134,36 +140,64 @@ class _BaseAccountView(ModelView):
         self.accounts = accounts
         self.page_size_options = [25, 50, 100]
 
-    def _validated(self, obj: GitHubAccountRecord | GitLabAccountRecord) -> Account:
+    def _validated(self, obj: AccountRecord) -> Account:
         if self.provider is Provider.GITHUB:
-            github_record = cast(GitHubAccountRecord, obj)
+            github = cast(GitHubAccountRecord, obj)
             return Account(
-                id=github_record.id,
-                alias=github_record.alias,
+                id=github.id,
+                alias=github.alias,
                 provider=Provider.GITHUB,
-                auth_type=AuthType(github_record.auth_type),
-                external_id=github_record.app_id,
-                enabled=github_record.enabled,
-                created_at=github_record.created_at,
-                updated_at=github_record.updated_at,
+                auth_type=AuthType(github.auth_type),
+                external_id=github.app_id,
+                enabled=github.enabled,
+                created_at=github.created_at,
+                updated_at=github.updated_at,
             )
-        gitlab_record = cast(GitLabAccountRecord, obj)
+        if self.provider is Provider.GITLAB:
+            gitlab = cast(GitLabAccountRecord, obj)
+            return Account(
+                id=gitlab.id,
+                alias=gitlab.alias,
+                provider=Provider.GITLAB,
+                auth_type=AuthType(gitlab.auth_type),
+                base_url=gitlab.base_url,
+                verify_tls=gitlab.verify_tls,
+                ca_cert_pem=gitlab.ca_cert_pem,
+                enabled=gitlab.enabled,
+                created_at=gitlab.created_at,
+                updated_at=gitlab.updated_at,
+            )
+        if self.provider is Provider.SIGNOZ:
+            signoz = cast(SigNozAccountRecord, obj)
+            return Account(
+                id=signoz.id,
+                alias=signoz.alias,
+                provider=Provider.SIGNOZ,
+                auth_type=AuthType(signoz.auth_type),
+                base_url=signoz.base_url,
+                verify_tls=signoz.verify_tls,
+                ca_cert_pem=signoz.ca_cert_pem,
+                enabled=signoz.enabled,
+                created_at=signoz.created_at,
+                updated_at=signoz.updated_at,
+            )
+        coolify = cast(CoolifyAccountRecord, obj)
         return Account(
-            id=gitlab_record.id,
-            alias=gitlab_record.alias,
-            provider=Provider.GITLAB,
-            auth_type=AuthType(gitlab_record.auth_type),
-            base_url=gitlab_record.base_url,
-            verify_tls=gitlab_record.verify_tls,
-            ca_cert_pem=gitlab_record.ca_cert_pem,
-            enabled=gitlab_record.enabled,
-            created_at=gitlab_record.created_at,
-            updated_at=gitlab_record.updated_at,
+            id=coolify.id,
+            alias=coolify.alias,
+            provider=Provider.COOLIFY,
+            auth_type=AuthType(coolify.auth_type),
+            base_url=coolify.base_url,
+            verify_tls=coolify.verify_tls,
+            ca_cert_pem=coolify.ca_cert_pem,
+            enabled=coolify.enabled,
+            created_at=coolify.created_at,
+            updated_at=coolify.updated_at,
         )
 
     def _apply_normalized(
         self,
-        obj: GitHubAccountRecord | GitLabAccountRecord,
+        obj: AccountRecord,
         account: Account,
     ) -> None:
         obj.alias = account.alias
@@ -172,16 +206,28 @@ class _BaseAccountView(ModelView):
         if self.provider is Provider.GITHUB:
             cast(GitHubAccountRecord, obj).app_id = account.external_id
             return
-        record = cast(GitLabAccountRecord, obj)
-        record.base_url = account.base_url
-        record.verify_tls = account.verify_tls
-        record.ca_cert_pem = account.ca_cert_pem
+        if self.provider is Provider.GITLAB:
+            gitlab = cast(GitLabAccountRecord, obj)
+            gitlab.base_url = account.base_url
+            gitlab.verify_tls = account.verify_tls
+            gitlab.ca_cert_pem = account.ca_cert_pem
+            return
+        if self.provider is Provider.SIGNOZ:
+            signoz = cast(SigNozAccountRecord, obj)
+            signoz.base_url = account.base_url
+            signoz.verify_tls = account.verify_tls
+            signoz.ca_cert_pem = account.ca_cert_pem
+            return
+        coolify = cast(CoolifyAccountRecord, obj)
+        coolify.base_url = account.base_url
+        coolify.verify_tls = account.verify_tls
+        coolify.ca_cert_pem = account.ca_cert_pem
 
     async def before_create(
         self,
         request: Request,
         data: dict[str, object],
-        obj: GitHubAccountRecord | GitLabAccountRecord,
+        obj: AccountRecord,
     ) -> None:
         del request, data
         secret = obj._credential_input.strip()
@@ -201,7 +247,7 @@ class _BaseAccountView(ModelView):
         self,
         request: Request,
         data: dict[str, object],
-        obj: GitHubAccountRecord | GitLabAccountRecord,
+        obj: AccountRecord,
     ) -> None:
         del request, data
         obj.updated_at = datetime.now(UTC)
@@ -292,6 +338,89 @@ class GitLabAccountView(_BaseAccountView):
         ),
     )
     searchable_fields = ("alias", "base_url")
+
+
+class _ExternalServiceAccountView(_BaseAccountView):
+    def _validated(self, obj: AccountRecord) -> Account:
+        if self.provider is Provider.SIGNOZ:
+            signoz = cast(SigNozAccountRecord, obj)
+            return Account(
+                id=signoz.id,
+                alias=signoz.alias,
+                provider=Provider.SIGNOZ,
+                auth_type=AuthType.SIGNOZ_API_KEY,
+                base_url=signoz.base_url,
+                verify_tls=signoz.verify_tls,
+                ca_cert_pem=signoz.ca_cert_pem,
+                enabled=signoz.enabled,
+                created_at=signoz.created_at,
+                updated_at=signoz.updated_at,
+            )
+        if self.provider is Provider.COOLIFY:
+            coolify = cast(CoolifyAccountRecord, obj)
+            return Account(
+                id=coolify.id,
+                alias=coolify.alias,
+                provider=Provider.COOLIFY,
+                auth_type=AuthType.COOLIFY_API_TOKEN,
+                base_url=coolify.base_url,
+                verify_tls=coolify.verify_tls,
+                ca_cert_pem=coolify.ca_cert_pem,
+                enabled=coolify.enabled,
+                created_at=coolify.created_at,
+                updated_at=coolify.updated_at,
+            )
+        raise ValueError("external service account provider is invalid")
+
+    fields = cast(
+        Sequence[BaseField],
+        (
+            "id",
+            "alias",
+            "base_url",
+            "verify_tls",
+            TextAreaField("ca_cert_pem", label="Custom CA certificate PEM"),
+            BooleanField("enabled", default=True),
+            PasswordField(
+                "credential_input",
+                label="API credential",
+                required=False,
+                exclude_from_list=True,
+                exclude_from_detail=True,
+                getter=lambda _request, _obj: "",
+                help_text="Leave blank on edit to keep the stored credential.",
+            ),
+            "created_at",
+            "updated_at",
+        ),
+    )
+    searchable_fields = ("alias", "base_url")
+
+
+class SigNozAccountView(_ExternalServiceAccountView):
+    provider = Provider.SIGNOZ
+
+    def __init__(self, cipher: FernetCredentialCipher, accounts: AccountService) -> None:
+        super().__init__(
+            SigNozAccountRecord,
+            cipher,
+            accounts,
+            icon="fa fa-chart-line",
+            menu_label="SigNoz Accounts",
+        )
+
+
+class CoolifyAccountView(_ExternalServiceAccountView):
+    provider = Provider.COOLIFY
+
+    def __init__(self, cipher: FernetCredentialCipher, accounts: AccountService) -> None:
+        super().__init__(
+            CoolifyAccountRecord,
+            cipher,
+            accounts,
+            icon="fa fa-server",
+            menu_label="Coolify Accounts",
+        )
 
 
 def _display_invocation_tool(_request: Request, obj: InvocationRecord) -> str:
@@ -511,21 +640,13 @@ class ReverseView(CustomView):
             if isinstance(item, dict)
         )
         running = sum(
-            1
-            for item in worker_items
-            if isinstance(item, dict) and bool(item.get("running"))
+            1 for item in worker_items if isinstance(item, dict) and bool(item.get("running"))
         )
         enabled_workers = sum(
-            1
-            for item in worker_items
-            if isinstance(item, dict) and bool(item.get("enabled", True))
+            1 for item in worker_items if isinstance(item, dict) and bool(item.get("enabled", True))
         )
         all_groups = sorted(
-            {
-                str(item.get("group") or "Root")
-                for item in project_items
-                if isinstance(item, dict)
-            },
+            {str(item.get("group") or "Root") for item in project_items if isinstance(item, dict)},
             key=str.casefold,
         )
 
@@ -592,9 +713,7 @@ class ReverseView(CustomView):
                         },
                         refresh_after_seconds=coverage_refresh_seconds(full=full_mode),
                     )
-                    coverage = (
-                        cached_coverage.payload if cached_coverage.payload else None
-                    )
+                    coverage = cached_coverage.payload if cached_coverage.payload else None
                     coverage_meta = snapshot_meta(cached_coverage)
             except Exception as exc:
                 error = str(exc)
@@ -655,7 +774,6 @@ class ReverseView(CustomView):
         else:
             flash(request, "Project session released", "success")
         return RedirectResponse("/admin/reverse", status_code=303)
-
 
     @route("/create", methods=["POST"])
     async def create_project(self, request: Request) -> Response:
@@ -744,11 +862,13 @@ class TerminalView(CustomView):
         workspace_items = workspaces if isinstance(workspaces, list) else []
         job_items = jobs if isinstance(jobs, list) else []
         running = sum(
-            1 for item in job_items
+            1
+            for item in job_items
             if isinstance(item, dict) and item.get("state") in {"running", "cancelling"}
         )
         failed = sum(
-            1 for item in job_items
+            1
+            for item in job_items
             if isinstance(item, dict) and item.get("state") in {"failed", "interrupted"}
         )
         return _view_templates(self).TemplateResponse(
@@ -861,9 +981,7 @@ class SettingsView(CustomView):
             logging_capture_payloads="logging_capture_payloads" in form,
             logging_retention_days=int(str(form.get("logging_retention_days", "30"))),
             logging_max_records=int(str(form.get("logging_max_records", "10000"))),
-            maintenance_interval_minutes=int(
-                str(form.get("maintenance_interval_minutes", "60"))
-            ),
+            maintenance_interval_minutes=int(str(form.get("maintenance_interval_minutes", "60"))),
         )
 
     @route("", methods=["GET", "POST"])
@@ -872,13 +990,9 @@ class SettingsView(CustomView):
             form = await request.form()
             try:
                 config = self._form_config(form)
-                reverse_idle_timeout = float(
-                    str(form.get("reverse_idle_timeout_seconds", "900"))
-                )
+                reverse_idle_timeout = float(str(form.get("reverse_idle_timeout_seconds", "900")))
                 if not 0 <= reverse_idle_timeout <= 86_400:
-                    raise ValueError(
-                        "Reverse idle timeout must be between 0 and 86400 seconds"
-                    )
+                    raise ValueError("Reverse idle timeout must be between 0 and 86400 seconds")
                 await self.reverse.set_idle_timeout(reverse_idle_timeout)
                 await asyncio.to_thread(self.config.update, config)
             except (TypeError, ValueError, RuntimeError) as exc:
@@ -967,9 +1081,7 @@ class FilesView(CustomView):
         form = await request.form()
         upload = form.get("file")
         current = str(form.get("path", "")).strip().strip("/")
-        overwrite = str(form.get("overwrite", "")).lower() in {
-            "1", "true", "on", "yes"
-        }
+        overwrite = str(form.get("overwrite", "")).lower() in {"1", "true", "on", "yes"}
         if not isinstance(upload, UploadFile):
             flash(request, "Choose a file to upload", "error")
         else:
@@ -1034,9 +1146,7 @@ class FilesView(CustomView):
         form = await request.form()
         current = str(form.get("current_path", "")).strip().strip("/")
         path = str(form.get("path", "")).strip()
-        recursive = str(form.get("recursive", "")).lower() in {
-            "1", "true", "on", "yes"
-        }
+        recursive = str(form.get("recursive", "")).lower() in {"1", "true", "on", "yes"}
         try:
             await asyncio.to_thread(
                 self.files.delete,
@@ -1073,17 +1183,25 @@ def _dashboard(
         return await asyncio.to_thread(_scalar, engine, statement)
 
     async def count_accounts(_request: Request) -> int:
-        github, gitlab = await asyncio.gather(
+        github, gitlab, signoz, coolify = await asyncio.gather(
             count(GitHubAccountRecord, GitHubAccountRecord.enabled.is_(True)),
             count(GitLabAccountRecord, GitLabAccountRecord.enabled.is_(True)),
+            count(SigNozAccountRecord, SigNozAccountRecord.enabled.is_(True)),
+            count(CoolifyAccountRecord, CoolifyAccountRecord.enabled.is_(True)),
         )
-        return github + gitlab
+        return github + gitlab + signoz + coolify
 
     async def count_github(_request: Request) -> int:
         return await count(GitHubAccountRecord, GitHubAccountRecord.enabled.is_(True))
 
     async def count_gitlab(_request: Request) -> int:
         return await count(GitLabAccountRecord, GitLabAccountRecord.enabled.is_(True))
+
+    async def count_signoz(_request: Request) -> int:
+        return await count(SigNozAccountRecord, SigNozAccountRecord.enabled.is_(True))
+
+    async def count_coolify(_request: Request) -> int:
+        return await count(CoolifyAccountRecord, CoolifyAccountRecord.enabled.is_(True))
 
     async def count_oauth_sessions(_request: Request) -> int:
         return await count(OAuthSessionRecord, OAuthSessionRecord.status == "active")
@@ -1132,9 +1250,7 @@ def _dashboard(
         if not isinstance(projects, list):
             return 0
         return sum(
-            1
-            for item in projects
-            if isinstance(item, dict) and item.get("session") == "active"
+            1 for item in projects if isinstance(item, dict) and item.get("session") == "active"
         )
 
     async def reverse_workers(request: Request) -> int:
@@ -1143,9 +1259,7 @@ def _dashboard(
         if not isinstance(workers, list):
             return 0
         return sum(
-            1
-            for item in workers
-            if isinstance(item, dict) and bool(item.get("enabled", True))
+            1 for item in workers if isinstance(item, dict) and bool(item.get("enabled", True))
         )
 
     async def reverse_queue(request: Request) -> int:
@@ -1154,9 +1268,7 @@ def _dashboard(
         if not isinstance(workers, list):
             return 0
         return sum(
-            json_int(item.get("queued"), default=0)
-            for item in workers
-            if isinstance(item, dict)
+            json_int(item.get("queued"), default=0) for item in workers if isinstance(item, dict)
         )
 
     async def error_rate(_request: Request) -> float:
@@ -1178,6 +1290,14 @@ def _dashboard(
                 ),
                 Col(
                     StatWidget(title="GitLab accounts", value_callback=count_gitlab),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
+                Col(
+                    StatWidget(title="SigNoz accounts", value_callback=count_signoz),
+                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
+                ),
+                Col(
+                    StatWidget(title="Coolify accounts", value_callback=count_coolify),
                     breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
                 ),
                 Col(
@@ -1275,6 +1395,8 @@ def build_admin(
             menu_label="GitLab Accounts",
         )
     )
+    admin.add_view(SigNozAccountView(cipher, accounts))
+    admin.add_view(CoolifyAccountView(cipher, accounts))
     admin.add_view(ReverseView(reverse, snapshots))
     admin.add_view(TerminalView(terminal))
     admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))

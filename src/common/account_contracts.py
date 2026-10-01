@@ -10,7 +10,7 @@ from .models import JsonObject, StrictModel
 class AccountPublic(StrictModel):
     id: str
     alias: str
-    provider: Literal["github", "gitlab"]
+    provider: Literal["github", "gitlab", "signoz", "coolify"]
     auth_type: str
     base_url: str
     external_id: str | None = None

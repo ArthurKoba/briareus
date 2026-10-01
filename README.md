@@ -22,6 +22,8 @@ gateway
   +-- /web/mcp      -------------> web (curl + persistent Chromium)
   +-- /analysis/mcp -------------> analysis ---> ghidra (private)
   +-- /terminal/mcp -------------> terminal
+  +-- /signoz/mcp  -------------> signoz (read-only)
+  +-- /coolify/mcp -------------> coolify (read-only)
   +-- /admin        -------------> management
 ```
 
@@ -38,6 +40,8 @@ public domain. Auth and all provider runtimes remain private on the Compose netw
 /web/mcp
 /analysis/mcp
 /terminal/mcp
+/signoz/mcp
+/coolify/mcp
 /admin
 ```
 
@@ -134,8 +138,11 @@ is not part of the external ChatGPT contract.
 ## Management
 
 Management owns provider accounts, encrypted credentials, invocation telemetry, settings,
-Files administration and the Admin UI. Provider runtimes resolve account data through the
-private management API rather than opening the management database directly. Expensive
+Files administration and the Admin UI. GitHub, GitLab, SigNoz and Coolify can each have
+multiple named accounts. SigNoz API keys and Coolify API tokens are encrypted in Management;
+they are not deployment environment variables. Provider runtimes resolve the explicitly
+selected `account_id`/alias through the private management API rather than opening the
+management database directly. Expensive
 workspace statistics and Reverse overview/coverage calculations are refreshed by background
 workers into persistent snapshots; Admin pages render the latest cached value with freshness
 metadata instead of performing long scans or analyses in the HTTP request path.
@@ -172,3 +179,20 @@ copying access or refresh tokens. Management shows client/resource identity, las
 refresh activity, token expiry, revocation and the latest authentication error. Refresh
 rotation keeps a short bounded replay grace window so concurrent client refresh requests
 reuse the same rotated result instead of spuriously forcing a full reauthorization.
+
+## SigNoz
+
+SigNoz is a dedicated read-only MCP surface at `/signoz/mcp`. Connections are created in
+Management under **SigNoz Accounts** with an alias, instance URL and service-account API key.
+Every data-bearing tool requires an explicit `account_id` selector. The runtime supports
+read-only log and trace search, Query Builder v5 requests, service discovery and field
+discovery. It does not expose alert/dashboard/view mutation tools.
+
+## Coolify
+
+Coolify is a dedicated read-only MCP surface at `/coolify/mcp`. Connections are created in
+Management under **Coolify Accounts** with an alias, instance URL and API token. The intended
+token permission is ordinary `Read`. The MCP contract exposes team, application and deployment
+metadata only. Runtime logs, environment variables, secrets, configuration mutation, deploy,
+restart and cancellation operations are deliberately absent. Runtime application diagnostics
+belong to the SigNoz telemetry surface instead of requiring Coolify `read:sensitive`.

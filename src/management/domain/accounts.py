@@ -13,6 +13,8 @@ from common.models import JsonObject, StrictModel
 class Provider(StrEnum):
     GITHUB = "github"
     GITLAB = "gitlab"
+    SIGNOZ = "signoz"
+    COOLIFY = "coolify"
 
 
 class AuthType(StrEnum):
@@ -21,6 +23,8 @@ class AuthType(StrEnum):
     PRIVATE_TOKEN = "private_token"
     BEARER = "bearer"
     JOB_TOKEN = "job_token"
+    SIGNOZ_API_KEY = "signoz_api_key"
+    COOLIFY_API_TOKEN = "coolify_api_token"
 
 
 class Account(StrictModel):
@@ -60,13 +64,25 @@ class Account(StrictModel):
             object.__setattr__(self, "ca_cert_pem", "")
             return self
 
-        if self.auth_type not in {
-            AuthType.PRIVATE_TOKEN,
-            AuthType.BEARER,
-            AuthType.JOB_TOKEN,
-        }:
-            raise ValueError("GitLab auth_type must be token based")
-        base_url = (self.base_url or "https://gitlab.com").rstrip("/")
+        if self.provider is Provider.GITLAB:
+            if self.auth_type not in {
+                AuthType.PRIVATE_TOKEN,
+                AuthType.BEARER,
+                AuthType.JOB_TOKEN,
+            }:
+                raise ValueError("GitLab auth_type must be token based")
+            default_url = "https://gitlab.com"
+        elif self.provider is Provider.SIGNOZ:
+            if self.auth_type is not AuthType.SIGNOZ_API_KEY:
+                raise ValueError("SigNoz auth_type must be signoz_api_key")
+            default_url = ""
+        elif self.provider is Provider.COOLIFY:
+            if self.auth_type is not AuthType.COOLIFY_API_TOKEN:
+                raise ValueError("Coolify auth_type must be coolify_api_token")
+            default_url = ""
+        else:
+            raise ValueError(f"unsupported provider: {self.provider.value}")
+        base_url = (self.base_url or default_url).rstrip("/")
         parsed = urllib.parse.urlsplit(base_url)
         if (
             parsed.scheme not in {"http", "https"}
@@ -76,7 +92,9 @@ class Account(StrictModel):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("GitLab base_url must be an http(s) URL without credentials/query")
+            raise ValueError(
+                f"{self.provider.value} base_url must be an http(s) URL without credentials/query"
+            )
         object.__setattr__(self, "base_url", base_url)
         object.__setattr__(self, "external_id", "")
         return self

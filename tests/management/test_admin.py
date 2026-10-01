@@ -92,6 +92,8 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     labels = {view.menu_label for view in admin._views if hasattr(view, "menu_label")}
     assert "GitHub Accounts" in labels
     assert "GitLab Accounts" in labels
+    assert "SigNoz Accounts" in labels
+    assert "Coolify Accounts" in labels
     assert "MCP Calls" in labels
     assert "OAuth Sessions" in labels
     assert "Reverse" in labels

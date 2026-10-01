@@ -4,10 +4,12 @@ import pytest
 from fastmcp import Client
 
 from modules.analysis.runtime import mcp as analysis
+from modules.coolify.runtime import mcp as coolify
 from modules.curl.runtime import mcp as curl
 from modules.files.runtime import mcp as files
 from modules.github.runtime import mcp as github
 from modules.gitlab.runtime import mcp as gitlab
+from modules.signoz.runtime import mcp as signoz
 
 
 async def _tool_names(mcp) -> set[str]:
@@ -127,3 +129,35 @@ async def test_terminal_runtime_surface_is_isolated(monkeypatch, tmp_path) -> No
     assert "github_agent_status" not in names
     assert "curl_request" not in names
     assert "accounts" not in names
+
+
+@pytest.mark.asyncio
+async def test_signoz_runtime_is_read_only_and_account_selected() -> None:
+    names = await _tool_names(signoz)
+    assert {
+        "signoz_accounts",
+        "signoz_connection",
+        "signoz_whoami",
+        "signoz_search_logs",
+        "signoz_search_traces",
+        "signoz_query_range",
+        "signoz_list_services",
+        "signoz_field_keys",
+        "signoz_field_values",
+    } == names
+
+
+@pytest.mark.asyncio
+async def test_coolify_runtime_is_read_only_and_excludes_sensitive_logs() -> None:
+    names = await _tool_names(coolify)
+    assert {
+        "coolify_accounts",
+        "coolify_connection",
+        "coolify_current_team",
+        "coolify_list_applications",
+        "coolify_get_application",
+        "coolify_list_deployments",
+        "coolify_list_application_deployments",
+        "coolify_get_deployment",
+    } == names
+    assert not any("log" in name or "env" in name or "secret" in name for name in names)
