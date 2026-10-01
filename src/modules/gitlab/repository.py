@@ -28,18 +28,19 @@ class GitLabRepositoryClient(GitLabApiClient):
         encoded_project = urllib.parse.quote(raw_project, safe="/-._~")
         clone_url = f"{self.profile.base_url.rstrip('/')}/{encoded_project}.git"
 
-        token = self.profile.token()
         auth_header = ""
-        if self.profile.auth_type == "private_token":
-            encoded = base64.b64encode(f"oauth2:{token}".encode()).decode("ascii")
-            auth_header = f"Authorization: Basic {encoded}"
-        elif self.profile.auth_type == "bearer":
-            auth_header = f"Authorization: Bearer {token}"
-        else:
-            encoded = base64.b64encode(
-                f"gitlab-ci-token:{token}".encode()
-            ).decode("ascii")
-            auth_header = f"Authorization: Basic {encoded}"
+        if not self.anonymous_only:
+            token = self.profile.token()
+            if self.profile.auth_type == "private_token":
+                encoded = base64.b64encode(f"oauth2:{token}".encode()).decode("ascii")
+                auth_header = f"Authorization: Basic {encoded}"
+            elif self.profile.auth_type == "bearer":
+                auth_header = f"Authorization: Bearer {token}"
+            else:
+                encoded = base64.b64encode(
+                    f"gitlab-ci-token:{token}".encode()
+                ).decode("ascii")
+                auth_header = f"Authorization: Basic {encoded}"
 
         result = checkout_repository(
             clone_url,
