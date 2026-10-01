@@ -144,24 +144,89 @@ class AnalysisWorkspaceTransfers:
     ) -> JsonObject:
         staged = await self._stage_workspace_file(project_id, workspace_path)
         stage_id = str(staged["stage_id"])
+        result = await self._call(
+            "import_file",
+            {
+                "project_id": project_id,
+                "file_path": staged["path"],
+                "project_folder": project_folder,
+                "language": language or None,
+                "compiler_spec": compiler_spec or None,
+                "auto_analyze": auto_analyze,
+            },
+        )
+        cleanup_error = ""
         try:
-            result = await self._call(
-                "import_file",
-                {
-                    "project_id": project_id,
-                    "file_path": staged["path"],
-                    "project_folder": project_folder,
-                    "language": language or None,
-                    "compiler_spec": compiler_spec or None,
-                    "auto_analyze": auto_analyze,
-                },
-            )
-        finally:
             await self._cancel_stage(project_id, stage_id)
+        except Exception as exc:
+            cleanup_error = str(exc)
         return {
             "workspace_path": workspace_path,
             "sha256": staged["sha256"],
             "result": result,
+            "stage_cleanup_error": cleanup_error,
+        }
+
+    async def import_workspace_program(
+        self,
+        project_id: str,
+        workspace_path: str,
+        target_folder: str = "/",
+        target_name: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        staged = await self._stage_workspace_file(project_id, workspace_path)
+        stage_id = str(staged["stage_id"])
+        result = await self._call(
+            "import_program",
+            {
+                "project_id": project_id,
+                "gzf_path": staged["path"],
+                "target_folder": target_folder,
+                "target_name": target_name,
+                "overwrite": overwrite,
+            },
+        )
+        cleanup_error = ""
+        try:
+            await self._cancel_stage(project_id, stage_id)
+        except Exception as exc:
+            cleanup_error = str(exc)
+        return {
+            "workspace_path": workspace_path,
+            "sha256": staged["sha256"],
+            "result": result,
+            "stage_cleanup_error": cleanup_error,
+        }
+
+    async def restore_workspace_project(
+        self,
+        project_id: str,
+        workspace_path: str,
+        project_name: str,
+        parent_dir: str = "",
+    ) -> JsonObject:
+        staged = await self._stage_workspace_file(project_id, workspace_path)
+        stage_id = str(staged["stage_id"])
+        result = await self._call(
+            "restore_project",
+            {
+                "project_id": project_id,
+                "gar_path": staged["path"],
+                "project_name": project_name,
+                "parent_dir": parent_dir,
+            },
+        )
+        cleanup_error = ""
+        try:
+            await self._cancel_stage(project_id, stage_id)
+        except Exception as exc:
+            cleanup_error = str(exc)
+        return {
+            "workspace_path": workspace_path,
+            "sha256": staged["sha256"],
+            "result": result,
+            "stage_cleanup_error": cleanup_error,
         }
 
     async def _copy_artifact_to_workspace(
@@ -242,6 +307,17 @@ class AnalysisWorkspaceTransfers:
         info = self.workspace.info(workspace_path)
         info["sha256"] = self.workspace.sha256(workspace_path)
         info["source_artifact_path"] = artifact_path
+        cleanup_error = ""
+        try:
+            await self._call(
+                "artifact_file_delete",
+                {"project_id": project_id, "path": artifact_path},
+            )
+            info["source_deleted"] = True
+        except Exception as exc:
+            cleanup_error = str(exc)
+            info["source_deleted"] = False
+        info["source_cleanup_error"] = cleanup_error
         return info
 
     async def export_program_to_workspace(
@@ -324,6 +400,38 @@ def register_workspace_transfer_tools(
             language,
             compiler_spec,
             auto_analyze,
+        )
+
+    @mcp.tool(title="Import workspace program package")
+    async def import_workspace_program(
+        project_id: str,
+        workspace_path: str,
+        target_folder: str = "/",
+        target_name: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Import a workspace program package through isolated staging."""
+        return await transfers.import_workspace_program(
+            project_id,
+            workspace_path,
+            target_folder,
+            target_name,
+            overwrite,
+        )
+
+    @mcp.tool(title="Restore workspace project archive")
+    async def restore_workspace_project(
+        project_id: str,
+        workspace_path: str,
+        project_name: str,
+        parent_dir: str = "",
+    ) -> JsonObject:
+        """Restore a workspace project archive through isolated staging."""
+        return await transfers.restore_workspace_project(
+            project_id,
+            workspace_path,
+            project_name,
+            parent_dir,
         )
 
     @mcp.tool(title="Export program to workspace")
