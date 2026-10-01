@@ -181,3 +181,32 @@ def test_transport_surfaces_error_after_retry_budget() -> None:
 
     with pytest.raises(HttpTransportError, match="failed after reconnect"):
         transport.request("GET", "/resource")
+
+
+def test_transport_honors_extended_retry_budget() -> None:
+    attempts = 0
+
+    class Connection:
+        def request(self, *args, **kwargs) -> None:
+            nonlocal attempts
+            del args, kwargs
+            attempts += 1
+            if attempts < 4:
+                raise OSError("transient")
+
+        def getresponse(self) -> _Response:
+            return _Response()
+
+        def close(self) -> None:
+            return None
+
+    transport = PooledHttpTransport(Connection)
+    result = transport.request(
+        "GET",
+        "/resource",
+        reconnect_retries=3,
+        retry_backoff_seconds=0,
+    )
+
+    assert result.status == 200
+    assert attempts == 4

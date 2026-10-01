@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import queue
 import threading
+import time
 from collections.abc import Callable, Mapping
 
 from .models import StrictModel
@@ -98,6 +99,7 @@ class PooledHttpTransport:
         body: bytes | None = None,
         headers: Mapping[str, str] | None = None,
         reconnect_retries: int = 1,
+        retry_backoff_seconds: float = 0.0,
     ) -> HttpTransportResponse:
         attempts = max(0, int(reconnect_retries)) + 1
         last_error: OSError | http.client.HTTPException | None = None
@@ -127,6 +129,8 @@ class PooledHttpTransport:
                 self._release(connection, reusable=False)
                 if attempt + 1 >= attempts:
                     break
+                if retry_backoff_seconds > 0:
+                    time.sleep(retry_backoff_seconds * (2 ** attempt))
 
         raise HttpTransportError(
             f"HTTP request failed after reconnect: {last_error}"
