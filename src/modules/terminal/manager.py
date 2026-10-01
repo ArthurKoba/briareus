@@ -279,8 +279,12 @@ class TerminalManager:
         }
 
     def _environment(self, overrides: dict[str, str] | None) -> dict[str, str]:
-        env = dict(os.environ)
-        env["HOME"] = str(self.home)
+        env = {
+            "HOME": str(self.home),
+            "PATH": self.settings.path,
+            "LANG": self.settings.lang,
+            "TERM": self.settings.term,
+        }
         if overrides:
             for key, value in overrides.items():
                 if "\x00" in key or "=" in key or not key:

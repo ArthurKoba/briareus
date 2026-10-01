@@ -13,6 +13,7 @@ EXPECTED_SERVICES = {
     "gitlab",
     "files",
     "curl",
+    "terminal",
     "analysis",
     "ghidra",
 }
@@ -70,7 +71,13 @@ def test_compose_does_not_publish_host_ports() -> None:
 def test_compose_owns_clean_named_volumes() -> None:
     volumes = _document()["volumes"]
 
-    assert set(volumes) == {"management", "files", "auth"}
+    assert set(volumes) == {
+        "management",
+        "files",
+        "auth",
+        "terminal-workspace",
+        "terminal-home",
+    }
     for config in volumes.values():
         assert config is None or "external" not in config
 
@@ -85,6 +92,11 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     assert services["files"]["volumes"] == ["files:/files"]
     assert services["curl"]["volumes"] == ["files:/files"]
     assert services["auth"]["volumes"] == ["auth:/auth"]
+    assert services["terminal"]["volumes"] == [
+        "terminal-workspace:/workspace",
+        "terminal-home:/home/agent",
+        "files:/files",
+    ]
 
 
 def test_compose_exposes_only_external_bootstrap_environment() -> None:
@@ -131,6 +143,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "curl": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
     }
@@ -154,6 +167,7 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "CURL_URL",
         "ANALYSIS_URL",
         "GHIDRA_URL",
+        "TERMINAL_URL",
         "GHIDRA_MCP_URL",
         "GITHUB_AGENT_PROTECTED_BRANCHES",
         "GITHUB_AGENT_REQUIRED_CHECKS",
@@ -166,6 +180,15 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "FILE_MAX_EXTRACT_BYTES",
         "CURL_BINARY",
         "ANALYSIS_SCHEMA_CACHE_TTL_SECONDS",
+        "TERMINAL_WORKSPACE_ROOT",
+        "TERMINAL_HOME",
+        "TERMINAL_SHELL",
+        "TERMINAL_PATH",
+        "TERMINAL_LANG",
+        "TERMINAL_TERM",
+        "TERMINAL_MAX_EXEC_OUTPUT_BYTES",
+        "TERMINAL_MAX_JOB_READ_BYTES",
+        "TERMINAL_MAX_JOB_LOG_BYTES",
     }
 
     for name, service in _services().items():

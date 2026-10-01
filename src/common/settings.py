@@ -559,6 +559,12 @@ class TerminalSettings(ProcessSettings):
         validation_alias="TERMINAL_HOME",
     )
     shell: str = Field("/bin/bash", validation_alias="TERMINAL_SHELL")
+    path: str = Field(
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        validation_alias="TERMINAL_PATH",
+    )
+    lang: str = Field("C.UTF-8", validation_alias="TERMINAL_LANG")
+    term: str = Field("xterm-256color", validation_alias="TERMINAL_TERM")
     max_exec_output_bytes: int = Field(
         2 * 1024 * 1024,
         ge=1024,
@@ -585,9 +591,9 @@ class TerminalSettings(ProcessSettings):
             raise ValueError("terminal paths must be absolute")
         return value.resolve(strict=False)
 
-    @field_validator("shell", mode="before")
+    @field_validator("shell", "path", "lang", "term", mode="before")
     @classmethod
-    def _strip_shell(cls, value: object) -> object:
+    def _strip_terminal_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
 

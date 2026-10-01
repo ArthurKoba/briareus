@@ -66,6 +66,7 @@ def test_bridge_settings_use_canonical_backends_by_default(monkeypatch) -> None:
         "CURL_URL",
         "ANALYSIS_URL",
         "GHIDRA_URL",
+        "TERMINAL_URL",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -76,6 +77,7 @@ def test_bridge_settings_use_canonical_backends_by_default(monkeypatch) -> None:
         "web": "http://curl:8000/mcp",
         "analysis": "http://analysis:8000/mcp",
         "ghidra": "http://ghidra:8000/mcp",
+        "terminal": "http://terminal:8000/mcp",
     }
 
 
