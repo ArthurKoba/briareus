@@ -411,3 +411,18 @@ def test_public_catalog_rejects_missing_description() -> None:
 
     with pytest.raises(AnalysisProviderError, match="missing public description"):
         provider._validate_public_catalog([tool])
+
+
+def test_analysis_backend_client_marks_internal_proxy_origin() -> None:
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    from common.settings import AnalysisSettings
+    from modules.analysis.provider import AnalysisToolProvider
+
+    provider = AnalysisToolProvider(
+        AnalysisSettings(backend_url="http://ghidra:8000/mcp")
+    )
+    client = provider._backend_client()
+
+    assert isinstance(client.transport, StreamableHttpTransport)
+    assert client.transport.headers["X-Koba-Proxy-Origin"] == "analysis"
