@@ -96,7 +96,9 @@ All long-running and interactive work uses jobs:
 - `job_resize(job_id, cols, rows)`
 - `job_wait(job_id, timeout_seconds)`
 - `job_cancel(job_id, grace_seconds)`
-- `job_list(workspace_id, state)`
+- `job_list(workspace_id, state, offset, limit)`
+- `job_delete(job_id)`
+- `job_cleanup(older_than_hours, dry_run, limit)`
 
 `job_write` and `job_resize` are valid only for interactive jobs.
 
@@ -128,7 +130,9 @@ The response also reports:
 This lets an agent poll a long build without repeatedly consuming the full log. A caller
 may explicitly request from cursor 0 when the complete retained log is needed.
 
-Logs remain available after process exit according to a simple retention policy.
+Logs remain available after process exit and can be deleted individually or cleaned up in
+bounded batches by age. Job listings are paginated so a long-lived terminal does not push
+its complete process history into every agent/Admin request.
 
 ## Interactive jobs
 
