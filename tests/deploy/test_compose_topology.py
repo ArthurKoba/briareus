@@ -89,8 +89,14 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
         "management:/management",
         "files:/files",
     ]
-    assert services["files"]["volumes"] == ["files:/files"]
-    assert services["curl"]["volumes"] == ["files:/files"]
+    assert services["files"]["volumes"] == [
+        "files:/files",
+        "terminal-workspace:/workspace",
+    ]
+    assert services["curl"]["volumes"] == [
+        "files:/files",
+        "terminal-workspace:/workspace",
+    ]
     assert services["auth"]["volumes"] == ["auth:/auth"]
     assert services["terminal"]["volumes"] == [
         "terminal-workspace:/workspace",
@@ -174,6 +180,7 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "GITHUB_AGENT_REQUIRED_REVIEWERS",
         "GITLAB_PROTECTED_BRANCHES",
         "GITLAB_REGISTRY_CACHE_TTL_SECONDS",
+        "FILE_WORKSPACE_ROOT",
         "FILE_UPLOAD_MAX_BYTES",
         "FILE_UPLOAD_CHUNK_BYTES",
         "FILE_MAX_EXTRACT_FILES",
