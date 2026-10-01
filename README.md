@@ -146,6 +146,8 @@ MIT
 
 Terminal is a dedicated non-root Linux development runtime exposed at `/terminal/mcp`.
 It provides persistent workspaces, bounded shell execution, durable long-running jobs,
-interactive PTY input/output, cursor-based incremental logs and Files import/export.
-System toolchain packages are installed in the image; normal runtime commands execute as
-the unprivileged service user.
+interactive PTY input/output, cursor-based incremental logs and server-to-server Files
+import/export. The Files object-store volume is not exposed to shell jobs. System toolchain
+packages are installed in the image; normal runtime commands execute as the unprivileged
+service user. Terminal command/stdin/output payloads are not duplicated into Management
+MCP-call history.
