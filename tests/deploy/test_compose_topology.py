@@ -95,7 +95,6 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     assert services["terminal"]["volumes"] == [
         "terminal-workspace:/workspace",
         "terminal-home:/home/agent",
-        "files:/files",
     ]
 
 
@@ -143,7 +142,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "curl": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "terminal": observability,
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
     }
