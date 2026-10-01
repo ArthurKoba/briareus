@@ -207,10 +207,14 @@ not need to duplicate all of that inside Terminal.
 
 ## Files integration
 
-Use the existing Files system for moving immutable artifacts into and out of the workspace:
+Use the existing Files MCP for moving immutable artifacts into and out of the workspace:
 
 - Files -> workspace path;
 - workspace path -> Files object.
+
+Transfers are streamed server-to-server through the private Files MCP. The terminal
+container does not mount or expose the canonical Files object-store volume to shell jobs.
+This preserves the immutable store boundary while keeping file bytes out of model context.
 
 This is useful for uploaded source archives, binaries, build artifacts and logs that need
 to leave the terminal environment.
@@ -228,12 +232,19 @@ Show:
 - state, exit code and duration;
 - last activity;
 - current output tail;
-- cancel/close action.
+- installed tool availability and free disk;
+- Linux groups and persistent Git/SSH setup indicators;
+- serial devices visible to the container and whether they are readable/writable;
+- cancel, retained-log delete and old-job cleanup actions.
 
 Dashboard cards may show running jobs and failed recent jobs.
 
 Package lists, Linux permissions, device mappings and most resource settings remain in
-Docker/Linux configuration, not Admin forms.
+Docker/Linux configuration, not Admin forms. A missing OS package, supplemental group,
+host device mapping or mount is a deployment-level blocker: Admin should make the missing
+capability visible, but granting it requires an image/Compose change and container recreate.
+User-space dependencies, Git configuration and SSH keys remain agent-manageable inside the
+persistent home/workspace without root.
 
 ## Safety baseline
 
@@ -251,6 +262,10 @@ already has authorized repository/infrastructure mutation tools.
 ## Observability
 
 Reuse current OpenTelemetry integration with `mcp.scope=terminal`.
+
+Terminal intentionally does not send command arguments, stdin or job output into the
+Management MCP-call payload audit. Durable job metadata/output is already retained in the
+terminal workspace, while OpenTelemetry records operational metrics without command bodies.
 
 Useful metrics:
 
