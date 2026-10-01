@@ -29,7 +29,6 @@ x-private-service: &private-service
 x-file-service: &file-service
   <<: *private-service
   volumes:
-    - files:/files
     - terminal-workspace:/workspace
 
 services:
@@ -47,7 +46,6 @@ services:
       MANAGEMENT_SESSION_SECRET: ${MANAGEMENT_SESSION_SECRET:?}
     volumes:
       - management:/management
-      - files:/files
       - terminal-workspace:/workspace
 
   auth:
@@ -155,7 +153,6 @@ services:
 
 volumes:
   management:
-  files:
   auth:
   terminal-workspace:
   terminal-home:
