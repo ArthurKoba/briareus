@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -119,6 +120,53 @@ class BrowserManager:
             "page_id": page_id,
             "url": page.url,
             "title": await page.title(),
+        }
+
+    async def diagnostics(self) -> JsonObject:
+        self.profile_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        async def run(*args: str) -> tuple[int, str, str]:
+            process = await asyncio.create_subprocess_exec(
+                self.executable_path,
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+                return -1, "", "timed out after 20s"
+            return (
+                int(process.returncode or 0),
+                stdout.decode("utf-8", errors="replace")[-12000:],
+                stderr.decode("utf-8", errors="replace")[-12000:],
+            )
+
+        version_code, version_stdout, version_stderr = await run("--version")
+        with tempfile.TemporaryDirectory(
+            prefix="browser-probe-",
+            dir=self.profile_dir.parent,
+        ) as temporary_profile:
+            probe_code, probe_stdout, probe_stderr = await run(
+                "--headless",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                f"--user-data-dir={temporary_profile}",
+                "--dump-dom",
+                "data:text/html,<title>KobaBrowserProbe</title><body>probe-ok</body>",
+            )
+        return {
+            "executable_path": self.executable_path,
+            "profile_dir": str(self.profile_dir),
+            "version_exit_code": version_code,
+            "version_stdout": version_stdout,
+            "version_stderr": version_stderr,
+            "probe_exit_code": probe_code,
+            "probe_stdout": probe_stdout,
+            "probe_stderr": probe_stderr,
         }
 
     async def status(self) -> JsonObject:

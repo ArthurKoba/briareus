@@ -15,6 +15,11 @@ def register_browser_tools(
     *,
     browser: BrowserManager,
 ) -> None:
+    @mcp.tool(title="Browser diagnostics", annotations=read_annotations)
+    async def browser_diagnostics() -> JsonObject:
+        """Run a bounded Chromium executable/headless probe and return stderr/stdout tails."""
+        return await browser.diagnostics()
+
     @mcp.tool(title="Browser status", annotations=read_annotations)
     async def browser_status() -> JsonObject:
         """Start the persistent Chromium profile if needed and report browser/page status."""

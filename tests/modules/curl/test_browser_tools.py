@@ -11,6 +11,9 @@ from modules.curl.browser_tools import register_browser_tools
 
 
 class FakeBrowser:
+    async def diagnostics(self):
+        return {"probe_exit_code": 0, "probe_stdout": "probe-ok", "probe_stderr": ""}
+
     async def status(self):
         return {"running": True, "page_count": 0, "pages": []}
 
@@ -73,6 +76,7 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
         tools = {tool.name for tool in await client.list_tools()}
 
     assert tools == {
+        "browser_diagnostics",
         "browser_status",
         "browser_pages",
         "browser_open",
