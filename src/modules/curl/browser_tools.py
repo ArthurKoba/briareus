@@ -107,6 +107,19 @@ def register_browser_tools(
             overwrite=overwrite,
         )
 
+    @mcp.tool(title="Browser wait", annotations=read_annotations)
+    async def browser_wait(
+        page_id: str,
+        state: str = "networkidle",
+        timeout_seconds: float = 30,
+    ) -> JsonObject:
+        """Wait for a browser page load state without repeatedly polling snapshots."""
+        return await browser.wait(
+            page_id,
+            state=state,
+            timeout_seconds=timeout_seconds,
+        )
+
     @mcp.tool(title="Browser back", annotations=write_annotations)
     async def browser_back(page_id: str) -> JsonObject:
         """Navigate one browser page backward."""

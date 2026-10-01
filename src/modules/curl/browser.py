@@ -192,6 +192,7 @@ class BrowserManager:
               ].join(',');
               const nodes = Array.from(document.querySelectorAll(selector))
                 .filter((el) => {
+                  if (el.matches('input[type="file"]')) return true;
                   const style = window.getComputedStyle(el);
                   return style.visibility !== 'hidden' && style.display !== 'none' &&
                     el.getClientRects().length > 0;
@@ -201,7 +202,10 @@ class BrowserManager:
                 const ref = `e${index + 1}`;
                 el.setAttribute('data-koba-ref', ref);
                 const text = (el.innerText || el.textContent || '').trim();
-                const value = 'value' in el ? String(el.value || '') : '';
+                const inputType = (el.getAttribute('type') || '').toLowerCase();
+                const value = inputType === 'password'
+                  ? '<redacted>'
+                  : ('value' in el ? String(el.value || '') : '');
                 return {
                   ref,
                   tag: el.tagName.toLowerCase(),
@@ -317,6 +321,22 @@ class BrowserManager:
         target.parent.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(target), full_page=full_page)
         return self.workspace.info(self.workspace.relative(target))
+
+    async def wait(
+        self,
+        page_id: str,
+        *,
+        state: str,
+        timeout_seconds: float,
+    ) -> JsonObject:
+        page = await self._page(page_id)
+        normalized = state.strip().casefold()
+        if normalized not in {"load", "domcontentloaded", "networkidle"}:
+            raise BrowserError("wait state must be load, domcontentloaded, or networkidle")
+        if not 0 < timeout_seconds <= 120:
+            raise BrowserError("timeout_seconds must be between 0 and 120")
+        await page.wait_for_load_state(normalized, timeout=timeout_seconds * 1000)  # type: ignore[arg-type]
+        return await self._summary(page_id, page)
 
     async def back(self, page_id: str) -> JsonObject:
         page = await self._page(page_id)

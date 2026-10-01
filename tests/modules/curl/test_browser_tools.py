@@ -47,6 +47,9 @@ class FakeBrowser:
             "overwrite": overwrite,
         }
 
+    async def wait(self, page_id, *, state, timeout_seconds):
+        return {"page_id": page_id, "state": state, "timeout": timeout_seconds}
+
     async def back(self, page_id):
         return {"page_id": page_id}
 
@@ -79,6 +82,7 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
         "browser_upload",
         "browser_download",
         "browser_screenshot",
+        "browser_wait",
         "browser_back",
         "browser_reload",
         "browser_close_page",
