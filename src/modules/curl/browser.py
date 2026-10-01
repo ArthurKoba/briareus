@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
@@ -335,7 +335,11 @@ class BrowserManager:
             raise BrowserError("wait state must be load, domcontentloaded, or networkidle")
         if not 0 < timeout_seconds <= 120:
             raise BrowserError("timeout_seconds must be between 0 and 120")
-        await page.wait_for_load_state(normalized, timeout=timeout_seconds * 1000)  # type: ignore[arg-type]
+        load_state = cast(
+            Literal["load", "domcontentloaded", "networkidle"],
+            normalized,
+        )
+        await page.wait_for_load_state(load_state, timeout=timeout_seconds * 1000)
         return await self._summary(page_id, page)
 
     async def back(self, page_id: str) -> JsonObject:
