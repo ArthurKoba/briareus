@@ -27,6 +27,7 @@ from common.models import (
     json_str,
     json_value,
 )
+from common.repository_checkout import checkout_repository
 
 _GITHUB_API = "https://api.github.com"
 _GITHUB_API_VERSION = "2026-03-10"
