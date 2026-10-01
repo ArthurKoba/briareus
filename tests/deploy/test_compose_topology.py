@@ -294,6 +294,9 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
     assert "uv sync --frozen --no-dev --group web --no-install-project" in web_stage
     assert "BROWSER_PROFILE_PATH=/browser/profile" in web_stage
     assert "BROWSER_EXECUTABLE_PATH=/usr/bin/chromium" in web_stage
+    assert "XDG_CONFIG_HOME=/browser/config" in web_stage
+    assert "XDG_CACHE_HOME=/browser/cache" in web_stage
+    assert "BREAKPAD_DUMP_LOCATION=/browser/crash" in web_stage
 
 
 def test_entrypoint_owns_browser_profile_volume_before_dropping_privileges() -> None:
