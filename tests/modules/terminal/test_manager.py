@@ -178,7 +178,7 @@ async def test_terminal_exec_bounds_captured_output(manager: TerminalManager) ->
     manager.workspace_create("demo")
     result = await manager.terminal_exec(
         "demo",
-        "python -c \"print('x' * 10000)\"",
+        "printf '%010000d' 0",
         max_output_bytes=128,
     )
 
