@@ -106,9 +106,6 @@ class ManagementConfigRecord(Base):
     logging_capture_payloads: Mapped[bool] = mapped_column(Boolean, default=True)
     logging_retention_days: Mapped[int] = mapped_column(Integer, default=30)
     logging_max_records: Mapped[int] = mapped_column(Integer, default=10_000)
-    file_auto_cleanup_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    file_retention_days: Mapped[int] = mapped_column(Integer, default=30)
-    file_cleanup_limit: Mapped[int] = mapped_column(Integer, default=1_000)
     maintenance_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
 
 
