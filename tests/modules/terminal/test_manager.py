@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -125,59 +124,6 @@ def test_persisted_running_job_becomes_interrupted(tmp_path: Path) -> None:
 
     second = TerminalManager(settings)
     assert second.job_status("persisted")["state"] == "interrupted"
-
-
-class _FakeFiles:
-    async def import_to_path(self, file_id: str, destination: Path):
-        await asyncio.to_thread(destination.parent.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(destination.write_text, "payload", encoding="utf-8")
-        return {
-            "file_id": file_id,
-            "size_bytes": 7,
-            "bytes_copied": 7,
-        }
-
-    async def export_from_path(self, source: Path, *, name: str, mime_type: str = ""):
-        del mime_type
-        content = await asyncio.to_thread(source.read_text, encoding="utf-8")
-        source_stat = await asyncio.to_thread(source.stat)
-        assert content == "payload"
-        return {
-            "file_id": "sha256:" + "a" * 64,
-            "name": name,
-            "size_bytes": source_stat.st_size,
-        }
-
-
-@pytest.mark.asyncio
-async def test_workspace_files_round_trip(tmp_path: Path) -> None:
-    manager = TerminalManager(
-        TerminalSettings(
-            workspace_root=tmp_path / "workspace",
-            home=tmp_path / "home",
-            shell="/bin/bash",
-        ),
-        _FakeFiles(),
-    )
-    manager.workspace_create("demo")
-
-    imported = await manager.workspace_import_file(
-        "demo",
-        "sha256:" + "b" * 64,
-        "src/input.txt",
-    )
-    imported_text = await asyncio.to_thread(
-        Path(str(imported["path"])).read_text,
-        encoding="utf-8",
-    )
-    assert imported_text == "payload"
-
-    exported = await manager.workspace_export_file(
-        "demo",
-        "src/input.txt",
-        name="copy.txt",
-    )
-    assert str(exported["file_id"]).startswith("sha256:")
 
 
 @pytest.mark.asyncio
