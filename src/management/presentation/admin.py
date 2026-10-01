@@ -659,6 +659,32 @@ class TerminalView(CustomView):
             flash(request, "Job cancelled", "success")
         return RedirectResponse("/admin/terminal", status_code=303)
 
+    @route("/job/{job_id:path}/delete", methods=["POST"])
+    async def delete_job(self, request: Request) -> Response:
+        job_id = request.path_params["job_id"]
+        try:
+            await self.terminal.delete_job(job_id)
+        except Exception as exc:
+            flash(request, f"Delete job failed: {exc}", "error")
+        else:
+            flash(request, "Job log deleted", "success")
+        return RedirectResponse("/admin/terminal", status_code=303)
+
+    @route("/cleanup-jobs", methods=["POST"])
+    async def cleanup_jobs(self, request: Request) -> Response:
+        form = await request.form()
+        try:
+            older_than_hours = int(str(form.get("older_than_hours", "168")))
+            result = await self.terminal.cleanup_jobs(
+                older_than_hours=older_than_hours,
+                dry_run=False,
+            )
+        except Exception as exc:
+            flash(request, f"Job cleanup failed: {exc}", "error")
+        else:
+            flash(request, f"Deleted {result.get('count', 0)} retained jobs", "success")
+        return RedirectResponse("/admin/terminal", status_code=303)
+
     @route("/workspace/{workspace_id:path}/delete", methods=["POST"])
     async def delete_workspace(self, request: Request) -> Response:
         workspace_id = request.path_params["workspace_id"]
