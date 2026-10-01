@@ -4,6 +4,7 @@ import asyncio
 import fcntl
 import grp
 import json
+import logging
 import os
 import pty
 import re
@@ -18,8 +19,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from common.management_client import ManagementClient, ManagementClientError
 from common.models import JsonObject, JsonValue
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from common.settings import TerminalSettings
+
+logger = logging.getLogger(__name__)
 
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -50,6 +55,7 @@ class Job:
     master_fd: int | None = None
     reader_task: asyncio.Task[None] | None = None
     watcher_task: asyncio.Task[None] | None = None
+    timeout_seconds: float = 0
 
 
 def _timestamp(value: float | None) -> str | None:
@@ -59,8 +65,13 @@ def _timestamp(value: float | None) -> str | None:
 
 
 class TerminalManager:
-    def __init__(self, settings: TerminalSettings) -> None:
+    def __init__(
+        self,
+        settings: TerminalSettings,
+        management: ManagementClient | None = None,
+    ) -> None:
         self.settings = settings
+        self.management = management
         self.workspace_root = settings.workspace_root
         self.projects_root = self.workspace_root / "projects"
         self.home = settings.home
@@ -163,6 +174,28 @@ class TerminalManager:
             ],
         }
 
+    @staticmethod
+    def _tree_size_bytes(path: Path) -> int:
+        total = 0
+        stack = [path]
+        while stack:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as iterator:
+                    for item in iterator:
+                        try:
+                            if item.is_symlink():
+                                continue
+                            if item.is_dir(follow_symlinks=False):
+                                stack.append(Path(item.path))
+                            elif item.is_file(follow_symlinks=False):
+                                total += item.stat(follow_symlinks=False).st_size
+                        except FileNotFoundError:
+                            continue
+            except FileNotFoundError:
+                continue
+        return total
+
     async def workspace_delete(self, workspace_id: str, force: bool = False) -> JsonObject:
         workspace_id = self._workspace_id(workspace_id)
         path = self._require_workspace(workspace_id)
@@ -171,7 +204,21 @@ class TerminalManager:
             for job in self._jobs.values()
             if job.workspace_id == workspace_id and job.state in {"running", "cancelling"}
         ]
+        size_bytes = self._tree_size_bytes(path)
+        logger.info(
+            "workspace cleanup decision workspace_id=%s action=delete reason=%s "
+            "active_jobs=%d size_bytes=%d",
+            workspace_id,
+            "forced_manual_delete" if force else "manual_delete",
+            len(active),
+            size_bytes,
+        )
         if active and not force:
+            logger.info(
+                "workspace cleanup skipped workspace_id=%s reason=active_jobs active_jobs=%d",
+                workspace_id,
+                len(active),
+            )
             raise TerminalError(
                 "workspace has active jobs: " + ", ".join(job.job_id for job in active)
             )
@@ -179,7 +226,18 @@ class TerminalManager:
             for job in active:
                 await self.job_cancel(job.job_id, grace_seconds=1)
         shutil.rmtree(path)
-        return {"workspace_id": workspace_id, "deleted": True}
+        logger.info(
+            "workspace cleanup completed workspace_id=%s reason=%s freed_bytes=%d",
+            workspace_id,
+            "forced_manual_delete" if force else "manual_delete",
+            size_bytes,
+        )
+        return {
+            "workspace_id": workspace_id,
+            "deleted": True,
+            "freed_bytes": size_bytes,
+            "reason": "forced_manual_delete" if force else "manual_delete",
+        }
 
     def status(self) -> JsonObject:
         usage = shutil.disk_usage(self.workspace_root)
@@ -252,13 +310,20 @@ class TerminalManager:
                 "free_bytes": usage.free,
             },
             "tools": {
-                name: shutil.which(name, path=self.settings.path) or ""
-                for name in tool_names
+                name: shutil.which(name, path=self.settings.path) or "" for name in tool_names
             },
             "serial_devices": serial_devices,
             "ssh_public_keys": public_keys,
             "git_configured": (self.home / ".gitconfig").is_file(),
         }
+
+    def _runtime_policy(self) -> TerminalRuntimePolicy:
+        if self.management is None:
+            return TerminalRuntimePolicy()
+        try:
+            return self.management.terminal_runtime_policy()
+        except (ManagementClientError, ValueError):
+            return TerminalRuntimePolicy()
 
     def _environment(self, overrides: dict[str, str] | None) -> dict[str, str]:
         env = {
@@ -293,6 +358,11 @@ class TerminalManager:
         if requested_limit <= 0:
             raise TerminalError("max_output_bytes must be > 0")
         limit = min(requested_limit, self.settings.max_exec_output_bytes)
+        policy = self._runtime_policy()
+        effective_timeout = min(
+            max(0.1, timeout_seconds),
+            float(policy.max_exec_timeout_seconds),
+        )
         started = time.time()
         process = await asyncio.create_subprocess_shell(
             command,
@@ -312,7 +382,7 @@ class TerminalManager:
         try:
             await asyncio.wait_for(
                 process.wait(),
-                timeout=max(0.1, timeout_seconds),
+                timeout=effective_timeout,
             )
         except TimeoutError:
             timed_out = True
@@ -340,6 +410,7 @@ class TerminalManager:
             "started_at": _timestamp(started),
             "ended_at": _timestamp(ended),
             "duration_seconds": round(ended - started, 3),
+            "timeout_seconds": effective_timeout,
         }
 
     @staticmethod
@@ -381,6 +452,7 @@ class TerminalManager:
             "pid": job.pid,
             "log_path": str(job.log_path),
             "log_truncated": job.log_truncated,
+            "timeout_seconds": job.timeout_seconds,
         }
         tmp = job.metadata_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -412,6 +484,7 @@ class TerminalManager:
                     log_path=Path(data.get("log_path") or metadata_path.parent / "output.log"),
                     metadata_path=metadata_path,
                     log_truncated=bool(data.get("log_truncated", False)),
+                    timeout_seconds=float(data.get("timeout_seconds", 0) or 0),
                 )
                 self._jobs[job.job_id] = job
                 self._persist(job)
@@ -428,6 +501,7 @@ class TerminalManager:
         label: str = "",
         cols: int = 120,
         rows: int = 40,
+        timeout_seconds: float | None = None,
     ) -> JsonObject:
         if not command.strip():
             raise TerminalError("command is required")
@@ -439,6 +513,16 @@ class TerminalManager:
         log_path = job_dir / "output.log"
         log_path.touch()
         metadata_path = job_dir / "metadata.json"
+        policy = self._runtime_policy()
+        requested_timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else float(policy.max_job_runtime_seconds)
+        )
+        effective_timeout = min(
+            max(0.1, requested_timeout),
+            float(policy.max_job_runtime_seconds),
+        )
         now = time.time()
 
         if interactive:
@@ -488,6 +572,7 @@ class TerminalManager:
             metadata_path=metadata_path,
             process=process,
             master_fd=master_fd,
+            timeout_seconds=effective_timeout,
         )
         self._jobs[job_id] = job
         self._persist(job)
@@ -541,14 +626,29 @@ class TerminalManager:
 
     async def _watch_job(self, job: Job) -> None:
         assert job.process is not None
-        returncode = await job.process.wait()
+        timed_out = False
+        try:
+            returncode = await asyncio.wait_for(
+                job.process.wait(),
+                timeout=max(0.1, job.timeout_seconds),
+            )
+        except TimeoutError:
+            timed_out = True
+            self._signal_process_group(job.process.pid, signal.SIGTERM)
+            try:
+                returncode = await asyncio.wait_for(job.process.wait(), timeout=2)
+            except TimeoutError:
+                self._signal_process_group(job.process.pid, signal.SIGKILL)
+                returncode = await job.process.wait()
         if job.reader_task is not None:
             with suppress(Exception):
                 await job.reader_task
         job.ended_at = time.time()
         job.exit_code = returncode
         job.signal_number = -returncode if returncode < 0 else None
-        if job.state == "cancelling":
+        if timed_out:
+            job.state = "timed_out"
+        elif job.state == "cancelling":
             job.state = "cancelled"
         elif returncode == 0:
             job.state = "completed"
@@ -589,6 +689,7 @@ class TerminalManager:
             ),
             "output_bytes": output_bytes,
             "output_truncated": job.log_truncated,
+            "timeout_seconds": job.timeout_seconds,
         }
 
     def job_status(self, job_id: str) -> JsonObject:
@@ -616,8 +717,7 @@ class TerminalManager:
             and (not state_filter or job.state == state_filter)
         ]
         selected: list[JsonValue] = [
-            self._job_public(job)
-            for job in matched[offset : offset + limit]
+            self._job_public(job) for job in matched[offset : offset + limit]
         ]
         return {
             "jobs": selected,
@@ -628,14 +728,39 @@ class TerminalManager:
             "truncated": offset + len(selected) < len(matched),
         }
 
-    def job_delete(self, job_id: str) -> JsonObject:
+    def job_delete(
+        self,
+        job_id: str,
+        *,
+        reason: str = "explicit_job_delete",
+    ) -> JsonObject:
         job = self._get_job(job_id)
         if job.state in {"running", "cancelling"}:
+            logger.info(
+                "job cleanup skipped job_id=%s workspace_id=%s reason=active_job state=%s",
+                job.job_id,
+                job.workspace_id,
+                job.state,
+            )
             raise TerminalError("running jobs must be cancelled before deletion")
+        size_bytes = self._tree_size_bytes(job.metadata_path.parent)
         with suppress(FileNotFoundError):
             shutil.rmtree(job.metadata_path.parent)
         self._jobs.pop(job.job_id, None)
-        return {"job_id": job.job_id, "deleted": True}
+        logger.info(
+            "job cleanup deleted job_id=%s workspace_id=%s reason=%s state=%s freed_bytes=%d",
+            job.job_id,
+            job.workspace_id,
+            reason,
+            job.state,
+            size_bytes,
+        )
+        return {
+            "job_id": job.job_id,
+            "deleted": True,
+            "reason": reason,
+            "freed_bytes": size_bytes,
+        }
 
     def job_cleanup(
         self,
@@ -648,6 +773,13 @@ class TerminalManager:
         if not 1 <= limit <= 10000:
             raise TerminalError("limit must be between 1 and 10000")
         cutoff = time.time() - older_than_hours * 3600
+        logger.info(
+            "job cleanup scan started older_than_hours=%d dry_run=%s limit=%d retained_jobs=%d",
+            older_than_hours,
+            dry_run,
+            limit,
+            len(self._jobs),
+        )
         candidates = [
             job
             for job in sorted(
@@ -658,9 +790,34 @@ class TerminalManager:
             and (job.ended_at or job.created_at) <= cutoff
         ][:limit]
         ids = [job.job_id for job in candidates]
+        candidate_bytes = sum(self._tree_size_bytes(job.metadata_path.parent) for job in candidates)
+        for job in candidates:
+            age_hours = max(0.0, (time.time() - (job.ended_at or job.created_at)) / 3600)
+            logger.info(
+                "job cleanup candidate job_id=%s workspace_id=%s reason=retention_expired "
+                "state=%s age_hours=%.2f dry_run=%s",
+                job.job_id,
+                job.workspace_id,
+                job.state,
+                age_hours,
+                dry_run,
+            )
+        freed_bytes = 0
         if not dry_run:
             for job_id in ids:
-                self.job_delete(job_id)
+                result = self.job_delete(job_id, reason="retention_expired")
+                raw = result.get("freed_bytes")
+                if isinstance(raw, int):
+                    freed_bytes += raw
+        logger.info(
+            "job cleanup scan completed candidates=%d candidate_bytes=%d deleted=%d "
+            "freed_bytes=%d dry_run=%s",
+            len(ids),
+            candidate_bytes,
+            0 if dry_run else len(ids),
+            freed_bytes,
+            dry_run,
+        )
         public_ids: list[JsonValue] = []
         public_ids.extend(ids)
         return {
@@ -668,6 +825,9 @@ class TerminalManager:
             "older_than_hours": older_than_hours,
             "job_ids": public_ids,
             "count": len(ids),
+            "candidate_bytes": candidate_bytes,
+            "freed_bytes": freed_bytes,
+            "reason": "retention_expired",
         }
 
     async def job_read(
@@ -697,9 +857,7 @@ class TerminalManager:
             await asyncio.sleep(0.05)
 
         if cursor > size:
-            raise TerminalError(
-                f"cursor {cursor} is beyond retained output size {size}"
-            )
+            raise TerminalError(f"cursor {cursor} is beyond retained output size {size}")
         with job.log_path.open("rb") as stream:
             stream.seek(cursor)
             data = stream.read(limit)
