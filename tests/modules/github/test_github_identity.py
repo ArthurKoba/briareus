@@ -232,4 +232,6 @@ def test_github_account_list_exposes_potential_capabilities() -> None:
 
     listed = result["accounts"][0]
     assert listed["permission_scope"] == "repository-dependent"
+    assert listed["preferred_selector"] == "github-user"
+    assert listed["selector_stability"] == "stable_alias"
     assert "user_token_scoped_access" in listed["potential_capabilities"]
