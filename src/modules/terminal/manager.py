@@ -19,7 +19,7 @@ from pathlib import Path
 
 from common.models import JsonObject, JsonValue
 from common.settings import TerminalSettings
-from modules.files.file_store import FileStore
+from .files_client import TerminalFilesClient
 
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -59,9 +59,9 @@ def _timestamp(value: float | None) -> str | None:
 
 
 class TerminalManager:
-    def __init__(self, settings: TerminalSettings, file_store: FileStore | None = None) -> None:
+    def __init__(self, settings: TerminalSettings, files: TerminalFilesClient | None = None) -> None:
         self.settings = settings
-        self.file_store = file_store
+        self.files = files
         self.workspace_root = settings.workspace_root
         self.projects_root = self.workspace_root / "projects"
         self.jobs_root = self.workspace_root / ".terminal" / "jobs"
