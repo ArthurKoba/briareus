@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from .models import StrictModel
 
@@ -27,3 +27,16 @@ class OAuthSessionEvent(StrictModel):
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     error_type: str = ""
     error_message: str = ""
+
+    @field_validator(
+        "access_expires_at",
+        "refresh_expires_at",
+        "occurred_at",
+        mode="before",
+    )
+    @classmethod
+    def _parse_wire_datetimes(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip().replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized)
+        return value
