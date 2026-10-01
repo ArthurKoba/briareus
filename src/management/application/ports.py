@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -91,6 +92,15 @@ class ManagementConfigRepository(Protocol):
     def get(self) -> ManagementConfig: ...
 
     def save(self, config: ManagementConfig) -> ManagementConfig: ...
+
+
+class RuntimeSettingsRepository(Protocol):
+    def get_terminal_policy(self) -> TerminalRuntimePolicy: ...
+
+    def save_terminal_policy(
+        self,
+        policy: TerminalRuntimePolicy,
+    ) -> TerminalRuntimePolicy: ...
 
 
 class CredentialCipher(Protocol):
