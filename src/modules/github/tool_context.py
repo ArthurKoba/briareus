@@ -62,6 +62,8 @@ class GitHubRuntimeContext:
 
     @staticmethod
     def _potential_capabilities(auth_type: str) -> list[str]:
+        if auth_type == "public":
+            return ["repository_read", "issues", "pull_requests", "actions", "checks", "git_history"]
         capabilities = [
             "repository_read",
             "repository_write",
@@ -89,7 +91,11 @@ class GitHubRuntimeContext:
             self._potential_capabilities(client.auth_type),
             context="GitHub potential capabilities",
         )
-        result["permission_scope"] = "repository-dependent"
+        result["permission_scope"] = (
+            "public-repositories-only"
+            if client.public_only
+            else "repository-dependent"
+        )
         if repository.strip():
             result["repository"] = client.capabilities(repository.strip())
         return result
