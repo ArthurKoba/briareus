@@ -21,11 +21,13 @@ class GitLabApiClient:
         max_connections: int = 4,
         protected_branches: frozenset[str] = frozenset({"main", "master"}),
         workspace_root: Path = Path("/workspace"),
+        anonymous_only: bool = False,
     ) -> None:
         self.profile = profile
         self.max_connections = max(1, int(max_connections))
         self.protected_branches = protected_branches
         self.workspace_root = workspace_root
+        self.anonymous_only = anonymous_only
         parsed = urllib.parse.urlsplit(profile.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise GitLabError(
@@ -169,12 +171,18 @@ class GitLabApiClient:
             ).encode("utf-8")
         )
         target = self._target(path, query)
+        normalized_method = method.upper()
+        if self.anonymous_only and normalized_method not in {"GET", "HEAD"}:
+            raise GitLabError("public GitLab access is read-only")
         try:
             response = self._transport.request(
-                method,
+                normalized_method,
                 target,
                 body=body,
-                headers=self._headers(has_body=body is not None),
+                headers=self._headers(
+                    has_body=body is not None,
+                    anonymous=self.anonymous_only,
+                ),
             )
         except HttpTransportError as exc:
             raise GitLabError(
@@ -182,7 +190,6 @@ class GitLabApiClient:
             ) from exc
         status, headers, raw = response.status, response.headers, response.body
         data = self._decode_response(raw, headers)
-        normalized_method = method.upper()
         if (
             status in {401, 403, 404}
             and normalized_method in {"GET", "HEAD"}
@@ -216,11 +223,14 @@ class GitLabApiClient:
 
     def request_text(self, method: str, path: str) -> GitLabResponse:
         target = self._target(path)
+        normalized_method = method.upper()
+        if self.anonymous_only and normalized_method not in {"GET", "HEAD"}:
+            raise GitLabError("public GitLab access is read-only")
         try:
             response = self._transport.request(
-                method,
+                normalized_method,
                 target,
-                headers=self._headers(),
+                headers=self._headers(anonymous=self.anonymous_only),
             )
         except HttpTransportError as exc:
             raise GitLabError(
