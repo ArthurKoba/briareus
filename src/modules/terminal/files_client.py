@@ -92,10 +92,15 @@ class TerminalFilesClient:
                         if isinstance(size_raw, int):
                             size_bytes = size_raw
                         next_raw = payload.get("next_offset")
-                        if not isinstance(next_raw, int) or next_raw < offset:
+                        eof = bool(payload.get("eof"))
+                        if (
+                            not isinstance(next_raw, int)
+                            or next_raw < offset
+                            or (next_raw == offset and not eof)
+                        ):
                             raise RuntimeError("file_read returned an invalid next_offset")
                         offset = next_raw
-                        if bool(payload.get("eof")):
+                        if eof:
                             break
         except Exception:
             with suppress(OSError):
