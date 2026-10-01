@@ -96,6 +96,22 @@ policy defaults and database/file paths. Public OAuth/HTTP identity is deploymen
 
 `AUTH_SERVICE_TOKEN`, `AUTH_URL` and `AUTH_TIMEOUT_SECONDS` are not used.
 
+## Terminal resource containment
+
+The `terminal` service is an arbitrary-command execution boundary and has hard Docker cgroup
+limits in Compose. Defaults are `2g` memory, `2g` memory+swap, `1.5` CPUs, and `256` PIDs.
+These limits apply to the complete process tree launched inside Terminal, including Wine,
+compilers, Python workloads, and accidental fork storms.
+
+Coolify may override these restart-required infrastructure limits with:
+
+- `TERMINAL_MEMORY_LIMIT` (default `2g`)
+- `TERMINAL_MEMORY_SWAP_LIMIT` (default `2g`; equal to memory limit means no extra swap budget)
+- `TERMINAL_CPU_LIMIT` (default `1.5`)
+- `TERMINAL_PIDS_LIMIT` (default `256`)
+
+Increase these only deliberately for a known workload; do not remove the containment boundary.
+
 ## Persistent storage
 
 The Compose stack owns four named volumes with minimal logical names:

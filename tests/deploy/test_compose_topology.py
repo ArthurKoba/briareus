@@ -36,6 +36,15 @@ def test_compose_keeps_runtime_services_restartable() -> None:
         assert service.get("restart") == "unless-stopped"
 
 
+def test_terminal_has_hard_resource_limits() -> None:
+    terminal = _services()["terminal"]
+
+    assert terminal["mem_limit"] == "${TERMINAL_MEMORY_LIMIT:-2g}"
+    assert terminal["memswap_limit"] == "${TERMINAL_MEMORY_SWAP_LIMIT:-2g}"
+    assert terminal["cpus"] == "${TERMINAL_CPU_LIMIT:-1.5}"
+    assert terminal["pids_limit"] == "${TERMINAL_PIDS_LIMIT:-256}"
+
+
 def test_compose_declares_only_primary_runtime_dependencies() -> None:
     services = _services()
 
