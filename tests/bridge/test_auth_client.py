@@ -138,8 +138,52 @@ async def test_local_auth_verifier_does_not_fail_closed_on_management_error() ->
             raise RuntimeError("management unavailable")
 
     verifier = LocalAuthTokenVerifier(
-        settings, resource, BrokenManagement()  # type: ignore[arg-type]
+        settings,
+        resource,
+        BrokenManagement(),  # type: ignore[arg-type]
     )
     access = await verifier.verify_token(token)
     assert access is not None
     assert access.client_id == "chatgpt-client"
+
+
+@pytest.mark.asyncio
+async def test_first_session_usage_is_recorded_before_sixty_seconds_uptime(monkeypatch) -> None:
+    settings = _settings()
+    resource = "https://mcp.example.test/web/mcp"
+    signing_key = derive_jwt_key(
+        low_entropy_material=settings.oauth_jwt_signing_key,
+        salt="fastmcp-jwt-signing-key",
+    )
+    issuer = JWTIssuer(
+        issuer=str(AnyHttpUrl(settings.public_base_url)),
+        audience=resource,
+        signing_key=signing_key,
+    )
+    token = issuer.issue_access_token(
+        client_id="fresh-runner",
+        scopes=["read:user"],
+        jti="fresh-jti",
+        upstream_claims={"login": "arthurkoba", "sub": "42"},
+    )
+
+    class FakeManagement:
+        def __init__(self) -> None:
+            self.events = []
+
+        def record_oauth_session(self, event) -> None:
+            self.events.append(event)
+
+    management = FakeManagement()
+    verifier = LocalAuthTokenVerifier(
+        settings,
+        resource,
+        management,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr("bridge.auth_client.time.monotonic", lambda: 1.0)
+
+    assert await verifier.verify_token(token) is not None
+    assert len(management.events) == 1
+
+    assert await verifier.verify_token(token) is not None
+    assert len(management.events) == 1
