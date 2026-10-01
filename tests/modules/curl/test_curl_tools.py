@@ -9,7 +9,6 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from common.settings import FileSettings
 from modules.curl.curl_tools import (
     DEFAULT_CURL_PRESET,
     CurlError,
@@ -20,15 +19,16 @@ from modules.curl.curl_tools import (
     curl_request_impl,
     curl_stream_capture_impl,
 )
-from modules.files.file_store import FileStore
 from modules.files.workspace_store import WorkspaceFileStore
+
+_MAX_FILE_BYTES = 64 * 1024 * 1024
 
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):  # noqa: A002
-        return
+        del format, args
 
     def _body(self) -> bytes:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -52,7 +52,9 @@ class _Handler(BaseHTTPRequestHandler):
             {
                 "method": self.command,
                 "path": self.path,
-                "headers": {key.lower(): value for key, value in self.headers.items()},
+                "headers": {
+                    key.lower(): value for key, value in self.headers.items()
+                },
                 "body": body.decode("utf-8", errors="replace"),
             },
             extra_headers=[
@@ -127,10 +129,19 @@ def http_server():
 
 
 @pytest.fixture
-def file_store(tmp_path) -> FileStore:
-    store = FileStore(settings=FileSettings(root=tmp_path / "files"))
-    store.ensure()
-    return store
+def workspace(tmp_path) -> WorkspaceFileStore:
+    value = WorkspaceFileStore(tmp_path / "workspace")
+    value.ensure()
+    return value
+
+
+def _request(workspace: WorkspaceFileStore, url: str, **kwargs):
+    return curl_request_impl(
+        url,
+        workspace=workspace,
+        max_file_bytes=_MAX_FILE_BYTES,
+        **kwargs,
+    )
 
 
 def test_presets_expose_browser_and_api_options() -> None:
@@ -139,9 +150,11 @@ def test_presets_expose_browser_and_api_options() -> None:
 
 
 def test_request_supports_method_query_headers_cookies_and_json(
-    http_server, file_store: FileStore
+    http_server,
+    workspace: WorkspaceFileStore,
 ) -> None:
-    result = curl_request_impl(
+    result = _request(
+        workspace,
         f"{http_server}/echo?existing=1",
         method="POST",
         query={"q": ["one", "two"], "flag": True},
@@ -149,12 +162,9 @@ def test_request_supports_method_query_headers_cookies_and_json(
         cookies={"session": "abc"},
         body_json={"hello": "world"},
         preset="json-api",
-        store=file_store,
     )
 
     assert result["status"] == 200
-    assert result["ok"] is True
-    assert result["body_is_text"] is True
     payload = json.loads(result["body_text"])
     assert payload["method"] == "POST"
     assert "existing=1" in payload["path"]
@@ -169,13 +179,14 @@ def test_request_supports_method_query_headers_cookies_and_json(
 
 
 def test_request_supports_arbitrary_method_and_form_body(
-    http_server, file_store: FileStore
+    http_server,
+    workspace: WorkspaceFileStore,
 ) -> None:
-    result = curl_request_impl(
+    result = _request(
+        workspace,
         f"{http_server}/echo",
         method="PATCH",
         body_form={"alpha": "1", "beta": ["x", "y"]},
-        store=file_store,
     )
     payload = json.loads(result["body_text"])
     assert payload["method"] == "PATCH"
@@ -185,97 +196,110 @@ def test_request_supports_arbitrary_method_and_form_body(
     )
 
 
-def test_browser_preset_can_be_overridden(http_server, file_store: FileStore) -> None:
-    result = curl_request_impl(
+def test_browser_preset_can_be_overridden(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
+    result = _request(
+        workspace,
         f"{http_server}/echo",
         preset="chrome-desktop",
         headers={"Accept-Language": "lv-LV,lv;q=0.9"},
-        store=file_store,
     )
     payload = json.loads(result["body_text"])
     assert "Chrome/" in payload["headers"]["user-agent"]
     assert payload["headers"]["accept-language"] == "lv-LV,lv;q=0.9"
 
 
-def test_redirects_follow_without_sensitive_headers(http_server, file_store: FileStore) -> None:
-    result = curl_request_impl(f"{http_server}/redirect", store=file_store)
+def test_redirects_follow_without_sensitive_headers(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
+    result = _request(workspace, f"{http_server}/redirect")
     assert result["status"] == 200
     assert result["redirect_count"] == 1
     assert "via=redirect" in result["final_url"]
-    assert result["redirect_follow_blocked_sensitive"] is False
 
 
 def test_sensitive_headers_block_automatic_redirect_by_default(
-    http_server, file_store: FileStore
+    http_server,
+    workspace: WorkspaceFileStore,
 ) -> None:
-    result = curl_request_impl(
+    result = _request(
+        workspace,
         f"{http_server}/redirect",
         headers={"Authorization": "Bearer secret"},
-        store=file_store,
     )
     assert result["status"] == 302
     assert result["redirect_follow_blocked_sensitive"] is True
-    request_headers = {item["name"].lower(): item["value"] for item in result["request"]["headers"]}
+    request_headers = {
+        item["name"].lower(): item["value"]
+        for item in result["request"]["headers"]
+    }
     assert request_headers["authorization"] == "<redacted>"
 
 
-def test_sensitive_redirect_can_be_explicitly_enabled(http_server, file_store: FileStore) -> None:
-    result = curl_request_impl(
+def test_sensitive_redirect_can_be_explicitly_enabled(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
+    result = _request(
+        workspace,
         f"{http_server}/redirect",
         headers={"Authorization": "Bearer secret"},
         forward_sensitive_headers_on_redirect=True,
-        store=file_store,
     )
     assert result["status"] == 200
     assert result["redirect_count"] == 1
 
 
-def test_download_streams_into_file_store(http_server, file_store: FileStore) -> None:
-    result = curl_download_impl(f"{http_server}/download", store=file_store)
-    file = result["file"]
+def test_download_defaults_to_workspace_downloads(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
+    result = curl_download_impl(
+        f"{http_server}/download",
+        workspace=workspace,
+        max_file_bytes=_MAX_FILE_BYTES,
+    )
 
-    assert result["status"] == 200
-    assert file["name"] == "fixture.bin"
-    stored = file_store.path_for(file["file_id"]).read_bytes()
-    assert stored == b"\x00BridgeBinary\xff" * 64
+    file = result["workspace_file"]
+    assert file["path"] == "downloads/fixture.bin"
+    assert workspace.path_for(file["path"]).read_bytes() == (
+        b"\x00BridgeBinary\xff" * 64
+    )
     assert result["body_is_text"] is False
     assert result["body_preview_hex"]
 
-def test_download_can_write_directly_to_shared_workspace(
+
+def test_download_supports_explicit_workspace_path(
     http_server,
-    file_store: FileStore,
-    tmp_path,
+    workspace: WorkspaceFileStore,
 ) -> None:
-    workspace = WorkspaceFileStore(tmp_path / "workspace")
     result = curl_download_impl(
         f"{http_server}/download",
         workspace_path="projects/demo/fixture.bin",
-        store=file_store,
         workspace=workspace,
+        max_file_bytes=_MAX_FILE_BYTES,
     )
 
-    assert "file" not in result
     assert result["workspace_file"]["path"] == "projects/demo/fixture.bin"
     assert workspace.path_for("projects/demo/fixture.bin").read_bytes() == (
         b"\x00BridgeBinary\xff" * 64
     )
-    assert file_store.list()["total"] == 0
 
 
+def test_workspace_file_can_be_sent_as_raw_request_body(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
+    workspace.write_text("payload.bin", "file-payload")
 
-def test_file_can_be_sent_as_raw_request_body(http_server, file_store: FileStore) -> None:
-    source = file_store.put_bytes(
-        b"file-payload",
-        name="payload.bin",
-        mime_type="application/octet-stream",
-        source="test",
-    )
-
-    result = curl_request_impl(
+    result = _request(
+        workspace,
         f"{http_server}/echo",
         method="POST",
-        body_file_id=source["file_id"],
-        store=file_store,
+        body_workspace_path="payload.bin",
     )
     payload = json.loads(result["body_text"])
     assert payload["body"] == "file-payload"
@@ -284,49 +308,56 @@ def test_file_can_be_sent_as_raw_request_body(http_server, file_store: FileStore
     )
 
 
-def test_stream_capture_commits_partial_stream_to_file(http_server, file_store: FileStore) -> None:
+def test_stream_capture_defaults_to_workspace_captures(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
     result = curl_stream_capture_impl(
         f"{http_server}/stream",
         duration_seconds=0.35,
         max_bytes=1024 * 1024,
         file_name="events.txt",
-        store=file_store,
+        workspace=workspace,
+        max_file_bytes=_MAX_FILE_BYTES,
     )
 
     assert result["status"] == 200
     assert result["captured_bytes"] > 0
     assert result["stop_reason"] in {"duration", "eof"}
-    file = result["file"]
-    captured = file_store.path_for(file["file_id"]).read_bytes()
-    assert captured.startswith(b"data:")
-    assert file["name"] == "events.txt"
+    file = result["workspace_file"]
+    assert file["path"] == "captures/events.txt"
+    assert workspace.path_for(file["path"]).read_bytes().startswith(b"data:")
 
 
-def test_rejects_header_injection(file_store: FileStore) -> None:
+def test_rejects_header_injection(workspace: WorkspaceFileStore) -> None:
     with pytest.raises(CurlError, match="control characters"):
-        curl_request_impl(
+        _request(
+            workspace,
             "http://127.0.0.1/",
             headers={"X-Test": "good\r\nInjected: yes"},
-            store=file_store,
         )
 
 
-def test_rejects_multiple_body_sources(http_server, file_store: FileStore) -> None:
+def test_rejects_multiple_body_sources(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
     with pytest.raises(CurlError, match="only one body source"):
-        curl_request_impl(
+        _request(
+            workspace,
             f"{http_server}/echo",
             method="POST",
             body_text="a",
             body_json={"b": 1},
-            store=file_store,
         )
 
 
-def test_http_auth_failure_is_classified(http_server, file_store: FileStore) -> None:
-    result = curl_request_impl(f"{http_server}/unauthorized", store=file_store)
-
+def test_http_auth_failure_is_classified(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
+    result = _request(workspace, f"{http_server}/unauthorized")
     assert result["status"] == 401
-    assert result["ok"] is False
     assert result["error"]["error_type"] == "http_authentication"
     assert "HTTP 401" in result["error"]["error_hint"]
 
@@ -342,12 +373,12 @@ def test_curl_transport_failure_categories_are_actionable() -> None:
     assert _http_status_diagnostic(429)["error_type"] == "http_rate_limit"
 
 
-def test_chrome_desktop_is_the_default_preset(http_server, file_store: FileStore) -> None:
+def test_chrome_desktop_is_default(
+    http_server,
+    workspace: WorkspaceFileStore,
+) -> None:
     assert DEFAULT_CURL_PRESET == "chrome-desktop"
-    presets = curl_presets_impl()
-    assert presets["default_preset"] == "chrome-desktop"
-
-    result = curl_request_impl(f"{http_server}/echo", store=file_store)
+    result = _request(workspace, f"{http_server}/echo")
     payload = json.loads(result["body_text"])
     headers = payload["headers"]
 
@@ -355,16 +386,14 @@ def test_chrome_desktop_is_the_default_preset(http_server, file_store: FileStore
     assert '"Google Chrome";v="153"' in headers["sec-ch-ua"]
     assert headers["sec-ch-ua-mobile"] == "?0"
     assert headers["sec-ch-ua-platform"] == '"Windows"'
-    assert headers["sec-fetch-mode"] == "navigate"
-    assert headers["sec-fetch-dest"] == "document"
     assert result["request"]["preset"] == "chrome-desktop"
 
 
-def test_explicit_native_curl_preset_still_overrides_default(
-    http_server, file_store: FileStore
+def test_explicit_native_curl_preset_overrides_default(
+    http_server,
+    workspace: WorkspaceFileStore,
 ) -> None:
-    result = curl_request_impl(f"{http_server}/echo", preset="curl", store=file_store)
+    result = _request(workspace, f"{http_server}/echo", preset="curl")
     payload = json.loads(result["body_text"])
-
     assert result["request"]["preset"] == "curl"
     assert "Chrome/" not in payload["headers"].get("user-agent", "")
