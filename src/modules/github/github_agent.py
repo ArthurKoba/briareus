@@ -349,7 +349,9 @@ class GitHubAppClient:
     ) -> JsonObject:
         repository = self._assert_allowed(repository)
         token = ""
-        if self.token:
+        if self.public_only:
+            token = ""
+        elif self.token:
             token = self.token
         else:
             try:
