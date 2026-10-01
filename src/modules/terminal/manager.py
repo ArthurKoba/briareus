@@ -12,9 +12,11 @@ import struct
 import termios
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
 from common.models import JsonObject
 from common.settings import TerminalSettings
 from modules.files.file_store import FileStore
@@ -508,10 +510,8 @@ class TerminalManager:
                     self._append_job_output(job, chunk)
         finally:
             if job.master_fd is not None:
-                try:
+                with suppress(OSError):
                     os.close(job.master_fd)
-                except OSError:
-                    pass
                 job.master_fd = None
 
     def _append_job_output(self, job: Job, chunk: bytes) -> None:
@@ -536,10 +536,8 @@ class TerminalManager:
         assert job.process is not None
         returncode = await job.process.wait()
         if job.reader_task is not None:
-            try:
+            with suppress(Exception):
                 await job.reader_task
-            except Exception:
-                pass
         job.ended_at = time.time()
         job.exit_code = returncode
         job.signal_number = -returncode if returncode < 0 else None
@@ -674,13 +672,11 @@ class TerminalManager:
     async def job_wait(self, job_id: str, timeout_seconds: float = 30) -> JsonObject:
         job = self._get_job(job_id)
         if job.watcher_task is not None and job.state in {"running", "cancelling"}:
-            try:
+            with suppress(TimeoutError):
                 await asyncio.wait_for(
                     asyncio.shield(job.watcher_task),
                     timeout=max(0, min(timeout_seconds, 300)),
                 )
-            except TimeoutError:
-                pass
         return self._job_public(job)
 
     async def job_cancel(self, job_id: str, grace_seconds: float = 3) -> JsonObject:
@@ -700,17 +696,13 @@ class TerminalManager:
             self._signal_process_group(process.pid, signal.SIGKILL)
             await process.wait()
         if job.watcher_task is not None:
-            try:
+            with suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(job.watcher_task), timeout=2)
-            except TimeoutError:
-                pass
         return self._job_public(job)
 
     @staticmethod
     def _signal_process_group(pid: int | None, signum: signal.Signals) -> None:
         if pid is None:
             return
-        try:
+        with suppress(ProcessLookupError):
             os.killpg(pid, signum)
-        except ProcessLookupError:
-            pass
