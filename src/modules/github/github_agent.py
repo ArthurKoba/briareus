@@ -13,7 +13,6 @@ from pathlib import Path
 import jwt
 
 from common.http_transport import HttpTransportError, PooledHttpTransport
-from common.repository_checkout import checkout_repository
 from common.models import (
     JsonContainer,
     JsonObject,
