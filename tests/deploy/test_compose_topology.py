@@ -105,6 +105,10 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
         "terminal-workspace:/workspace",
         "terminal-home:/home/agent",
     ]
+    assert services["analysis"]["volumes"] == [
+        "terminal-workspace:/workspace",
+    ]
+    assert "volumes" not in services["ghidra"]
 
 
 def test_compose_exposes_only_external_bootstrap_environment() -> None:

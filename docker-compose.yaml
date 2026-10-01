@@ -143,6 +143,8 @@ services:
       target: analysis
     environment:
       <<: [*management-client, *observability]
+    volumes:
+      - terminal-workspace:/workspace
 
   ghidra:
     <<: *private-service
