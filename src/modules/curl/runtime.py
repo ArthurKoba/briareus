@@ -8,7 +8,6 @@ from common.settings import (
     ManagementClientSettings,
     PrivateRuntimeSettings,
 )
-from modules.files.file_store import FileStore
 from modules.files.workspace_store import WorkspaceFileStore
 
 from .executor import resolve_curl_binary
@@ -20,7 +19,6 @@ _file_settings = FileSettings()
 _curl_settings = CurlSettings()
 
 mcp = build_private_mcp("curl", _management, observability_scope="web")
-_store = FileStore(settings=_file_settings)
 _workspace = WorkspaceFileStore(_file_settings.workspace_root)
 _curl_binary = resolve_curl_binary(_curl_settings)
 
@@ -28,8 +26,8 @@ register_curl_tools(
     mcp,
     READ_ONLY_LOCAL,
     WRITE_EXTERNAL,
-    store=_store,
     workspace=_workspace,
+    max_file_bytes=_file_settings.upload_max_bytes,
     curl_binary=_curl_binary,
 )
 

@@ -22,15 +22,14 @@ ARG BUILD_SHA=unknown
 ARG BUILD_TIME=unknown
 
 ENV FASTMCP_HOME=/auth \
-    FILE_ROOT=/files \
     HOME=/home/bridge \
     BUILD_SHA=${BUILD_SHA} \
     BUILD_TIME=${BUILD_TIME}
 
 COPY docker-entrypoint.sh /usr/local/bin/bridge-entrypoint
 RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
-    && mkdir -p /auth /files/objects/sha256 /files/tmp /management /home/bridge \
-    && chown -R 1000:1000 /auth /files /management /home/bridge
+    && mkdir -p /auth /management /home/bridge \
+    && chown -R 1000:1000 /auth /management /home/bridge
 
 COPY src/common ./src/common
 

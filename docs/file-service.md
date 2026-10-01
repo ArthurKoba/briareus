@@ -1,100 +1,75 @@
 # Files service architecture
 
-MCP Bridge has two file layers with different purposes:
+MCP Bridge uses one shared persistent working filesystem at `/workspace`.
 
-1. the shared mutable working filesystem at `/workspace`;
-2. the immutable content-addressed artifact store at `/files`.
+Terminal, Files, Curl and Management Admin mount the same Docker volume. A file uploaded
+through Files, downloaded by Curl, created by Terminal, or uploaded in Admin is therefore
+the same file at the same path. There is no content-addressed object store, SQLite file
+index, collection/reference layer, or `file_id` storage contract.
 
-The shared workspace is the normal agent working area. Terminal, Files and Curl see the
-same persistent Docker volume. Source checkouts, downloaded files, uploaded attachments,
-temporary investigation data and build outputs can therefore be manipulated by path
-without copying through an intermediate file ID.
+## Files MCP
 
-The immutable artifact store remains available for snapshots, reproducibility, deduplication
-and integrations such as Ghidra where an explicit immutable source boundary is useful.
+Files is a path-based file manager and transport surface over `/workspace`.
 
-## Shared workspace
+The public operations cover:
 
-The Files MCP is the file explorer/transport surface for the same filesystem Terminal uses.
-
-Workspace operations include:
-
-- list and inspect paths;
+- filesystem status and free space;
+- directory listing and file metadata;
 - bounded binary reads;
-- create UTF-8 text files and directories;
-- copy, move/rename and delete;
-- stream a ChatGPT/client attachment directly to a chosen workspace path;
-- snapshot a workspace file into immutable artifact storage when required.
+- SHA-256 calculation;
+- UTF-8 text creation/replacement;
+- sequential base64 chunk writes for binary files;
+- direct ChatGPT/client attachment ingress to a selected path;
+- directory creation;
+- copy, move/rename and delete.
 
-All public paths are relative to `/workspace`. The implementation resolves paths against
-that root and rejects traversal or symlink resolution outside it.
+All paths are resolved under `/workspace`. Traversal and symlink escapes outside the
+workspace root are rejected.
 
-Terminal uses named execution directories under `/workspace/projects/<workspace_id>`, but
-the shared filesystem is not limited to those directories. Files may also organize inputs,
-artifacts or scratch data elsewhere under `/workspace` when useful.
+## Binary writes
 
-Terminal's own job metadata and retained process logs are not stored in the shared
-filesystem. They live under the persistent agent home so Files operations cannot corrupt
-job state accidentally.
+`file_write` is the generic binary transfer primitive. The first call may use
+`truncate=true` and `offset=0`; subsequent chunks must use the exact returned
+`next_offset`. Sparse and overlapping writes are rejected. This replaces the previous
+resumable CAS upload-session API without introducing a second storage system.
 
-## Direct ingress
+## Attachment ingress
 
-`file_workspace_ingest` accepts a client attachment through the MCP file parameter and
-streams it directly to a requested workspace path. Partial data is written to a sibling
-temporary file and atomically published only after size/SHA-256 validation succeeds.
+`file_ingest` accepts a client attachment through the MCP file parameter and streams it
+directly into a caller-selected workspace destination. Partial bytes are written to a
+sibling temporary file and published only after configured size and optional SHA-256
+validation succeed.
 
-This is the preferred ingress when the file will immediately be inspected, unpacked,
-patched, built or otherwise manipulated through Terminal.
+## Curl integration
 
-The legacy `file_ingest` tool remains available when an immutable artifact is wanted
-immediately.
+Curl uses the same workspace. Request bodies may reference `body_workspace_path`.
+Downloads and bounded stream captures write directly to workspace paths. When the caller
+does not supply a destination, Curl uses ordinary `downloads/` or `captures/`
+subdirectories under `/workspace`.
 
-## Web downloads
+No hidden immutable object is created.
 
-Curl and Files share the same workspace volume. `curl_download` and
-`curl_stream_capture` accept an optional `workspace_path`; when supplied, their output is
-placed directly into the shared workspace and no immutable artifact is created.
+## Terminal integration
 
-Without `workspace_path`, existing behavior is retained and the result is committed to
-the immutable artifact store.
+Terminal executes directly against the same filesystem. Its named project directories
+live under `/workspace/projects/<workspace_id>`, but Files may operate anywhere under the
+workspace root.
 
-## Immutable artifact identity
+Terminal job metadata and retained process logs remain under `/home/agent/.terminal` so
+normal file-manager operations cannot corrupt job state.
 
-Immutable files are addressed by their SHA-256 content identity:
+## Ghidra / Analysis boundary
 
-```text
-sha256:<64-hex-digest>
-```
+Ghidra project storage remains isolated from `/workspace` and is never exposed to normal
+Terminal or Files operations.
 
-Names and MIME types are metadata. Re-uploading identical bytes does not create a second
-stored object.
+Analysis transfers selected inbound workspace files through Ghidra's internal chunked
+artifact staging before import. Ghidra project databases remain private. Exported analysis
+artifacts must likewise cross an explicit controlled transfer boundary before becoming
+normal workspace files; the project store itself is not mounted into the workspace.
 
-The persistent `/files` volume contains the internal object tree and SQLite metadata
-index. It is not mounted into the Terminal container.
+## Migration
 
-## Resumable artifact upload
-
-The existing `file_upload_*` protocol remains the generic resumable route for creating
-immutable artifacts. Upload sessions survive disconnects, validate sequential offsets,
-sizes and optional SHA-256, and commit into content-addressed storage.
-
-It is not required for normal workspace file manipulation.
-
-## Collections and references
-
-Archive collections and durable consumer references remain artifact-store concepts.
-Collections content-address archive members, while references protect immutable objects
-used by consumers from garbage collection.
-
-## Ghidra boundary
-
-Ghidra project storage remains separate from the shared workspace and is never mounted into
-Terminal/Files.
-
-When a workspace file must enter a Ghidra workflow, first create an explicit immutable
-snapshot with `file_workspace_snapshot`, then use the existing Ghidra/Analysis import
-adapter with that file ID. This preserves a reproducible source identity and prevents
-ordinary shell/file operations from touching Ghidra project databases.
-
-Ghidra exports continue to enter immutable artifact storage and can later be copied or
-otherwise materialized into normal working files through an explicit adapter when needed.
+The former content-addressed Files store was migrated before removal. Existing objects were
+copied into `/workspace/projects/migrated-files`, checksum-verified, and accompanied by
+`migration-manifest.json` containing the former identifiers and provenance metadata.

@@ -47,12 +47,24 @@ async def test_gitlab_runtime_surface_is_isolated() -> None:
 async def test_files_runtime_surface_is_isolated() -> None:
     names = await _tool_names(files)
 
-    assert "file_status" in names
-    assert "file_ingest" in names
-    assert "file_extract" in names
-    assert "file_workspace_list" in names
-    assert "file_workspace_ingest" in names
-    assert "file_workspace_snapshot" in names
+    assert {
+        "file_status",
+        "file_list",
+        "file_info",
+        "file_read",
+        "file_hash",
+        "file_write_text",
+        "file_write",
+        "file_ingest",
+        "file_mkdir",
+        "file_copy",
+        "file_move",
+        "file_delete",
+    }.issubset(names)
+    assert "file_extract" not in names
+    assert "file_upload_begin" not in names
+    assert "file_collection_list" not in names
+    assert "file_workspace_snapshot" not in names
     assert "curl_request" not in names
     assert "github_agent_status" not in names
     assert "accounts" not in names

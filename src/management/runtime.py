@@ -60,13 +60,6 @@ async def _maintenance_loop() -> None:
             config = await asyncio.to_thread(config_service.get)
             interval_seconds = config.maintenance_interval_minutes * 60
             await asyncio.to_thread(audit.cleanup)
-            if config.file_auto_cleanup_enabled:
-                await asyncio.to_thread(
-                    files.cleanup,
-                    retention_days=config.file_retention_days,
-                    limit=config.file_cleanup_limit,
-                    dry_run=False,
-                )
         except Exception:
             logger.exception("management maintenance cycle failed")
         await asyncio.sleep(interval_seconds)

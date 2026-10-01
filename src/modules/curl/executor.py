@@ -10,7 +10,7 @@ from pathlib import Path
 
 from common.models import JsonObject, JsonValue, json_loads, json_object, json_value
 from common.settings import CurlSettings
-from modules.files.file_store import FileStore
+from modules.files.workspace_store import WorkspaceFileStore
 
 from .errors import CurlError
 from .request import (
@@ -125,7 +125,8 @@ def _build_curl_command(
 
 def _execute_curl(
     *,
-    store: FileStore,
+    workspace: WorkspaceFileStore,
+    max_file_bytes: int,
     curl_binary: str,
     method: str,
     url: str,
@@ -136,7 +137,7 @@ def _execute_curl(
     body_json: JsonObject | list[JsonValue] | None,
     body_form: JsonObject | None,
     body_base64: str | None,
-    body_file_id: str | None,
+    body_workspace_path: str | None,
     body_content_type: str,
     preset: str,
     follow_redirects: bool,
@@ -148,7 +149,6 @@ def _execute_curl(
     max_response_bytes: int,
     forward_sensitive_headers_on_redirect: bool,
 ) -> tuple[JsonObject, Path, Path]:
-    store.ensure()
     clean_method = _validate_method(method)
     final_request_url = _with_query(_validate_url(url), query)
     merged = _merged_headers(preset, headers)
@@ -157,16 +157,17 @@ def _execute_curl(
         body_json=body_json,
         body_form=body_form,
         body_base64=body_base64,
-        body_file_id=body_file_id,
+        body_workspace_path=body_workspace_path,
         body_content_type=body_content_type,
         headers=merged,
-        store=store,
+        workspace=workspace,
+        max_file_bytes=max_file_bytes,
     )
 
-    fd_headers, raw_headers = tempfile.mkstemp(prefix="curl-headers-", dir=store.tmp)
+    fd_headers, raw_headers = tempfile.mkstemp(prefix="curl-headers-")
     os.close(fd_headers)
     header_path = Path(raw_headers)
-    fd_output, raw_output = tempfile.mkstemp(prefix="curl-output-", dir=store.tmp)
+    fd_output, raw_output = tempfile.mkstemp(prefix="curl-output-")
     os.close(fd_output)
     output_path = Path(raw_output)
 

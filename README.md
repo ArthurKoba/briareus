@@ -121,9 +121,9 @@ This prevents clean deployments from resolving a different dependency graph.
 
 ## Files
 
-Files are immutable and content-addressed. Public file identifiers are content IDs;
-physical storage paths stay internal. Files, Web/curl and other consumers use the same
-canonical object store contract.
+Files is the path-based file manager for the shared persistent `/workspace` filesystem.
+Terminal, Files, Web/curl and Management Admin see the same working files immediately.
+There is no separate content-addressed file store and no `file_id` storage contract.
 
 ## Analysis
 
@@ -146,9 +146,8 @@ MIT
 
 Terminal is a dedicated non-root Linux development runtime exposed at `/terminal/mcp`.
 It provides persistent workspaces, bounded shell execution, durable long-running jobs,
-interactive PTY input/output and cursor-based incremental logs. Terminal, Files and Curl
-share the same mutable `/workspace` volume, so working files are immediately available by
-path without file-ID import/export. The immutable Files object store remains separate and
-is not exposed to shell jobs. System toolchain packages are installed in the image; normal
-runtime commands execute as the unprivileged service user. Terminal command/stdin/output
-payloads are not duplicated into Management MCP-call history.
+interactive PTY input/output and cursor-based incremental logs. Terminal, Files, Curl and
+Management Admin share the same mutable `/workspace` volume, so working files are
+immediately available by path without import/export copies. System toolchain packages are
+installed in the image; normal runtime commands execute as the unprivileged service user.
+Terminal command/stdin/output payloads are not duplicated into Management MCP-call history.

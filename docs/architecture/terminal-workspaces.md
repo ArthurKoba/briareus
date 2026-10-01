@@ -65,8 +65,6 @@ per-workspace containers initially.
 - `workspace_create`
 - `workspace_info`
 - `workspace_delete`
-- `workspace_import_file(file_id, path)`
-- `workspace_export_file(path)`
 
 Keep these tools small and operational. Workspace deletion must refuse while jobs are
 using it unless an explicit force flag is supplied.
@@ -216,8 +214,8 @@ therefore require no import/export operation: a file uploaded, downloaded, moved
 through Files is immediately visible to Terminal by path, and files produced by Terminal
 are immediately visible to Files.
 
-The immutable `/files` artifact store is still separate and is not mounted into Terminal.
-Creating an immutable artifact from a working file is an explicit Files snapshot operation.
+There is no separate Files object store. Files and Terminal are two interfaces over the
+same working filesystem.
 
 Terminal job metadata and retained process logs live under `/home/agent/.terminal`, not
 inside the shared workspace.

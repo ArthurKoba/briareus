@@ -720,9 +720,6 @@ class SettingsView(CustomView):
             logging_capture_payloads="logging_capture_payloads" in form,
             logging_retention_days=int(str(form.get("logging_retention_days", "30"))),
             logging_max_records=int(str(form.get("logging_max_records", "10000"))),
-            file_auto_cleanup_enabled="file_auto_cleanup_enabled" in form,
-            file_retention_days=int(str(form.get("file_retention_days", "30"))),
-            file_cleanup_limit=int(str(form.get("file_cleanup_limit", "1000"))),
             maintenance_interval_minutes=int(
                 str(form.get("maintenance_interval_minutes", "60"))
             ),
@@ -790,60 +787,11 @@ class FilesView(CustomView):
 
     @route("")
     async def index(self, request: Request) -> Response:
-        query = request.query_params.get("q", "")
-        sort_by = request.query_params.get("sort", "created_at")
-        sort_order = request.query_params.get("order", "desc").casefold()
-        allowed_sorts = {"name", "mime_type", "size_bytes", "created_at", "reference_count"}
-        if sort_by not in allowed_sorts:
-            sort_by = "created_at"
-        if sort_order not in {"asc", "desc"}:
-            sort_order = "desc"
-        listing, stats = await asyncio.gather(
-            asyncio.to_thread(
-                self.files.list,
-                query=query,
-                limit=250,
-                sort_by=sort_by,
-                sort_order=sort_order,
-            ),
-            asyncio.to_thread(self.files.stats),
-        )
-        base_url = "/admin/files"
-        sort_urls = {
-            field: f"{base_url}?{urllib.parse.urlencode({
-                'q': query,
-                'sort': field,
-                'order': (
-                    'desc'
-                    if sort_by == field and sort_order == 'asc'
-                    else 'asc'
-                ),
-            })}"
-            for field in allowed_sorts
-        }
-        return _view_templates(self).TemplateResponse(
-            request=request,
-            name="management_files.html",
-            context={
-                "title": "Files",
-                "listing": listing,
-                "stats": stats,
-                "query": query,
-                "sort_by": sort_by,
-                "sort_order": sort_order,
-                "sort_urls": sort_urls,
-                "base_url": base_url,
-            },
-        )
-
-    @route("/workspace")
-    async def workspace(self, request: Request) -> Response:
         current = request.query_params.get("path", "").strip().strip("/")
         try:
-            listing = await asyncio.to_thread(
-                self.files.workspace_list,
-                current,
-                limit=500,
+            listing, stats = await asyncio.gather(
+                asyncio.to_thread(self.files.list, current, limit=500),
+                asyncio.to_thread(self.files.stats),
             )
             error = ""
         except Exception as exc:
@@ -854,205 +802,111 @@ class FilesView(CustomView):
                 "total": 0,
                 "truncated": False,
             }
+            stats = {}
             error = str(exc)
-        parent = ""
-        if current:
-            parent = posixpath.dirname(current)
+        parent = posixpath.dirname(current) if current else ""
         return _view_templates(self).TemplateResponse(
             request=request,
-            name="management_workspace_files.html",
+            name="management_files.html",
             context={
-                "title": "Workspace Files",
+                "title": "Files",
                 "listing": listing,
+                "stats": stats,
                 "current_path": current,
                 "parent_path": parent,
                 "error": error,
             },
         )
 
-    @route("/workspace/upload", methods=["POST"])
-    async def workspace_upload(self, request: Request) -> Response:
+    @route("/upload", methods=["POST"])
+    async def upload(self, request: Request) -> Response:
         form = await request.form()
         upload = form.get("file")
         current = str(form.get("path", "")).strip().strip("/")
         overwrite = str(form.get("overwrite", "")).lower() in {
-            "1",
-            "true",
-            "on",
-            "yes",
+            "1", "true", "on", "yes"
         }
         if not isinstance(upload, UploadFile):
             flash(request, "Choose a file to upload", "error")
-            return RedirectResponse(
-                f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
-                status_code=303,
-            )
-        name = upload.filename or "upload.bin"
-        destination = posixpath.join(current, name) if current else name
-        try:
-            await asyncio.to_thread(
-                self.files.workspace_upload,
-                upload.file,
-                destination=destination,
-                overwrite=overwrite,
-            )
-        except Exception as exc:
-            flash(request, f"Workspace upload failed: {exc}", "error")
         else:
-            flash(request, f"Uploaded {destination}", "success")
+            name = Path(upload.filename or "upload.bin").name
+            destination = posixpath.join(current, name) if current else name
+            try:
+                await asyncio.to_thread(
+                    self.files.upload,
+                    upload.file,
+                    destination=destination,
+                    overwrite=overwrite,
+                )
+            except Exception as exc:
+                flash(request, f"Upload failed: {exc}", "error")
+            else:
+                flash(request, f"Uploaded {destination}", "success")
         return RedirectResponse(
-            f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
-    @route("/workspace/mkdir", methods=["POST"])
-    async def workspace_mkdir(self, request: Request) -> Response:
+    @route("/mkdir", methods=["POST"])
+    async def mkdir(self, request: Request) -> Response:
         form = await request.form()
         current = str(form.get("path", "")).strip().strip("/")
         name = str(form.get("name", "")).strip().strip("/")
-        if not name:
-            flash(request, "Directory name is required", "error")
+        if not name or "/" in name or "\\" in name:
+            flash(request, "A single directory name is required", "error")
         else:
             destination = posixpath.join(current, name) if current else name
             try:
-                await asyncio.to_thread(self.files.workspace_mkdir, destination)
+                await asyncio.to_thread(self.files.mkdir, destination)
             except Exception as exc:
                 flash(request, f"Create directory failed: {exc}", "error")
             else:
                 flash(request, f"Created {destination}", "success")
         return RedirectResponse(
-            f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
-    @route("/workspace/download")
-    async def workspace_download(self, request: Request) -> Response:
+    @route("/download")
+    async def download(self, request: Request) -> Response:
         path = request.query_params.get("path", "").strip()
         if not path:
-            raise HTTPException(status_code=400, detail="workspace path is required")
+            raise HTTPException(status_code=400, detail="file path is required")
         try:
-            info = await asyncio.to_thread(self.files.workspace_info, path)
-            file_path = await asyncio.to_thread(self.files.workspace_path_for, path)
+            info = await asyncio.to_thread(self.files.info, path)
+            file_path = await asyncio.to_thread(self.files.path_for, path)
         except Exception as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if info.get("type") != "file":
-            raise HTTPException(status_code=400, detail="workspace path is not a file")
-        mime_type = str(info.get("mime_type") or "application/octet-stream")
+            raise HTTPException(status_code=400, detail="path is not a file")
         return FileResponse(
             file_path,
             filename=str(info.get("name") or file_path.name),
-            media_type=mime_type,
+            media_type=str(info.get("mime_type") or "application/octet-stream"),
         )
 
-    @route("/workspace/delete", methods=["POST"])
-    async def workspace_delete(self, request: Request) -> Response:
+    @route("/delete", methods=["POST"])
+    async def delete(self, request: Request) -> Response:
         form = await request.form()
         current = str(form.get("current_path", "")).strip().strip("/")
         path = str(form.get("path", "")).strip()
         recursive = str(form.get("recursive", "")).lower() in {
-            "1",
-            "true",
-            "on",
-            "yes",
+            "1", "true", "on", "yes"
         }
         try:
             await asyncio.to_thread(
-                self.files.workspace_delete,
+                self.files.delete,
                 path,
                 recursive=recursive,
             )
         except Exception as exc:
-            flash(request, f"Workspace delete failed: {exc}", "error")
+            flash(request, f"Delete failed: {exc}", "error")
         else:
             flash(request, f"Deleted {path}", "success")
         return RedirectResponse(
-            f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
-
-    @route("/upload", methods=["POST"])
-    async def upload(self, request: Request) -> Response:
-        form = await request.form()
-        upload = form.get("file")
-        if not isinstance(upload, UploadFile):
-            flash(request, "Choose a file to upload", "error")
-            return RedirectResponse("/admin/files", status_code=303)
-        name = upload.filename or "upload.bin"
-        content_type = upload.content_type or ""
-        try:
-            await asyncio.to_thread(
-                self.files.upload,
-                upload.file,
-                name=name,
-                mime_type=content_type,
-            )
-        except Exception as exc:
-            flash(request, f"Upload failed: {exc}", "error")
-        else:
-            flash(request, f"Uploaded {name}", "success")
-        return RedirectResponse("/admin/files", status_code=303)
-
-    @route("/detail/{file_id:path}")
-    async def detail(self, request: Request) -> Response:
-        file_id = request.path_params["file_id"]
-        try:
-            info = await asyncio.to_thread(self.files.info, file_id)
-        except Exception as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _view_templates(self).TemplateResponse(
-            request=request,
-            name="management_file_detail.html",
-            context={"title": "File details", "info": info, "base_url": "/admin/files"},
-        )
-
-    @route("/download/{file_id:path}")
-    async def download(self, request: Request) -> Response:
-        file_id = request.path_params["file_id"]
-        try:
-            info = await asyncio.to_thread(self.files.info, file_id)
-            path = await asyncio.to_thread(self.files.path_for, file_id)
-        except Exception as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        name = str(info.get("name") or "download.bin")
-        mime_type = str(info.get("mime_type") or "application/octet-stream")
-        return FileResponse(path, filename=name, media_type=mime_type)
-
-    @route("/delete", methods=["POST"])
-    async def delete_file(self, request: Request) -> Response:
-        form = await request.form()
-        file_id = str(form.get("file_id", "")).strip()
-        force = str(form.get("force", "")).lower() in {"1", "true", "on", "yes"}
-        try:
-            await asyncio.to_thread(self.files.delete, file_id, force=force)
-        except Exception as exc:
-            flash(request, f"Delete failed: {exc}", "error")
-        else:
-            flash(request, f"Deleted {file_id}", "success")
-        return RedirectResponse("/admin/files", status_code=303)
-
-    @route("/cleanup", methods=["POST"])
-    async def cleanup(self, request: Request) -> Response:
-        form = await request.form()
-        dry_run = str(form.get("dry_run", "")).lower() in {"1", "true", "on", "yes"}
-        try:
-            retention_days = int(str(form.get("retention_days", "30")))
-            limit = int(str(form.get("limit", "1000")))
-            if not 1 <= retention_days <= 3650:
-                raise ValueError("retention days must be between 1 and 3650")
-            if not 1 <= limit <= 10_000:
-                raise ValueError("cleanup limit must be between 1 and 10000")
-            result = await asyncio.to_thread(
-                self.files.cleanup,
-                retention_days=retention_days,
-                limit=limit,
-                dry_run=dry_run,
-            )
-        except Exception as exc:
-            flash(request, f"Cleanup failed: {exc}", "error")
-        else:
-            mode = "Would remove" if dry_run else "Removed"
-            flash(request, f"{mode} {result.get('count', 0)} files", "success")
-        return RedirectResponse("/admin/files", status_code=303)
 
 
 def _view_templates(view: CustomView) -> Jinja2Templates:

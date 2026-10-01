@@ -73,7 +73,6 @@ def test_compose_owns_clean_named_volumes() -> None:
 
     assert set(volumes) == {
         "management",
-        "files",
         "auth",
         "terminal-workspace",
         "terminal-home",
@@ -87,15 +86,12 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
 
     assert services["management"]["volumes"] == [
         "management:/management",
-        "files:/files",
         "terminal-workspace:/workspace",
     ]
     assert services["files"]["volumes"] == [
-        "files:/files",
         "terminal-workspace:/workspace",
     ]
     assert services["curl"]["volumes"] == [
-        "files:/files",
         "terminal-workspace:/workspace",
     ]
     assert services["auth"]["volumes"] == ["auth:/auth"]
@@ -183,9 +179,6 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "GITLAB_REGISTRY_CACHE_TTL_SECONDS",
         "FILE_WORKSPACE_ROOT",
         "FILE_UPLOAD_MAX_BYTES",
-        "FILE_UPLOAD_CHUNK_BYTES",
-        "FILE_MAX_EXTRACT_FILES",
-        "FILE_MAX_EXTRACT_BYTES",
         "CURL_BINARY",
         "ANALYSIS_SCHEMA_CACHE_TTL_SECONDS",
         "TERMINAL_WORKSPACE_ROOT",

@@ -19,7 +19,7 @@ MCP Bridge owns one private `management` runtime inside the modular monolith.
 - Every provider operation selects an explicit `account_id`; UUID and provider-local alias are valid selectors.
 - Starlette Admin is a presentation adapter for accounts, invocation logs, runtime settings and Files administration.
 - FastMCP middleware emits bounded, secret-redacted call payloads best-effort. Logging and payload capture are runtime-configurable and retention is enforced automatically.
-- Files administration reuses the canonical Files `FileStore` over the shared `files-data` volume, including reference-aware cleanup.
+- Files administration operates directly on the same shared `/workspace` volume used by Files, Curl and Terminal.
 - Deployment environment contains bootstrap/configuration only; dynamic provider accounts are application data.
 
 ## Consequences

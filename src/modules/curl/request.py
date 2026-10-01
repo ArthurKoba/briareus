@@ -10,8 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from common.models import JsonObject, JsonValue
-from modules.files.file_store import FileStore
-from modules.files.models import FileInfo
+from modules.files.workspace_store import WorkspaceFileStore
 
 from .errors import CurlError
 from .presets import _PRESETS, DEFAULT_CURL_PRESET
@@ -133,10 +132,11 @@ def _body_source(
     body_json: JsonObject | list[JsonValue] | None,
     body_form: JsonObject | None,
     body_base64: str | None,
-    body_file_id: str | None,
+    body_workspace_path: str | None,
     body_content_type: str,
     headers: dict[str, str],
-    store: FileStore,
+    workspace: WorkspaceFileStore,
+    max_file_bytes: int,
 ) -> tuple[Path | None, Path | None]:
     supplied = sum(
         value is not None and value != ""
@@ -145,25 +145,27 @@ def _body_source(
             body_json,
             body_form,
             body_base64,
-            body_file_id,
+            body_workspace_path,
         )
     )
     if supplied > 1:
         raise CurlError(
             "only one body source may be used: body_text, body_json, body_form, "
-            "body_base64, or body_file_id"
+            "body_base64, or body_workspace_path"
         )
 
     content_type = body_content_type.strip()
-    if body_file_id:
-        file = FileInfo.model_validate(store.info(body_file_id))
+    if body_workspace_path:
+        info = workspace.info(body_workspace_path)
+        if info.get("type") != "file":
+            raise CurlError("body_workspace_path must point to a file")
         if content_type and not _has_header(headers, "Content-Type"):
             headers["Content-Type"] = content_type
         elif not _has_header(headers, "Content-Type"):
-            mime = file.mime_type.strip()
+            mime = str(info.get("mime_type") or "").strip()
             if mime:
                 headers["Content-Type"] = mime
-        return store.path_for(body_file_id), None
+        return workspace.path_for(body_workspace_path), None
 
     data: bytes | None = None
     if body_json is not None:
@@ -192,11 +194,10 @@ def _body_source(
 
     if data is None:
         return None, None
-    if len(data) > store.settings.upload_max_bytes:
+    if len(data) > max_file_bytes:
         raise CurlError("request body exceeds the configured file size limit")
 
-    store.ensure()
-    fd, raw = tempfile.mkstemp(prefix="curl-body-", dir=store.tmp)
+    fd, raw = tempfile.mkstemp(prefix="curl-body-")
     path = Path(raw)
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)

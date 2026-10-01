@@ -45,8 +45,8 @@ The gateway exposes the private Starlette Admin surface at `/admin` on the main 
 - separate GitHub Accounts and GitLab Accounts sections;
 - write-only credential replacement and connection tests;
 - MCP invocation history including captured arguments/results/errors;
-- Settings for logging enable/disable, payload capture, retention/max-record limits, Files auto-cleanup and maintenance cadence;
-- a Files section for search/inspection, upload, download, guarded deletion, cleanup preview and manual cleanup.
+- Settings for logging enable/disable, payload capture, retention/max-record limits and maintenance cadence;
+- a Files section that browses the shared workspace and supports upload, download, directory creation and deletion.
 
 ## Invocation logging
 
@@ -54,9 +54,11 @@ Tool-call logging is best-effort and never makes a successful MCP call depend on
 
 Retention is enforced both while appending events and by the periodic management maintenance task. Logs can also be cleared or retention can be applied immediately from Admin.
 
-## Files lifecycle
+## Files administration
 
-Management mounts the same `files-data` volume used by the Files/Curl runtimes and uses the canonical `FileStore`, not a second storage implementation. Automatic cleanup is disabled by default and only removes old unreferenced files. The same cleanup can be previewed and triggered manually from Admin.
+Management mounts the same `/workspace` volume used by Files, Curl and Terminal. Admin is
+a direct file-manager view of that shared filesystem rather than a second storage/index
+implementation.
 
 ## Coolify bootstrap
 

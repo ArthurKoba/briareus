@@ -5,11 +5,7 @@ from mcp.types import ToolAnnotations
 
 from common.models import JsonObject
 
-from .file_ingress import ingest_file
-from .file_store import FileStore
-from .migration import migrate_legacy_store
-from .models import ClientFile, FileReference, FileReferenceListResponse
-from .upload_manager import FileUploadManager
+from .models import ClientFile
 from .workspace_ingress import ingest_workspace_file
 from .workspace_store import WorkspaceFileStore
 
@@ -20,114 +16,69 @@ def register_file_tools(
     write_annotations: ToolAnnotations,
     destructive_annotations: ToolAnnotations,
     *,
-    store: FileStore,
-    upload_manager: FileUploadManager,
     workspace: WorkspaceFileStore,
+    max_file_bytes: int,
 ) -> None:
     @mcp.tool(title="File status", annotations=read_annotations)
     def file_status() -> JsonObject:
-        """Inspect the universal persistent MCP Bridge file store and active uploads."""
-        result = store.status()
-        result["active_uploads"] = upload_manager.active_count()
-        result["workspace"] = workspace.status()
-        return result
+        return workspace.status()
 
-    @mcp.tool(title="Migrate legacy file store", annotations=write_annotations)
-    def file_migrate_legacy_store(
-        destination_dir: str = "projects/migrated-files",
-        overwrite: bool = True,
-    ) -> JsonObject:
-        """Copy every legacy content-addressed file into normal workspace files.
-
-        This is a one-time migration tool. Each copied file is checksum-verified and
-        migration-manifest.json records the old file ID, metadata and references.
-        """
-        return migrate_legacy_store(
-            store,
-            workspace,
-            destination_dir=destination_dir,
-            overwrite=overwrite,
-        )
-
-    @mcp.tool(title="Workspace list", annotations=read_annotations)
-    def file_workspace_list(
-        path: str = "",
-        offset: int = 0,
-        limit: int = 200,
-    ) -> JsonObject:
-        """List files/directories in the shared Terminal workspace."""
+    @mcp.tool(title="File list", annotations=read_annotations)
+    def file_list(path: str = "", offset: int = 0, limit: int = 200) -> JsonObject:
         return workspace.list(path, offset=offset, limit=limit)
 
-    @mcp.tool(title="Workspace info", annotations=read_annotations)
-    def file_workspace_info(path: str) -> JsonObject:
-        """Inspect one file or directory in the shared Terminal workspace."""
+    @mcp.tool(title="File info", annotations=read_annotations)
+    def file_info(path: str) -> JsonObject:
         return workspace.info(path)
 
-    @mcp.tool(title="Workspace read", annotations=read_annotations)
-    def file_workspace_read(
-        path: str,
-        offset: int = 0,
-        length: int = 1024 * 1024,
-    ) -> JsonObject:
-        """Read bounded bytes from a shared-workspace file as base64."""
+    @mcp.tool(title="File read", annotations=read_annotations)
+    def file_read(path: str, offset: int = 0, length: int = 1024 * 1024) -> JsonObject:
         return workspace.read(path, offset=offset, length=length)
 
-    @mcp.tool(title="Workspace write text", annotations=write_annotations)
-    def file_workspace_write_text(
+    @mcp.tool(title="File hash", annotations=read_annotations)
+    def file_hash(path: str) -> JsonObject:
+        return {"path": path.strip().lstrip("/"), "sha256": workspace.sha256(path)}
+
+    @mcp.tool(title="File write text", annotations=write_annotations)
+    def file_write_text(
         path: str,
         content: str,
         overwrite: bool = True,
         create_parents: bool = True,
     ) -> JsonObject:
-        """Create or replace one UTF-8 text file in the shared workspace."""
         return workspace.write_text(
-            path,
-            content,
-            overwrite=overwrite,
-            create_parents=create_parents,
+            path, content, overwrite=overwrite, create_parents=create_parents
         )
 
-    @mcp.tool(title="Workspace mkdir", annotations=write_annotations)
-    def file_workspace_mkdir(path: str, parents: bool = True) -> JsonObject:
-        """Create a directory in the shared workspace."""
-        return workspace.mkdir(path, parents=parents)
-
-    @mcp.tool(title="Workspace copy", annotations=write_annotations)
-    def file_workspace_copy(
-        source: str,
-        destination: str,
-        overwrite: bool = False,
+    @mcp.tool(title="File write chunk", annotations=write_annotations)
+    def file_write(
+        path: str,
+        data_base64: str,
+        offset: int = 0,
+        truncate: bool = False,
+        create_parents: bool = True,
     ) -> JsonObject:
-        """Copy a file or directory within the shared workspace."""
-        return workspace.copy(source, destination, overwrite=overwrite)
-
-    @mcp.tool(title="Workspace move", annotations=write_annotations)
-    def file_workspace_move(
-        source: str,
-        destination: str,
-        overwrite: bool = False,
-    ) -> JsonObject:
-        """Move or rename a file/directory within the shared workspace."""
-        return workspace.move(source, destination, overwrite=overwrite)
-
-    @mcp.tool(title="Workspace delete", annotations=destructive_annotations)
-    def file_workspace_delete(path: str, recursive: bool = False) -> JsonObject:
-        """Delete a file or directory from the shared workspace."""
-        return workspace.delete(path, recursive=recursive)
+        return workspace.write_chunk(
+            path,
+            data_base64,
+            offset=offset,
+            truncate=truncate,
+            create_parents=create_parents,
+            max_file_bytes=max_file_bytes,
+        )
 
     @mcp.tool(
-        title="Workspace ingest attachment",
+        title="File ingest attachment",
         annotations=write_annotations,
         meta={"openai/fileParams": ["file"]},
     )
-    def file_workspace_ingest(
+    def file_ingest(
         file: ClientFile,
         destination: str,
         expected_size: int | None = None,
         expected_sha256: str = "",
         overwrite: bool = False,
     ) -> JsonObject:
-        """Stream a chat/client attachment directly into a workspace path."""
         return ingest_workspace_file(
             file=file,
             destination=destination,
@@ -135,229 +86,21 @@ def register_file_tools(
             expected_sha256=expected_sha256,
             overwrite=overwrite,
             workspace=workspace,
-            max_bytes=store.settings.upload_max_bytes,
+            max_bytes=max_file_bytes,
         )
 
-    @mcp.tool(title="Workspace snapshot", annotations=write_annotations)
-    def file_workspace_snapshot(
-        path: str,
-        name: str = "",
-        mime_type: str = "",
-    ) -> JsonObject:
-        """Snapshot a workspace file into immutable content-addressed storage."""
-        source = workspace.path_for(path)
-        if not source.is_file():
-            raise ValueError("workspace path is not a file")
-        return store.put_file(
-            source,
-            name=name.strip() or source.name,
-            mime_type=mime_type,
-            source="workspace-snapshot",
-        )
+    @mcp.tool(title="File mkdir", annotations=write_annotations)
+    def file_mkdir(path: str, parents: bool = True) -> JsonObject:
+        return workspace.mkdir(path, parents=parents)
 
-    @mcp.tool(
-        title="File ingest",
-        annotations=write_annotations,
-        meta={"openai/fileParams": ["file"]},
-    )
-    def file_ingest(
-        file: ClientFile,
-        name: str = "",
-        mime_type: str = "",
-        expected_size: int | None = None,
-        expected_sha256: str = "",
-    ) -> JsonObject:
-        """Ingest a client attachment/file directly into immutable file storage.
+    @mcp.tool(title="File copy", annotations=write_annotations)
+    def file_copy(source: str, destination: str, overwrite: bool = False) -> JsonObject:
+        return workspace.copy(source, destination, overwrite=overwrite)
 
-        Pass the client-visible attachment/file as `file`. ChatGPT resolves this
-        marked file parameter into a structured payload containing an authorized
-        temporary download URL plus file metadata. MCP Bridge streams the bytes server-side;
-        do not base64-encode chat attachments for this tool.
-
-        Use file_upload_* only as the generic resumable fallback for clients that
-        cannot provide a file-capable argument.
-        """
-        return ingest_file(
-            file=file,
-            name=name,
-            mime_type=mime_type,
-            expected_size=expected_size,
-            expected_sha256=expected_sha256,
-            store=store,
-        )
-
-    @mcp.tool(title="File upload begin", annotations=write_annotations)
-    def file_upload_begin(
-        name: str,
-        size_bytes: int,
-        mime_type: str = "",
-        expected_sha256: str = "",
-    ) -> JsonObject:
-        """Create a resumable upload session for an agent-controlled file transfer."""
-        return upload_manager.begin(
-            name=name,
-            size_bytes=size_bytes,
-            mime_type=mime_type,
-            expected_sha256=expected_sha256,
-        )
-
-    @mcp.tool(title="File upload status", annotations=read_annotations)
-    def file_upload_status(upload_id: str) -> JsonObject:
-        """Return upload progress and the exact next byte offset."""
-        return upload_manager.status(upload_id)
-
-    @mcp.tool(title="File upload list", annotations=read_annotations)
-    def file_upload_list(
-        state: str = "",
-        offset: int = 0,
-        limit: int = 100,
-    ) -> JsonObject:
-        """List resumable upload sessions so agents can recover interrupted transfers."""
-        return upload_manager.list(state=state, offset=offset, limit=limit)
-
-    @mcp.tool(title="File upload write", annotations=write_annotations)
-    def file_upload_write(
-        upload_id: str,
-        offset: int,
-        data_base64: str,
-    ) -> JsonObject:
-        """Append one base64-encoded chunk at the exact next offset.
-
-        The server rejects oversized, reordered, sparse, or overlapping chunks.
-        Use the returned next_offset for the following call.
-        """
-        return upload_manager.write(upload_id, offset, data_base64)
-
-    @mcp.tool(title="File upload finish", annotations=write_annotations)
-    def file_upload_finish(upload_id: str) -> JsonObject:
-        """Verify size/SHA-256, commit the upload, and return its immutable file_id."""
-        return upload_manager.finish(upload_id)
-
-    @mcp.tool(title="File upload cancel", annotations=destructive_annotations)
-    def file_upload_cancel(upload_id: str) -> JsonObject:
-        """Cancel an unfinished upload and discard its staged bytes."""
-        return upload_manager.cancel(upload_id)
-
-    @mcp.tool(title="File upload cleanup", annotations=destructive_annotations)
-    def file_upload_cleanup(
-        older_than_hours: int = 24,
-        dry_run: bool = True,
-        limit: int = 1000,
-    ) -> JsonObject:
-        """Preview or remove stale upload-session state without deleting committed files."""
-        return upload_manager.cleanup(
-            older_than_hours=older_than_hours,
-            dry_run=dry_run,
-            limit=limit,
-        )
-
-    @mcp.tool(title="File list", annotations=read_annotations)
-    def file_list(
-        query: str = "",
-        offset: int = 0,
-        limit: int = 100,
-    ) -> JsonObject:
-        """List immutable files by metadata. Physical filesystem paths are private."""
-        return store.list(query=query, offset=offset, limit=limit)
-
-    @mcp.tool(title="File info", annotations=read_annotations)
-    def file_info(file_id: str) -> JsonObject:
-        """Return metadata, aliases, collections, and consumer references."""
-        return store.info(file_id)
-
-    @mcp.tool(title="File read", annotations=read_annotations)
-    def file_read(
-        file_id: str,
-        offset: int = 0,
-        length: int = 1024 * 1024,
-    ) -> JsonObject:
-        """Read file bytes as base64 by immutable file_id."""
-        return store.read(file_id, offset=offset, length=length)
-
-    @mcp.tool(title="File create text", annotations=write_annotations)
-    def file_create_text(
-        name: str,
-        content: str,
-        mime_type: str = "text/plain; charset=utf-8",
-    ) -> JsonObject:
-        """Create an immutable text file generated by an agent or backend."""
-        return store.put_text(name=name, content=content, mime_type=mime_type)
-
-    @mcp.tool(title="File extract", annotations=write_annotations)
-    def file_extract(file_id: str) -> JsonObject:
-        """Extract a tar/zip file into a content-addressed collection."""
-        return store.extract(file_id)
-
-    @mcp.tool(title="File collection list", annotations=read_annotations)
-    def file_collection_list(
-        collection_id: str,
-        prefix: str = "",
-        offset: int = 0,
-        limit: int = 200,
-    ) -> JsonObject:
-        """List files in an extracted collection without exposing server paths."""
-        return store.collection_list(
-            collection_id,
-            prefix=prefix,
-            offset=offset,
-            limit=limit,
-        )
-
-    @mcp.tool(title="File collection delete", annotations=destructive_annotations)
-    def file_collection_delete(collection_id: str) -> JsonObject:
-        """Delete a collection manifest while leaving its immutable member files intact."""
-        return store.collection_delete(collection_id)
-
-    @mcp.tool(title="File collection resolve", annotations=read_annotations)
-    def file_collection_resolve(
-        collection_id: str,
-        path: str,
-    ) -> JsonObject:
-        """Resolve one collection-relative path to its immutable file_id."""
-        return store.collection_resolve(collection_id, path)
-
-    @mcp.tool(title="File references", annotations=read_annotations)
-    def file_references(
-        consumer_type: str = "",
-        consumer_id: str = "",
-    ) -> JsonObject:
-        """List durable links from files to consumers such as Ghidra projects."""
-        refs = store.references(
-            consumer_type=consumer_type,
-            consumer_id=consumer_id,
-        )
-        return FileReferenceListResponse(
-            references=[FileReference.model_validate(ref) for ref in refs],
-            count=len(refs),
-        ).to_json()
-
-    @mcp.tool(title="File release reference", annotations=destructive_annotations)
-    def file_release_reference(
-        file_id: str,
-        consumer_type: str,
-        consumer_id: str,
-        role: str = "source",
-    ) -> JsonObject:
-        """Release one consumer reference so an unused file can later be collected."""
-        return store.release_reference(
-            file_id,
-            consumer_type,
-            consumer_id,
-            role,
-        )
+    @mcp.tool(title="File move", annotations=write_annotations)
+    def file_move(source: str, destination: str, overwrite: bool = False) -> JsonObject:
+        return workspace.move(source, destination, overwrite=overwrite)
 
     @mcp.tool(title="File delete", annotations=destructive_annotations)
-    def file_delete(
-        file_id: str,
-        force: bool = False,
-    ) -> JsonObject:
-        """Delete an unreferenced file. force=true also removes its links."""
-        return store.delete(file_id, force=force)
-
-    @mcp.tool(title="File garbage collect", annotations=destructive_annotations)
-    def file_gc(
-        dry_run: bool = True,
-        limit: int = 1000,
-    ) -> JsonObject:
-        """Find or delete files that are not referenced by any consumer or collection."""
-        return store.gc(dry_run=dry_run, limit=limit)
+    def file_delete(path: str, recursive: bool = False) -> JsonObject:
+        return workspace.delete(path, recursive=recursive)

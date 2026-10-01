@@ -141,6 +141,53 @@ class WorkspaceFileStore:
             "data_base64": base64.b64encode(data).decode("ascii"),
         }
 
+    def write_chunk(
+        self,
+        path: str,
+        data_base64: str,
+        *,
+        offset: int = 0,
+        truncate: bool = False,
+        create_parents: bool = True,
+        max_file_bytes: int,
+    ) -> JsonObject:
+        if offset < 0:
+            raise WorkspaceFileError("offset must be >= 0")
+        try:
+            data = base64.b64decode(data_base64, validate=True)
+        except Exception as exc:
+            raise WorkspaceFileError("data_base64 is not valid base64") from exc
+        target = self._path(path)
+        if create_parents:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        elif not target.parent.is_dir():
+            raise WorkspaceFileError("parent directory does not exist")
+
+        current_size = target.stat().st_size if target.exists() else 0
+        if truncate:
+            if offset != 0:
+                raise WorkspaceFileError("truncate=true requires offset=0")
+            current_size = 0
+        elif offset != current_size:
+            raise WorkspaceFileError(
+                f"offset mismatch: expected {current_size}, received {offset}"
+            )
+        if current_size + len(data) > max_file_bytes:
+            raise WorkspaceFileError("file exceeds configured size limit")
+
+        mode = "wb" if truncate or not target.exists() else "ab"
+        with target.open(mode) as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        next_offset = current_size + len(data)
+        return {
+            "path": self.relative(target),
+            "bytes_written": len(data),
+            "next_offset": next_offset,
+            "size_bytes": next_offset,
+        }
+
     def write_text(
         self,
         path: str,
