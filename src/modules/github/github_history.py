@@ -119,7 +119,19 @@ class GitHubHistoryMixin:
         if not isinstance(repo, dict):
             raise GitHubAgentError("unexpected repository response")
 
-        if self._history_host().token:
+        if self._history_host().public_only:
+            contents_write = False
+            permissions = {
+                "contents": "read",
+                "workflows": "none",
+                "pull_requests": "read",
+                "issues": "read",
+                "actions": "read",
+                "checks": "read",
+            }
+            app_id = None
+            installation_id = None
+        elif self._history_host().token:
             repository_permissions = json_member_object(repo, "permissions")
             push = bool(repository_permissions.get("push") or repository_permissions.get("admin"))
             permissions: JsonObject = {
