@@ -8,6 +8,7 @@ from common.models import JsonObject, json_array
 from common.settings import FileSettings
 from modules.files.file_primitives import FileError
 from modules.files.file_store import FileStore
+from modules.files.workspace_store import WorkspaceFileStore
 
 
 class FileAdminStore:
@@ -16,6 +17,7 @@ class FileAdminStore:
     def __init__(self, settings: FileSettings) -> None:
         self.store = FileStore(settings)
         self.store.ensure()
+        self.workspace = WorkspaceFileStore(settings.workspace_root)
 
     def list(
         self,
@@ -48,6 +50,40 @@ class FileAdminStore:
 
     def delete(self, file_id: str, *, force: bool = False) -> JsonObject:
         return self.store.delete(file_id, force=force)
+
+    def workspace_list(
+        self,
+        path: str = "",
+        *,
+        offset: int = 0,
+        limit: int = 500,
+    ) -> JsonObject:
+        return self.workspace.list(path, offset=offset, limit=limit)
+
+    def workspace_info(self, path: str) -> JsonObject:
+        return self.workspace.info(path)
+
+    def workspace_upload(
+        self,
+        stream: BinaryIO,
+        *,
+        destination: str,
+        overwrite: bool = False,
+    ) -> JsonObject:
+        return self.workspace.put_stream(
+            stream,
+            destination,
+            overwrite=overwrite,
+        )
+
+    def workspace_path_for(self, path: str) -> Path:
+        return self.workspace.path_for(path)
+
+    def workspace_mkdir(self, path: str) -> JsonObject:
+        return self.workspace.mkdir(path)
+
+    def workspace_delete(self, path: str, *, recursive: bool = False) -> JsonObject:
+        return self.workspace.delete(path, recursive=recursive)
 
     def cleanup(self, *, retention_days: int, limit: int, dry_run: bool = False) -> JsonObject:
         bounded_limit = min(max(limit, 1), 10_000)
