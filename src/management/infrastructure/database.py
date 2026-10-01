@@ -172,9 +172,7 @@ class OAuthSessionRecord(Base):
     error_type: Mapped[str] = mapped_column(String(256), default="")
     error_message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(
-        index=True, default=lambda: datetime.now(UTC)
-    )
+    updated_at: Mapped[datetime] = mapped_column(index=True, default=lambda: datetime.now(UTC))
 
 
 class CachedSnapshotRecord(Base):
@@ -202,6 +200,14 @@ class ManagementConfigRecord(Base):
     logging_retention_days: Mapped[int] = mapped_column(Integer, default=30)
     logging_max_records: Mapped[int] = mapped_column(Integer, default=10_000)
     maintenance_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
+
+
+class RuntimeSettingsRecord(Base):
+    __tablename__ = "runtime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    terminal_max_exec_timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    terminal_max_job_runtime_seconds: Mapped[int] = mapped_column(Integer, default=3600)
 
 
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
@@ -239,9 +245,7 @@ def ensure_zero_state_schema(engine: Engine) -> bool:
 
     inspector = inspect(engine)
     for table_name, table in Base.metadata.tables.items():
-        actual_columns = {
-            column["name"] for column in inspector.get_columns(table_name)
-        }
+        actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
         expected_columns = {column.name for column in table.columns}
         missing_columns = expected_columns - actual_columns
         if missing_columns:
