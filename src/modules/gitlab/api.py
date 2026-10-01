@@ -47,18 +47,24 @@ class GitLabApiClient:
             return ssl.create_default_context(cadata=self.profile.ca_cert_pem.replace("\\n", "\n"))
         return ssl.create_default_context()
 
-    def _headers(self, has_body: bool = False) -> dict[str, str]:
-        token = self.profile.token()
+    def _headers(
+        self,
+        has_body: bool = False,
+        *,
+        anonymous: bool = False,
+    ) -> dict[str, str]:
         headers = {
             "Accept": "application/json",
             "User-Agent": "mcp-bridge-gitlab",
         }
-        if self.profile.auth_type == "private_token":
-            headers["PRIVATE-TOKEN"] = token
-        elif self.profile.auth_type == "bearer":
-            headers["Authorization"] = f"Bearer {token}"
-        else:
-            headers["JOB-TOKEN"] = token
+        if not anonymous:
+            token = self.profile.token()
+            if self.profile.auth_type == "private_token":
+                headers["PRIVATE-TOKEN"] = token
+            elif self.profile.auth_type == "bearer":
+                headers["Authorization"] = f"Bearer {token}"
+            else:
+                headers["JOB-TOKEN"] = token
         if has_body:
             headers["Content-Type"] = "application/json"
         return headers
@@ -173,6 +179,34 @@ class GitLabApiClient:
             ) from exc
         status, headers, raw = response.status, response.headers, response.body
         data = self._decode_response(raw, headers)
+        normalized_method = method.upper()
+        if (
+            status in {401, 403, 404}
+            and normalized_method in {"GET", "HEAD"}
+            and not (allowed_errors and status in allowed_errors)
+        ):
+            try:
+                public_response = self._transport.request(
+                    normalized_method,
+                    target,
+                    body=body,
+                    headers=self._headers(
+                        has_body=body is not None,
+                        anonymous=True,
+                    ),
+                )
+            except HttpTransportError:
+                public_response = None
+            if public_response is not None and public_response.status < 400:
+                public_data = self._decode_response(
+                    public_response.body,
+                    public_response.headers,
+                )
+                return GitLabResponse(
+                    status=public_response.status,
+                    data=public_data,
+                    headers=public_response.headers,
+                )
         if status >= 400 and not (allowed_errors and status in allowed_errors):
             raise GitLabError(self._error_message(status, target, data))
         return GitLabResponse(status=status, data=data, headers=headers)
