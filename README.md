@@ -135,7 +135,10 @@ is not part of the external ChatGPT contract.
 
 Management owns provider accounts, encrypted credentials, invocation telemetry, settings,
 Files administration and the Admin UI. Provider runtimes resolve account data through the
-private management API rather than opening the management database directly.
+private management API rather than opening the management database directly. Expensive
+workspace statistics and Reverse overview/coverage calculations are refreshed by background
+workers into persistent snapshots; Admin pages render the latest cached value with freshness
+metadata instead of performing long scans or analyses in the HTTP request path.
 
 ## License
 

@@ -52,6 +52,7 @@ from management.application.services import (
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    SnapshotService,
 )
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
@@ -64,6 +65,13 @@ from management.infrastructure.database import (
 )
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.reverse import ReverseAdminClient
+from management.infrastructure.snapshot_worker import (
+    REVERSE_OVERVIEW_KEY,
+    WORKSPACE_STATS_KEY,
+    coverage_refresh_seconds,
+    coverage_snapshot_key,
+    snapshot_meta,
+)
 from management.infrastructure.terminal import TerminalAdminClient
 from management.presentation.admin_ui import ManagementUiPlugin
 
@@ -456,18 +464,25 @@ class ReverseView(CustomView):
     icon = "fa fa-diagram-project"
     path = "/reverse"
 
-    def __init__(self, reverse: ReverseAdminClient) -> None:
+    def __init__(
+        self,
+        reverse: ReverseAdminClient,
+        snapshots: SnapshotService,
+    ) -> None:
         super().__init__()
         self.reverse = reverse
+        self.snapshots = snapshots
 
     @route("")
     async def index(self, request: Request) -> Response:
-        try:
-            overview = await self.reverse.overview()
-            error = ""
-        except Exception as exc:
-            overview = {"projects": [], "workers": [], "worker_count": 0, "count": 0}
-            error = str(exc)
+        cached = await asyncio.to_thread(self.snapshots.get, REVERSE_OVERVIEW_KEY)
+        overview = (
+            cached.payload
+            if cached is not None and cached.payload
+            else {"projects": [], "workers": [], "worker_count": 0, "count": 0}
+        )
+        overview_meta = snapshot_meta(cached)
+        error = cached.error_message if cached is not None and cached.error_message else ""
 
         projects = overview.get("projects")
         workers = overview.get("workers")
@@ -529,6 +544,7 @@ class ReverseView(CustomView):
                 "queued_total": queued,
                 "running_workers": running,
                 "enabled_workers": enabled_workers,
+                "overview_meta": overview_meta,
                 "error": error,
             },
         )
@@ -539,6 +555,7 @@ class ReverseView(CustomView):
         folder = request.query_params.get("folder", "/") or "/"
         error = ""
         coverage: JsonObject | None = None
+        coverage_meta: JsonObject = {}
         coverage_program = request.query_params.get("program", "").strip()
         coverage_mode = request.query_params.get("coverage", "").strip().casefold()
         try:
@@ -558,11 +575,27 @@ class ReverseView(CustomView):
                     self.reverse.open_programs(project_id),
                 )
                 if coverage_program and coverage_mode in {"quick", "full"}:
-                    coverage = await self.reverse.coverage(
+                    full_mode = coverage_mode == "full"
+                    cache_key = coverage_snapshot_key(
                         project_id,
                         coverage_program,
-                        full=coverage_mode == "full",
+                        full=full_mode,
                     )
+                    cached_coverage = await asyncio.to_thread(
+                        self.snapshots.ensure,
+                        cache_key,
+                        category="reverse_coverage",
+                        parameters={
+                            "project_id": project_id,
+                            "program": coverage_program,
+                            "full": full_mode,
+                        },
+                        refresh_after_seconds=coverage_refresh_seconds(full=full_mode),
+                    )
+                    coverage = (
+                        cached_coverage.payload if cached_coverage.payload else None
+                    )
+                    coverage_meta = snapshot_meta(cached_coverage)
             except Exception as exc:
                 error = str(exc)
 
@@ -594,6 +627,7 @@ class ReverseView(CustomView):
                 "folder_links": folder_links,
                 "parent_folder": parent_folder,
                 "coverage": coverage,
+                "coverage_meta": coverage_meta,
                 "coverage_program": coverage_program,
                 "coverage_mode": coverage_mode,
                 "error": error,
@@ -888,18 +922,19 @@ class FilesView(CustomView):
     icon = "fa fa-folder-open"
     path = "/files"
 
-    def __init__(self, files: FileAdminStore) -> None:
+    def __init__(self, files: FileAdminStore, snapshots: SnapshotService) -> None:
         super().__init__()
         self.files = files
+        self.snapshots = snapshots
 
     @route("")
     async def index(self, request: Request) -> Response:
         current = request.query_params.get("path", "").strip().strip("/")
         try:
-            listing, stats = await asyncio.gather(
-                asyncio.to_thread(self.files.list, current, limit=500),
-                asyncio.to_thread(self.files.stats),
-            )
+            listing = await asyncio.to_thread(self.files.list, current, limit=500)
+            cached_stats = await asyncio.to_thread(self.snapshots.get, WORKSPACE_STATS_KEY)
+            stats = cached_stats.payload if cached_stats is not None else {}
+            stats_meta = snapshot_meta(cached_stats)
             error = ""
         except Exception as exc:
             listing = {
@@ -910,6 +945,7 @@ class FilesView(CustomView):
                 "truncated": False,
             }
             stats = {}
+            stats_meta = {}
             error = str(exc)
         parent = posixpath.dirname(current) if current else ""
         return _view_templates(self).TemplateResponse(
@@ -919,6 +955,7 @@ class FilesView(CustomView):
                 "title": "Files",
                 "listing": listing,
                 "stats": stats,
+                "stats_meta": stats_meta,
                 "current_path": current,
                 "parent_path": parent,
                 "error": error,
@@ -1024,8 +1061,7 @@ def _view_templates(view: CustomView) -> Jinja2Templates:
 
 def _dashboard(
     engine: Engine,
-    files: FileAdminStore,
-    reverse: ReverseAdminClient,
+    snapshots: SnapshotService,
 ) -> CustomView:
     async def count(
         model: type[object],
@@ -1065,26 +1101,25 @@ def _dashboard(
             select(func.avg(InvocationRecord.duration_ms)),
         )
 
-    async def stored_files(_request: Request) -> int:
-        stats = await asyncio.to_thread(files.stats)
-        return json_int(stats.get("files"), field="files")
-
-    async def storage_used(_request: Request) -> str:
-        stats = await asyncio.to_thread(files.stats)
-        return json_str(stats.get("size_display"), default="0 B", field="size_display")
+    async def workspace_free(_request: Request) -> str:
+        cached = await asyncio.to_thread(snapshots.get, WORKSPACE_STATS_KEY)
+        payload = cached.payload if cached is not None else {}
+        return json_str(
+            payload.get("free_display"),
+            default="—",
+            field="free_display",
+        )
 
     async def reverse_overview(request: Request) -> JsonObject:
-        task = cast(
-            asyncio.Task[JsonObject] | None,
-            getattr(request.state, "_reverse_overview_task", None),
+        cached = cast(
+            object | None,
+            getattr(request.state, "_reverse_overview_snapshot", None),
         )
-        if task is None:
-            task = asyncio.create_task(reverse.overview())
-            request.state._reverse_overview_task = task
-        try:
-            return await task
-        except Exception:
-            return {"projects": [], "workers": []}
+        if cached is None:
+            cached = await asyncio.to_thread(snapshots.get, REVERSE_OVERVIEW_KEY)
+            request.state._reverse_overview_snapshot = cached
+        payload = getattr(cached, "payload", None)
+        return payload if isinstance(payload, dict) else {"projects": [], "workers": []}
 
     async def reverse_projects(request: Request) -> int:
         overview = await reverse_overview(request)
@@ -1166,11 +1201,7 @@ def _dashboard(
                     breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
                 ),
                 Col(
-                    StatWidget(title="Stored files", value_callback=stored_files),
-                    breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
-                ),
-                Col(
-                    StatWidget(title="Storage used", value_callback=storage_used),
+                    StatWidget(title="Workspace free", value_callback=workspace_free),
                     breakpoints=Breakpoints(default=12, sm=6, md=4, xl=3),
                 ),
                 Col(
@@ -1209,10 +1240,11 @@ def build_admin(
     accounts: AccountService,
     audit: InvocationAuditService,
     oauth_sessions: OAuthSessionService,
+    snapshots: SnapshotService,
     config: ManagementConfigService,
     files: FileAdminStore,
+    reverse: ReverseAdminClient,
 ) -> Admin:
-    reverse = ReverseAdminClient()
     terminal = TerminalAdminClient()
     admin = Admin(
         engine,
@@ -1220,11 +1252,11 @@ def build_admin(
         base_url="/admin",
         auth_provider=ManagementAuthProvider(settings),
         secret_key=settings.session_secret,
-        index_view=_dashboard(engine, files, reverse),
+        index_view=_dashboard(engine, snapshots),
         templates_dir=str(Path(__file__).with_name("templates")),
         plugins=[ManagementUiPlugin()],
     )
-    admin.add_view(FilesView(files))
+    admin.add_view(FilesView(files, snapshots))
     admin.add_view(
         GitHubAccountView(
             GitHubAccountRecord,
@@ -1243,7 +1275,7 @@ def build_admin(
             menu_label="GitLab Accounts",
         )
     )
-    admin.add_view(ReverseView(reverse))
+    admin.add_view(ReverseView(reverse, snapshots))
     admin.add_view(TerminalView(terminal))
     admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))
     admin.add_view(InvocationView(InvocationRecord, audit))

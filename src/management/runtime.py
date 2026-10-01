@@ -16,6 +16,7 @@ from management.application.services import (
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    SnapshotService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -29,7 +30,10 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
     SqlAlchemyOAuthSessionRepository,
+    SqlAlchemySnapshotRepository,
 )
+from management.infrastructure.reverse import ReverseAdminClient
+from management.infrastructure.snapshot_worker import SnapshotRefresher
 from management.presentation.admin import build_admin
 from management.presentation.api import ApiServices, build_internal_router
 
@@ -49,12 +53,16 @@ account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
 config_repository = SqlAlchemyManagementConfigRepository(sessions)
 oauth_session_repository = SqlAlchemyOAuthSessionRepository(sessions)
+snapshot_repository = SqlAlchemySnapshotRepository(sessions)
 config_service = ManagementConfigService(config_repository)
 oauth_sessions = OAuthSessionService(oauth_session_repository)
+snapshots = SnapshotService(snapshot_repository)
 config_service.get()
 accounts = AccountService(account_repository, cipher, ProviderConnectionVerifier())
 audit = InvocationAuditService(invocation_repository)
 files = FileAdminStore(FileSettings())
+reverse = ReverseAdminClient()
+snapshot_refresher = SnapshotRefresher(snapshots, files, reverse)
 
 
 async def _maintenance_loop() -> None:
@@ -71,12 +79,28 @@ async def _maintenance_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    task = asyncio.create_task(_maintenance_loop(), name="management-maintenance")
+    await snapshot_refresher.ensure_base_snapshots()
+    tasks = [
+        asyncio.create_task(_maintenance_loop(), name="management-maintenance"),
+        asyncio.create_task(
+            snapshot_refresher.workspace_loop(),
+            name="management-workspace-snapshots",
+        ),
+        asyncio.create_task(
+            snapshot_refresher.reverse_loop(),
+            name="management-reverse-snapshots",
+        ),
+        asyncio.create_task(
+            snapshot_refresher.coverage_loop(),
+            name="management-coverage-snapshots",
+        ),
+    ]
     try:
         yield
     finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 app = FastAPI(
@@ -117,7 +141,9 @@ admin = build_admin(
     accounts,
     audit,
     oauth_sessions,
+    snapshots,
     config_service,
     files,
+    reverse,
 )
 admin.mount_to(app)

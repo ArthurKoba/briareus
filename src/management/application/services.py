@@ -8,6 +8,7 @@ from common.models import JsonObject, json_object
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
+from management.domain.snapshots import CachedSnapshot
 from management.domain.telemetry import Invocation
 
 from .ports import (
@@ -17,6 +18,7 @@ from .ports import (
     InvocationRepository,
     ManagementConfigRepository,
     OAuthSessionRepository,
+    SnapshotRepository,
 )
 
 
@@ -110,6 +112,78 @@ class OAuthSessionService:
 
     def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]:
         return self.repository.recent(limit=limit)
+
+
+class SnapshotService:
+    def __init__(self, repository: SnapshotRepository) -> None:
+        self.repository = repository
+
+    def ensure(
+        self,
+        key: str,
+        *,
+        category: str,
+        parameters: dict[str, object] | None = None,
+        refresh_after_seconds: int,
+    ) -> CachedSnapshot:
+        return self.repository.ensure(
+            key,
+            category=category,
+            parameters=parameters,
+            refresh_after_seconds=refresh_after_seconds,
+        )
+
+    def get(self, key: str) -> CachedSnapshot | None:
+        return self.repository.get(key)
+
+    def list_category(
+        self,
+        category: str,
+        *,
+        limit: int = 1000,
+    ) -> Sequence[CachedSnapshot]:
+        return self.repository.list_category(category, limit=limit)
+
+    def due(
+        self,
+        category: str,
+        *,
+        retry_after_seconds: int = 30,
+        limit: int = 100,
+    ) -> list[CachedSnapshot]:
+        now = datetime.now(UTC)
+        result: list[CachedSnapshot] = []
+        for snapshot in self.repository.list_category(category, limit=limit):
+            if snapshot.status == "refreshing":
+                attempted = snapshot.attempted_at
+                if attempted is not None and attempted.tzinfo is None:
+                    attempted = attempted.replace(tzinfo=UTC)
+                if (
+                    attempted is not None
+                    and (now - attempted).total_seconds() < retry_after_seconds
+                ):
+                    continue
+            attempted = snapshot.attempted_at
+            if attempted is not None and attempted.tzinfo is None:
+                attempted = attempted.replace(tzinfo=UTC)
+            if snapshot.stale(now) and (
+                attempted is None or (now - attempted).total_seconds() >= retry_after_seconds
+            ):
+                result.append(snapshot)
+        return result
+
+    def mark_attempt(self, key: str) -> None:
+        self.repository.mark_attempt(key)
+
+    def store_success(
+        self,
+        key: str,
+        payload: dict[str, object],
+    ) -> CachedSnapshot:
+        return self.repository.store_success(key, payload)
+
+    def store_error(self, key: str, exc: Exception) -> CachedSnapshot:
+        return self.repository.store_error(key, exc)
 
 
 class ManagementConfigService:

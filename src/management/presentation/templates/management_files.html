@@ -10,24 +10,37 @@
 {% endblock %}
 {% block content %}
 {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+{% if stats_meta %}
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3 text-secondary">
+  <span>Workspace metrics:</span>
+  {% if stats_meta.get("updated_at") %}
+    <time class="js-local-datetime" datetime="{{ stats_meta.get('updated_at') }}">{{ stats_meta.get("updated_at") }}</time>
+  {% else %}
+    <span>waiting for first background scan</span>
+  {% endif %}
+  {% if stats_meta.get("stale") %}<span class="badge bg-yellow-lt">stale</span>{% endif %}
+  {% if stats_meta.get("status") == "refreshing" %}<span class="badge bg-blue-lt">refreshing</span>{% endif %}
+  {% if stats_meta.get("error_message") %}<span class="badge bg-red-lt">refresh error</span>{% endif %}
+</div>
+{% endif %}
 
 <div class="row row-cards mb-3">
   <div class="col-sm-6 col-lg-3">
     <div class="card card-sm"><div class="card-body">
-      <div class="text-secondary">Files</div>
-      <div class="h2 mb-0">{{ stats.get("files", 0) }}</div>
+      <div class="text-secondary">Entries here</div>
+      <div class="h2 mb-0">{{ listing.get("total", 0) }}</div>
     </div></div>
   </div>
   <div class="col-sm-6 col-lg-3">
     <div class="card card-sm"><div class="card-body">
-      <div class="text-secondary">Workspace data</div>
-      <div class="h2 mb-0">{{ stats.get("size_display", "0 B") }}</div>
+      <div class="text-secondary">Shown</div>
+      <div class="h2 mb-0">{{ listing.get("count", 0) }}</div>
     </div></div>
   </div>
   <div class="col-sm-6 col-lg-3">
     <div class="card card-sm"><div class="card-body">
       <div class="text-secondary">Disk free</div>
-      <div class="h2 mb-0">{{ stats.get("free_bytes", 0) }}</div>
+      <div class="h2 mb-0">{{ stats.get("free_display", "0 B") }}</div>
     </div></div>
   </div>
 </div>
