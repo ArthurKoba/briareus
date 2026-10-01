@@ -305,9 +305,6 @@ class SqlAlchemyManagementConfigRepository:
             logging_capture_payloads=record.logging_capture_payloads,
             logging_retention_days=record.logging_retention_days,
             logging_max_records=record.logging_max_records,
-            file_auto_cleanup_enabled=record.file_auto_cleanup_enabled,
-            file_retention_days=record.file_retention_days,
-            file_cleanup_limit=record.file_cleanup_limit,
             maintenance_interval_minutes=record.maintenance_interval_minutes,
         )
 
