@@ -43,7 +43,7 @@ class GitLabProjectClient(GitLabApiClient):
     def account_capabilities(self, project: str = "") -> JsonObject:
         """Return provider-visible account scope and optional project access details."""
         if self.anonymous_only:
-            result: JsonObject = {
+            public_result: JsonObject = {
                 "account": {
                     **self.profile.public(),
                     "auth_type": "public",
@@ -59,14 +59,14 @@ class GitLabProjectClient(GitLabApiClient):
                     "project",
                     required=True,
                 )
-                result["project"] = {
+                public_result["project"] = {
                     "selector": project,
                     "id": project_result.get("id"),
                     "path_with_namespace": project_result.get("path_with_namespace"),
                     "visibility": project_result.get("visibility"),
                     "access": {},
                 }
-            return result
+            return public_result
 
         result: JsonObject = {
             "account": self.profile.public(),
