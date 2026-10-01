@@ -37,8 +37,9 @@ async def test_provider_adapts_live_backend_catalog(monkeypatch) -> None:
     seen_urls: list[str] = []
 
     class FakeClient:
-        def __init__(self, url: str) -> None:
-            seen_urls.append(url)
+        def __init__(self, transport) -> None:
+            seen_urls.append(str(transport.url))
+            assert transport.headers["X-Koba-Proxy-Origin"] == "analysis"
 
         async def __aenter__(self):
             return self
