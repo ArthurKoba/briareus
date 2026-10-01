@@ -88,6 +88,8 @@ services:
       target: github
     environment:
       <<: [*management-client, *observability]
+    volumes:
+      - terminal-workspace:/workspace
 
   gitlab:
     <<: *private-service
@@ -100,6 +102,8 @@ services:
       target: gitlab
     environment:
       <<: [*management-client, *observability]
+    volumes:
+      - terminal-workspace:/workspace
 
   files:
     <<: *file-service

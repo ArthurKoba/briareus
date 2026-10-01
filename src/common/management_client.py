@@ -85,7 +85,25 @@ class ManagementClient:
             raise ValueError("account_id is required")
         query = {"provider": provider}
         path = "/internal/accounts/" + urllib.parse.quote(value, safe="") + "/resolve"
-        data = self._request("GET", path, query=query)
+        try:
+            data = self._request("GET", path, query=query)
+        except ManagementClientError as exc:
+            if "management HTTP 404:" not in str(exc):
+                raise
+            accounts = self.list_accounts(provider=provider)
+            aliases = sorted(
+                account.alias
+                for account in accounts.accounts
+                if account.alias
+            )
+            hint = (
+                f"; use stable account alias instead: {', '.join(aliases)}"
+                if aliases
+                else ""
+            )
+            raise ManagementClientError(
+                f"{provider} account selector not found: {value}{hint}"
+            ) from exc
         return ResolvedAccount.model_validate(data)
 
     def record_invocation(self, event: InvocationEvent) -> None:

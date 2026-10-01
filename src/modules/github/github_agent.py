@@ -8,6 +8,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import jwt
 
@@ -26,6 +27,7 @@ from common.models import (
     json_str,
     json_value,
 )
+from common.repository_checkout import checkout_repository
 
 _GITHUB_API = "https://api.github.com"
 _GITHUB_API_VERSION = "2026-03-10"
@@ -42,10 +44,12 @@ class GitHubAppClient:
     account_id: str = ""
     token: str = ""
     auth_type: str = "github_app"
+    public_only: bool = False
     _installation_ids: dict[str, int] = field(default_factory=dict)
     _tokens: dict[int, tuple[str, float]] = field(default_factory=dict)
     repository_cache_ttl_seconds: float = 30.0
     max_connections: int = 8
+    workspace_root: Path = Path("/workspace")
     protected_branches: frozenset[str] = frozenset({"main", "master"})
     required_checks: tuple[str, ...] = ("test", "docker")
     required_reviewers: tuple[str, ...] = ()
@@ -303,14 +307,71 @@ class GitHubAppClient:
         allowed_errors: set[int] | None = None,
     ) -> tuple[int, JsonContainer]:
         repository = self._assert_allowed(repository)
-        token = self._installation_token(repository)
+        normalized_method = method.upper()
+        if self.public_only:
+            if normalized_method not in {"GET", "HEAD"}:
+                raise GitHubAgentError("public GitHub access is read-only")
+            return self._request(
+                normalized_method,
+                f"{_GITHUB_API}{path}",
+                payload=payload,
+                allowed_errors=allowed_errors,
+            )
+        try:
+            token = self._installation_token(repository)
+        except GitHubAgentError as exc:
+            if normalized_method not in {"GET", "HEAD"} or (
+                "is not installed for GitHub App" not in str(exc)
+            ):
+                raise
+            return self._request(
+                normalized_method,
+                f"{_GITHUB_API}{path}",
+                payload=payload,
+                allowed_errors=allowed_errors,
+            )
         return self._request(
-            method,
+            normalized_method,
             f"{_GITHUB_API}{path}",
             token=token,
             payload=payload,
             allowed_errors=allowed_errors,
         )
+
+    def checkout_repository(
+        self,
+        repository: str,
+        destination: str,
+        *,
+        mode: str = "snapshot",
+        ref: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        repository = self._assert_allowed(repository)
+        token = ""
+        if self.public_only:
+            token = ""
+        elif self.token:
+            token = self.token
+        else:
+            try:
+                token = self._installation_token(repository)
+            except GitHubAgentError as exc:
+                if "is not installed for GitHub App" not in str(exc):
+                    raise
+        result = checkout_repository(
+            f"https://github.com/{repository}.git",
+            destination,
+            workspace_root=self.workspace_root,
+            mode=mode,
+            ref=ref,
+            overwrite=overwrite,
+            auth_scope="https://github.com/",
+            auth_header=f"Authorization: Bearer {token}" if token else "",
+            fallback_without_auth=False,
+        )
+        result["repository"] = repository
+        return result
 
     def _installation_ids_from_github(self) -> list[int]:
         installation_ids: list[int] = []
@@ -475,8 +536,17 @@ class GitHubAppClient:
             "auth_type": self.auth_type,
             "status": "ok",
         }
+        if self.public_only:
+            response["auth_type"] = "public"
+            response["access_mode"] = "public_anonymous"
+            return response
         if self.token:
             return response
         response["app_id"] = self.app_id
-        response["installation_id"] = self._installation_id(repository)
+        try:
+            response["installation_id"] = self._installation_id(repository)
+            response["access_mode"] = "installation"
+        except GitHubAgentError:
+            response["installation_id"] = None
+            response["access_mode"] = "public_anonymous"
         return response

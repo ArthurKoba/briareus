@@ -18,6 +18,29 @@ def register_gitlab_repository_tools(
     write_annotations: ToolAnnotations,
     destructive_annotations: ToolAnnotations,
 ) -> None:
+    @mcp.tool(title="GitLab checkout repository", annotations=write_annotations)
+    def checkout_repository(
+        account_id: str,
+        project: str,
+        destination: str,
+        mode: str = "snapshot",
+        ref: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Checkout a GitLab repository into the shared workspace.
+
+        mode='snapshot' creates a shallow working tree without .git.
+        mode='git' keeps full Git metadata and history.
+        account_id may be a stable account alias.
+        """
+        return client_factory(account_id).checkout_repository(
+            project,
+            destination,
+            mode=mode,
+            ref=ref,
+            overwrite=overwrite,
+        )
+
     @mcp.tool(title="GitLab get file", annotations=read_annotations)
     def get_file(
         account_id: str,

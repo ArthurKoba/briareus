@@ -4,6 +4,7 @@ import http.client
 import json
 import ssl
 import urllib.parse
+from pathlib import Path
 
 from common.http_transport import HttpTransportError, PooledHttpTransport
 from common.models import JsonObject, JsonValue, json_loads, json_value
@@ -19,10 +20,14 @@ class GitLabApiClient:
         *,
         max_connections: int = 4,
         protected_branches: frozenset[str] = frozenset({"main", "master"}),
+        workspace_root: Path = Path("/workspace"),
+        anonymous_only: bool = False,
     ) -> None:
         self.profile = profile
         self.max_connections = max(1, int(max_connections))
         self.protected_branches = protected_branches
+        self.workspace_root = workspace_root
+        self.anonymous_only = anonymous_only
         parsed = urllib.parse.urlsplit(profile.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise GitLabError(
@@ -47,18 +52,24 @@ class GitLabApiClient:
             return ssl.create_default_context(cadata=self.profile.ca_cert_pem.replace("\\n", "\n"))
         return ssl.create_default_context()
 
-    def _headers(self, has_body: bool = False) -> dict[str, str]:
-        token = self.profile.token()
+    def _headers(
+        self,
+        has_body: bool = False,
+        *,
+        anonymous: bool = False,
+    ) -> dict[str, str]:
         headers = {
             "Accept": "application/json",
             "User-Agent": "mcp-bridge-gitlab",
         }
-        if self.profile.auth_type == "private_token":
-            headers["PRIVATE-TOKEN"] = token
-        elif self.profile.auth_type == "bearer":
-            headers["Authorization"] = f"Bearer {token}"
-        else:
-            headers["JOB-TOKEN"] = token
+        if not anonymous:
+            token = self.profile.token()
+            if self.profile.auth_type == "private_token":
+                headers["PRIVATE-TOKEN"] = token
+            elif self.profile.auth_type == "bearer":
+                headers["Authorization"] = f"Bearer {token}"
+            else:
+                headers["JOB-TOKEN"] = token
         if has_body:
             headers["Content-Type"] = "application/json"
         return headers
@@ -160,12 +171,18 @@ class GitLabApiClient:
             ).encode("utf-8")
         )
         target = self._target(path, query)
+        normalized_method = method.upper()
+        if self.anonymous_only and normalized_method not in {"GET", "HEAD"}:
+            raise GitLabError("public GitLab access is read-only")
         try:
             response = self._transport.request(
-                method,
+                normalized_method,
                 target,
                 body=body,
-                headers=self._headers(has_body=body is not None),
+                headers=self._headers(
+                    has_body=body is not None,
+                    anonymous=self.anonymous_only,
+                ),
             )
         except HttpTransportError as exc:
             raise GitLabError(
@@ -173,17 +190,47 @@ class GitLabApiClient:
             ) from exc
         status, headers, raw = response.status, response.headers, response.body
         data = self._decode_response(raw, headers)
+        if (
+            status in {401, 403, 404}
+            and normalized_method in {"GET", "HEAD"}
+            and not (allowed_errors and status in allowed_errors)
+        ):
+            try:
+                public_response = self._transport.request(
+                    normalized_method,
+                    target,
+                    body=body,
+                    headers=self._headers(
+                        has_body=body is not None,
+                        anonymous=True,
+                    ),
+                )
+            except HttpTransportError:
+                public_response = None
+            if public_response is not None and public_response.status < 400:
+                public_data = self._decode_response(
+                    public_response.body,
+                    public_response.headers,
+                )
+                return GitLabResponse(
+                    status=public_response.status,
+                    data=public_data,
+                    headers=public_response.headers,
+                )
         if status >= 400 and not (allowed_errors and status in allowed_errors):
             raise GitLabError(self._error_message(status, target, data))
         return GitLabResponse(status=status, data=data, headers=headers)
 
     def request_text(self, method: str, path: str) -> GitLabResponse:
         target = self._target(path)
+        normalized_method = method.upper()
+        if self.anonymous_only and normalized_method not in {"GET", "HEAD"}:
+            raise GitLabError("public GitLab access is read-only")
         try:
             response = self._transport.request(
-                method,
+                normalized_method,
                 target,
-                headers=self._headers(),
+                headers=self._headers(anonymous=self.anonymous_only),
             )
         except HttpTransportError as exc:
             raise GitLabError(

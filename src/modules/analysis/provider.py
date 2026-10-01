@@ -200,7 +200,11 @@ class AnalysisToolProvider(Provider):
             for backend_tool in backend_tools
         }
         for backend_tool in backend_tools:
-            if backend_tool.name in {"search_tools", "check_tools"}:
+            if (
+                backend_tool.name in {"search_tools", "check_tools"}
+                or backend_tool.name.startswith("artifact_stage_")
+                or backend_tool.name.startswith("artifact_file_")
+            ):
                 continue
             alias = analysis_tool_name(backend_tool.name)
             owner = owners.get(alias)

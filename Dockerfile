@@ -62,12 +62,18 @@ ENV ASGI_APP=management.runtime:app \
 
 
 FROM runtime-base AS github
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/github ./src/modules/github
 ENV ASGI_APP=modules.github.runtime:app
 
 
 FROM runtime-base AS gitlab
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/gitlab ./src/modules/gitlab
 ENV ASGI_APP=modules.gitlab.runtime:app

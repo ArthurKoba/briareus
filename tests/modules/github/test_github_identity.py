@@ -232,4 +232,25 @@ def test_github_account_list_exposes_potential_capabilities() -> None:
 
     listed = result["accounts"][0]
     assert listed["permission_scope"] == "repository-dependent"
+    assert listed["preferred_selector"] == "github-user"
+    assert listed["selector_stability"] == "stable_alias"
     assert "user_token_scoped_access" in listed["potential_capabilities"]
+
+
+def test_public_github_selector_does_not_resolve_management_account() -> None:
+    context = GitHubRuntimeContext(_ListOnlyManagement(), GitHubPolicySettings())
+
+    client = context.client("public")
+
+    assert client.public_only is True
+    assert client.auth_type == "public"
+
+
+def test_public_github_capabilities_are_read_only() -> None:
+    context = GitHubRuntimeContext(_ListOnlyManagement(), GitHubPolicySettings())
+    client = context.client("public")
+
+    result = client.account_capabilities()
+
+    assert result["auth_type"] == "public"
+    assert result["provider_permissions"] == {"contents": "read"}

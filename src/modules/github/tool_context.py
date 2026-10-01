@@ -36,10 +36,41 @@ class GitHubRuntimeContext:
                     context="GitHub potential capabilities",
                 )
                 account["permission_scope"] = "repository-dependent"
+                account["preferred_selector"] = str(account.get("alias", ""))
+                account["selector_stability"] = "stable_alias"
+            accounts.append(
+                {
+                    "id": "public",
+                    "alias": "public",
+                    "provider": "github",
+                    "auth_type": "public",
+                    "base_url": "https://api.github.com",
+                    "external_id": None,
+                    "verify_tls": True,
+                    "ca_cert_pem": None,
+                    "enabled": True,
+                    "created_at": "",
+                    "updated_at": "",
+                    "potential_capabilities": ["repository_read", "git_history"],
+                    "permission_scope": "public-repositories-only",
+                    "preferred_selector": "public",
+                    "selector_stability": "stable_alias",
+                }
+            )
+            result["count"] = len(accounts)
         return result
 
     @staticmethod
     def _potential_capabilities(auth_type: str) -> list[str]:
+        if auth_type == "public":
+            return [
+                "repository_read",
+                "issues",
+                "pull_requests",
+                "actions",
+                "checks",
+                "git_history",
+            ]
         capabilities = [
             "repository_read",
             "repository_write",
@@ -67,12 +98,26 @@ class GitHubRuntimeContext:
             self._potential_capabilities(client.auth_type),
             context="GitHub potential capabilities",
         )
-        result["permission_scope"] = "repository-dependent"
+        result["permission_scope"] = (
+            "public-repositories-only"
+            if client.public_only
+            else "repository-dependent"
+        )
         if repository.strip():
             result["repository"] = client.capabilities(repository.strip())
         return result
 
     def _client(self, account_id: str) -> GitHubPrettyIdentityClient:
+        selector = account_id.strip().casefold()
+        if selector in {"public", "anonymous"}:
+            return GitHubPrettyIdentityClient(
+                account_id="public",
+                auth_type="public",
+                public_only=True,
+                protected_branches=self.policy.protected_branches,
+                required_checks=self.policy.required_checks,
+                required_reviewers=self.policy.required_reviewers,
+            )
         account = self.management.resolve_account(account_id, provider="github")
         key = ("github", account.id)
         with self._lock:

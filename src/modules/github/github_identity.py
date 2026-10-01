@@ -62,6 +62,16 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
     """
 
     def _app_identity(self) -> JsonObject:
+        if self.public_only:
+            return {
+                "source": "public_anonymous",
+                "display_name": "public",
+                "login": "public",
+                "id": 0,
+                "type": "Public",
+                "name": "public",
+                "email": "",
+            }
         cached = getattr(self, "_app_identity_cache", None)
         if isinstance(cached, dict):
             return dict(cached)
@@ -196,6 +206,15 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
 
     def account_capabilities(self) -> JsonObject:
         """Return provider-reported account permissions without requiring a repository."""
+        if self.public_only:
+            return {
+                "account_id": "public",
+                "auth_type": "public",
+                "identity": {"login": "public", "type": "Public"},
+                "provider_permissions": {"contents": "read"},
+                "provider_permissions_known": True,
+                "note": "Anonymous public GitHub access; read-only.",
+            }
         if self.token:
             _, user = self._request("GET", f"{_GITHUB_API}/user", token=self.token)
             payload = json_object(user, context="GitHub user response")
@@ -237,6 +256,14 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
         }
 
     def list_repositories(self) -> JsonObject:
+        if self.public_only:
+            return {
+                "auth_type": "public",
+                "count": 0,
+                "repositories": [],
+                "note": "Public selector addresses repositories explicitly by owner/name.",
+                "app_identity": self._app_identity(),
+            }
         base_list = super().list_repositories
         with ThreadPoolExecutor(
             max_workers=2,
