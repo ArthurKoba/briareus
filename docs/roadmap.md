@@ -10,22 +10,22 @@
 - capability-oriented GitHub and GitLab clients and tool registrars;
 - shared pooled HTTP transport and shared Git branch-policy primitives;
 - Pydantic validation at stable module boundaries;
-- persistent Files service split into object, metadata, reference, collection and lifecycle capabilities;
+- persistent path-based Files service over the shared workspace filesystem;
 - structured curl split into preset, request, execution, response and operation layers;
 - schema-driven Analysis facade over the native Ghidra MCP tool catalog;
 - Analysis terminology aliases with new names preferred and legacy Ghidra argument names accepted as fallback;
 - architecture tests preventing provider-to-provider imports and provider code from leaking into `bridge`/`common`;
 - one production `docker-compose.yaml` at repository root;
-- persistent `files-data`, `fastmcp-data` and `management-data` volumes.
+- persistent management, auth, shared workspace and terminal-home volumes.
 
 ## Remaining
 
 ### Production acceptance
 
 After the modular stack is deployed, verify every dedicated public surface, persistent
-Files reads/uploads, multi-account GitHub operations, self-hosted GitLab discovery,
-management admin/account onboarding, encrypted credential persistence, HTTP/Files
-integration, OAuth persistence and Analysis-to-Ghidra connectivity.
+workspace Files reads/uploads, multi-account GitHub operations, self-hosted GitLab
+discovery, management admin/account onboarding, encrypted credential persistence,
+HTTP/Files integration, OAuth persistence and Analysis-to-Ghidra connectivity.
 
 ### Formatting
 
