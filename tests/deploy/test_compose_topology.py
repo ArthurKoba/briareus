@@ -262,3 +262,12 @@ def test_entrypoint_has_no_legacy_file_dir_dependency() -> None:
     assert "FILE_DIR" not in entrypoint
     assert "/files/objects" not in entrypoint
     assert "/files/tmp" not in entrypoint
+
+
+def test_analysis_image_packages_workspace_dependency() -> None:
+    dockerfile = Path("Dockerfile").read_text()
+    analysis_stage = dockerfile.split("FROM runtime-base AS analysis", 1)[1].split(
+        "FROM runtime-base AS ghidra", 1
+    )[0]
+    assert "COPY src/modules/files ./src/modules/files" in analysis_stage
+    assert "FILE_WORKSPACE_ROOT=/workspace" in analysis_stage
