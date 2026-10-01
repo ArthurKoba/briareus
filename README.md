@@ -21,6 +21,7 @@ gateway
   +-- /files/mcp    -------------> files
   +-- /web/mcp      -------------> curl
   +-- /analysis/mcp -------------> analysis ---> ghidra (private)
+  +-- /terminal/mcp -------------> terminal
   +-- /admin        -------------> management
 ```
 
@@ -36,6 +37,7 @@ public domain. Auth and all provider runtimes remain private on the Compose netw
 /files/mcp
 /web/mcp
 /analysis/mcp
+/terminal/mcp
 /admin
 ```
 
@@ -84,14 +86,15 @@ src/
     ├── files/
     ├── curl/
     ├── analysis/
-    └── ghidra/
+    ├── ghidra/
+    └── terminal/
 ```
 
 ## Runtime and deployment isolation
 
 Production is one Git-backed Coolify Docker Compose application. The Compose file is the
 topology authority and starts separate containers for `auth`, `gateway`, `management`,
-`github`, `gitlab`, `files`, `curl`, `analysis`, and `ghidra`.
+`github`, `gitlab`, `files`, `curl`, `terminal`, `analysis`, and `ghidra`.
 
 Deployments may rebuild or recreate the stack. Runtime correctness does not depend on
 selective-restart scripts. Each service has its own restart policy, and Compose
@@ -137,3 +140,12 @@ private management API rather than opening the management database directly.
 ## License
 
 MIT
+
+
+## Terminal
+
+Terminal is a dedicated non-root Linux development runtime exposed at `/terminal/mcp`.
+It provides persistent workspaces, bounded shell execution, durable long-running jobs,
+interactive PTY input/output, cursor-based incremental logs and Files import/export.
+System toolchain packages are installed in the image; normal runtime commands execute as
+the unprivileged service user.
