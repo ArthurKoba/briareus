@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 
 from modules.github.github_agent import (
@@ -282,3 +284,30 @@ def test_public_github_checkout_skips_installation_auth(monkeypatch) -> None:
 
     assert result["repository"] == "octocat/Hello-World"
     assert captured["auth_header"] == ""
+
+
+def test_authenticated_github_checkout_uses_basic_git_credentials(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_checkout(clone_url, destination, **kwargs):
+        captured["clone_url"] = clone_url
+        captured["destination"] = destination
+        captured.update(kwargs)
+        return {
+            "path": destination,
+            "mode": kwargs["mode"],
+            "ref": kwargs["ref"],
+            "git_metadata": True,
+            "auth_mode": "authenticated",
+        }
+
+    monkeypatch.setattr(
+        "modules.github.github_agent.checkout_repository",
+        fake_checkout,
+    )
+    client = GitHubAppClient(token="installation-token")
+
+    client.checkout_repository("ArthurKoba/mcp-bridge", "repos/bridge", mode="git")
+
+    expected = base64.b64encode(b"x-access-token:installation-token").decode("ascii")
+    assert captured["auth_header"] == f"Authorization: Basic {expected}"

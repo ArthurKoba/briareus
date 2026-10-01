@@ -127,7 +127,7 @@ services:
       <<: *build
       target: terminal
     environment:
-      <<: *observability
+      <<: [*management-client, *observability]
     volumes:
       - terminal-workspace:/workspace
       - terminal-home:/home/agent

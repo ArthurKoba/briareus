@@ -14,7 +14,11 @@ from common.observability import (
     _resource_attributes,
 )
 from common.settings import ObservabilitySettings
-from common.tool_observability import management_audit_enabled
+from common.tool_observability import (
+    invocation_arguments_payload,
+    invocation_result_payload,
+    management_audit_enabled,
+)
 
 
 class _RecordingSink(ObservabilitySink):
@@ -190,3 +194,21 @@ def test_analysis_and_ghidra_audit_visibility_contract() -> None:
     assert management_audit_enabled("ghidra", "") is True
     assert management_audit_enabled("ghidra", "external-agent") is True
     assert management_audit_enabled("ghidra", "analysis") is False
+
+
+def test_terminal_management_audit_bounds_commands_and_omits_stream_payloads() -> None:
+    arguments = invocation_arguments_payload(
+        "terminal",
+        {"workspace_id": "demo", "command": "x" * 3000, "data": "secret-ish-input"},
+    )
+    result = invocation_result_payload(
+        "terminal",
+        {"stdout": "y" * 100000, "stderr": "", "exit_code": 0},
+    )
+
+    assert '"workspace_id": "demo"' in arguments
+    assert "<truncated 952 chars>" in arguments
+    assert "secret-ish-input" not in arguments
+    assert "<omitted 16 chars>" in arguments
+    assert "y" * 100 not in result
+    assert "terminal result omitted" in result

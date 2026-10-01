@@ -13,6 +13,31 @@ from .audit_payloads import render_error, render_payload
 from .observability import ObservabilitySink
 
 
+def _terminal_arguments_payload(arguments: object) -> str:
+    if not isinstance(arguments, dict):
+        return render_payload(arguments)
+    bounded = dict(arguments)
+    command = bounded.get("command")
+    if isinstance(command, str) and len(command) > 2048:
+        bounded["command"] = command[:2048] + f"<truncated {len(command) - 2048} chars>"
+    data = bounded.get("data")
+    if isinstance(data, str):
+        bounded["data"] = f"<omitted {len(data)} chars>"
+    return render_payload(bounded)
+
+
+def invocation_arguments_payload(module: str, arguments: object) -> str:
+    if module.strip().casefold() == "terminal":
+        return _terminal_arguments_payload(arguments)
+    return render_payload(arguments)
+
+
+def invocation_result_payload(module: str, result: object) -> str:
+    if module.strip().casefold() == "terminal":
+        return render_payload({"detail": "terminal result omitted from Management audit"})
+    return render_payload(result)
+
+
 def management_audit_enabled(module: str, proxy_origin: str) -> bool:
     """Persist user-visible calls, but suppress Analysis->Ghidra proxy duplicates."""
     return not (
@@ -63,7 +88,7 @@ class ToolObservabilityMiddleware(Middleware):
         account_id = self._account_id(context)
         provider = self.module if self.module in {"github", "gitlab"} else ""
         request_id = self._request_id(context)
-        arguments_json = render_payload(context.message.arguments or {})
+        arguments_json = invocation_arguments_payload(self.module, context.message.arguments or {})
         headers = get_http_headers()
         proxy_origin = headers.get("x-koba-proxy-origin", "").strip().casefold()
         audit = management_audit_enabled(self.module, proxy_origin)
@@ -110,7 +135,7 @@ class ToolObservabilityMiddleware(Middleware):
                     status="success",
                     duration_ms=(time.monotonic() - started) * 1000,
                     arguments_json=arguments_json,
-                    result_json=render_payload(result),
+                    result_json=invocation_result_payload(self.module, result),
                 ),
                 audit=audit,
             )
