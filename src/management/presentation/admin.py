@@ -46,12 +46,14 @@ from starlette_admin.fields import BaseField
 from common.mcp_surfaces import MCP_SURFACE_PATHS
 from common.models import JsonObject, JsonValue, json_int, json_str
 from common.public_tool_names import public_tool_name
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    RuntimeSettingsService,
     SnapshotService,
 )
 from management.domain.accounts import Account, AuthType, Provider
@@ -966,11 +968,13 @@ class SettingsView(CustomView):
     def __init__(
         self,
         config: ManagementConfigService,
+        runtime_settings: RuntimeSettingsService,
         audit: InvocationAuditService,
         reverse: ReverseAdminClient,
     ) -> None:
         super().__init__()
         self.config = config
+        self.runtime_settings = runtime_settings
         self.audit = audit
         self.reverse = reverse
 
@@ -993,8 +997,20 @@ class SettingsView(CustomView):
                 reverse_idle_timeout = float(str(form.get("reverse_idle_timeout_seconds", "900")))
                 if not 0 <= reverse_idle_timeout <= 86_400:
                     raise ValueError("Reverse idle timeout must be between 0 and 86400 seconds")
+                terminal_policy = TerminalRuntimePolicy(
+                    max_exec_timeout_seconds=int(
+                        str(form.get("terminal_max_exec_timeout_seconds", "300"))
+                    ),
+                    max_job_runtime_seconds=int(
+                        str(form.get("terminal_max_job_runtime_seconds", "3600"))
+                    ),
+                )
                 await self.reverse.set_idle_timeout(reverse_idle_timeout)
                 await asyncio.to_thread(self.config.update, config)
+                await asyncio.to_thread(
+                    self.runtime_settings.update_terminal_policy,
+                    terminal_policy,
+                )
             except (TypeError, ValueError, RuntimeError) as exc:
                 flash(request, f"Invalid settings: {exc}", "error")
             else:
@@ -1002,6 +1018,7 @@ class SettingsView(CustomView):
                 return RedirectResponse("/admin/settings", status_code=303)
 
         config = await asyncio.to_thread(self.config.get)
+        terminal_policy = await asyncio.to_thread(self.runtime_settings.terminal_policy)
         try:
             reverse_settings = await self.reverse.session_settings()
             reverse_error = ""
@@ -1019,6 +1036,7 @@ class SettingsView(CustomView):
             context={
                 "title": "Settings",
                 "config": config,
+                "terminal_policy": terminal_policy,
                 "reverse_settings": reverse_settings,
                 "reverse_error": reverse_error,
             },
@@ -1362,6 +1380,7 @@ def build_admin(
     oauth_sessions: OAuthSessionService,
     snapshots: SnapshotService,
     config: ManagementConfigService,
+    runtime_settings: RuntimeSettingsService,
     files: FileAdminStore,
     reverse: ReverseAdminClient,
 ) -> Admin:
@@ -1401,5 +1420,5 @@ def build_admin(
     admin.add_view(TerminalView(terminal))
     admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))
     admin.add_view(InvocationView(InvocationRecord, audit))
-    admin.add_view(SettingsView(config, audit, reverse))
+    admin.add_view(SettingsView(config, runtime_settings, audit, reverse))
     return admin
