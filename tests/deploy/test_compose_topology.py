@@ -148,6 +148,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
             "GITHUB_OAUTH_ALLOWED_USERS",
         },
         "gateway": observability | {
+            "MANAGEMENT_SERVICE_TOKEN",
             "OAUTH_ENABLED",
             "MCP_PUBLIC_BASE_URL",
             "GITHUB_OAUTH_JWT_SIGNING_KEY",

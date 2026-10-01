@@ -69,7 +69,7 @@ services:
       <<: *build
       target: gateway
     environment:
-      <<: *observability
+      <<: [*management-client, *observability]
       OAUTH_ENABLED: ${OAUTH_ENABLED:-true}
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
       GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:?}
