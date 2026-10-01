@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import grp
 import json
 import os
 import pty
@@ -243,6 +244,7 @@ class TerminalManager:
         tool_names = (
             "bash",
             "git",
+            "gh",
             "ssh",
             "curl",
             "wget",
@@ -255,10 +257,44 @@ class TerminalManager:
             "python",
             "uv",
             "picocom",
+            "gdb",
+            "strace",
+            "socat",
+        )
+        group_ids = sorted(set(os.getgroups()) | {os.getgid()})
+        groups: list[JsonValue] = []
+        for group_id in group_ids:
+            try:
+                name = grp.getgrgid(group_id).gr_name
+            except KeyError:
+                name = ""
+            groups.append({"gid": group_id, "name": name})
+        serial_paths = sorted(
+            {
+                *Path("/dev").glob("ttyUSB*"),
+                *Path("/dev").glob("ttyACM*"),
+                *Path("/dev/serial/by-id").glob("*"),
+            },
+            key=lambda item: str(item),
+        )
+        serial_devices: list[JsonValue] = [
+            {
+                "path": str(path),
+                "readable": os.access(path, os.R_OK),
+                "writable": os.access(path, os.W_OK),
+            }
+            for path in serial_paths
+        ]
+        ssh_dir = self.home / ".ssh"
+        public_keys = (
+            sorted(path.name for path in ssh_dir.glob("*.pub"))
+            if ssh_dir.is_dir()
+            else []
         )
         return {
             "uid": os.getuid(),
             "gid": os.getgid(),
+            "groups": groups,
             "home": str(self.home),
             "workspace_root": str(self.workspace_root),
             "shell": self.settings.shell,
@@ -269,7 +305,13 @@ class TerminalManager:
                 "used_bytes": usage.used,
                 "free_bytes": usage.free,
             },
-            "tools": {name: shutil.which(name) or "" for name in tool_names},
+            "tools": {
+                name: shutil.which(name, path=self.settings.path) or ""
+                for name in tool_names
+            },
+            "serial_devices": serial_devices,
+            "ssh_public_keys": public_keys,
+            "git_configured": (self.home / ".gitconfig").is_file(),
         }
 
     def _environment(self, overrides: dict[str, str] | None) -> dict[str, str]:
