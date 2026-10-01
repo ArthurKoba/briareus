@@ -76,6 +76,7 @@ async def test_http_runtime_surface_is_isolated() -> None:
 
     assert "curl_presets" in names
     assert "curl_request" in names
+    assert "browser_diagnostics" in names
     assert "browser_status" in names
     assert "browser_open" in names
     assert "browser_snapshot" in names
