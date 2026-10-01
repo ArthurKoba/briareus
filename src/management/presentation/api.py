@@ -12,6 +12,7 @@ from management.application.services import (
     AccountService,
     InvocationAuditService,
     OAuthSessionService,
+    RuntimeSettingsService,
 )
 from management.domain.accounts import Provider
 from management.domain.telemetry import Invocation
@@ -23,11 +24,13 @@ class ApiServices:
         accounts: AccountService,
         audit: InvocationAuditService,
         oauth_sessions: OAuthSessionService,
+        runtime_settings: RuntimeSettingsService,
         service_token: str,
     ) -> None:
         self.accounts = accounts
         self.audit = audit
         self.oauth_sessions = oauth_sessions
+        self.runtime_settings = runtime_settings
         self.service_token = service_token
 
 
@@ -57,6 +60,12 @@ def build_internal_router(services: ApiServices) -> APIRouter:
             return services.accounts.resolve(selector, provider=provider).model_dump(mode="json")
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.get("/runtime-settings/terminal")
+    def terminal_runtime_settings(
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        return services.runtime_settings.terminal_policy().to_json()
 
     @router.post("/events", status_code=204)
     def record_event(
@@ -91,18 +100,14 @@ def build_internal_router(services: ApiServices) -> APIRouter:
                         session.last_refresh_at.isoformat() if session.last_refresh_at else None
                     ),
                     "access_expires_at": (
-                        session.access_expires_at.isoformat()
-                        if session.access_expires_at
-                        else None
+                        session.access_expires_at.isoformat() if session.access_expires_at else None
                     ),
                     "refresh_expires_at": (
                         session.refresh_expires_at.isoformat()
                         if session.refresh_expires_at
                         else None
                     ),
-                    "revoked_at": (
-                        session.revoked_at.isoformat() if session.revoked_at else None
-                    ),
+                    "revoked_at": (session.revoked_at.isoformat() if session.revoked_at else None),
                 }
                 for session in sessions
             ],

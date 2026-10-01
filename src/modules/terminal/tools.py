@@ -68,6 +68,7 @@ def register_terminal_tools(mcp: FastMCP, manager: TerminalManager) -> None:
         label: str = "",
         cols: int = 120,
         rows: int = 40,
+        timeout_seconds: float | None = None,
     ) -> JsonObject:
         """Start a persistent long-running or interactive process job."""
         return await manager.job_start(
@@ -79,6 +80,7 @@ def register_terminal_tools(mcp: FastMCP, manager: TerminalManager) -> None:
             label=label,
             cols=cols,
             rows=rows,
+            timeout_seconds=timeout_seconds,
         )
 
     @mcp.tool(title="Job status", annotations=READ_ONLY_LOCAL)

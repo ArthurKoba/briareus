@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from common.management_client import ManagementClient, ManagementClientError
 from common.models import JsonObject, JsonValue
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from common.settings import TerminalSettings
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ class Job:
     master_fd: int | None = None
     reader_task: asyncio.Task[None] | None = None
     watcher_task: asyncio.Task[None] | None = None
+    timeout_seconds: float = 0
 
 
 def _timestamp(value: float | None) -> str | None:
@@ -62,8 +65,13 @@ def _timestamp(value: float | None) -> str | None:
 
 
 class TerminalManager:
-    def __init__(self, settings: TerminalSettings) -> None:
+    def __init__(
+        self,
+        settings: TerminalSettings,
+        management: ManagementClient | None = None,
+    ) -> None:
         self.settings = settings
+        self.management = management
         self.workspace_root = settings.workspace_root
         self.projects_root = self.workspace_root / "projects"
         self.home = settings.home
@@ -309,6 +317,14 @@ class TerminalManager:
             "git_configured": (self.home / ".gitconfig").is_file(),
         }
 
+    def _runtime_policy(self) -> TerminalRuntimePolicy:
+        if self.management is None:
+            return TerminalRuntimePolicy()
+        try:
+            return self.management.terminal_runtime_policy()
+        except (ManagementClientError, ValueError):
+            return TerminalRuntimePolicy()
+
     def _environment(self, overrides: dict[str, str] | None) -> dict[str, str]:
         env = {
             "HOME": str(self.home),
@@ -342,6 +358,11 @@ class TerminalManager:
         if requested_limit <= 0:
             raise TerminalError("max_output_bytes must be > 0")
         limit = min(requested_limit, self.settings.max_exec_output_bytes)
+        policy = self._runtime_policy()
+        effective_timeout = min(
+            max(0.1, timeout_seconds),
+            float(policy.max_exec_timeout_seconds),
+        )
         started = time.time()
         process = await asyncio.create_subprocess_shell(
             command,
@@ -361,7 +382,7 @@ class TerminalManager:
         try:
             await asyncio.wait_for(
                 process.wait(),
-                timeout=max(0.1, timeout_seconds),
+                timeout=effective_timeout,
             )
         except TimeoutError:
             timed_out = True
@@ -389,6 +410,7 @@ class TerminalManager:
             "started_at": _timestamp(started),
             "ended_at": _timestamp(ended),
             "duration_seconds": round(ended - started, 3),
+            "timeout_seconds": effective_timeout,
         }
 
     @staticmethod
@@ -430,6 +452,7 @@ class TerminalManager:
             "pid": job.pid,
             "log_path": str(job.log_path),
             "log_truncated": job.log_truncated,
+            "timeout_seconds": job.timeout_seconds,
         }
         tmp = job.metadata_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -461,6 +484,7 @@ class TerminalManager:
                     log_path=Path(data.get("log_path") or metadata_path.parent / "output.log"),
                     metadata_path=metadata_path,
                     log_truncated=bool(data.get("log_truncated", False)),
+                    timeout_seconds=float(data.get("timeout_seconds", 0) or 0),
                 )
                 self._jobs[job.job_id] = job
                 self._persist(job)
@@ -477,6 +501,7 @@ class TerminalManager:
         label: str = "",
         cols: int = 120,
         rows: int = 40,
+        timeout_seconds: float | None = None,
     ) -> JsonObject:
         if not command.strip():
             raise TerminalError("command is required")
@@ -488,6 +513,16 @@ class TerminalManager:
         log_path = job_dir / "output.log"
         log_path.touch()
         metadata_path = job_dir / "metadata.json"
+        policy = self._runtime_policy()
+        requested_timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else float(policy.max_job_runtime_seconds)
+        )
+        effective_timeout = min(
+            max(0.1, requested_timeout),
+            float(policy.max_job_runtime_seconds),
+        )
         now = time.time()
 
         if interactive:
@@ -537,6 +572,7 @@ class TerminalManager:
             metadata_path=metadata_path,
             process=process,
             master_fd=master_fd,
+            timeout_seconds=effective_timeout,
         )
         self._jobs[job_id] = job
         self._persist(job)
@@ -590,14 +626,29 @@ class TerminalManager:
 
     async def _watch_job(self, job: Job) -> None:
         assert job.process is not None
-        returncode = await job.process.wait()
+        timed_out = False
+        try:
+            returncode = await asyncio.wait_for(
+                job.process.wait(),
+                timeout=max(0.1, job.timeout_seconds),
+            )
+        except TimeoutError:
+            timed_out = True
+            self._signal_process_group(job.process.pid, signal.SIGTERM)
+            try:
+                returncode = await asyncio.wait_for(job.process.wait(), timeout=2)
+            except TimeoutError:
+                self._signal_process_group(job.process.pid, signal.SIGKILL)
+                returncode = await job.process.wait()
         if job.reader_task is not None:
             with suppress(Exception):
                 await job.reader_task
         job.ended_at = time.time()
         job.exit_code = returncode
         job.signal_number = -returncode if returncode < 0 else None
-        if job.state == "cancelling":
+        if timed_out:
+            job.state = "timed_out"
+        elif job.state == "cancelling":
             job.state = "cancelled"
         elif returncode == 0:
             job.state = "completed"
@@ -638,6 +689,7 @@ class TerminalManager:
             ),
             "output_bytes": output_bytes,
             "output_truncated": job.log_truncated,
+            "timeout_seconds": job.timeout_seconds,
         }
 
     def job_status(self, job_id: str) -> JsonObject:

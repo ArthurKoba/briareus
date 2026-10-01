@@ -8,6 +8,7 @@ import urllib.request
 from .account_contracts import AccountList, InvocationEvent, ResolvedAccount
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
+from .runtime_policy_contracts import TerminalRuntimePolicy
 from .settings import ManagementClientSettings
 
 
@@ -50,13 +51,9 @@ class ManagementClient:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read()[:2048].decode("utf-8", "replace")
-            raise ManagementClientError(
-                f"management HTTP {exc.code}: {detail}"
-            ) from exc
+            raise ManagementClientError(f"management HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
-            raise ManagementClientError(
-                f"management transport error: {exc.reason}"
-            ) from exc
+            raise ManagementClientError(f"management transport error: {exc.reason}") from exc
         if not expect_body or not raw:
             return {}
         return json_object(
@@ -92,16 +89,8 @@ class ManagementClient:
             if "management HTTP 404:" not in str(exc):
                 raise
             accounts = self.list_accounts(provider=provider)
-            aliases = sorted(
-                account.alias
-                for account in accounts.accounts
-                if account.alias
-            )
-            hint = (
-                f"; use stable account alias instead: {', '.join(aliases)}"
-                if aliases
-                else ""
-            )
+            aliases = sorted(account.alias for account in accounts.accounts if account.alias)
+            hint = f"; use stable account alias instead: {', '.join(aliases)}" if aliases else ""
             raise ManagementClientError(
                 f"{provider} account selector not found: {value}{hint}"
             ) from exc
@@ -114,6 +103,10 @@ class ManagementClient:
             payload=json_object(event.model_dump(mode="json"), context="invocation event"),
             expect_body=False,
         )
+
+    def terminal_runtime_policy(self) -> TerminalRuntimePolicy:
+        data = self._request("GET", "/internal/runtime-settings/terminal")
+        return TerminalRuntimePolicy.model_validate(data)
 
     def record_oauth_session(self, event: OAuthSessionEvent) -> None:
         self._request(

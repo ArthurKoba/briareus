@@ -16,6 +16,7 @@ from management.application.services import (
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    RuntimeSettingsService,
     SnapshotService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -30,6 +31,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
     SqlAlchemyOAuthSessionRepository,
+    SqlAlchemyRuntimeSettingsRepository,
     SqlAlchemySnapshotRepository,
 )
 from management.infrastructure.reverse import ReverseAdminClient
@@ -52,9 +54,11 @@ cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
 config_repository = SqlAlchemyManagementConfigRepository(sessions)
+runtime_settings_repository = SqlAlchemyRuntimeSettingsRepository(sessions)
 oauth_session_repository = SqlAlchemyOAuthSessionRepository(sessions)
 snapshot_repository = SqlAlchemySnapshotRepository(sessions)
 config_service = ManagementConfigService(config_repository)
+runtime_settings = RuntimeSettingsService(runtime_settings_repository)
 oauth_sessions = OAuthSessionService(oauth_session_repository)
 snapshots = SnapshotService(snapshot_repository)
 config_service.get()
@@ -135,6 +139,7 @@ app.include_router(
             accounts=accounts,
             audit=audit,
             oauth_sessions=oauth_sessions,
+            runtime_settings=runtime_settings,
             service_token=settings.service_token,
         )
     )
@@ -155,6 +160,7 @@ admin = build_admin(
     oauth_sessions,
     snapshots,
     config_service,
+    runtime_settings,
     files,
     reverse,
 )
