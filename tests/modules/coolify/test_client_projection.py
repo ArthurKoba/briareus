@@ -100,3 +100,37 @@ def test_team_projection_is_minimal(monkeypatch) -> None:
         "description": "root",
         "personal_team": True,
     }
+
+
+def test_application_deployments_accepts_coolify_envelope_and_sanitizes(monkeypatch) -> None:
+    client = CoolifyClient(_account())
+    payload = {
+        "deployments": [
+            {
+                "deployment_uuid": "dep-2",
+                "application_name": "mcp-bridge",
+                "status": "in_progress",
+                "commit": "deadbeef",
+                "logs": "TOKEN=very-secret",
+                "configuration": {"secret": "very-secret"},
+            }
+        ],
+        "count": 1,
+        "internal": {"token": "very-secret"},
+    }
+    monkeypatch.setattr(client, "_get", lambda *_args, **_kwargs: payload)
+
+    result = client.application_deployments("app-1")
+
+    assert result == {
+        "deployments": [
+            {
+                "deployment_uuid": "dep-2",
+                "application_name": "mcp-bridge",
+                "status": "in_progress",
+                "commit": "deadbeef",
+            }
+        ],
+        "count": 1,
+    }
+    assert "very-secret" not in repr(result)
