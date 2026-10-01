@@ -1044,8 +1044,14 @@ class FilesView(CustomView):
     @route("")
     async def index(self, request: Request) -> Response:
         current = request.query_params.get("path", "").strip().strip("/")
+        measure_directories = request.query_params.get("sizes", "") == "1"
         try:
-            listing = await asyncio.to_thread(self.files.list, current, limit=500)
+            listing = await asyncio.to_thread(
+                self.files.list,
+                current,
+                limit=500,
+                measure_directories=measure_directories,
+            )
             cached_stats = await asyncio.to_thread(self.snapshots.get, WORKSPACE_STATS_KEY)
             stats = cached_stats.payload if cached_stats is not None else {}
             stats_meta = snapshot_meta(cached_stats)
@@ -1072,6 +1078,7 @@ class FilesView(CustomView):
                 "stats_meta": stats_meta,
                 "current_path": current,
                 "parent_path": parent,
+                "measure_directories": measure_directories,
                 "error": error,
             },
         )

@@ -194,3 +194,44 @@ def test_oauth_session_admin_uses_readable_surface_and_client_labels() -> None:
     assert _oauth_client_label(None, web) == "ChatGPT"  # type: ignore[arg-type]
     assert _oauth_client_label(None, root) == "short-client"  # type: ignore[arg-type]
     assert _oauth_client_label(None, analysis) == "41e63a78…91a658"  # type: ignore[arg-type]
+
+
+def test_file_admin_store_measures_directory_sizes_on_demand(tmp_path: Path) -> None:
+    store = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
+    root = tmp_path / "workspace"
+    (root / "large" / "nested").mkdir(parents=True)
+    (root / "large" / "a.bin").write_bytes(b"a" * 1024)
+    (root / "large" / "nested" / "b.bin").write_bytes(b"b" * 2048)
+    (root / "small").mkdir()
+    (root / "small" / "c.txt").write_text("hello")
+
+    fast = store.list()
+    fast_large = next(item for item in fast["entries"] if item["name"] == "large")
+    assert fast_large["size_bytes"] == 0
+    assert fast["directory_sizes_measured"] is False
+
+    measured = store.list(measure_directories=True)
+    large = next(item for item in measured["entries"] if item["name"] == "large")
+    small = next(item for item in measured["entries"] if item["name"] == "small")
+
+    assert measured["directory_sizes_measured"] is True
+    assert large["size_bytes"] == 3072
+    assert large["size_display"] == "3.0 KiB"
+    assert large["file_count"] == 2
+    assert small["size_bytes"] == 5
+    assert small["file_count"] == 1
+
+
+def test_file_admin_store_directory_size_skips_symlinks(tmp_path: Path) -> None:
+    store = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
+    root = tmp_path / "workspace"
+    (root / "dir").mkdir(parents=True)
+    (root / "dir" / "real.bin").write_bytes(b"x" * 7)
+    (root / "outside.bin").write_bytes(b"y" * 100)
+    (root / "dir" / "link.bin").symlink_to(root / "outside.bin")
+
+    measured = store.list(measure_directories=True)
+    directory = next(item for item in measured["entries"] if item["name"] == "dir")
+
+    assert directory["size_bytes"] == 7
+    assert directory["file_count"] == 1
