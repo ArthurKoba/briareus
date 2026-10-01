@@ -135,11 +135,18 @@ class CoolifyClient:
         return _project(raw, _DEPLOYMENT_FIELDS)
 
     def application_deployments(self, uuid: str) -> JsonValue:
-        rows = json_object_list(
+        envelope = json_object(
             self._get("/deployments/applications/" + urllib.parse.quote(uuid, safe="")),
             context="Coolify application deployments",
         )
-        return [_project(row, _DEPLOYMENT_FIELDS) for row in rows]
+        rows = json_object_list(
+            envelope.get("deployments"),
+            context="Coolify application deployments.deployments",
+        )
+        return {
+            "deployments": [_project(row, _DEPLOYMENT_FIELDS) for row in rows],
+            "count": len(rows),
+        }
 
     def account_summary(self) -> JsonObject:
         return json_object(
