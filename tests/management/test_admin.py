@@ -131,8 +131,6 @@ def test_admin_settings_parse_invocation_audit_controls() -> None:
                 "logging_capture_payloads": "on",
                 "logging_retention_days": "14",
                 "logging_max_records": "5000",
-                "file_retention_days": "30",
-                "file_cleanup_limit": "1000",
                 "maintenance_interval_minutes": "15",
             }
         )
