@@ -720,9 +720,6 @@ class SettingsView(CustomView):
             logging_capture_payloads="logging_capture_payloads" in form,
             logging_retention_days=int(str(form.get("logging_retention_days", "30"))),
             logging_max_records=int(str(form.get("logging_max_records", "10000"))),
-            file_auto_cleanup_enabled="file_auto_cleanup_enabled" in form,
-            file_retention_days=int(str(form.get("file_retention_days", "30"))),
-            file_cleanup_limit=int(str(form.get("file_cleanup_limit", "1000"))),
             maintenance_interval_minutes=int(
                 str(form.get("maintenance_interval_minutes", "60"))
             ),
