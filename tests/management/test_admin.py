@@ -172,7 +172,7 @@ def test_oauth_session_admin_uses_readable_surface_and_client_labels() -> None:
         client_id="short-client",
     )
 
-    assert _oauth_surface_label(None, analysis) == "Analysis (Ghidra backend)"  # type: ignore[arg-type]
+    assert _oauth_surface_label(None, analysis) == "Analysis"  # type: ignore[arg-type]
     assert _oauth_surface_label(None, web) == "Web / Browser"  # type: ignore[arg-type]
     assert _oauth_surface_label(None, root) == "Bridge / Root MCP"  # type: ignore[arg-type]
     assert _oauth_client_label(None, web) == "ChatGPT"  # type: ignore[arg-type]

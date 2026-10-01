@@ -354,7 +354,7 @@ _OAUTH_SURFACE_LABELS = {
     "gitlab": "GitLab",
     "files": "Files",
     "web": "Web / Browser",
-    "analysis": "Analysis (Ghidra backend)",
+    "analysis": "Analysis",
     "terminal": "Terminal",
 }
 
