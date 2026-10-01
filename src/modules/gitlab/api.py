@@ -4,6 +4,7 @@ import http.client
 import json
 import ssl
 import urllib.parse
+from pathlib import Path
 
 from common.http_transport import HttpTransportError, PooledHttpTransport
 from common.models import JsonObject, JsonValue, json_loads, json_value
@@ -19,10 +20,12 @@ class GitLabApiClient:
         *,
         max_connections: int = 4,
         protected_branches: frozenset[str] = frozenset({"main", "master"}),
+        workspace_root: Path = Path("/workspace"),
     ) -> None:
         self.profile = profile
         self.max_connections = max(1, int(max_connections))
         self.protected_branches = protected_branches
+        self.workspace_root = workspace_root
         parsed = urllib.parse.urlsplit(profile.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise GitLabError(
