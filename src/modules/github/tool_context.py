@@ -36,6 +36,8 @@ class GitHubRuntimeContext:
                     context="GitHub potential capabilities",
                 )
                 account["permission_scope"] = "repository-dependent"
+                account["preferred_selector"] = str(account.get("alias", ""))
+                account["selector_stability"] = "stable_alias"
         return result
 
     @staticmethod
