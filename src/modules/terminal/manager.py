@@ -240,9 +240,10 @@ class TerminalManager:
 
     def status(self) -> JsonObject:
         usage = shutil.disk_usage(self.workspace_root)
-        states: JsonObject = {}
+        states: dict[str, int] = {}
         for job in self._jobs.values():
             states[job.state] = states.get(job.state, 0) + 1
+        job_states: JsonObject = {key: value for key, value in states.items()}
         tool_names = (
             "bash",
             "git",
@@ -266,7 +267,7 @@ class TerminalManager:
             "workspace_root": str(self.workspace_root),
             "shell": self.settings.shell,
             "workspaces": self.workspace_list()["count"],
-            "jobs": states,
+            "jobs": job_states,
             "disk": {
                 "total_bytes": usage.total,
                 "used_bytes": usage.used,
