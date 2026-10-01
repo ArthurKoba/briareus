@@ -79,11 +79,9 @@ updates the image or host/container permissions deliberately.
 
 ### Files integration
 
-Terminal integrates with the existing Files capability for explicit import/export between
-immutable Files objects and workspace paths. Transfers go through the private Files MCP;
-the canonical Files storage volume is not mounted into the terminal shell runtime. The
-public contract remains file_id <-> workspace path and agents cannot accidentally mutate
-the immutable object store directly.
+Files and Terminal operate on the same persistent `/workspace` filesystem. Files is the
+path-based file-manager/transport surface; Terminal is the process-execution surface.
+No import/export copy or immutable file identifier is required between them.
 
 ### Git and credentials
 
