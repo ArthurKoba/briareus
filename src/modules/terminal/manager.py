@@ -48,6 +48,7 @@ class Job:
     process: asyncio.subprocess.Process | None = None
     master_fd: int | None = None
     reader_task: asyncio.Task[None] | None = None
+    watcher_task: asyncio.Task[None] | None = None
 
 
 def _timestamp(value: float | None) -> str | None:
@@ -162,6 +163,7 @@ class TerminalManager:
         }
 
     async def workspace_delete(self, workspace_id: str, force: bool = False) -> JsonObject:
+        workspace_id = self._workspace_id(workspace_id)
         path = self._require_workspace(workspace_id)
         active = [
             job
@@ -238,11 +240,12 @@ class TerminalManager:
     ) -> JsonObject:
         if not command.strip():
             raise TerminalError("command is required")
+        workspace_id = self._workspace_id(workspace_id)
         workdir = self.resolve_cwd(workspace_id, cwd)
-        limit = min(
-            max_output_bytes or self.settings.max_exec_output_bytes,
-            self.settings.max_exec_output_bytes,
-        )
+        requested_limit = max_output_bytes or self.settings.max_exec_output_bytes
+        if requested_limit <= 0:
+            raise TerminalError("max_output_bytes must be > 0")
+        limit = min(requested_limit, self.settings.max_exec_output_bytes)
         started = time.time()
         process = await asyncio.create_subprocess_shell(
             command,
@@ -363,6 +366,7 @@ class TerminalManager:
     ) -> JsonObject:
         if not command.strip():
             raise TerminalError("command is required")
+        workspace_id = self._workspace_id(workspace_id)
         workdir = self.resolve_cwd(workspace_id, cwd)
         job_id = uuid.uuid4().hex
         job_dir = self._job_dir(job_id)
@@ -423,7 +427,7 @@ class TerminalManager:
         self._jobs[job_id] = job
         self._persist(job)
         job.reader_task = asyncio.create_task(self._read_job_output(job))
-        asyncio.create_task(self._watch_job(job))
+        job.watcher_task = asyncio.create_task(self._watch_job(job))
         return self._job_public(job)
 
     async def _read_job_output(self, job: Job) -> None:
@@ -552,10 +556,10 @@ class TerminalManager:
         job = self._get_job(job_id)
         if cursor < 0:
             raise TerminalError("cursor must be >= 0")
-        limit = min(
-            max_bytes or self.settings.max_job_read_bytes,
-            self.settings.max_job_read_bytes,
-        )
+        requested_limit = max_bytes or self.settings.max_job_read_bytes
+        if requested_limit <= 0:
+            raise TerminalError("max_bytes must be > 0")
+        limit = min(requested_limit, self.settings.max_job_read_bytes)
         deadline = time.monotonic() + max(0, min(wait_seconds, 30))
         while True:
             try:
@@ -613,10 +617,10 @@ class TerminalManager:
 
     async def job_wait(self, job_id: str, timeout_seconds: float = 30) -> JsonObject:
         job = self._get_job(job_id)
-        if job.process is not None and job.state in {"running", "cancelling"}:
+        if job.watcher_task is not None and job.state in {"running", "cancelling"}:
             try:
                 await asyncio.wait_for(
-                    asyncio.shield(job.process.wait()),
+                    asyncio.shield(job.watcher_task),
                     timeout=max(0, min(timeout_seconds, 300)),
                 )
             except TimeoutError:
@@ -639,10 +643,10 @@ class TerminalManager:
         except TimeoutError:
             self._signal_process_group(process.pid, signal.SIGKILL)
             await process.wait()
-        if job.reader_task is not None:
+        if job.watcher_task is not None:
             try:
-                await asyncio.wait_for(asyncio.shield(job.reader_task), timeout=2)
-            except (TimeoutError, Exception):
+                await asyncio.wait_for(asyncio.shield(job.watcher_task), timeout=2)
+            except TimeoutError:
                 pass
         return self._job_public(job)
 
