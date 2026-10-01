@@ -20,6 +20,7 @@ from pathlib import Path
 
 from common.models import JsonObject, JsonValue
 from common.settings import TerminalSettings
+
 from .files_client import TerminalFilesClient
 
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -60,7 +61,11 @@ def _timestamp(value: float | None) -> str | None:
 
 
 class TerminalManager:
-    def __init__(self, settings: TerminalSettings, files: TerminalFilesClient | None = None) -> None:
+    def __init__(
+        self,
+        settings: TerminalSettings,
+        files: TerminalFilesClient | None = None,
+    ) -> None:
         self.settings = settings
         self.files = files
         self.workspace_root = settings.workspace_root
@@ -275,7 +280,7 @@ class TerminalManager:
                 *Path("/dev").glob("ttyACM*"),
                 *Path("/dev/serial/by-id").glob("*"),
             },
-            key=lambda item: str(item),
+            key=str,
         )
         serial_devices: list[JsonValue] = [
             {
@@ -704,7 +709,10 @@ class TerminalManager:
         cutoff = time.time() - older_than_hours * 3600
         candidates = [
             job
-            for job in sorted(self._jobs.values(), key=lambda item: item.ended_at or item.created_at)
+            for job in sorted(
+                self._jobs.values(),
+                key=lambda item: item.ended_at or item.created_at,
+            )
             if job.state not in {"running", "cancelling"}
             and (job.ended_at or job.created_at) <= cutoff
         ][:limit]
