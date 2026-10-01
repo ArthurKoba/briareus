@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import json
+import time
 from contextvars import ContextVar
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -29,6 +32,7 @@ _RESOURCE_BINDING_TTL_SECONDS = 10 * 60
 _TRANSACTION_TTL_SECONDS = 15 * 60
 _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS = 24 * 60 * 60
 _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
+_REFRESH_REPLAY_SECONDS = 5.0
 
 
 class ResourceBinding(StrictModel):
@@ -46,6 +50,8 @@ class MultiResourceGitHubProvider(GitHubProvider):
         )
         self._allowed_resources = allowed_resource_urls(settings.public_base_url)
         self._root_resource = resource_url(settings.public_base_url, "root")
+        self._refresh_exchange_locks: dict[str, asyncio.Lock] = {}
+        self._refresh_exchange_replays: dict[str, tuple[float, OAuthToken]] = {}
 
         super().__init__(
             client_id=settings.oauth_client_id,
@@ -253,11 +259,43 @@ class MultiResourceGitHubProvider(GitHubProvider):
         scopes: list[str],
     ) -> OAuthToken:
         resource = self.canonical_resource(refresh_token.resource)
-        token = self._resource_context.set(resource)
-        try:
-            return await super().exchange_refresh_token(client, refresh_token, scopes)
-        finally:
-            self._resource_context.reset(token)
+        client_id = client.client_id or ""
+        replay_key = hashlib.sha256(
+            (client_id + "\0" + refresh_token.token).encode()
+        ).hexdigest()
+        now = time.monotonic()
+        expired = [
+            key
+            for key, (expires_at, _result) in self._refresh_exchange_replays.items()
+            if expires_at <= now
+        ]
+        for key in expired:
+            self._refresh_exchange_replays.pop(key, None)
+            lock = self._refresh_exchange_locks.get(key)
+            if lock is not None and not lock.locked():
+                self._refresh_exchange_locks.pop(key, None)
+
+        lock = self._refresh_exchange_locks.setdefault(replay_key, asyncio.Lock())
+        async with lock:
+            cached = self._refresh_exchange_replays.get(replay_key)
+            if cached is not None and cached[0] > time.monotonic():
+                return cached[1]
+
+            token = self._resource_context.set(resource)
+            try:
+                result = await super().exchange_refresh_token(
+                    client,
+                    refresh_token,
+                    scopes,
+                )
+            finally:
+                self._resource_context.reset(token)
+
+            self._refresh_exchange_replays[replay_key] = (
+                time.monotonic() + _REFRESH_REPLAY_SECONDS,
+                result,
+            )
+            return result
 
     async def revoke_token(
         self,

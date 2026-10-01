@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 
 from auth_service.provider import (
@@ -92,3 +95,47 @@ def test_refresh_token_audience_is_recovered_from_token_claims() -> None:
 
     assert provider._jwt_audience_unverified(token) == analysis
     assert provider.canonical_resource(provider._jwt_audience_unverified(token)) == analysis
+
+
+@pytest.mark.asyncio
+async def test_concurrent_refresh_requests_are_coalesced(monkeypatch) -> None:
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from mcp.shared.auth import OAuthToken
+
+    settings = _settings()
+    provider = MultiResourceGitHubProvider(settings)
+    analysis = resource_url(settings.public_base_url, "analysis")
+    calls = 0
+
+    async def fake_exchange(
+        self,
+        client,
+        refresh_token,
+        scopes,
+    ):
+        nonlocal calls
+        del self, client, refresh_token, scopes
+        calls += 1
+        await asyncio.sleep(0.05)
+        return OAuthToken(
+            access_token="new-access",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="new-refresh",
+            scope="read:user",
+        )
+
+    monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fake_exchange)
+
+    client = SimpleNamespace(client_id="chatgpt-client")
+    refresh = SimpleNamespace(token="old-refresh", resource=analysis)
+
+    first, second = await asyncio.gather(
+        provider.exchange_refresh_token(client, refresh, ["read:user"]),  # type: ignore[arg-type]
+        provider.exchange_refresh_token(client, refresh, ["read:user"]),  # type: ignore[arg-type]
+    )
+
+    assert calls == 1
+    assert first.access_token == "new-access"
+    assert second.access_token == "new-access"
+    assert first.refresh_token == second.refresh_token == "new-refresh"
