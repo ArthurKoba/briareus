@@ -50,6 +50,9 @@ async def test_files_runtime_surface_is_isolated() -> None:
     assert "file_status" in names
     assert "file_ingest" in names
     assert "file_extract" in names
+    assert "file_workspace_list" in names
+    assert "file_workspace_ingest" in names
+    assert "file_workspace_snapshot" in names
     assert "curl_request" not in names
     assert "github_agent_status" not in names
     assert "accounts" not in names
@@ -98,6 +101,8 @@ async def test_terminal_runtime_surface_is_isolated(monkeypatch, tmp_path) -> No
     assert "job_write" in names
     assert "job_delete" in names
     assert "job_cleanup" in names
+    assert "workspace_import_file" not in names
+    assert "workspace_export_file" not in names
     assert "github_agent_status" not in names
     assert "curl_request" not in names
     assert "accounts" not in names

@@ -5,6 +5,7 @@ from mcp.types import ToolAnnotations
 
 from common.models import JsonObject, JsonValue
 from modules.files.file_store import FileStore
+from modules.files.workspace_store import WorkspaceFileStore
 
 
 def register_curl_tools(
@@ -13,6 +14,7 @@ def register_curl_tools(
     write_annotations: ToolAnnotations,
     *,
     store: FileStore,
+    workspace: WorkspaceFileStore,
     curl_binary: str,
 ) -> None:
     from .curl_tools import (
@@ -99,6 +101,8 @@ def register_curl_tools(
         body_file_id: str | None = None,
         body_content_type: str = "",
         file_name: str = "",
+        workspace_path: str = "",
+        workspace_overwrite: bool = False,
         preset: str = DEFAULT_CURL_PRESET,
         follow_redirects: bool = True,
         max_redirects: int = 10,
@@ -130,6 +134,8 @@ def register_curl_tools(
             body_file_id=body_file_id,
             body_content_type=body_content_type,
             file_name=file_name,
+            workspace_path=workspace_path,
+            workspace_overwrite=workspace_overwrite,
             preset=preset,
             follow_redirects=follow_redirects,
             max_redirects=max_redirects,
@@ -142,6 +148,7 @@ def register_curl_tools(
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
             store=store,
+            workspace=workspace,
             curl_binary=curl_binary,
         )
 
@@ -159,6 +166,8 @@ def register_curl_tools(
         body_file_id: str | None = None,
         body_content_type: str = "",
         file_name: str = "",
+        workspace_path: str = "",
+        workspace_overwrite: bool = False,
         preset: str = DEFAULT_CURL_PRESET,
         follow_redirects: bool = True,
         max_redirects: int = 10,
@@ -188,6 +197,8 @@ def register_curl_tools(
             body_file_id=body_file_id,
             body_content_type=body_content_type,
             file_name=file_name,
+            workspace_path=workspace_path,
+            workspace_overwrite=workspace_overwrite,
             preset=preset,
             follow_redirects=follow_redirects,
             max_redirects=max_redirects,
@@ -199,5 +210,6 @@ def register_curl_tools(
             forward_sensitive_headers_on_redirect=forward_sensitive_headers_on_redirect,
             preview_bytes=preview_bytes,
             store=store,
+            workspace=workspace,
             curl_binary=curl_binary,
         )

@@ -371,3 +371,43 @@ def test_attachment_ingress_rejects_non_https_source(tmp_path, monkeypatch) -> N
             },
             store=store,
         )
+
+
+def test_attachment_can_stream_directly_to_shared_workspace(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from modules.files import workspace_ingress
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    payload = b"workspace-attachment"
+    digest = hashlib.sha256(payload).hexdigest()
+    workspace = WorkspaceFileStore(tmp_path / "workspace")
+
+    monkeypatch.setattr(
+        workspace_ingress,
+        "_validate_remote_file_url",
+        urllib.parse.urlsplit,
+    )
+    monkeypatch.setattr(
+        workspace_ingress,
+        "_open_remote_file",
+        lambda request: _FakeAttachmentResponse(payload),
+    )
+
+    result = workspace_ingress.ingest_workspace_file(
+        file={
+            "download_url": "https://files.example.invalid/download/token",
+            "file_id": "file-workspace",
+            "file_name": "input.bin",
+        },
+        destination="projects/demo/input.bin",
+        expected_size=len(payload),
+        expected_sha256=digest,
+        workspace=workspace,
+        max_bytes=16 * 1024 * 1024,
+    )
+
+    assert result["path"] == "projects/demo/input.bin"
+    assert result["sha256"] == digest
+    assert workspace.path_for("projects/demo/input.bin").read_bytes() == payload

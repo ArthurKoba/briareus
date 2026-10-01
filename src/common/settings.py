@@ -516,6 +516,10 @@ class GitLabSettings(ProcessSettings):
 
 class FileSettings(ProcessSettings):
     root: Path = Field(Path("/files"), validation_alias="FILE_ROOT")
+    workspace_root: Path = Field(
+        Path("/workspace"),
+        validation_alias="FILE_WORKSPACE_ROOT",
+    )
     upload_max_bytes: int = Field(
         8 * 1024 * 1024 * 1024,
         ge=1024 * 1024,
@@ -541,19 +545,15 @@ class FileSettings(ProcessSettings):
         validation_alias="FILE_UPLOAD_CHUNK_BYTES",
     )
 
-    @field_validator("root")
+    @field_validator("root", "workspace_root")
     @classmethod
     def _absolute_root(cls, value: Path) -> Path:
         if not value.is_absolute():
-            raise ValueError("FILE_ROOT must be absolute")
+            raise ValueError("file paths must be absolute")
         return value.resolve(strict=False)
 
 
 class TerminalSettings(ProcessSettings):
-    files_url: str = Field(
-        "http://files:8000/mcp",
-        validation_alias="TERMINAL_FILES_URL",
-    )
     workspace_root: Path = Field(
         Path("/workspace"),
         validation_alias="TERMINAL_WORKSPACE_ROOT",
@@ -595,7 +595,7 @@ class TerminalSettings(ProcessSettings):
             raise ValueError("terminal paths must be absolute")
         return value.resolve(strict=False)
 
-    @field_validator("files_url", "shell", "path", "lang", "term", mode="before")
+    @field_validator("shell", "path", "lang", "term", mode="before")
     @classmethod
     def _strip_terminal_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value

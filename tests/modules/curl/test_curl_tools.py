@@ -21,6 +21,7 @@ from modules.curl.curl_tools import (
     curl_stream_capture_impl,
 )
 from modules.files.file_store import FileStore
+from modules.files.workspace_store import WorkspaceFileStore
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -239,6 +240,27 @@ def test_download_streams_into_file_store(http_server, file_store: FileStore) ->
     assert stored == b"\x00BridgeBinary\xff" * 64
     assert result["body_is_text"] is False
     assert result["body_preview_hex"]
+
+def test_download_can_write_directly_to_shared_workspace(
+    http_server,
+    file_store: FileStore,
+    tmp_path,
+) -> None:
+    workspace = WorkspaceFileStore(tmp_path / "workspace")
+    result = curl_download_impl(
+        f"{http_server}/download",
+        workspace_path="projects/demo/fixture.bin",
+        store=file_store,
+        workspace=workspace,
+    )
+
+    assert "file" not in result
+    assert result["workspace_file"]["path"] == "projects/demo/fixture.bin"
+    assert workspace.path_for("projects/demo/fixture.bin").read_bytes() == (
+        b"\x00BridgeBinary\xff" * 64
+    )
+    assert file_store.list()["total"] == 0
+
 
 
 def test_file_can_be_sent_as_raw_request_body(http_server, file_store: FileStore) -> None:

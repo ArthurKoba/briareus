@@ -21,8 +21,6 @@ from pathlib import Path
 from common.models import JsonObject, JsonValue
 from common.settings import TerminalSettings
 
-from .files_client import TerminalFilesClient
-
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -61,17 +59,12 @@ def _timestamp(value: float | None) -> str | None:
 
 
 class TerminalManager:
-    def __init__(
-        self,
-        settings: TerminalSettings,
-        files: TerminalFilesClient | None = None,
-    ) -> None:
+    def __init__(self, settings: TerminalSettings) -> None:
         self.settings = settings
-        self.files = files
         self.workspace_root = settings.workspace_root
         self.projects_root = self.workspace_root / "projects"
-        self.jobs_root = self.workspace_root / ".terminal" / "jobs"
         self.home = settings.home
+        self.jobs_root = self.home / ".terminal" / "jobs"
         self._jobs: dict[str, Job] = {}
         self._prepare_storage()
         self._load_persisted_jobs()
@@ -187,56 +180,6 @@ class TerminalManager:
                 await self.job_cancel(job.job_id, grace_seconds=1)
         shutil.rmtree(path)
         return {"workspace_id": workspace_id, "deleted": True}
-
-    def _workspace_file_path(self, workspace_id: str, path: str) -> Path:
-        base = self._require_workspace(workspace_id).resolve(strict=False)
-        raw = path.strip()
-        if not raw:
-            raise TerminalError("path is required")
-        candidate = (base / raw).resolve(strict=False)
-        if not candidate.is_relative_to(base):
-            raise TerminalError("path escapes workspace")
-        return candidate
-
-    async def workspace_import_file(
-        self,
-        workspace_id: str,
-        file_id: str,
-        path: str,
-        overwrite: bool = False,
-    ) -> JsonObject:
-        if self.files is None:
-            raise TerminalError("Files integration is not configured")
-        workspace_id = self._workspace_id(workspace_id)
-        destination = self._workspace_file_path(workspace_id, path)
-        if destination.exists() and not overwrite:
-            raise TerminalError(f"destination already exists: {path}")
-        result = await self.files.import_to_path(file_id, destination)
-        result["workspace_id"] = workspace_id
-        result["path"] = str(destination)
-        return result
-
-    async def workspace_export_file(
-        self,
-        workspace_id: str,
-        path: str,
-        name: str = "",
-        mime_type: str = "",
-    ) -> JsonObject:
-        if self.files is None:
-            raise TerminalError("Files integration is not configured")
-        workspace_id = self._workspace_id(workspace_id)
-        source = self._workspace_file_path(workspace_id, path)
-        if not source.is_file():
-            raise TerminalError(f"workspace file not found: {path}")
-        result = await self.files.export_from_path(
-            source,
-            name=name.strip() or source.name,
-            mime_type=mime_type,
-        )
-        result["workspace_id"] = workspace_id
-        result["workspace_path"] = str(source)
-        return result
 
     def status(self) -> JsonObject:
         usage = shutil.disk_usage(self.workspace_root)

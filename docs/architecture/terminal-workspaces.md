@@ -26,7 +26,7 @@ terminal
    +-- persistent /workspace
    +-- persistent /home/agent
    +-- normal outbound network
-   +-- Files integration
+   +-- shared /workspace with Files and Curl
    +-- optional deployed UART/USB devices
 ```
 
@@ -211,17 +211,16 @@ not need to duplicate all of that inside Terminal.
 
 ## Files integration
 
-Use the existing Files MCP for moving immutable artifacts into and out of the workspace:
+Files and Terminal mount the same persistent `/workspace` volume. Normal working files
+therefore require no import/export operation: a file uploaded, downloaded, moved or edited
+through Files is immediately visible to Terminal by path, and files produced by Terminal
+are immediately visible to Files.
 
-- Files -> workspace path;
-- workspace path -> Files object.
+The immutable `/files` artifact store is still separate and is not mounted into Terminal.
+Creating an immutable artifact from a working file is an explicit Files snapshot operation.
 
-Transfers are streamed server-to-server through the private Files MCP. The terminal
-container does not mount or expose the canonical Files object-store volume to shell jobs.
-This preserves the immutable store boundary while keeping file bytes out of model context.
-
-This is useful for uploaded source archives, binaries, build artifacts and logs that need
-to leave the terminal environment.
+Terminal job metadata and retained process logs live under `/home/agent/.terminal`, not
+inside the shared workspace.
 
 ## Admin MVP
 
@@ -289,7 +288,7 @@ Do not export command bodies, stdin, credentials or full output as telemetry att
 3. `terminal_exec`;
 4. jobs with durable cursor/delta logs;
 5. PTY input/resize on interactive jobs;
-6. Files import/export;
+6. shared Files/Curl workspace access;
 7. compact Management/Admin view;
 8. telemetry/tests;
 9. validate UART by passing one real device and running it as an interactive job.

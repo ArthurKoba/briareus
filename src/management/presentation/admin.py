@@ -836,6 +836,140 @@ class FilesView(CustomView):
             },
         )
 
+    @route("/workspace")
+    async def workspace(self, request: Request) -> Response:
+        current = request.query_params.get("path", "").strip().strip("/")
+        try:
+            listing = await asyncio.to_thread(
+                self.files.workspace_list,
+                current,
+                limit=500,
+            )
+            error = ""
+        except Exception as exc:
+            listing = {
+                "path": current or "/",
+                "entries": [],
+                "count": 0,
+                "total": 0,
+                "truncated": False,
+            }
+            error = str(exc)
+        parent = ""
+        if current:
+            parent = posixpath.dirname(current)
+        return _view_templates(self).TemplateResponse(
+            request=request,
+            name="management_workspace_files.html",
+            context={
+                "title": "Workspace Files",
+                "listing": listing,
+                "current_path": current,
+                "parent_path": parent,
+                "error": error,
+            },
+        )
+
+    @route("/workspace/upload", methods=["POST"])
+    async def workspace_upload(self, request: Request) -> Response:
+        form = await request.form()
+        upload = form.get("file")
+        current = str(form.get("path", "")).strip().strip("/")
+        overwrite = str(form.get("overwrite", "")).lower() in {
+            "1",
+            "true",
+            "on",
+            "yes",
+        }
+        if not isinstance(upload, UploadFile):
+            flash(request, "Choose a file to upload", "error")
+            return RedirectResponse(
+                f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+                status_code=303,
+            )
+        name = upload.filename or "upload.bin"
+        destination = posixpath.join(current, name) if current else name
+        try:
+            await asyncio.to_thread(
+                self.files.workspace_upload,
+                upload.file,
+                destination=destination,
+                overwrite=overwrite,
+            )
+        except Exception as exc:
+            flash(request, f"Workspace upload failed: {exc}", "error")
+        else:
+            flash(request, f"Uploaded {destination}", "success")
+        return RedirectResponse(
+            f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+            status_code=303,
+        )
+
+    @route("/workspace/mkdir", methods=["POST"])
+    async def workspace_mkdir(self, request: Request) -> Response:
+        form = await request.form()
+        current = str(form.get("path", "")).strip().strip("/")
+        name = str(form.get("name", "")).strip().strip("/")
+        if not name:
+            flash(request, "Directory name is required", "error")
+        else:
+            destination = posixpath.join(current, name) if current else name
+            try:
+                await asyncio.to_thread(self.files.workspace_mkdir, destination)
+            except Exception as exc:
+                flash(request, f"Create directory failed: {exc}", "error")
+            else:
+                flash(request, f"Created {destination}", "success")
+        return RedirectResponse(
+            f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+            status_code=303,
+        )
+
+    @route("/workspace/download")
+    async def workspace_download(self, request: Request) -> Response:
+        path = request.query_params.get("path", "").strip()
+        if not path:
+            raise HTTPException(status_code=400, detail="workspace path is required")
+        try:
+            info = await asyncio.to_thread(self.files.workspace_info, path)
+            file_path = await asyncio.to_thread(self.files.workspace_path_for, path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if info.get("type") != "file":
+            raise HTTPException(status_code=400, detail="workspace path is not a file")
+        mime_type = str(info.get("mime_type") or "application/octet-stream")
+        return FileResponse(
+            file_path,
+            filename=str(info.get("name") or file_path.name),
+            media_type=mime_type,
+        )
+
+    @route("/workspace/delete", methods=["POST"])
+    async def workspace_delete(self, request: Request) -> Response:
+        form = await request.form()
+        current = str(form.get("current_path", "")).strip().strip("/")
+        path = str(form.get("path", "")).strip()
+        recursive = str(form.get("recursive", "")).lower() in {
+            "1",
+            "true",
+            "on",
+            "yes",
+        }
+        try:
+            await asyncio.to_thread(
+                self.files.workspace_delete,
+                path,
+                recursive=recursive,
+            )
+        except Exception as exc:
+            flash(request, f"Workspace delete failed: {exc}", "error")
+        else:
+            flash(request, f"Deleted {path}", "success")
+        return RedirectResponse(
+            f"/admin/files/workspace?{urllib.parse.urlencode({'path': current})}",
+            status_code=303,
+        )
+
     @route("/upload", methods=["POST"])
     async def upload(self, request: Request) -> Response:
         form = await request.form()
