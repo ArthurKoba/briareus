@@ -73,6 +73,8 @@ async def test_copy_artifact_reads_chunks_into_workspace(
     payload = b"abcdefghij"
 
     async def fake_call(name: str, arguments: dict[str, object]):
+        if name == "artifact_file_delete":
+            return {"deleted": True}
         assert name == "artifact_file_read"
         offset = int(arguments["offset"])
         chunk = payload[offset : offset + 4]
@@ -82,7 +84,7 @@ async def test_copy_artifact_reads_chunks_into_workspace(
             "next_offset": next_offset,
             "size_bytes": len(payload),
             "eof": next_offset >= len(payload),
-        }
+        } if name == "artifact_file_read" else {"deleted": True}
 
     monkeypatch.setattr(transfers, "_call", fake_call)
 
@@ -116,6 +118,8 @@ async def test_export_program_copies_returned_artifact(
                 "size_bytes": 3,
                 "eof": True,
             }
+        if name == "artifact_file_delete":
+            return {"deleted": True}
         raise AssertionError(name)
 
     monkeypatch.setattr(transfers, "_call", fake_call)
@@ -130,3 +134,76 @@ async def test_export_program_copies_returned_artifact(
     assert transfers.workspace.path_for("exports/program.gzf").read_bytes() == b"gzf"
     assert calls[0][0] == "export_program"
     assert calls[0][1]["output_dir"] == "/artifacts/exports"
+
+
+@pytest.mark.asyncio
+async def test_import_workspace_program_uses_staged_gzf(
+    transfers: AnalysisWorkspaceTransfers,
+    monkeypatch,
+) -> None:
+    transfers.workspace.write_text("exports/input.gzf", "package")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_call(name: str, arguments: dict[str, object]):
+        calls.append((name, arguments))
+        if name == "artifact_stage_begin":
+            return {"stage_id": "stage-2"}
+        if name == "artifact_stage_write":
+            raw = base64.b64decode(str(arguments["data_base64"]))
+            return {"next_offset": int(arguments["offset"]) + len(raw)}
+        if name == "artifact_stage_finish":
+            return {"path": "/artifacts/.koba-stage/stage-2/input.gzf"}
+        if name == "import_program":
+            return {"imported": True}
+        if name == "artifact_stage_cancel":
+            return {"cancelled": True}
+        raise AssertionError(name)
+
+    monkeypatch.setattr(transfers, "_call", fake_call)
+
+    result = await transfers.import_workspace_program(
+        "project-1",
+        "exports/input.gzf",
+        target_folder="/imports",
+    )
+
+    import_call = next(args for name, args in calls if name == "import_program")
+    assert import_call["gzf_path"] == "/artifacts/.koba-stage/stage-2/input.gzf"
+    assert import_call["target_folder"] == "/imports"
+    assert result["stage_cleanup_error"] == ""
+
+
+@pytest.mark.asyncio
+async def test_restore_workspace_project_uses_staged_gar(
+    transfers: AnalysisWorkspaceTransfers,
+    monkeypatch,
+) -> None:
+    transfers.workspace.write_text("exports/project.gar", "archive")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_call(name: str, arguments: dict[str, object]):
+        calls.append((name, arguments))
+        if name == "artifact_stage_begin":
+            return {"stage_id": "stage-3"}
+        if name == "artifact_stage_write":
+            raw = base64.b64decode(str(arguments["data_base64"]))
+            return {"next_offset": int(arguments["offset"]) + len(raw)}
+        if name == "artifact_stage_finish":
+            return {"path": "/artifacts/.koba-stage/stage-3/project.gar"}
+        if name == "restore_project":
+            return {"restored": True}
+        if name == "artifact_stage_cancel":
+            return {"cancelled": True}
+        raise AssertionError(name)
+
+    monkeypatch.setattr(transfers, "_call", fake_call)
+
+    await transfers.restore_workspace_project(
+        "project-1",
+        "exports/project.gar",
+        "restored-project",
+    )
+
+    restore_call = next(args for name, args in calls if name == "restore_project")
+    assert restore_call["gar_path"] == "/artifacts/.koba-stage/stage-3/project.gar"
+    assert restore_call["project_name"] == "restored-project"
