@@ -85,7 +85,6 @@ async def test_analysis_runtime_surface_is_dynamic_and_isolated() -> None:
 async def test_terminal_runtime_surface_is_isolated(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TERMINAL_WORKSPACE_ROOT", str(tmp_path / "workspace"))
     monkeypatch.setenv("TERMINAL_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("FILE_ROOT", str(tmp_path / "files"))
 
     from modules.terminal.runtime import mcp as terminal
 
@@ -97,6 +96,8 @@ async def test_terminal_runtime_surface_is_isolated(monkeypatch, tmp_path) -> No
     assert "job_start" in names
     assert "job_read" in names
     assert "job_write" in names
+    assert "job_delete" in names
+    assert "job_cleanup" in names
     assert "github_agent_status" not in names
     assert "curl_request" not in names
     assert "accounts" not in names
