@@ -925,9 +925,11 @@ class FilesView(CustomView):
             status_code=303,
         )
 
-    @route("/workspace/download/{path:path}")
+    @route("/workspace/download")
     async def workspace_download(self, request: Request) -> Response:
-        path = request.path_params["path"]
+        path = request.query_params.get("path", "").strip()
+        if not path:
+            raise HTTPException(status_code=400, detail="workspace path is required")
         try:
             info = await asyncio.to_thread(self.files.workspace_info, path)
             file_path = await asyncio.to_thread(self.files.workspace_path_for, path)

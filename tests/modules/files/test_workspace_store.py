@@ -71,3 +71,15 @@ async def test_files_and_terminal_share_same_workspace_root(tmp_path: Path) -> N
 
     assert result["exit_code"] == 0
     assert result["stdout"] == "shared"
+
+
+def test_workspace_rejects_directory_copy_or_move_into_itself(
+    workspace: WorkspaceFileStore,
+) -> None:
+    workspace.write_text("tree/source.txt", "data")
+
+    with pytest.raises(WorkspaceFileError, match="inside source"):
+        workspace.copy("tree", "tree/nested")
+
+    with pytest.raises(WorkspaceFileError, match="inside source"):
+        workspace.move("tree", "tree/nested")

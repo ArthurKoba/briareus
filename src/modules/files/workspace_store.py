@@ -169,6 +169,8 @@ class WorkspaceFileStore:
         dst = self._path(destination)
         if not src.exists():
             raise WorkspaceFileError(f"source not found: {source}")
+        if src.is_dir() and dst.is_relative_to(src):
+            raise WorkspaceFileError("destination may not be inside source directory")
         if dst.exists() and not overwrite:
             raise WorkspaceFileError(f"destination already exists: {destination}")
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -185,6 +187,8 @@ class WorkspaceFileStore:
         dst = self._path(destination)
         if not src.exists():
             raise WorkspaceFileError(f"source not found: {source}")
+        if src.is_dir() and dst.is_relative_to(src):
+            raise WorkspaceFileError("destination may not be inside source directory")
         if dst.exists():
             if not overwrite:
                 raise WorkspaceFileError(f"destination already exists: {destination}")

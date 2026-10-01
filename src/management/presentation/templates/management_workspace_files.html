@@ -59,7 +59,7 @@
           <td>{{ item.get("size_bytes", 0) }}</td>
           <td class="text-nowrap">
             {% if item.get("type") == "file" %}
-              <a class="btn btn-sm" href="/admin/files/workspace/download/{{ item.get('path') }}">Download</a>
+              <a class="btn btn-sm" href="/admin/files/workspace/download?{{ {'path': item.get('path', '')} | urlencode }}">Download</a>
             {% endif %}
             <form method="post" action="/admin/files/workspace/delete" style="display:inline">
               {{ csrf_input(request) }}
