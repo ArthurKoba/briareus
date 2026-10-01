@@ -24,6 +24,7 @@ class _GitHubHistoryHost(Protocol):
     app_id: str
     auth_type: str
     token: str
+    public_only: bool
     protected_branches: frozenset[str]
 
     def _assert_allowed(self, repository: str) -> str: ...
@@ -119,6 +120,10 @@ class GitHubHistoryMixin:
         if not isinstance(repo, dict):
             raise GitHubAgentError("unexpected repository response")
 
+        permissions: JsonObject
+        app_id: str | None
+        installation_id: int | None
+
         if self._history_host().public_only:
             contents_write = False
             permissions = {
@@ -134,7 +139,7 @@ class GitHubHistoryMixin:
         elif self._history_host().token:
             repository_permissions = json_member_object(repo, "permissions")
             push = bool(repository_permissions.get("push") or repository_permissions.get("admin"))
-            permissions: JsonObject = {
+            permissions = {
                 "repository_push": push,
                 "repository_admin": bool(repository_permissions.get("admin")),
                 "repository_maintain": bool(repository_permissions.get("maintain")),
@@ -145,8 +150,8 @@ class GitHubHistoryMixin:
                 "actions": "unknown",
                 "checks": "unknown",
             }
-            app_id: str | None = None
-            installation_id: int | None = None
+            app_id = None
+            installation_id = None
             contents_write = push
         else:
             installation_permissions = self._installation_permissions(repository)
