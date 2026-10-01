@@ -215,19 +215,57 @@ def test_provider_contracts_are_separate() -> None:
         )
 
 
-def test_zero_state_schema_resets_incompatible_management_database(tmp_path: Path) -> None:
+def test_schema_mismatch_fails_without_destroying_data(tmp_path: Path) -> None:
     database = tmp_path / "legacy.sqlite3"
     engine, _sessions = create_database(f"sqlite:///{database}")
     with engine.begin() as connection:
         connection.exec_driver_sql(
             "CREATE TABLE github_accounts (id TEXT PRIMARY KEY, label TEXT NOT NULL)"
         )
+        connection.exec_driver_sql(
+            "INSERT INTO github_accounts (id, label) VALUES ('keep-me', 'legacy')"
+        )
 
-    assert ensure_zero_state_schema(engine) is True
+    with pytest.raises(RuntimeError, match="migration required"):
+        ensure_zero_state_schema(engine)
 
-    inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("github_accounts")}
-    assert "label" not in columns
-    assert columns == {column.name for column in GitHubAccountRecord.__table__.columns}
+    with engine.connect() as connection:
+        row = connection.exec_driver_sql(
+            "SELECT id, label FROM github_accounts"
+        ).one()
+    assert tuple(row) == ("keep-me", "legacy")
+    engine.dispose()
+
+
+def test_schema_tolerates_removed_legacy_columns_and_preserves_accounts(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "legacy-extra.sqlite3"
+    engine, sessions = create_database(f"sqlite:///{database}")
+    Base.metadata.create_all(engine)
+    with sessions.begin() as session:
+        session.add(
+            GitHubAccountRecord(
+                id="keep-account",
+                alias="agent",
+                auth_type="token",
+                encrypted_credential="ciphertext",
+            )
+        )
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE management_config ADD COLUMN legacy_cleanup INTEGER DEFAULT 1"
+        )
+
     assert ensure_zero_state_schema(engine) is False
+
+    with sessions() as session:
+        account = session.get(GitHubAccountRecord, "keep-account")
+        assert account is not None
+        assert account.alias == "agent"
+    inspector = inspect(engine)
+    columns = {
+        column["name"] for column in inspector.get_columns("management_config")
+    }
+    assert "legacy_cleanup" in columns
     engine.dispose()
