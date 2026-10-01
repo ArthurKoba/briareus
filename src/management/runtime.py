@@ -15,6 +15,7 @@ from management.application.services import (
     AccountService,
     InvocationAuditService,
     ManagementConfigService,
+    OAuthSessionService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -27,6 +28,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyAccountRepository,
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
+    SqlAlchemyOAuthSessionRepository,
 )
 from management.presentation.admin import build_admin
 from management.presentation.api import ApiServices, build_internal_router
@@ -46,7 +48,9 @@ cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
 config_repository = SqlAlchemyManagementConfigRepository(sessions)
+oauth_session_repository = SqlAlchemyOAuthSessionRepository(sessions)
 config_service = ManagementConfigService(config_repository)
+oauth_sessions = OAuthSessionService(oauth_session_repository)
 config_service.get()
 accounts = AccountService(account_repository, cipher, ProviderConnectionVerifier())
 audit = InvocationAuditService(invocation_repository)
@@ -94,6 +98,7 @@ app.include_router(
         ApiServices(
             accounts=accounts,
             audit=audit,
+            oauth_sessions=oauth_sessions,
             service_token=settings.service_token,
         )
     )
@@ -105,5 +110,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-admin = build_admin(engine, settings, cipher, accounts, audit, config_service, files)
+admin = build_admin(
+    engine,
+    settings,
+    cipher,
+    accounts,
+    audit,
+    oauth_sessions,
+    config_service,
+    files,
+)
 admin.mount_to(app)

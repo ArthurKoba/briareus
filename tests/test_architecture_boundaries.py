@@ -142,7 +142,11 @@ def test_process_settings_are_created_only_in_composition_roots() -> None:
         "PrivateRuntimeSettings",
         "TerminalSettings",
     }
-    allowed = {_SRC / "bridge" / "server.py", _SRC / "management" / "runtime.py"}
+    allowed = {
+        _SRC / "auth_service" / "runtime.py",
+        _SRC / "bridge" / "server.py",
+        _SRC / "management" / "runtime.py",
+    }
     allowed.update((_SRC / "modules").glob("*/runtime.py"))
 
     for path in _python_files(_SRC):

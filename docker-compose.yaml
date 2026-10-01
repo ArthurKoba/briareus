@@ -54,7 +54,7 @@ services:
       <<: *build
       target: auth
     environment:
-      <<: *observability
+      <<: [*management-client, *observability]
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}

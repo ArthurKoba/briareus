@@ -7,6 +7,7 @@ from common.account_contracts import AccountPublic, ResolvedAccount
 from common.models import JsonObject, json_object
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
+from management.domain.oauth_sessions import OAuthSession
 from management.domain.telemetry import Invocation
 
 from .ports import (
@@ -15,6 +16,7 @@ from .ports import (
     CredentialCipher,
     InvocationRepository,
     ManagementConfigRepository,
+    OAuthSessionRepository,
 )
 
 
@@ -97,6 +99,17 @@ class InvocationAuditService:
 
     def cleanup(self) -> int:
         return self.repository.cleanup()
+
+
+class OAuthSessionService:
+    def __init__(self, repository: OAuthSessionRepository) -> None:
+        self.repository = repository
+
+    def record(self, event: object) -> OAuthSession:
+        return self.repository.apply_event(event)
+
+    def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]:
+        return self.repository.recent(limit=limit)
 
 
 class ManagementConfigService:

@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from common.account_contracts import AccountList, InvocationEvent
 from common.models import JsonObject
-from management.application.services import AccountService, InvocationAuditService
+from common.oauth_session_contracts import OAuthSessionEvent
+from management.application.services import (
+    AccountService,
+    InvocationAuditService,
+    OAuthSessionService,
+)
 from management.domain.accounts import Provider
 from management.domain.telemetry import Invocation
 
@@ -17,10 +22,12 @@ class ApiServices:
         self,
         accounts: AccountService,
         audit: InvocationAuditService,
+        oauth_sessions: OAuthSessionService,
         service_token: str,
     ) -> None:
         self.accounts = accounts
         self.audit = audit
+        self.oauth_sessions = oauth_sessions
         self.service_token = service_token
 
 
@@ -57,6 +64,50 @@ def build_internal_router(services: ApiServices) -> APIRouter:
         _authorized: None = Depends(authorize),
     ) -> None:
         services.audit.record(Invocation.model_validate(event.model_dump()))
+
+    @router.post("/oauth-sessions/events", status_code=204)
+    def record_oauth_session(
+        event: OAuthSessionEvent,
+        _authorized: None = Depends(authorize),
+    ) -> None:
+        services.oauth_sessions.record(event)
+
+    @router.get("/oauth-sessions/recent")
+    def recent_oauth_sessions(
+        limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        sessions = services.oauth_sessions.recent(limit=limit)
+        return {
+            "sessions": [
+                {
+                    **session.__dict__,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "last_used_at": (
+                        session.last_used_at.isoformat() if session.last_used_at else None
+                    ),
+                    "last_refresh_at": (
+                        session.last_refresh_at.isoformat() if session.last_refresh_at else None
+                    ),
+                    "access_expires_at": (
+                        session.access_expires_at.isoformat()
+                        if session.access_expires_at
+                        else None
+                    ),
+                    "refresh_expires_at": (
+                        session.refresh_expires_at.isoformat()
+                        if session.refresh_expires_at
+                        else None
+                    ),
+                    "revoked_at": (
+                        session.revoked_at.isoformat() if session.revoked_at else None
+                    ),
+                }
+                for session in sessions
+            ],
+            "count": len(sessions),
+        }
 
     @router.get("/events/recent")
     def recent_events(

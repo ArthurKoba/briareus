@@ -97,6 +97,34 @@ class InvocationRecord(Base):
     occurred_at: Mapped[datetime] = mapped_column(index=True, default=lambda: datetime.now(UTC))
 
 
+class OAuthSessionRecord(Base):
+    __tablename__ = "oauth_sessions"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(512), default="", index=True)
+    client_name: Mapped[str] = mapped_column(String(512), default="")
+    resource: Mapped[str] = mapped_column(String(2048), default="", index=True)
+    login: Mapped[str] = mapped_column(String(256), default="", index=True)
+    subject: Mapped[str] = mapped_column(String(512), default="")
+    scopes_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    last_event: Mapped[str] = mapped_column(String(64), default="", index=True)
+    access_jti: Mapped[str] = mapped_column(String(256), default="", index=True)
+    refresh_jti: Mapped[str] = mapped_column(String(256), default="", index=True)
+    previous_refresh_jti: Mapped[str] = mapped_column(String(256), default="", index=True)
+    access_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    refresh_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    last_refresh_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    error_type: Mapped[str] = mapped_column(String(256), default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        index=True, default=lambda: datetime.now(UTC)
+    )
+
+
 class ManagementConfigRecord(Base):
     __tablename__ = "management_config"
 

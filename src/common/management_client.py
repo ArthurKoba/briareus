@@ -7,6 +7,7 @@ import urllib.request
 
 from .account_contracts import AccountList, InvocationEvent, ResolvedAccount
 from .models import JsonObject, json_loads, json_object
+from .oauth_session_contracts import OAuthSessionEvent
 from .settings import ManagementClientSettings
 
 
@@ -111,5 +112,13 @@ class ManagementClient:
             "POST",
             "/internal/events",
             payload=json_object(event.model_dump(mode="json"), context="invocation event"),
+            expect_body=False,
+        )
+
+    def record_oauth_session(self, event: OAuthSessionEvent) -> None:
+        self._request(
+            "POST",
+            "/internal/oauth-sessions/events",
+            payload=json_object(event.model_dump(mode="json"), context="oauth session event"),
             expect_body=False,
         )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
+from management.domain.oauth_sessions import OAuthSession
 from management.domain.telemetry import Invocation
 
 from .database import (
@@ -17,6 +19,7 @@ from .database import (
     GitLabAccountRecord,
     InvocationRecord,
     ManagementConfigRecord,
+    OAuthSessionRecord,
 )
 
 
@@ -292,6 +295,140 @@ class SqlAlchemyInvocationRepository:
     def cleanup(self) -> int:
         with self.sessions.begin() as session:
             return self._cleanup_in_session(session, self._config(session))
+
+
+class SqlAlchemyOAuthSessionRepository:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self.sessions = sessions
+
+    @staticmethod
+    def _domain(record: OAuthSessionRecord) -> OAuthSession:
+        try:
+            scopes = json.loads(record.scopes_json)
+        except json.JSONDecodeError:
+            scopes = []
+        return OAuthSession(
+            id=record.id,
+            client_id=record.client_id,
+            client_name=record.client_name,
+            resource=record.resource,
+            login=record.login,
+            subject=record.subject,
+            scopes=[str(item) for item in scopes] if isinstance(scopes, list) else [],
+            status=record.status,
+            last_event=record.last_event,
+            access_jti=record.access_jti,
+            refresh_jti=record.refresh_jti,
+            previous_refresh_jti=record.previous_refresh_jti,
+            access_expires_at=record.access_expires_at,
+            refresh_expires_at=record.refresh_expires_at,
+            last_used_at=record.last_used_at,
+            last_refresh_at=record.last_refresh_at,
+            revoked_at=record.revoked_at,
+            error_type=record.error_type,
+            error_message=record.error_message,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+
+    def _resolve_record(
+        self,
+        session: Session,
+        *,
+        session_id: str,
+        refresh_jti: str,
+        access_jti: str,
+    ) -> OAuthSessionRecord | None:
+        if session_id:
+            record = session.get(OAuthSessionRecord, session_id)
+            if record is not None:
+                return record
+        if refresh_jti or access_jti:
+            criteria = []
+            if refresh_jti:
+                criteria.extend(
+                    [
+                        OAuthSessionRecord.refresh_jti == refresh_jti,
+                        OAuthSessionRecord.previous_refresh_jti == refresh_jti,
+                    ]
+                )
+            if access_jti:
+                criteria.append(OAuthSessionRecord.access_jti == access_jti)
+            return session.scalar(select(OAuthSessionRecord).where(or_(*criteria)))
+        return None
+
+    def apply_event(self, event: object) -> OAuthSession:
+        from common.oauth_session_contracts import OAuthSessionEvent
+
+        value = OAuthSessionEvent.model_validate(event)
+        with self.sessions.begin() as session:
+            record = self._resolve_record(
+                session,
+                session_id=value.session_id,
+                refresh_jti=value.refresh_jti,
+                access_jti=value.access_jti,
+            )
+            if record is None:
+                identifier = value.session_id or f"orphan-{value.refresh_jti or value.access_jti}"
+                if not identifier or identifier == "orphan-":
+                    raise ValueError("oauth session event has no stable identifier")
+                record = OAuthSessionRecord(
+                    id=identifier[:128],
+                    client_id=value.client_id,
+                    created_at=value.occurred_at,
+                )
+                session.add(record)
+
+            if value.client_id:
+                record.client_id = value.client_id
+            if value.client_name:
+                record.client_name = value.client_name
+            if value.resource:
+                record.resource = value.resource
+            if value.login:
+                record.login = value.login
+            if value.subject:
+                record.subject = value.subject
+            if value.scopes:
+                record.scopes_json = json.dumps(value.scopes, ensure_ascii=False)
+            if value.access_jti:
+                record.access_jti = value.access_jti
+            if value.refresh_jti and value.refresh_jti != record.refresh_jti:
+                record.previous_refresh_jti = record.refresh_jti
+                record.refresh_jti = value.refresh_jti
+            if value.access_expires_at is not None:
+                record.access_expires_at = value.access_expires_at
+            if value.refresh_expires_at is not None:
+                record.refresh_expires_at = value.refresh_expires_at
+
+            record.status = value.status
+            record.last_event = value.event
+            record.updated_at = value.occurred_at
+            if value.event in {"authorized", "access_used", "refresh_success", "refresh_replay"}:
+                record.last_used_at = value.occurred_at
+            if value.event == "refresh_success":
+                record.last_refresh_at = value.occurred_at
+            if value.event == "revoked":
+                record.revoked_at = value.occurred_at
+            if value.error_type or value.error_message:
+                record.error_type = value.error_type
+                record.error_message = value.error_message
+            elif value.status == "active":
+                record.error_type = ""
+                record.error_message = ""
+
+            session.flush()
+            return self._domain(record)
+
+    def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]:
+        size = max(1, min(limit, 1000))
+        with self.sessions() as session:
+            rows = session.scalars(
+                select(OAuthSessionRecord)
+                .order_by(OAuthSessionRecord.updated_at.desc())
+                .limit(size)
+            ).all()
+            return [self._domain(row) for row in rows]
 
 
 class SqlAlchemyManagementConfigRepository:
