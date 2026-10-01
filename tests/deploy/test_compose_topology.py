@@ -167,6 +167,7 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "ANALYSIS_URL",
         "GHIDRA_URL",
         "TERMINAL_URL",
+        "TERMINAL_FILES_URL",
         "GHIDRA_MCP_URL",
         "GITHUB_AGENT_PROTECTED_BRANCHES",
         "GITHUB_AGENT_REQUIRED_CHECKS",
