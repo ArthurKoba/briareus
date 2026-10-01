@@ -317,3 +317,27 @@ def test_gitlab_mutation_does_not_retry_anonymously(
             "/projects/public%2Frepo/issues",
             payload={"title": "blocked"},
         )
+
+
+def test_public_gitlab_selector_does_not_require_saved_account() -> None:
+    context = GitLabRuntimeContext(_FakeControlPlane({}), GitLabSettings())
+
+    client = context.client("public")
+
+    assert client.anonymous_only is True
+    assert client.profile.account_id == "public"
+
+
+def test_public_gitlab_capabilities_are_read_only(gitlab_server: str) -> None:
+    profile = GitLabProfile(
+        account_id="public",
+        alias="public",
+        base_url=gitlab_server,
+        auth_type="private_token",
+    )
+    client = GitLabClient(profile, anonymous_only=True)
+
+    result = client.account_capabilities()
+
+    assert result["auth_type"] == "public"
+    assert result["provider_permissions"] == {"repository": "read"}
