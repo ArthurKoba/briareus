@@ -61,7 +61,7 @@ class FileAdminStore:
                     files += 1
                 except FileNotFoundError:
                     continue
-        status = self.workspace.status()
+        status = self.status()
         status.update(
             {
                 "files": files,
