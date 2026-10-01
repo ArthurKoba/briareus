@@ -26,6 +26,8 @@
       <div><strong>UID/GID:</strong> {{ status.get("uid", "—") }}/{{ status.get("gid", "—") }}</div>
       <div><strong>Shell:</strong> <code>{{ status.get("shell", "—") }}</code></div>
       <div><strong>Workspace root:</strong> <code>{{ status.get("workspace_root", "—") }}</code></div>
+      {% set disk = status.get("disk", {}) %}
+      <div><strong>Free disk:</strong> {{ disk.get("free_bytes", 0) }} bytes</div>
       <div><strong>Groups:</strong>
         {% for group in status.get("groups", []) %}
           <code>{{ group.get("name") or group.get("gid") }}</code>{% if not loop.last %}, {% endif %}
@@ -33,6 +35,15 @@
       </div>
       <div><strong>Git config:</strong> {{ "yes" if status.get("git_configured") else "no" }}</div>
       <div><strong>SSH public keys:</strong> {{ status.get("ssh_public_keys", []) | join(", ") or "—" }}</div>
+      <div class="mt-2"><strong>Toolchain:</strong>
+        <div class="d-flex flex-wrap gap-1 mt-1">
+        {% for name, path in status.get("tools", {}).items() %}
+          <span class="badge {% if path %}bg-green-lt{% else %}bg-red-lt{% endif %}">{{ name }}</span>
+        {% else %}
+          <span class="text-secondary">unavailable</span>
+        {% endfor %}
+        </div>
+      </div>
       <div class="mt-2"><strong>Serial devices:</strong>
         {% for device in status.get("serial_devices", []) %}
           <div><code>{{ device.get("path") }}</code>
