@@ -75,6 +75,29 @@ def register_github_core_tools(
         """Delete one file from a non-protected working branch."""
         return client_factory(account_id).delete_file(repository, path, message, branch)
 
+    @mcp.tool(title="GitHub checkout repository", annotations=write_annotations)
+    def github_checkout_repository(
+        account_id: str,
+        repository: str,
+        destination: str,
+        mode: str = "snapshot",
+        ref: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Checkout a repository into the shared workspace.
+
+        mode='snapshot' creates a shallow working tree without .git.
+        mode='git' keeps full Git metadata and history.
+        account_id may be a stable account alias.
+        """
+        return client_factory(account_id).checkout_repository(
+            repository,
+            destination,
+            mode=mode,
+            ref=ref,
+            overwrite=overwrite,
+        )
+
     @mcp.tool(title="GitHub agent compare refs", annotations=read_annotations)
     def github_agent_compare(
         account_id: str,

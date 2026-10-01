@@ -35,10 +35,32 @@ class GitLabRuntimeContext:
                 account["permission_scope"] = "project-dependent"
                 account["preferred_selector"] = str(account.get("alias", ""))
                 account["selector_stability"] = "stable_alias"
+            accounts.append(
+                {
+                    "id": "public",
+                    "alias": "public",
+                    "provider": "gitlab",
+                    "auth_type": "public",
+                    "base_url": "https://gitlab.com",
+                    "external_id": None,
+                    "verify_tls": True,
+                    "ca_cert_pem": None,
+                    "enabled": True,
+                    "created_at": "",
+                    "updated_at": "",
+                    "potential_capabilities": ["project_read", "repository_read"],
+                    "permission_scope": "public-projects-only",
+                    "preferred_selector": "public",
+                    "selector_stability": "stable_alias",
+                }
+            )
+            result["count"] = len(accounts)
         return result
 
     @staticmethod
     def _potential_capabilities(auth_type: str) -> list[str]:
+        if auth_type == "public":
+            return ["project_read", "repository_read"]
         capabilities = [
             "project_read",
             "repository_read",
@@ -62,14 +84,32 @@ class GitLabRuntimeContext:
     ) -> JsonObject:
         client = self.client(account_id)
         result = client.account_capabilities(project.strip())
+        auth_type = "public" if client.anonymous_only else client.profile.auth_type
         result["potential_capabilities"] = json_array(
-            self._potential_capabilities(client.profile.auth_type),
+            self._potential_capabilities(auth_type),
             context="GitLab potential capabilities",
         )
-        result["permission_scope"] = "project-dependent"
+        result["permission_scope"] = (
+            "public-projects-only"
+            if client.anonymous_only
+            else "project-dependent"
+        )
         return result
 
     def client(self, account_id: str) -> GitLabClient:
+        selector = account_id.strip().casefold()
+        if selector in {"public", "anonymous"}:
+            profile = GitLabProfile(
+                account_id="public",
+                alias="public",
+                base_url="https://gitlab.com",
+                auth_type="private_token",
+            )
+            return GitLabClient(
+                profile,
+                protected_branches=self.settings.protected_branches,
+                anonymous_only=True,
+            )
         account = self.management.resolve_account(account_id, provider="gitlab")
         with self._lock:
             cached = self._client_cache.get(account.id)

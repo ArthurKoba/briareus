@@ -185,3 +185,100 @@ def test_repository_metadata_is_cached_until_refresh() -> None:
     assert client.calls == 2
 
 
+
+
+def test_public_get_falls_back_when_app_is_not_installed() -> None:
+    class PublicFallbackClient(GitHubAppClient):
+        def _installation_token(self, repository: str) -> str:
+            raise GitHubAgentError(
+                f"repository {repository!r} is not installed for GitHub App 123"
+            )
+
+        def _request(
+            self,
+            method: str,
+            url: str,
+            *,
+            token: str | None = None,
+            payload: object | None = None,
+            allowed_errors: set[int] | None = None,
+        ) -> tuple[int, object]:
+            del payload, allowed_errors
+            assert method == "GET"
+            assert token is None
+            assert url.endswith("/repos/public/repo")
+            return 200, {
+                "full_name": "public/repo",
+                "default_branch": "main",
+                "private": False,
+                "archived": False,
+                "fork": False,
+            }
+
+    client = PublicFallbackClient(app_id="123", private_key="unused")
+    result = client._repository_metadata("public/repo")
+
+    assert result["repository"] == "public/repo"
+    assert result["private"] is False
+
+
+def test_public_fallback_never_applies_to_mutations() -> None:
+    class PublicFallbackClient(GitHubAppClient):
+        def _installation_token(self, repository: str) -> str:
+            raise GitHubAgentError(
+                f"repository {repository!r} is not installed for GitHub App 123"
+            )
+
+    client = PublicFallbackClient(app_id="123", private_key="unused")
+    with pytest.raises(GitHubAgentError, match="not installed"):
+        client._repo_request(
+            "public/repo",
+            "POST",
+            "/repos/public/repo/issues",
+            payload={"title": "no"},
+        )
+
+
+def test_invalid_app_auth_does_not_silently_fallback() -> None:
+    class BrokenAppClient(GitHubAppClient):
+        def _installation_token(self, repository: str) -> str:
+            del repository
+            raise GitHubAgentError("GitHub App authentication failed (HTTP 401)")
+
+    client = BrokenAppClient(app_id="123", private_key="unused")
+    with pytest.raises(GitHubAgentError, match="authentication failed"):
+        client._repo_request("public/repo", "GET", "/repos/public/repo")
+
+
+def test_public_github_checkout_skips_installation_auth(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_checkout(clone_url, destination, **kwargs):
+        captured["clone_url"] = clone_url
+        captured["destination"] = destination
+        captured.update(kwargs)
+        return {
+            "path": destination,
+            "mode": kwargs["mode"],
+            "ref": kwargs["ref"],
+            "git_metadata": False,
+            "auth_mode": "anonymous",
+        }
+
+    monkeypatch.setattr(
+        "modules.github.github_agent.checkout_repository",
+        fake_checkout,
+    )
+    client = GitHubAppClient(
+        account_id="public",
+        auth_type="public",
+        public_only=True,
+    )
+
+    result = client.checkout_repository(
+        "octocat/Hello-World",
+        "repos/hello",
+    )
+
+    assert result["repository"] == "octocat/Hello-World"
+    assert captured["auth_header"] == ""

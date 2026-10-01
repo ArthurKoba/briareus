@@ -8,6 +8,21 @@ from .errors import GitLabError
 
 class GitLabProjectClient(GitLabApiClient):
     def profile_status(self) -> JsonObject:
+        if self.anonymous_only:
+            version = self.request(
+                "GET",
+                "/version",
+                allowed_errors={401, 403, 404},
+            ).data
+            account = self.profile.public()
+            account["auth_type"] = "public"
+            return {
+                "account": account,
+                "authenticated_user": None,
+                "gitlab_version": version if isinstance(version, dict) else {},
+                "status": "ok",
+                "access_mode": "public_anonymous",
+            }
         user = self.request("GET", "/user").data
         version = self.request("GET", "/version", allowed_errors={401, 403, 404}).data
         if not isinstance(user, dict):
@@ -27,6 +42,32 @@ class GitLabProjectClient(GitLabApiClient):
 
     def account_capabilities(self, project: str = "") -> JsonObject:
         """Return provider-visible account scope and optional project access details."""
+        if self.anonymous_only:
+            public_result: JsonObject = {
+                "account": {
+                    **self.profile.public(),
+                    "auth_type": "public",
+                },
+                "auth_type": "public",
+                "provider_permissions_known": True,
+                "provider_permissions": {"repository": "read"},
+                "note": "Anonymous public GitLab access; read-only.",
+            }
+            if project:
+                project_result = json_member_object(
+                    self.project_status(project),
+                    "project",
+                    required=True,
+                )
+                public_result["project"] = {
+                    "selector": project,
+                    "id": project_result.get("id"),
+                    "path_with_namespace": project_result.get("path_with_namespace"),
+                    "visibility": project_result.get("visibility"),
+                    "access": {},
+                }
+            return public_result
+
         result: JsonObject = {
             "account": self.profile.public(),
             "auth_type": self.profile.auth_type,
