@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import base64
+from contextlib import suppress
 from pathlib import Path
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 
-from common.models import JsonObject, JsonValue, json_object
+from common.models import JsonObject, json_object
 from common.settings import AnalysisSettings
 from modules.files.workspace_store import WorkspaceFileStore
 
@@ -108,13 +109,11 @@ class AnalysisWorkspaceTransfers:
                 {"project_id": project_id, "stage_id": stage_id},
             )
         except Exception:
-            try:
+            with suppress(Exception):
                 await self._call(
                     "artifact_stage_cancel",
                     {"project_id": project_id, "stage_id": stage_id},
                 )
-            except Exception:
-                pass
             raise
 
         path = finished.get("path")
