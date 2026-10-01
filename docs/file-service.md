@@ -1,82 +1,100 @@
 # Files service architecture
 
-MCP Bridge's files service is the common binary-data plane for every MCP workflow.
+MCP Bridge has two file layers with different purposes:
 
-## Identity
+1. the shared mutable working filesystem at `/workspace`;
+2. the immutable content-addressed artifact store at `/files`.
 
-Every file is addressed by its SHA-256 content identity:
+The shared workspace is the normal agent working area. Terminal, Files and Curl see the
+same persistent Docker volume. Source checkouts, downloaded files, uploaded attachments,
+temporary investigation data and build outputs can therefore be manipulated by path
+without copying through an intermediate file ID.
+
+The immutable artifact store remains available for snapshots, reproducibility, deduplication
+and integrations such as Ghidra where an explicit immutable source boundary is useful.
+
+## Shared workspace
+
+The Files MCP is the file explorer/transport surface for the same filesystem Terminal uses.
+
+Workspace operations include:
+
+- list and inspect paths;
+- bounded binary reads;
+- create UTF-8 text files and directories;
+- copy, move/rename and delete;
+- stream a ChatGPT/client attachment directly to a chosen workspace path;
+- snapshot a workspace file into immutable artifact storage when required.
+
+All public paths are relative to `/workspace`. The implementation resolves paths against
+that root and rejects traversal or symlink resolution outside it.
+
+Terminal uses named execution directories under `/workspace/projects/<workspace_id>`, but
+the shared filesystem is not limited to those directories. Files may also organize inputs,
+artifacts or scratch data elsewhere under `/workspace` when useful.
+
+Terminal's own job metadata and retained process logs are not stored in the shared
+filesystem. They live under the persistent agent home so Files operations cannot corrupt
+job state accidentally.
+
+## Direct ingress
+
+`file_workspace_ingest` accepts a client attachment through the MCP file parameter and
+streams it directly to a requested workspace path. Partial data is written to a sibling
+temporary file and atomically published only after size/SHA-256 validation succeeds.
+
+This is the preferred ingress when the file will immediately be inspected, unpacked,
+patched, built or otherwise manipulated through Terminal.
+
+The legacy `file_ingest` tool remains available when an immutable artifact is wanted
+immediately.
+
+## Web downloads
+
+Curl and Files share the same workspace volume. `curl_download` and
+`curl_stream_capture` accept an optional `workspace_path`; when supplied, their output is
+placed directly into the shared workspace and no immutable artifact is created.
+
+Without `workspace_path`, existing behavior is retained and the result is committed to
+the immutable artifact store.
+
+## Immutable artifact identity
+
+Immutable files are addressed by their SHA-256 content identity:
 
 ```text
 sha256:<64-hex-digest>
 ```
 
-Names and MIME types are metadata. Re-uploading identical bytes does not create a
-second stored object.
+Names and MIME types are metadata. Re-uploading identical bytes does not create a second
+stored object.
 
-## Agent ingress
+The persistent `/files` volume contains the internal object tree and SQLite metadata
+index. It is not mounted into the Terminal container.
 
-For chat/client attachments, `file_ingest` is the primary ingress.
-Its `file` input is explicitly advertised through
-`_meta["openai/fileParams"]`. ChatGPT therefore resolves the attachment into a
-structured file payload with `download_url`, `file_id`, and optional
-`mime_type`/`file_name`. MCP Bridge fetches the authorized URL server-side, streams
-it directly to temporary storage, verifies optional expected size/SHA-256, and
-commits the resulting immutable file. Attachment bytes do not pass through
-model-visible base64.
+## Resumable artifact upload
 
-The generic fallback is a resumable MCP protocol. An agent creates a session with
-`file_upload_begin`, sends bounded base64 chunks with
-`file_upload_write`, and commits with `file_upload_finish`.
-`file_upload_status` returns the exact server-confirmed offset so an
-interrupted transfer can continue without restarting.
+The existing `file_upload_*` protocol remains the generic resumable route for creating
+immutable artifacts. Upload sessions survive disconnects, validate sequential offsets,
+sizes and optional SHA-256, and commit into content-addressed storage.
 
-Upload sessions are durable server state. They are independent from Ghidra and
-from every other consumer. The agent never supplies a server filesystem path.
-`file_upload_list` and `file_upload_status` let an agent recover after
-a disconnect, while `file_upload_cleanup` removes stale session metadata and
-unfinished staged bytes by age without deleting committed files.
-Successful commit returns the immutable content identity used by all subsequent
-operations.
+It is not required for normal workspace file manipulation.
 
-The server validates sequential offsets, declared total size, chunk limits, and
-an optional expected SHA-256 before admitting the object into canonical storage.
-Completed sessions are retained as idempotent commit receipts until cleanup, so a
-retry after a lost response returns the same file instead of duplicating work.
-Identical content is deduplicated automatically.
+## Collections and references
 
-## Storage
+Archive collections and durable consumer references remain artifact-store concepts.
+Collections content-address archive members, while references protect immutable objects
+used by consumers from garbage collection.
 
-The persistent volume contains an internal object tree and SQLite metadata index.
-Neither is part of the public API. Backends receive file IDs and resolve
-physical paths only inside trusted server-side adapters.
+## Ghidra boundary
 
-## Collections
+Ghidra project storage remains separate from the shared workspace and is never mounted into
+Terminal/Files.
 
-`file_extract` accepts a tar or zip file. Every regular member is
-content-addressed independently and a deterministic collection manifest maps
-archive-relative paths to file IDs. Traversal paths and unsupported member
-types are rejected. Collections have their own lifecycle: deleting a collection
-removes only its manifest relationships, after which unreferenced member/source
-files become eligible for garbage collection.
+When a workspace file must enter a Ghidra workflow, first create an explicit immutable
+snapshot with `file_workspace_snapshot`, then use the existing Ghidra/Analysis import
+adapter with that file ID. This preserves a reproducible source identity and prevents
+ordinary shell/file operations from touching Ghidra project databases.
 
-## References and cleanup
-
-Consumers create durable references such as:
-
-```text
-file_id -> ghidra-project -> project_name -> source
-```
-
-Referenced objects cannot be normally deleted. `file_gc` only collects
-objects with no consumer reference and no collection relationship.
-
-## Ghidra
-
-`ghidra_import_file` imports a source object into the open project and
-records the source reference. Ghidra's project database remains independent from
-the source store. Deleting transient upload state therefore cannot invalidate an
-already imported Ghidra program, while the canonical source remains available
-for reproducibility.
-
-GZF and GAR outputs are registered back into the same files service by the
-Ghidra export adapter.
+Ghidra exports continue to enter immutable artifact storage and can later be copied or
+otherwise materialized into normal working files through an explicit adapter when needed.

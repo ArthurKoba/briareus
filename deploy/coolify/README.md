@@ -103,7 +103,7 @@ The Compose stack owns five named volumes with minimal logical names:
 management -> /management
 files      -> /files
 auth       -> /auth
-terminal-workspace -> /workspace
+terminal-workspace -> /workspace (shared by Terminal, Files, Curl and Management Admin)
 terminal-home      -> /home/agent
 ```
 
