@@ -44,6 +44,7 @@ class GitHubAppClient:
     account_id: str = ""
     token: str = ""
     auth_type: str = "github_app"
+    public_only: bool = False
     _installation_ids: dict[str, int] = field(default_factory=dict)
     _tokens: dict[int, tuple[str, float]] = field(default_factory=dict)
     repository_cache_ttl_seconds: float = 30.0
@@ -307,6 +308,15 @@ class GitHubAppClient:
     ) -> tuple[int, JsonContainer]:
         repository = self._assert_allowed(repository)
         normalized_method = method.upper()
+        if self.public_only:
+            if normalized_method not in {"GET", "HEAD"}:
+                raise GitHubAgentError("public GitHub access is read-only")
+            return self._request(
+                normalized_method,
+                f"{_GITHUB_API}{path}",
+                payload=payload,
+                allowed_errors=allowed_errors,
+            )
         try:
             token = self._installation_token(repository)
         except GitHubAgentError as exc:
@@ -524,6 +534,10 @@ class GitHubAppClient:
             "auth_type": self.auth_type,
             "status": "ok",
         }
+        if self.public_only:
+            response["auth_type"] = "public"
+            response["access_mode"] = "public_anonymous"
+            return response
         if self.token:
             return response
         response["app_id"] = self.app_id
