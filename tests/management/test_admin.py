@@ -58,7 +58,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     )
     audit = InvocationAuditService(SqlAlchemyInvocationRepository(sessions))
     config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
-    files = FileAdminStore(FileSettings(root=tmp_path / "files"))
+    files = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
 
     admin = build_admin(engine, settings, cipher, accounts, audit, config, files)
 
