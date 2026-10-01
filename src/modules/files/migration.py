@@ -64,13 +64,15 @@ def migrate_legacy_store(
                 f"migration checksum mismatch for {file_id}: "
                 f"expected {sha256}, found {actual_sha}"
             )
+        raw_size = info.get("size_bytes")
+        size_bytes = raw_size if isinstance(raw_size, int) else 0
         migrated.append(
             {
                 "old_file_id": file_id,
                 "sha256": sha256,
                 "name": name,
                 "mime_type": str(info.get("mime_type") or ""),
-                "size_bytes": int(info.get("size_bytes") or 0),
+                "size_bytes": size_bytes,
                 "created_at": str(info.get("created_at") or ""),
                 "aliases": info.get("aliases") if isinstance(info.get("aliases"), list) else [],
                 "references": (
