@@ -44,7 +44,7 @@ class WorkspaceFileStore:
         if not resolved.is_relative_to(self.root):
             raise WorkspaceFileError("path escapes workspace root")
         value = resolved.relative_to(self.root).as_posix()
-        return "/" if not value else value
+        return value if value else "/"
 
     def status(self) -> JsonObject:
         self.ensure()

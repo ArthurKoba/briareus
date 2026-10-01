@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from common.settings import TerminalSettings
 from modules.files.workspace_store import WorkspaceFileError, WorkspaceFileStore
 from modules.terminal.manager import TerminalManager
-from common.settings import TerminalSettings
 
 
 @pytest.fixture
