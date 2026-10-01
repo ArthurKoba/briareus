@@ -251,10 +251,20 @@ class WorkspaceFileStore:
         if target.exists() and not overwrite:
             raise WorkspaceFileError(f"destination already exists: {destination}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        if consume:
-            os.replace(source, target)
-        else:
-            shutil.copy2(source, target)
+        temporary = target.parent / (
+            f".{target.name}.place-{uuid.uuid4().hex}.part"
+        )
+        try:
+            shutil.copy2(source, temporary)
+            if target.exists() and not overwrite:
+                raise WorkspaceFileError(
+                    f"destination already exists: {destination}"
+                )
+            os.replace(temporary, target)
+            if consume:
+                source.unlink(missing_ok=True)
+        finally:
+            temporary.unlink(missing_ok=True)
         return self.info(self.relative(target))
 
     def sha256(self, path: str) -> str:
@@ -266,6 +276,10 @@ class WorkspaceFileStore:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    def target_path(self, path: str) -> Path:
+        """Resolve a workspace destination path without requiring it to exist."""
+        return self._path(path)
 
     def path_for(self, path: str) -> Path:
         target = self._path(path)
