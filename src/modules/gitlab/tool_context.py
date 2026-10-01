@@ -33,6 +33,8 @@ class GitLabRuntimeContext:
                     context="GitLab potential capabilities",
                 )
                 account["permission_scope"] = "project-dependent"
+                account["preferred_selector"] = str(account.get("alias", ""))
+                account["selector_stability"] = "stable_alias"
         return result
 
     @staticmethod
