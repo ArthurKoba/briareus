@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from common.settings import TerminalSettings
+from common.settings import FileSettings, TerminalSettings
+from modules.files.file_store import FileStore
 from modules.terminal.manager import TerminalError, TerminalManager
 
 
@@ -125,3 +126,33 @@ def test_persisted_running_job_becomes_interrupted(tmp_path: Path) -> None:
 
     second = TerminalManager(settings)
     assert second.job_status("persisted")["state"] == "interrupted"
+
+
+def test_workspace_files_round_trip(tmp_path: Path) -> None:
+    store = FileStore(
+        FileSettings(
+            root=tmp_path / "files",
+            upload_max_bytes=1024 * 1024,
+        )
+    )
+    source = store.put_text("input.txt", "payload")
+    manager = TerminalManager(
+        TerminalSettings(
+            workspace_root=tmp_path / "workspace",
+            home=tmp_path / "home",
+            shell="/bin/bash",
+        ),
+        store,
+    )
+    manager.workspace_create("demo")
+
+    imported = manager.workspace_import_file(
+        "demo",
+        str(source["file_id"]),
+        "src/input.txt",
+    )
+    assert Path(str(imported["path"])).read_text(encoding="utf-8") == "payload"
+
+    exported = manager.workspace_export_file("demo", "src/input.txt", name="copy.txt")
+    assert str(exported["file_id"]).startswith("sha256:")
+    assert store.read(str(exported["file_id"]))["data_base64"]

@@ -94,6 +94,7 @@ RUN apt-get update \
         python3-venv bc bison flex gawk gettext cpio file perl picocom python3-serial \
     && rm -rf /var/lib/apt/lists/*
 COPY src/modules/__init__.py ./src/modules/__init__.py
+COPY src/modules/files ./src/modules/files
 COPY src/modules/terminal ./src/modules/terminal
 ENV ASGI_APP=modules.terminal.runtime:app \
     HOME=/home/agent \
