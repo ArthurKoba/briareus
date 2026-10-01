@@ -76,14 +76,16 @@ ENV ASGI_APP=modules.gitlab.runtime:app
 FROM runtime-base AS files
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/files ./src/modules/files
-ENV ASGI_APP=modules.files.runtime:app
+ENV ASGI_APP=modules.files.runtime:app \
+    FILE_WORKSPACE_ROOT=/workspace
 
 
 FROM runtime-base AS curl
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/files ./src/modules/files
 COPY src/modules/curl ./src/modules/curl
-ENV ASGI_APP=modules.curl.runtime:app
+ENV ASGI_APP=modules.curl.runtime:app \
+    FILE_WORKSPACE_ROOT=/workspace
 
 
 FROM runtime-base AS terminal

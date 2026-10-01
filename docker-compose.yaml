@@ -30,6 +30,7 @@ x-file-service: &file-service
   <<: *private-service
   volumes:
     - files:/files
+    - terminal-workspace:/workspace
 
 services:
   management:
