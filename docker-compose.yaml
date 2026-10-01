@@ -132,6 +132,10 @@ services:
       target: terminal
     environment:
       <<: [*management-client, *observability]
+    mem_limit: ${TERMINAL_MEMORY_LIMIT:-2g}
+    memswap_limit: ${TERMINAL_MEMORY_SWAP_LIMIT:-2g}
+    cpus: ${TERMINAL_CPU_LIMIT:-1.5}
+    pids_limit: ${TERMINAL_PIDS_LIMIT:-256}
     volumes:
       - terminal-workspace:/workspace
       - terminal-home:/home/agent
