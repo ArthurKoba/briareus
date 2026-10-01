@@ -151,7 +151,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "curl": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "terminal": observability,
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "ghidra": observability,
     }
 
     for name, service in services.items():

@@ -148,7 +148,7 @@ services:
       <<: *build
       target: ghidra
     environment:
-      <<: [*management-client, *observability]
+      <<: *observability
     networks:
       - default
       - coolify

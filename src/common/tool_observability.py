@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 
 import mcp.types as mt
@@ -65,7 +64,6 @@ class ToolObservabilityMiddleware(Middleware):
         if request_id:
             span_attributes["mcp.request.id"] = request_id
 
-        tool_logger = logging.getLogger(f"mcp_bridge.{self.module}")
         with self.sink.trace_span(
             f"mcp.tool.{context.message.name}",
             span_attributes,
@@ -86,16 +84,6 @@ class ToolObservabilityMiddleware(Middleware):
                     error_message=render_error(exc),
                 )
                 self._submit(event)
-                tool_logger.exception(
-                    "MCP tool call failed scope=%s tool=%s",
-                    self.module,
-                    context.message.name,
-                    extra={
-                        "mcp.scope": self.module,
-                        "mcp.tool": context.message.name,
-                        "mcp.request.id": request_id,
-                    },
-                )
                 raise
 
             self._submit(
