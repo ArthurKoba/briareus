@@ -59,6 +59,8 @@ class GitLabRuntimeContext:
 
     @staticmethod
     def _potential_capabilities(auth_type: str) -> list[str]:
+        if auth_type == "public":
+            return ["project_read", "repository_read"]
         capabilities = [
             "project_read",
             "repository_read",
@@ -82,11 +84,16 @@ class GitLabRuntimeContext:
     ) -> JsonObject:
         client = self.client(account_id)
         result = client.account_capabilities(project.strip())
+        auth_type = "public" if client.anonymous_only else client.profile.auth_type
         result["potential_capabilities"] = json_array(
-            self._potential_capabilities(client.profile.auth_type),
+            self._potential_capabilities(auth_type),
             context="GitLab potential capabilities",
         )
-        result["permission_scope"] = "project-dependent"
+        result["permission_scope"] = (
+            "public-projects-only"
+            if client.anonymous_only
+            else "project-dependent"
+        )
         return result
 
     def client(self, account_id: str) -> GitLabClient:
