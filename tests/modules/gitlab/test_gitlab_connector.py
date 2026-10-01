@@ -69,6 +69,19 @@ class _GitLabHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/v4/projects/public%2Frepo":
+            if self.headers.get("PRIVATE-TOKEN"):
+                self._json(404, {"message": "not found through token"})
+                return
+            self._json(
+                200,
+                {
+                    "id": 456,
+                    "path_with_namespace": "public/repo",
+                    "visibility": "public",
+                },
+            )
+            return
         if path == "/api/v4/projects/group%2Fproject":
             self._json(
                 200,
@@ -280,3 +293,27 @@ def test_gitlab_merge_request_note_rejects_empty_body(gitlab_server: str) -> Non
 
     with pytest.raises(GitLabError, match="note body is required"):
         client.add_merge_request_note("group/project", 7, "   ")
+
+
+def test_gitlab_get_retries_anonymously_for_public_project(
+    gitlab_server: str,
+) -> None:
+    client = GitLabClient(_profile("a", "alice", gitlab_server, "token-a"))
+
+    response = client.request("GET", "/projects/public%2Frepo")
+
+    assert response.status == 200
+    assert response.data["path_with_namespace"] == "public/repo"
+
+
+def test_gitlab_mutation_does_not_retry_anonymously(
+    gitlab_server: str,
+) -> None:
+    client = GitLabClient(_profile("a", "alice", gitlab_server, "token-a"))
+
+    with pytest.raises(GitLabError):
+        client.request(
+            "POST",
+            "/projects/public%2Frepo/issues",
+            payload={"title": "blocked"},
+        )
