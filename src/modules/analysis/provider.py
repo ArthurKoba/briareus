@@ -157,7 +157,7 @@ class AnalysisToolProvider(Provider):
             raise AnalysisProviderError("analysis backend URL is not configured")
         return value
 
-    def _backend_client(self) -> Client:
+    def _backend_client(self) -> Client[StreamableHttpTransport]:
         transport = StreamableHttpTransport(
             self._backend_url(),
             headers={"X-Koba-Proxy-Origin": "analysis"},
