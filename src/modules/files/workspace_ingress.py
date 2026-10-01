@@ -27,13 +27,12 @@ def ingest_workspace_file(
     max_bytes: int,
 ) -> JsonObject:
     """Stream a client-authorized attachment directly into the shared workspace."""
-    parsed = _validate_remote_file_url(file.download_url.strip())
-    del parsed
+    _validate_remote_file_url(file.download_url.strip())
     expected_digest = validate_sha256(expected_sha256)
     if expected_size is not None and (expected_size < 0 or expected_size > max_bytes):
         raise FileError(f"expected_size must be between 0 and {max_bytes}")
 
-    target = workspace._path(destination)
+    target = workspace.target_path(destination)
     if target.exists() and not overwrite:
         raise FileError(f"destination already exists: {destination}")
     target.parent.mkdir(parents=True, exist_ok=True)
