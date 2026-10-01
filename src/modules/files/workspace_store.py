@@ -87,7 +87,7 @@ class WorkspaceFileStore:
         if not directory.is_dir():
             raise WorkspaceFileError(f"directory not found: {path or '/'}")
         entries = sorted(
-            directory.iterdir(),
+            (item for item in directory.iterdir() if not item.is_symlink()),
             key=lambda item: (not item.is_dir(), item.name.casefold()),
         )
         selected: list[JsonValue] = [
@@ -171,12 +171,12 @@ class WorkspaceFileStore:
             raise WorkspaceFileError(f"source not found: {source}")
         if src.is_dir() and dst.is_relative_to(src):
             raise WorkspaceFileError("destination may not be inside source directory")
-        if dst.exists() and not overwrite:
-            raise WorkspaceFileError(f"destination already exists: {destination}")
+        if dst.exists():
+            if not overwrite:
+                raise WorkspaceFileError(f"destination already exists: {destination}")
+            self.delete(destination, recursive=True)
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
-            if dst.exists() and overwrite:
-                shutil.rmtree(dst)
             shutil.copytree(src, dst)
         else:
             shutil.copy2(src, dst)

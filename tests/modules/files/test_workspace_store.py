@@ -83,3 +83,29 @@ def test_workspace_rejects_directory_copy_or_move_into_itself(
 
     with pytest.raises(WorkspaceFileError, match="inside source"):
         workspace.move("tree", "tree/nested")
+
+
+def test_workspace_listing_does_not_follow_symlinks(
+    workspace: WorkspaceFileStore,
+) -> None:
+    outside = workspace.root.parent / "outside-list"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    workspace.ensure()
+    (workspace.root / "outside-link").symlink_to(outside, target_is_directory=True)
+
+    listing = workspace.list()
+    assert "outside-link" not in {item["name"] for item in listing["entries"]}
+
+
+def test_workspace_copy_overwrite_replaces_destination_type(
+    workspace: WorkspaceFileStore,
+) -> None:
+    workspace.write_text("source.txt", "file")
+    workspace.mkdir("destination")
+    workspace.write_text("destination/old.txt", "old")
+
+    result = workspace.copy("source.txt", "destination", overwrite=True)
+
+    assert result["type"] == "file"
+    assert workspace.path_for("destination").read_text(encoding="utf-8") == "file"
