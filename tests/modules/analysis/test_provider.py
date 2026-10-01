@@ -458,7 +458,7 @@ async def test_internal_artifact_tools_do_not_zero_analysis_catalog(monkeypatch)
 
         async def __aexit__(self, exc_type, exc, tb) -> None:
             del exc_type, exc, tb
-            return None
+            return
 
         async def list_tools(self):
             return [
