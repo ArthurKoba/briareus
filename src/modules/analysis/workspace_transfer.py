@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from contextlib import suppress
 from pathlib import Path
+import uuid
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
@@ -133,6 +134,17 @@ class AnalysisWorkspaceTransfers:
             {"project_id": project_id, "stage_id": stage_id},
         )
 
+    async def _cancel_stage_best_effort(
+        self,
+        project_id: str,
+        stage_id: str,
+    ) -> str:
+        try:
+            await self._cancel_stage(project_id, stage_id)
+        except Exception as exc:
+            return str(exc)
+        return ""
+
     async def import_workspace_file(
         self,
         project_id: str,
@@ -144,22 +156,22 @@ class AnalysisWorkspaceTransfers:
     ) -> JsonObject:
         staged = await self._stage_workspace_file(project_id, workspace_path)
         stage_id = str(staged["stage_id"])
-        result = await self._call(
-            "import_file",
-            {
-                "project_id": project_id,
-                "file_path": staged["path"],
-                "project_folder": project_folder,
-                "language": language or None,
-                "compiler_spec": compiler_spec or None,
-                "auto_analyze": auto_analyze,
-            },
-        )
-        cleanup_error = ""
         try:
-            await self._cancel_stage(project_id, stage_id)
-        except Exception as exc:
-            cleanup_error = str(exc)
+            result = await self._call(
+                "import_file",
+                {
+                    "project_id": project_id,
+                    "file_path": staged["path"],
+                    "project_folder": project_folder,
+                    "language": language,
+                    "compiler_spec": compiler_spec,
+                    "auto_analyze": auto_analyze,
+                },
+            )
+        except Exception:
+            await self._cancel_stage_best_effort(project_id, stage_id)
+            raise
+        cleanup_error = await self._cancel_stage_best_effort(project_id, stage_id)
         return {
             "workspace_path": workspace_path,
             "sha256": staged["sha256"],
@@ -177,21 +189,21 @@ class AnalysisWorkspaceTransfers:
     ) -> JsonObject:
         staged = await self._stage_workspace_file(project_id, workspace_path)
         stage_id = str(staged["stage_id"])
-        result = await self._call(
-            "import_program",
-            {
-                "project_id": project_id,
-                "gzf_path": staged["path"],
-                "target_folder": target_folder,
-                "target_name": target_name,
-                "overwrite": overwrite,
-            },
-        )
-        cleanup_error = ""
         try:
-            await self._cancel_stage(project_id, stage_id)
-        except Exception as exc:
-            cleanup_error = str(exc)
+            result = await self._call(
+                "import_program",
+                {
+                    "project_id": project_id,
+                    "gzf_path": staged["path"],
+                    "target_folder": target_folder,
+                    "target_name": target_name,
+                    "overwrite": overwrite,
+                },
+            )
+        except Exception:
+            await self._cancel_stage_best_effort(project_id, stage_id)
+            raise
+        cleanup_error = await self._cancel_stage_best_effort(project_id, stage_id)
         return {
             "workspace_path": workspace_path,
             "sha256": staged["sha256"],
@@ -208,20 +220,20 @@ class AnalysisWorkspaceTransfers:
     ) -> JsonObject:
         staged = await self._stage_workspace_file(project_id, workspace_path)
         stage_id = str(staged["stage_id"])
-        result = await self._call(
-            "restore_project",
-            {
-                "project_id": project_id,
-                "gar_path": staged["path"],
-                "project_name": project_name,
-                "parent_dir": parent_dir,
-            },
-        )
-        cleanup_error = ""
         try:
-            await self._cancel_stage(project_id, stage_id)
-        except Exception as exc:
-            cleanup_error = str(exc)
+            result = await self._call(
+                "restore_project",
+                {
+                    "project_id": project_id,
+                    "gar_path": staged["path"],
+                    "project_name": project_name,
+                    "parent_dir": parent_dir,
+                },
+            )
+        except Exception:
+            await self._cancel_stage_best_effort(project_id, stage_id)
+            raise
+        cleanup_error = await self._cancel_stage_best_effort(project_id, stage_id)
         return {
             "workspace_path": workspace_path,
             "sha256": staged["sha256"],
@@ -245,7 +257,9 @@ class AnalysisWorkspaceTransfers:
         if target.exists() and target.is_dir():
             raise AnalysisTransferError("workspace destination is a directory")
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.parent / f".{target.name}.analysis-transfer.part"
+        temporary = target.parent / (
+            f".{target.name}.analysis-transfer-{uuid.uuid4().hex}.part"
+        )
         temporary.unlink(missing_ok=True)
 
         offset = 0
@@ -328,7 +342,7 @@ class AnalysisWorkspaceTransfers:
         *,
         overwrite: bool = False,
     ) -> JsonObject:
-        output_name = Path(workspace_path).name
+        output_name = f"{uuid.uuid4().hex}-{Path(workspace_path).name}"
         exported = await self._call(
             "export_program",
             {
@@ -357,7 +371,7 @@ class AnalysisWorkspaceTransfers:
         *,
         overwrite: bool = False,
     ) -> JsonObject:
-        output_name = Path(workspace_path).name
+        output_name = f"{uuid.uuid4().hex}-{Path(workspace_path).name}"
         archived = await self._call(
             "archive_project",
             {
