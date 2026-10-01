@@ -39,36 +39,6 @@ def register_terminal_tools(mcp: FastMCP, manager: TerminalManager) -> None:
         """Delete a workspace. Active jobs block deletion unless force=true."""
         return await manager.workspace_delete(workspace_id, force=force)
 
-    @mcp.tool(title="Workspace import file", annotations=WRITE_LOCAL)
-    async def workspace_import_file(
-        workspace_id: str,
-        file_id: str,
-        path: str,
-        overwrite: bool = False,
-    ) -> JsonObject:
-        """Copy one immutable Files object into a workspace path."""
-        return await manager.workspace_import_file(
-            workspace_id,
-            file_id,
-            path,
-            overwrite=overwrite,
-        )
-
-    @mcp.tool(title="Workspace export file", annotations=WRITE_LOCAL)
-    async def workspace_export_file(
-        workspace_id: str,
-        path: str,
-        name: str = "",
-        mime_type: str = "",
-    ) -> JsonObject:
-        """Commit one workspace file to immutable Files storage."""
-        return await manager.workspace_export_file(
-            workspace_id,
-            path,
-            name=name,
-            mime_type=mime_type,
-        )
-
     @mcp.tool(title="Terminal exec", annotations=DESTRUCTIVE_EXTERNAL)
     async def terminal_exec(
         workspace_id: str,
