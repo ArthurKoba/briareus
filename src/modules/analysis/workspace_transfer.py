@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import base64
+import uuid
 from contextlib import suppress
 from pathlib import Path
-import uuid
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
