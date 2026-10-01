@@ -62,7 +62,8 @@ class LocalAuthTokenVerifier(TokenVerifier):
         jti = str(payload.get("jti", ""))
         now = time.monotonic()
         touch_key = f"{client_id}\0{self.resource}\0{login}\0{jti}"
-        if self.management is not None and now - self._touches.get(touch_key, 0.0) >= 60.0:
+        previous_touch = self._touches.get(touch_key)
+        if self.management is not None and (previous_touch is None or now - previous_touch >= 60.0):
             self._touches[touch_key] = now
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(
