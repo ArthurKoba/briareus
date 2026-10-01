@@ -40,7 +40,7 @@ announce_runtime_started(_observability, "management")
 settings.database_path.parent.mkdir(parents=True, exist_ok=True)
 engine, sessions = create_database(settings.database_url)
 if ensure_zero_state_schema(engine):
-    logger.warning("management schema changed; reset zero-state management database")
+    logger.info("management schema initialized missing tables")
 
 cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
