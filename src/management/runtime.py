@@ -71,7 +71,19 @@ async def _maintenance_loop() -> None:
         try:
             config = await asyncio.to_thread(config_service.get)
             interval_seconds = config.maintenance_interval_minutes * 60
-            await asyncio.to_thread(audit.cleanup)
+            logger.info(
+                "management cleanup scan started retention_days=%d "
+                "max_records=%d interval_minutes=%d",
+                config.logging_retention_days,
+                config.logging_max_records,
+                config.maintenance_interval_minutes,
+            )
+            removed = await asyncio.to_thread(audit.cleanup)
+            logger.info(
+                "management cleanup scan completed reason=retention_or_max_records "
+                "removed_records=%d",
+                removed,
+            )
         except Exception:
             logger.exception("management maintenance cycle failed")
         await asyncio.sleep(interval_seconds)

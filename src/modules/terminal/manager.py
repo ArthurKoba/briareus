@@ -4,6 +4,7 @@ import asyncio
 import fcntl
 import grp
 import json
+import logging
 import os
 import pty
 import re
@@ -20,6 +21,8 @@ from pathlib import Path
 
 from common.models import JsonObject, JsonValue
 from common.settings import TerminalSettings
+
+logger = logging.getLogger(__name__)
 
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -163,6 +166,28 @@ class TerminalManager:
             ],
         }
 
+    @staticmethod
+    def _tree_size_bytes(path: Path) -> int:
+        total = 0
+        stack = [path]
+        while stack:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as iterator:
+                    for item in iterator:
+                        try:
+                            if item.is_symlink():
+                                continue
+                            if item.is_dir(follow_symlinks=False):
+                                stack.append(Path(item.path))
+                            elif item.is_file(follow_symlinks=False):
+                                total += item.stat(follow_symlinks=False).st_size
+                        except FileNotFoundError:
+                            continue
+            except FileNotFoundError:
+                continue
+        return total
+
     async def workspace_delete(self, workspace_id: str, force: bool = False) -> JsonObject:
         workspace_id = self._workspace_id(workspace_id)
         path = self._require_workspace(workspace_id)
@@ -171,7 +196,21 @@ class TerminalManager:
             for job in self._jobs.values()
             if job.workspace_id == workspace_id and job.state in {"running", "cancelling"}
         ]
+        size_bytes = self._tree_size_bytes(path)
+        logger.info(
+            "workspace cleanup decision workspace_id=%s action=delete reason=%s "
+            "active_jobs=%d size_bytes=%d",
+            workspace_id,
+            "forced_manual_delete" if force else "manual_delete",
+            len(active),
+            size_bytes,
+        )
         if active and not force:
+            logger.info(
+                "workspace cleanup skipped workspace_id=%s reason=active_jobs active_jobs=%d",
+                workspace_id,
+                len(active),
+            )
             raise TerminalError(
                 "workspace has active jobs: " + ", ".join(job.job_id for job in active)
             )
@@ -179,7 +218,18 @@ class TerminalManager:
             for job in active:
                 await self.job_cancel(job.job_id, grace_seconds=1)
         shutil.rmtree(path)
-        return {"workspace_id": workspace_id, "deleted": True}
+        logger.info(
+            "workspace cleanup completed workspace_id=%s reason=%s freed_bytes=%d",
+            workspace_id,
+            "forced_manual_delete" if force else "manual_delete",
+            size_bytes,
+        )
+        return {
+            "workspace_id": workspace_id,
+            "deleted": True,
+            "freed_bytes": size_bytes,
+            "reason": "forced_manual_delete" if force else "manual_delete",
+        }
 
     def status(self) -> JsonObject:
         usage = shutil.disk_usage(self.workspace_root)
@@ -252,8 +302,7 @@ class TerminalManager:
                 "free_bytes": usage.free,
             },
             "tools": {
-                name: shutil.which(name, path=self.settings.path) or ""
-                for name in tool_names
+                name: shutil.which(name, path=self.settings.path) or "" for name in tool_names
             },
             "serial_devices": serial_devices,
             "ssh_public_keys": public_keys,
@@ -616,8 +665,7 @@ class TerminalManager:
             and (not state_filter or job.state == state_filter)
         ]
         selected: list[JsonValue] = [
-            self._job_public(job)
-            for job in matched[offset : offset + limit]
+            self._job_public(job) for job in matched[offset : offset + limit]
         ]
         return {
             "jobs": selected,
@@ -628,14 +676,39 @@ class TerminalManager:
             "truncated": offset + len(selected) < len(matched),
         }
 
-    def job_delete(self, job_id: str) -> JsonObject:
+    def job_delete(
+        self,
+        job_id: str,
+        *,
+        reason: str = "explicit_job_delete",
+    ) -> JsonObject:
         job = self._get_job(job_id)
         if job.state in {"running", "cancelling"}:
+            logger.info(
+                "job cleanup skipped job_id=%s workspace_id=%s reason=active_job state=%s",
+                job.job_id,
+                job.workspace_id,
+                job.state,
+            )
             raise TerminalError("running jobs must be cancelled before deletion")
+        size_bytes = self._tree_size_bytes(job.metadata_path.parent)
         with suppress(FileNotFoundError):
             shutil.rmtree(job.metadata_path.parent)
         self._jobs.pop(job.job_id, None)
-        return {"job_id": job.job_id, "deleted": True}
+        logger.info(
+            "job cleanup deleted job_id=%s workspace_id=%s reason=%s state=%s freed_bytes=%d",
+            job.job_id,
+            job.workspace_id,
+            reason,
+            job.state,
+            size_bytes,
+        )
+        return {
+            "job_id": job.job_id,
+            "deleted": True,
+            "reason": reason,
+            "freed_bytes": size_bytes,
+        }
 
     def job_cleanup(
         self,
@@ -648,6 +721,13 @@ class TerminalManager:
         if not 1 <= limit <= 10000:
             raise TerminalError("limit must be between 1 and 10000")
         cutoff = time.time() - older_than_hours * 3600
+        logger.info(
+            "job cleanup scan started older_than_hours=%d dry_run=%s limit=%d retained_jobs=%d",
+            older_than_hours,
+            dry_run,
+            limit,
+            len(self._jobs),
+        )
         candidates = [
             job
             for job in sorted(
@@ -658,9 +738,34 @@ class TerminalManager:
             and (job.ended_at or job.created_at) <= cutoff
         ][:limit]
         ids = [job.job_id for job in candidates]
+        candidate_bytes = sum(self._tree_size_bytes(job.metadata_path.parent) for job in candidates)
+        for job in candidates:
+            age_hours = max(0.0, (time.time() - (job.ended_at or job.created_at)) / 3600)
+            logger.info(
+                "job cleanup candidate job_id=%s workspace_id=%s reason=retention_expired "
+                "state=%s age_hours=%.2f dry_run=%s",
+                job.job_id,
+                job.workspace_id,
+                job.state,
+                age_hours,
+                dry_run,
+            )
+        freed_bytes = 0
         if not dry_run:
             for job_id in ids:
-                self.job_delete(job_id)
+                result = self.job_delete(job_id, reason="retention_expired")
+                raw = result.get("freed_bytes")
+                if isinstance(raw, int):
+                    freed_bytes += raw
+        logger.info(
+            "job cleanup scan completed candidates=%d candidate_bytes=%d deleted=%d "
+            "freed_bytes=%d dry_run=%s",
+            len(ids),
+            candidate_bytes,
+            0 if dry_run else len(ids),
+            freed_bytes,
+            dry_run,
+        )
         public_ids: list[JsonValue] = []
         public_ids.extend(ids)
         return {
@@ -668,6 +773,9 @@ class TerminalManager:
             "older_than_hours": older_than_hours,
             "job_ids": public_ids,
             "count": len(ids),
+            "candidate_bytes": candidate_bytes,
+            "freed_bytes": freed_bytes,
+            "reason": "retention_expired",
         }
 
     async def job_read(
@@ -697,9 +805,7 @@ class TerminalManager:
             await asyncio.sleep(0.05)
 
         if cursor > size:
-            raise TerminalError(
-                f"cursor {cursor} is beyond retained output size {size}"
-            )
+            raise TerminalError(f"cursor {cursor} is beyond retained output size {size}")
         with job.log_path.open("rb") as stream:
             stream.seek(cursor)
             data = stream.read(limit)
