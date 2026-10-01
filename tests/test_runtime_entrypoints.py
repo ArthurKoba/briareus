@@ -8,6 +8,7 @@ from modules.curl.runtime import mcp as curl
 from modules.files.runtime import mcp as files
 from modules.github.runtime import mcp as github
 from modules.gitlab.runtime import mcp as gitlab
+from modules.terminal.runtime import mcp as terminal
 
 
 async def _tool_names(mcp) -> set[str]:
@@ -78,4 +79,19 @@ async def test_analysis_runtime_surface_is_dynamic_and_isolated() -> None:
     assert "file_status" not in names
     assert "curl_request" not in names
     assert "github_agent_status" not in names
+    assert "accounts" not in names
+
+
+@pytest.mark.asyncio
+async def test_terminal_runtime_surface_is_isolated() -> None:
+    names = await _tool_names(terminal)
+
+    assert "terminal_status" in names
+    assert "workspace_create" in names
+    assert "terminal_exec" in names
+    assert "job_start" in names
+    assert "job_read" in names
+    assert "job_write" in names
+    assert "github_agent_status" not in names
+    assert "curl_request" not in names
     assert "accounts" not in names

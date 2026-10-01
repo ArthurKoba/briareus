@@ -4,6 +4,8 @@ set -eu
 FASTMCP_DIR="${FASTMCP_HOME:-/auth}"
 FILE_DIR="${FILE_ROOT:-/files}"
 MANAGEMENT_DIR="/management"
+TERMINAL_WORKSPACE_DIR="${TERMINAL_WORKSPACE_ROOT:-}"
+TERMINAL_HOME_DIR="${TERMINAL_HOME:-}"
 
 mkdir -p \
   "${FASTMCP_DIR}" \
@@ -13,5 +15,15 @@ mkdir -p \
   /home/bridge
 
 chown -R 1000:1000 "${FASTMCP_DIR}" "${FILE_DIR}" "${MANAGEMENT_DIR}" /home/bridge
+
+if [ -n "${TERMINAL_WORKSPACE_DIR}" ]; then
+  mkdir -p "${TERMINAL_WORKSPACE_DIR}"
+  chown 1000:1000 "${TERMINAL_WORKSPACE_DIR}"
+fi
+
+if [ -n "${TERMINAL_HOME_DIR}" ]; then
+  mkdir -p "${TERMINAL_HOME_DIR}"
+  chown 1000:1000 "${TERMINAL_HOME_DIR}"
+fi
 
 exec gosu 1000:1000 "$@"

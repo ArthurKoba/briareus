@@ -9,6 +9,7 @@ MCP_SURFACE_PATHS: dict[str, str] = {
     "files": "/files/mcp",
     "web": "/web/mcp",
     "analysis": "/analysis/mcp",
+    "terminal": "/terminal/mcp",
 }
 
 

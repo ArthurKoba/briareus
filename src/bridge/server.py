@@ -142,6 +142,12 @@ _backend_router = BackendRouter(
             "",
             "Private native analysis backend",
         ),
+        BackendDescriptor(
+            "terminal",
+            _BACKENDS["terminal"],
+            MCP_SURFACE_PATHS["terminal"],
+            "Persistent Linux workspaces, commands and long-running jobs",
+        ),
     )
 )
 
@@ -185,6 +191,12 @@ analysis_surface = _public_facade(
     "analysis",
     "analysis",
     _BACKENDS["analysis"],
+    _auth_by_surface,
+)
+terminal_surface = _public_facade(
+    "terminal",
+    "terminal",
+    _BACKENDS["terminal"],
     _auth_by_surface,
 )
 
@@ -247,6 +259,8 @@ def bridge_capabilities() -> JsonObject:
             "web",
             "curl",
             "analysis",
+            "terminal",
+            "jobs",
             "admin",
         ],
     ).to_json()
@@ -283,6 +297,7 @@ _gitlab_http_app = _http_app(gitlab_surface)
 _files_http_app = _http_app(files_surface)
 _web_http_app = _http_app(web_surface)
 _analysis_http_app = _http_app(analysis_surface)
+_terminal_http_app = _http_app(terminal_surface)
 
 _MCP_HTTP_APPS = (
     _root_http_app,
@@ -291,6 +306,7 @@ _MCP_HTTP_APPS = (
     _files_http_app,
     _web_http_app,
     _analysis_http_app,
+    _terminal_http_app,
 )
 _MCP_LIFESPANS = tuple(
     mcp_app.router.lifespan_context
@@ -325,4 +341,5 @@ app.mount("/gitlab", _gitlab_http_app)
 app.mount("/files", _files_http_app)
 app.mount("/web", _web_http_app)
 app.mount("/analysis", _analysis_http_app)
+app.mount("/terminal", _terminal_http_app)
 app.mount("/", _root_http_app)

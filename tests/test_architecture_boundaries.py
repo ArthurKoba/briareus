@@ -54,6 +54,7 @@ def test_provider_packages_do_not_import_each_other_or_management_implementation
         "curl": _SRC / "modules" / "curl",
         "analysis": _SRC / "modules" / "analysis",
         "ghidra": _SRC / "modules" / "ghidra",
+        "terminal": _SRC / "modules" / "terminal",
     }
     for provider, root in provider_roots.items():
         forbidden = {
@@ -139,6 +140,7 @@ def test_process_settings_are_created_only_in_composition_roots() -> None:
         "GitLabSettings",
         "GhidraSettings",
         "PrivateRuntimeSettings",
+        "TerminalSettings",
     }
     allowed = {_SRC / "bridge" / "server.py", _SRC / "management" / "runtime.py"}
     allowed.update((_SRC / "modules").glob("*/runtime.py"))

@@ -117,6 +117,23 @@ services:
     environment:
       <<: [*management-client, *observability]
 
+  terminal:
+    <<: *private-service
+    build:
+      <<: *build
+      target: terminal
+    environment:
+      <<: [*management-client, *observability]
+      TERMINAL_WORKSPACE_ROOT: /workspace
+      TERMINAL_HOME: /home/agent
+      TERMINAL_SHELL: ${TERMINAL_SHELL:-/bin/bash}
+      TERMINAL_MAX_EXEC_OUTPUT_BYTES: ${TERMINAL_MAX_EXEC_OUTPUT_BYTES:-2097152}
+      TERMINAL_MAX_JOB_READ_BYTES: ${TERMINAL_MAX_JOB_READ_BYTES:-1048576}
+      TERMINAL_MAX_JOB_LOG_BYTES: ${TERMINAL_MAX_JOB_LOG_BYTES:-268435456}
+    volumes:
+      - terminal-workspace:/workspace
+      - terminal-home:/home/agent
+
   analysis:
     <<: *private-service
     depends_on:
@@ -144,6 +161,8 @@ volumes:
   management:
   files:
   auth:
+  terminal-workspace:
+  terminal-home:
 
 networks:
   coolify:
