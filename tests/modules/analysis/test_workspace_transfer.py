@@ -84,7 +84,7 @@ async def test_copy_artifact_reads_chunks_into_workspace(
             "next_offset": next_offset,
             "size_bytes": len(payload),
             "eof": next_offset >= len(payload),
-        } if name == "artifact_file_read" else {"deleted": True}
+        }
 
     monkeypatch.setattr(transfers, "_call", fake_call)
 
@@ -98,6 +98,7 @@ async def test_copy_artifact_reads_chunks_into_workspace(
     assert result["path"] == "exports/demo.gzf"
     assert transfers.workspace.path_for("exports/demo.gzf").read_bytes() == payload
     assert result["source_artifact_path"] == "/artifacts/exports/demo.gzf"
+    assert result["source_deleted"] is True
 
 
 @pytest.mark.asyncio
