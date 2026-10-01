@@ -291,11 +291,9 @@ class TerminalManager:
             for path in serial_paths
         ]
         ssh_dir = self.home / ".ssh"
-        public_keys = (
-            sorted(path.name for path in ssh_dir.glob("*.pub"))
-            if ssh_dir.is_dir()
-            else []
-        )
+        public_keys: list[JsonValue] = []
+        if ssh_dir.is_dir():
+            public_keys.extend(sorted(path.name for path in ssh_dir.glob("*.pub")))
         return {
             "uid": os.getuid(),
             "gid": os.getgid(),
@@ -691,7 +689,7 @@ class TerminalManager:
         job = self._get_job(job_id)
         if job.state in {"running", "cancelling"}:
             raise TerminalError("running jobs must be cancelled before deletion")
-        with suppress(OSError):
+        with suppress(FileNotFoundError):
             shutil.rmtree(job.metadata_path.parent)
         self._jobs.pop(job.job_id, None)
         return {"job_id": job.job_id, "deleted": True}
@@ -720,10 +718,12 @@ class TerminalManager:
         if not dry_run:
             for job_id in ids:
                 self.job_delete(job_id)
+        public_ids: list[JsonValue] = []
+        public_ids.extend(ids)
         return {
             "dry_run": dry_run,
             "older_than_hours": older_than_hours,
-            "job_ids": ids,
+            "job_ids": public_ids,
             "count": len(ids),
         }
 
