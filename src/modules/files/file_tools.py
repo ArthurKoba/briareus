@@ -9,6 +9,8 @@ from .file_ingress import ingest_file
 from .file_store import FileStore
 from .models import ClientFile, FileReference, FileReferenceListResponse
 from .upload_manager import FileUploadManager
+from .workspace_ingress import ingest_workspace_file
+from .workspace_store import WorkspaceFileStore
 
 
 def register_file_tools(
@@ -19,13 +21,121 @@ def register_file_tools(
     *,
     store: FileStore,
     upload_manager: FileUploadManager,
+    workspace: WorkspaceFileStore,
 ) -> None:
     @mcp.tool(title="File status", annotations=read_annotations)
     def file_status() -> JsonObject:
         """Inspect the universal persistent MCP Bridge file store and active uploads."""
         result = store.status()
         result["active_uploads"] = upload_manager.active_count()
+        result["workspace"] = workspace.status()
         return result
+
+    @mcp.tool(title="Workspace list", annotations=read_annotations)
+    def file_workspace_list(
+        path: str = "",
+        offset: int = 0,
+        limit: int = 200,
+    ) -> JsonObject:
+        """List files/directories in the shared Terminal workspace."""
+        return workspace.list(path, offset=offset, limit=limit)
+
+    @mcp.tool(title="Workspace info", annotations=read_annotations)
+    def file_workspace_info(path: str) -> JsonObject:
+        """Inspect one file or directory in the shared Terminal workspace."""
+        return workspace.info(path)
+
+    @mcp.tool(title="Workspace read", annotations=read_annotations)
+    def file_workspace_read(
+        path: str,
+        offset: int = 0,
+        length: int = 1024 * 1024,
+    ) -> JsonObject:
+        """Read bounded bytes from a shared-workspace file as base64."""
+        return workspace.read(path, offset=offset, length=length)
+
+    @mcp.tool(title="Workspace write text", annotations=write_annotations)
+    def file_workspace_write_text(
+        path: str,
+        content: str,
+        overwrite: bool = True,
+        create_parents: bool = True,
+    ) -> JsonObject:
+        """Create or replace one UTF-8 text file in the shared workspace."""
+        return workspace.write_text(
+            path,
+            content,
+            overwrite=overwrite,
+            create_parents=create_parents,
+        )
+
+    @mcp.tool(title="Workspace mkdir", annotations=write_annotations)
+    def file_workspace_mkdir(path: str, parents: bool = True) -> JsonObject:
+        """Create a directory in the shared workspace."""
+        return workspace.mkdir(path, parents=parents)
+
+    @mcp.tool(title="Workspace copy", annotations=write_annotations)
+    def file_workspace_copy(
+        source: str,
+        destination: str,
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Copy a file or directory within the shared workspace."""
+        return workspace.copy(source, destination, overwrite=overwrite)
+
+    @mcp.tool(title="Workspace move", annotations=write_annotations)
+    def file_workspace_move(
+        source: str,
+        destination: str,
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Move or rename a file/directory within the shared workspace."""
+        return workspace.move(source, destination, overwrite=overwrite)
+
+    @mcp.tool(title="Workspace delete", annotations=destructive_annotations)
+    def file_workspace_delete(path: str, recursive: bool = False) -> JsonObject:
+        """Delete a file or directory from the shared workspace."""
+        return workspace.delete(path, recursive=recursive)
+
+    @mcp.tool(
+        title="Workspace ingest attachment",
+        annotations=write_annotations,
+        meta={"openai/fileParams": ["file"]},
+    )
+    def file_workspace_ingest(
+        file: ClientFile,
+        destination: str,
+        expected_size: int | None = None,
+        expected_sha256: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Stream a chat/client attachment directly into a workspace path."""
+        return ingest_workspace_file(
+            file=file,
+            destination=destination,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+            overwrite=overwrite,
+            workspace=workspace,
+            max_bytes=store.settings.upload_max_bytes,
+        )
+
+    @mcp.tool(title="Workspace snapshot", annotations=write_annotations)
+    def file_workspace_snapshot(
+        path: str,
+        name: str = "",
+        mime_type: str = "",
+    ) -> JsonObject:
+        """Snapshot a workspace file into immutable content-addressed storage."""
+        source = workspace.path_for(path)
+        if not source.is_file():
+            raise ValueError("workspace path is not a file")
+        return store.put_file(
+            source,
+            name=name.strip() or source.name,
+            mime_type=mime_type,
+            source="workspace-snapshot",
+        )
 
     @mcp.tool(
         title="File ingest",
