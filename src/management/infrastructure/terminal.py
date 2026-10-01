@@ -120,6 +120,29 @@ class TerminalAdminClient:
             context="terminal job cancel",
         )
 
+    async def delete_job(self, job_id: str) -> JsonObject:
+        return json_object(
+            await self._call("job_delete", {"job_id": job_id}),
+            context="terminal job delete",
+        )
+
+    async def cleanup_jobs(
+        self,
+        older_than_hours: int = 168,
+        dry_run: bool = False,
+    ) -> JsonObject:
+        return json_object(
+            await self._call(
+                "job_cleanup",
+                {
+                    "older_than_hours": older_than_hours,
+                    "dry_run": dry_run,
+                    "limit": 1000,
+                },
+            ),
+            context="terminal job cleanup",
+        )
+
     async def delete_workspace(self, workspace_id: str) -> JsonObject:
         return json_object(
             await self._call(
