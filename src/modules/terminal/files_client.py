@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from contextlib import suppress
 from pathlib import Path
@@ -98,7 +99,7 @@ class TerminalFilesClient:
                             break
         except Exception:
             with suppress(OSError):
-                destination.unlink()
+                await asyncio.to_thread(destination.unlink)
             raise
         return {
             "file_id": file_id,
@@ -114,7 +115,8 @@ class TerminalFilesClient:
         mime_type: str = "",
         chunk_bytes: int = 1024 * 1024,
     ) -> JsonObject:
-        size_bytes = source.stat().st_size
+        source_stat = await asyncio.to_thread(source.stat)
+        size_bytes = source_stat.st_size
         async with Client(self.url, timeout=self.timeout_seconds) as client:
             begin = self._decoded(
                 await client.call_tool(
