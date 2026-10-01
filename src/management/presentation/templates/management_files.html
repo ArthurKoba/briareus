@@ -51,6 +51,9 @@
       <a class="btn" href="/admin/files?{{ {'path': parent_path} | urlencode }}">Up</a>
     {% endif %}
     <code>/workspace{% if current_path %}/{{ current_path }}{% endif %}</code>
+    <a class="btn btn-outline-primary ms-auto" href="/admin/files?{{ {'path': current_path, 'sizes': '1'} | urlencode }}">
+      {% if measure_directories %}Recalculate directory sizes{% else %}Measure directory sizes{% endif %}
+    </a>
   </div>
   <div class="row g-2">
     <div class="col-12 col-lg-7">
@@ -87,7 +90,16 @@
     {% endif %}
   </td>
   <td>{{ item.get("type", "") }}</td>
-  <td>{{ item.get("size_bytes", 0) }}</td>
+  <td>
+    {% if item.get("type") == "directory" and not measure_directories %}
+      <span class="text-secondary">—</span>
+    {% else %}
+      {{ item.get("size_display", item.get("size_bytes", 0)) }}
+      {% if item.get("type") == "directory" and item.get("file_count") is not none %}
+        <div class="small text-secondary">{{ item.get("file_count", 0) }} files</div>
+      {% endif %}
+    {% endif %}
+  </td>
   <td>{{ item.get("modified_at_ns", "") }}</td>
   <td class="text-nowrap">
     {% if item.get("type") == "file" %}
