@@ -17,6 +17,12 @@
       <div><strong>CWD:</strong> <code>{{ job.get("cwd", "—") }}</code></div>
       <div><strong>Command:</strong> <code>{{ job.get("command", "—") }}</code></div>
       <div><strong>Duration:</strong> {{ job.get("duration_seconds", 0) }}s</div>
+      {% if job.get("state") not in ["running", "cancelling"] %}
+      <form method="post" action="/admin/terminal/job/{{ job['job_id'] }}/delete" class="mt-3">
+        {{ csrf_input(request) }}
+        <button class="btn btn-outline-danger" type="submit">Delete retained log</button>
+      </form>
+      {% endif %}
     </div>
   </div>
   <div class="card">
