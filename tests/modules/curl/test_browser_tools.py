@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastmcp import Client, FastMCP
 from mcp.types import ToolAnnotations
@@ -95,3 +97,8 @@ def test_browser_rejects_non_http_urls() -> None:
     with pytest.raises(BrowserError, match="absolute http"):
         BrowserManager._url("javascript:alert(1)")
     assert BrowserManager._url("https://example.com/path") == "https://example.com/path"
+
+
+def test_browser_runtime_uses_container_safe_chromium_sandbox_flag() -> None:
+    source = Path("src/modules/curl/browser.py").read_text()
+    assert 'args=["--no-sandbox"]' in source
