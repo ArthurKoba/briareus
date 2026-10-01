@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
+from common.runtime_policy_contracts import TerminalRuntimePolicy
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -24,6 +25,7 @@ from .database import (
     InvocationRecord,
     ManagementConfigRecord,
     OAuthSessionRecord,
+    RuntimeSettingsRecord,
     SigNozAccountRecord,
 )
 
@@ -693,3 +695,37 @@ class SqlAlchemyManagementConfigRepository:
             for name, value in config.model_dump().items():
                 setattr(record, name, value)
         return config
+
+
+class SqlAlchemyRuntimeSettingsRepository:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self.sessions = sessions
+
+    @staticmethod
+    def _domain(record: RuntimeSettingsRecord) -> TerminalRuntimePolicy:
+        return TerminalRuntimePolicy(
+            max_exec_timeout_seconds=record.terminal_max_exec_timeout_seconds,
+            max_job_runtime_seconds=record.terminal_max_job_runtime_seconds,
+        )
+
+    def get_terminal_policy(self) -> TerminalRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(RuntimeSettingsRecord, 1)
+            if record is None:
+                record = RuntimeSettingsRecord(id=1)
+                session.add(record)
+                session.flush()
+            return self._domain(record)
+
+    def save_terminal_policy(
+        self,
+        policy: TerminalRuntimePolicy,
+    ) -> TerminalRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(RuntimeSettingsRecord, 1)
+            if record is None:
+                record = RuntimeSettingsRecord(id=1)
+                session.add(record)
+            record.terminal_max_exec_timeout_seconds = policy.max_exec_timeout_seconds
+            record.terminal_max_job_runtime_seconds = policy.max_job_runtime_seconds
+        return policy
