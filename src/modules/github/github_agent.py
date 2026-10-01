@@ -303,9 +303,20 @@ class GitHubAppClient:
         allowed_errors: set[int] | None = None,
     ) -> tuple[int, JsonContainer]:
         repository = self._assert_allowed(repository)
-        token = self._installation_token(repository)
+        normalized_method = method.upper()
+        try:
+            token = self._installation_token(repository)
+        except GitHubAgentError:
+            if normalized_method not in {"GET", "HEAD"}:
+                raise
+            return self._request(
+                normalized_method,
+                f"{_GITHUB_API}{path}",
+                payload=payload,
+                allowed_errors=allowed_errors,
+            )
         return self._request(
-            method,
+            normalized_method,
             f"{_GITHUB_API}{path}",
             token=token,
             payload=payload,
@@ -478,5 +489,10 @@ class GitHubAppClient:
         if self.token:
             return response
         response["app_id"] = self.app_id
-        response["installation_id"] = self._installation_id(repository)
+        try:
+            response["installation_id"] = self._installation_id(repository)
+            response["access_mode"] = "installation"
+        except GitHubAgentError:
+            response["installation_id"] = None
+            response["access_mode"] = "public_anonymous"
         return response
