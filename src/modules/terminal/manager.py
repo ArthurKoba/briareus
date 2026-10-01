@@ -243,7 +243,9 @@ class TerminalManager:
         states: dict[str, int] = {}
         for job in self._jobs.values():
             states[job.state] = states.get(job.state, 0) + 1
-        job_states: JsonObject = {key: value for key, value in states.items()}
+        job_states: JsonObject = {}
+        for key, value in states.items():
+            job_states[key] = value
         tool_names = (
             "bash",
             "git",
