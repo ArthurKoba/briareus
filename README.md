@@ -19,7 +19,7 @@ gateway
   +-- /github/mcp   -------------> github
   +-- /gitlab/mcp   -------------> gitlab
   +-- /files/mcp    -------------> files
-  +-- /web/mcp      -------------> curl
+  +-- /web/mcp      -------------> web (curl + persistent Chromium)
   +-- /analysis/mcp -------------> analysis ---> ghidra (private)
   +-- /terminal/mcp -------------> terminal
   +-- /admin        -------------> management
@@ -150,4 +150,14 @@ interactive PTY input/output and cursor-based incremental logs. Terminal, Files,
 Management Admin share the same mutable `/workspace` volume, so working files are
 immediately available by path without import/export copies. System toolchain packages are
 installed in the image; normal runtime commands execute as the unprivileged service user.
-Terminal command/stdin/output payloads are not duplicated into Management MCP-call history.
+Terminal command/stdin/output payloads are bounded or omitted in Management MCP-call history.
+
+## Web browser
+
+The Web MCP combines structured curl operations with a persistent Playwright/Chromium
+browser profile. Browser cookies and local session state live in a dedicated persistent
+volume, while screenshots, uploads and downloads use the shared `/workspace`. Browser
+snapshots return bounded page text plus short-lived interactive element refs so agents can
+click and fill without serializing full page HTML into model context. Browser page content
+and filled values are omitted from Management audit payloads; tool/status metadata remains
+observable.

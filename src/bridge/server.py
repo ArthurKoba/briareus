@@ -128,7 +128,7 @@ _backend_router = BackendRouter(
             "web",
             _BACKENDS["web"],
             MCP_SURFACE_PATHS["web"],
-            "Web access; currently curl tools, later browser/session automation",
+            "Web access through structured curl and persistent browser automation",
         ),
         BackendDescriptor(
             "analysis",
@@ -258,6 +258,8 @@ def bridge_capabilities() -> JsonObject:
             "files",
             "web",
             "curl",
+            "browser",
+            "playwright",
             "analysis",
             "terminal",
             "jobs",

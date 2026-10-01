@@ -87,11 +87,17 @@ ENV ASGI_APP=modules.files.runtime:app \
 
 
 FROM runtime-base AS curl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv sync --frozen --no-dev --group web --no-install-project
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/files ./src/modules/files
 COPY src/modules/curl ./src/modules/curl
 ENV ASGI_APP=modules.curl.runtime:app \
-    FILE_WORKSPACE_ROOT=/workspace
+    FILE_WORKSPACE_ROOT=/workspace \
+    BROWSER_PROFILE_PATH=/browser/profile \
+    BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
 
 FROM runtime-base AS terminal
