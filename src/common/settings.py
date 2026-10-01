@@ -515,7 +515,6 @@ class GitLabSettings(ProcessSettings):
 
 
 class FileSettings(ProcessSettings):
-    root: Path = Field(Path("/files"), validation_alias="FILE_ROOT")
     workspace_root: Path = Field(
         Path("/workspace"),
         validation_alias="FILE_WORKSPACE_ROOT",
@@ -526,30 +525,12 @@ class FileSettings(ProcessSettings):
         le=64 * 1024 * 1024 * 1024,
         validation_alias="FILE_UPLOAD_MAX_BYTES",
     )
-    max_extract_files: int = Field(
-        20_000,
-        ge=1,
-        le=100_000,
-        validation_alias="FILE_MAX_EXTRACT_FILES",
-    )
-    max_extract_bytes: int = Field(
-        16 * 1024 * 1024 * 1024,
-        ge=1024 * 1024,
-        le=128 * 1024 * 1024 * 1024,
-        validation_alias="FILE_MAX_EXTRACT_BYTES",
-    )
-    upload_chunk_bytes: int = Field(
-        1024 * 1024,
-        ge=64 * 1024,
-        le=8 * 1024 * 1024,
-        validation_alias="FILE_UPLOAD_CHUNK_BYTES",
-    )
 
-    @field_validator("root", "workspace_root")
+    @field_validator("workspace_root")
     @classmethod
     def _absolute_root(cls, value: Path) -> Path:
         if not value.is_absolute():
-            raise ValueError("file paths must be absolute")
+            raise ValueError("FILE_WORKSPACE_ROOT must be absolute")
         return value.resolve(strict=False)
 
 
