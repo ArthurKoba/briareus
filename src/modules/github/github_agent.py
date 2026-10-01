@@ -306,8 +306,10 @@ class GitHubAppClient:
         normalized_method = method.upper()
         try:
             token = self._installation_token(repository)
-        except GitHubAgentError:
-            if normalized_method not in {"GET", "HEAD"}:
+        except GitHubAgentError as exc:
+            if normalized_method not in {"GET", "HEAD"} or (
+                "is not installed for GitHub App" not in str(exc)
+            ):
                 raise
             return self._request(
                 normalized_method,
