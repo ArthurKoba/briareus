@@ -550,6 +550,10 @@ class FileSettings(ProcessSettings):
 
 
 class TerminalSettings(ProcessSettings):
+    files_url: str = Field(
+        "http://files:8000/mcp",
+        validation_alias="TERMINAL_FILES_URL",
+    )
     workspace_root: Path = Field(
         Path("/workspace"),
         validation_alias="TERMINAL_WORKSPACE_ROOT",
@@ -591,7 +595,7 @@ class TerminalSettings(ProcessSettings):
             raise ValueError("terminal paths must be absolute")
         return value.resolve(strict=False)
 
-    @field_validator("shell", "path", "lang", "term", mode="before")
+    @field_validator("files_url", "shell", "path", "lang", "term", mode="before")
     @classmethod
     def _strip_terminal_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
