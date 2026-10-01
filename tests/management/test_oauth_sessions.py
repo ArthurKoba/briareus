@@ -75,3 +75,44 @@ def test_oauth_session_events_track_rotation_activity_and_errors(tmp_path) -> No
         rows = session.query(OAuthSessionRecord).all()
         assert len(rows) == 1
     engine.dispose()
+
+
+def test_gateway_observation_merges_with_later_auth_refresh(tmp_path) -> None:
+    engine, sessions = create_database(f"sqlite:///{tmp_path / 'legacy.sqlite3'}")
+    Base.metadata.create_all(engine)
+    service = OAuthSessionService(SqlAlchemyOAuthSessionRepository(sessions))
+    now = datetime.now(UTC)
+
+    observed = service.record(
+        OAuthSessionEvent(
+            client_id="chatgpt-client",
+            resource="https://mcp.example.test/web/mcp",
+            login="arthurkoba",
+            status="active",
+            event="access_used",
+            access_jti="legacy-access",
+            occurred_at=now,
+        )
+    )
+    assert observed.id.startswith("observed-")
+
+    refreshed = service.record(
+        OAuthSessionEvent(
+            session_id="upstream-session-real",
+            client_id="chatgpt-client",
+            resource="https://mcp.example.test/web/mcp",
+            login="arthurkoba",
+            status="active",
+            event="refresh_success",
+            access_jti="new-access",
+            refresh_jti="new-refresh",
+            occurred_at=now + timedelta(minutes=1),
+        )
+    )
+
+    assert refreshed.id == observed.id
+    assert refreshed.access_jti == "new-access"
+    assert refreshed.refresh_jti == "new-refresh"
+    with sessions() as session:
+        assert session.query(OAuthSessionRecord).count() == 1
+    engine.dispose()

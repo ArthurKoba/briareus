@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -338,6 +339,9 @@ class SqlAlchemyOAuthSessionRepository:
         session_id: str,
         refresh_jti: str,
         access_jti: str,
+        client_id: str,
+        resource: str,
+        login: str,
     ) -> OAuthSessionRecord | None:
         if session_id:
             record = session.get(OAuthSessionRecord, session_id)
@@ -354,7 +358,17 @@ class SqlAlchemyOAuthSessionRepository:
                 )
             if access_jti:
                 criteria.append(OAuthSessionRecord.access_jti == access_jti)
-            return session.scalar(select(OAuthSessionRecord).where(or_(*criteria)))
+            record = session.scalar(select(OAuthSessionRecord).where(or_(*criteria)))
+            if record is not None:
+                return record
+        if client_id and resource:
+            stmt = select(OAuthSessionRecord).where(
+                OAuthSessionRecord.client_id == client_id,
+                OAuthSessionRecord.resource == resource,
+            )
+            if login:
+                stmt = stmt.where(OAuthSessionRecord.login == login)
+            return session.scalar(stmt.order_by(OAuthSessionRecord.updated_at.desc()))
         return None
 
     def apply_event(self, event: object) -> OAuthSession:
@@ -367,9 +381,22 @@ class SqlAlchemyOAuthSessionRepository:
                 session_id=value.session_id,
                 refresh_jti=value.refresh_jti,
                 access_jti=value.access_jti,
+                client_id=value.client_id,
+                resource=value.resource,
+                login=value.login,
             )
             if record is None:
-                identifier = value.session_id or f"orphan-{value.refresh_jti or value.access_jti}"
+                identity = "\0".join((value.client_id, value.resource, value.login))
+                identity_id = (
+                    "observed-" + hashlib.sha256(identity.encode()).hexdigest()[:32]
+                    if value.client_id and value.resource
+                    else ""
+                )
+                identifier = (
+                    value.session_id
+                    or identity_id
+                    or f"orphan-{value.refresh_jti or value.access_jti}"
+                )
                 if not identifier or identifier == "orphan-":
                     raise ValueError("oauth session event has no stable identifier")
                 record = OAuthSessionRecord(
