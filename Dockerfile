@@ -114,8 +114,10 @@ ENV ASGI_APP=modules.terminal.runtime:app \
 
 FROM runtime-base AS analysis
 COPY src/modules/__init__.py ./src/modules/__init__.py
+COPY src/modules/files ./src/modules/files
 COPY src/modules/analysis ./src/modules/analysis
-ENV ASGI_APP=modules.analysis.runtime:app
+ENV ASGI_APP=modules.analysis.runtime:app \
+    FILE_WORKSPACE_ROOT=/workspace
 
 
 FROM runtime-base AS ghidra
