@@ -26,15 +26,28 @@ def _terminal_arguments_payload(arguments: object) -> str:
     return render_payload(bounded)
 
 
-def invocation_arguments_payload(module: str, arguments: object) -> str:
-    if module.strip().casefold() == "terminal":
+def invocation_arguments_payload(
+    module: str,
+    arguments: object,
+    tool: str = "",
+) -> str:
+    normalized_module = module.strip().casefold()
+    if normalized_module == "terminal":
         return _terminal_arguments_payload(arguments)
+    if normalized_module == "web" and tool.startswith("browser_") and isinstance(arguments, dict):
+        bounded = dict(arguments)
+        if tool == "browser_fill" and "value" in bounded:
+            bounded["value"] = "<omitted>"
+        return render_payload(bounded)
     return render_payload(arguments)
 
 
-def invocation_result_payload(module: str, result: object) -> str:
-    if module.strip().casefold() == "terminal":
+def invocation_result_payload(module: str, result: object, tool: str = "") -> str:
+    normalized_module = module.strip().casefold()
+    if normalized_module == "terminal":
         return render_payload({"detail": "terminal result omitted from Management audit"})
+    if normalized_module == "web" and tool.startswith("browser_"):
+        return render_payload({"detail": "browser result omitted from Management audit"})
     return render_payload(result)
 
 
@@ -88,7 +101,9 @@ class ToolObservabilityMiddleware(Middleware):
         account_id = self._account_id(context)
         provider = self.module if self.module in {"github", "gitlab"} else ""
         request_id = self._request_id(context)
-        arguments_json = invocation_arguments_payload(self.module, context.message.arguments or {})
+        arguments_json = invocation_arguments_payload(
+            self.module, context.message.arguments or {}, context.message.name
+        )
         headers = get_http_headers()
         proxy_origin = headers.get("x-koba-proxy-origin", "").strip().casefold()
         audit = management_audit_enabled(self.module, proxy_origin)
@@ -135,7 +150,9 @@ class ToolObservabilityMiddleware(Middleware):
                     status="success",
                     duration_ms=(time.monotonic() - started) * 1000,
                     arguments_json=arguments_json,
-                    result_json=invocation_result_payload(self.module, result),
+                    result_json=invocation_result_payload(
+                        self.module, result, context.message.name
+                    ),
                 ),
                 audit=audit,
             )

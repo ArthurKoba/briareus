@@ -582,6 +582,45 @@ class TerminalSettings(ProcessSettings):
         return value.strip() if isinstance(value, str) else value
 
 
+class BrowserSettings(ProcessSettings):
+    profile_dir: Path = Field(
+        Path("/browser/profile"),
+        validation_alias="BROWSER_PROFILE_PATH",
+    )
+    executable_path: str = Field(
+        "/usr/bin/chromium",
+        validation_alias="BROWSER_EXECUTABLE_PATH",
+    )
+    headless: bool = Field(True, validation_alias="BROWSER_HEADLESS")
+    timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
+    viewport_width: int = Field(1440, ge=320, le=3840, validation_alias="BROWSER_VIEWPORT_WIDTH")
+    viewport_height: int = Field(900, ge=240, le=2160, validation_alias="BROWSER_VIEWPORT_HEIGHT")
+    max_snapshot_text_chars: int = Field(
+        30_000,
+        ge=1_000,
+        le=200_000,
+        validation_alias="BROWSER_MAX_SNAPSHOT_TEXT_CHARS",
+    )
+    max_snapshot_elements: int = Field(
+        250,
+        ge=10,
+        le=2_000,
+        validation_alias="BROWSER_MAX_SNAPSHOT_ELEMENTS",
+    )
+
+    @field_validator("profile_dir")
+    @classmethod
+    def _absolute_profile_dir(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("BROWSER_PROFILE_PATH must be absolute")
+        return value.resolve(strict=False)
+
+    @field_validator("executable_path", mode="before")
+    @classmethod
+    def _strip_executable_path(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
 class CurlSettings(ProcessSettings):
     binary: Path | None = Field(None, validation_alias="CURL_BINARY")
 

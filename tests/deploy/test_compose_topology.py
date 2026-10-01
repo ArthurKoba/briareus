@@ -76,6 +76,7 @@ def test_compose_owns_clean_named_volumes() -> None:
         "auth",
         "terminal-workspace",
         "terminal-home",
+        "web-browser",
     }
     for config in volumes.values():
         assert config is None or "external" not in config
@@ -99,7 +100,9 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     ]
     assert services["curl"]["volumes"] == [
         "terminal-workspace:/workspace",
+        "web-browser:/browser",
     ]
+    assert services["curl"]["shm_size"] == "1gb"
     assert services["auth"]["volumes"] == ["auth:/auth"]
     assert services["terminal"]["volumes"] == [
         "terminal-workspace:/workspace",
@@ -190,6 +193,14 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "FILE_WORKSPACE_ROOT",
         "FILE_UPLOAD_MAX_BYTES",
         "CURL_BINARY",
+        "BROWSER_PROFILE_PATH",
+        "BROWSER_EXECUTABLE_PATH",
+        "BROWSER_HEADLESS",
+        "BROWSER_TIMEOUT_MS",
+        "BROWSER_VIEWPORT_WIDTH",
+        "BROWSER_VIEWPORT_HEIGHT",
+        "BROWSER_MAX_SNAPSHOT_TEXT_CHARS",
+        "BROWSER_MAX_SNAPSHOT_ELEMENTS",
         "ANALYSIS_SCHEMA_CACHE_TTL_SECONDS",
         "TERMINAL_WORKSPACE_ROOT",
         "TERMINAL_HOME",
@@ -271,3 +282,21 @@ def test_analysis_image_packages_workspace_dependency() -> None:
     )[0]
     assert "COPY src/modules/files ./src/modules/files" in analysis_stage
     assert "FILE_WORKSPACE_ROOT=/workspace" in analysis_stage
+
+
+def test_web_image_packages_persistent_browser_runtime() -> None:
+    dockerfile = Path("Dockerfile").read_text()
+    web_stage = dockerfile.split("FROM runtime-base AS curl", 1)[1].split(
+        "FROM runtime-base AS terminal", 1
+    )[0]
+
+    assert "chromium" in web_stage
+    assert "uv sync --frozen --no-dev --group web --no-install-project" in web_stage
+    assert "BROWSER_PROFILE_PATH=/browser/profile" in web_stage
+    assert "BROWSER_EXECUTABLE_PATH=/usr/bin/chromium" in web_stage
+
+
+def test_entrypoint_owns_browser_profile_volume_before_dropping_privileges() -> None:
+    entrypoint = Path("docker-entrypoint.sh").read_text()
+    assert 'BROWSER_PROFILE_PATH="${BROWSER_PROFILE_PATH:-}"' in entrypoint
+    assert 'chown -R 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")"' in entrypoint

@@ -212,3 +212,22 @@ def test_terminal_management_audit_bounds_commands_and_omits_stream_payloads() -
     assert "<omitted 16 chars>" in arguments
     assert "y" * 100 not in result
     assert "terminal result omitted" in result
+
+
+def test_browser_management_audit_omits_fill_values_and_results() -> None:
+    arguments = invocation_arguments_payload(
+        "web",
+        {"page_id": "page-1", "ref": "e4", "value": "super-secret"},
+        "browser_fill",
+    )
+    result = invocation_result_payload(
+        "web",
+        {"text": "private authenticated page", "elements": [{"value": "secret"}]},
+        "browser_snapshot",
+    )
+
+    assert "page-1" in arguments
+    assert "super-secret" not in arguments
+    assert "<omitted>" in arguments
+    assert "private authenticated page" not in result
+    assert "browser result omitted" in result
