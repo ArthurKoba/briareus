@@ -256,7 +256,7 @@ async def test_public_catalog_search_and_check_use_semantic_names() -> None:
     assert checked["results"]["get_function_callees"]["status"] == "not_found"
 
 
-def test_private_registry_tools_are_not_adapted_directly() -> None:
+def test_private_registry_and_artifact_transport_tools_are_not_adapted() -> None:
     provider = AnalysisToolProvider(
         AnalysisSettings(
             backend_url="http://private.internal/mcp",
@@ -275,6 +275,24 @@ def test_private_registry_tools_are_not_adapted_directly() -> None:
                 name="check_tools",
                 title="Check Tools",
                 description="Check private tools",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            SimpleNamespace(
+                name="artifact_stage_begin",
+                title="Artifact stage begin",
+                description="Internal staging under GHIDRA_MCP_FILE_ROOT",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            SimpleNamespace(
+                name="artifact_file_read",
+                title="Artifact file read",
+                description="Read GHIDRA_MCP_FILE_ROOT bytes",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            SimpleNamespace(
+                name="artifact_file_delete",
+                title="Artifact file delete",
+                description="Delete GHIDRA_MCP_FILE_ROOT bytes",
                 input_schema={"type": "object", "properties": {}},
             ),
         ]
@@ -427,3 +445,49 @@ def test_analysis_backend_client_marks_internal_proxy_origin() -> None:
 
     assert isinstance(client.transport, StreamableHttpTransport)
     assert client.transport.headers["X-Koba-Proxy-Origin"] == "analysis"
+
+
+@pytest.mark.asyncio
+async def test_internal_artifact_tools_do_not_zero_analysis_catalog(monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, transport) -> None:
+            del transport
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            del exc_type, exc, tb
+            return
+
+        async def list_tools(self):
+            return [
+                _backend_tool("get_function_callees"),
+                SimpleNamespace(
+                    name="artifact_file_read",
+                    title="Artifact file read",
+                    description="Read under GHIDRA_MCP_FILE_ROOT",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+                SimpleNamespace(
+                    name="artifact_file_delete",
+                    title="Artifact file delete",
+                    description="Delete under GHIDRA_MCP_FILE_ROOT",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ]
+
+    monkeypatch.setattr(provider_module, "Client", FakeClient)
+    provider = AnalysisToolProvider(
+        AnalysisSettings(
+            backend_url="http://ghidra.internal/mcp",
+            schema_cache_ttl_seconds=0,
+        )
+    )
+
+    tools = await provider._list_tools()
+    names = {tool.name for tool in tools}
+
+    assert "get_outbound_actions" in names
+    assert "artifact_file_read" not in names
+    assert "artifact_file_delete" not in names
