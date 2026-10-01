@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 
 from common.models import JsonObject, JsonValue, json_object
@@ -299,6 +299,58 @@ class AnalysisWorkspaceTransfers:
         return await self._copy_artifact_to_workspace(
             project_id,
             artifact_path,
+            workspace_path,
+            overwrite=overwrite,
+        )
+
+
+def register_workspace_transfer_tools(
+    mcp: FastMCP,
+    transfers: AnalysisWorkspaceTransfers,
+) -> None:
+    @mcp.tool(title="Import workspace file")
+    async def import_workspace_file(
+        project_id: str,
+        workspace_path: str,
+        project_folder: str = "/",
+        language: str = "",
+        compiler_spec: str = "",
+        auto_analyze: bool = True,
+    ) -> JsonObject:
+        """Import a shared-workspace file through the isolated analysis staging boundary."""
+        return await transfers.import_workspace_file(
+            project_id,
+            workspace_path,
+            project_folder,
+            language,
+            compiler_spec,
+            auto_analyze,
+        )
+
+    @mcp.tool(title="Export program to workspace")
+    async def export_program_to_workspace(
+        project_id: str,
+        program_name: str,
+        workspace_path: str,
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Export one analysis program into a normal shared-workspace file."""
+        return await transfers.export_program_to_workspace(
+            project_id,
+            program_name,
+            workspace_path,
+            overwrite=overwrite,
+        )
+
+    @mcp.tool(title="Archive project to workspace")
+    async def archive_project_to_workspace(
+        project_id: str,
+        workspace_path: str,
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Archive an analysis project into a normal shared-workspace file."""
+        return await transfers.archive_project_to_workspace(
+            project_id,
             workspace_path,
             overwrite=overwrite,
         )
