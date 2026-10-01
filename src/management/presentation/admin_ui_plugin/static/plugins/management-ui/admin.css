@@ -111,3 +111,26 @@ html {
   padding-top: .45rem;
   padding-bottom: .45rem;
 }
+
+/*
+ * Use the viewport for data-heavy administration pages instead of Tabler's
+ * fixed xl container. Wide tables remain horizontally scrollable rather than
+ * being squeezed into a narrow centered card.
+ */
+.page-wrapper .page-header > .container-xl,
+.page-wrapper .page-body > .container-xl {
+  width: 100%;
+  max-width: none !important;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.page-body .table-responsive {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.page-body .table-responsive > table {
+  width: max-content;
+  min-width: 100%;
+}

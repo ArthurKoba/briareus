@@ -187,12 +187,15 @@ class GitHubAppClient:
             headers["Content-Type"] = "application/json"
 
         target = self._request_target(url)
+        normalized_method = method.upper()
         try:
             response = self._transport.request(
-                method,
+                normalized_method,
                 target,
                 body=body,
                 headers=headers,
+                reconnect_retries=3 if normalized_method in {"GET", "HEAD"} else 1,
+                retry_backoff_seconds=0.1 if normalized_method in {"GET", "HEAD"} else 0.0,
             )
         except HttpTransportError as exc:
             raise GitHubAgentError(f"GitHub API transport error: {exc}") from exc
