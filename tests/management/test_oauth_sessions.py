@@ -116,3 +116,19 @@ def test_gateway_observation_merges_with_later_auth_refresh(tmp_path) -> None:
     with sessions() as session:
         assert session.query(OAuthSessionRecord).count() == 1
     engine.dispose()
+
+
+def test_oauth_session_event_accepts_json_iso_datetimes() -> None:
+    event = OAuthSessionEvent.model_validate(
+        {
+            "client_id": "chatgpt-client",
+            "resource": "https://mcp.example.test/web/mcp",
+            "status": "active",
+            "event": "access_used",
+            "access_expires_at": "2026-10-02T07:29:01Z",
+            "occurred_at": "2026-10-01T17:15:56.221092Z",
+        }
+    )
+    assert event.access_expires_at is not None
+    assert event.access_expires_at.tzinfo is not None
+    assert event.occurred_at.tzinfo is not None

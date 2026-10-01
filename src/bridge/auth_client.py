@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from datetime import UTC, datetime
 
@@ -63,24 +64,25 @@ class LocalAuthTokenVerifier(TokenVerifier):
         touch_key = f"{client_id}\0{self.resource}\0{login}\0{jti}"
         if self.management is not None and now - self._touches.get(touch_key, 0.0) >= 60.0:
             self._touches[touch_key] = now
-            await asyncio.to_thread(
-                self.management.record_oauth_session,
-                OAuthSessionEvent(
-                    client_id=client_id,
-                    resource=self.resource,
-                    login=login,
-                    subject=str(upstream_claims.get("sub") or ""),
-                    scopes=scopes,
-                    status="active",
-                    event="access_used",
-                    access_jti=jti,
-                    access_expires_at=(
-                        None
-                        if payload.get("exp") is None
-                        else datetime.fromtimestamp(int(payload["exp"]), tz=UTC)
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    self.management.record_oauth_session,
+                    OAuthSessionEvent(
+                        client_id=client_id,
+                        resource=self.resource,
+                        login=login,
+                        subject=str(upstream_claims.get("sub") or ""),
+                        scopes=scopes,
+                        status="active",
+                        event="access_used",
+                        access_jti=jti,
+                        access_expires_at=(
+                            None
+                            if payload.get("exp") is None
+                            else datetime.fromtimestamp(int(payload["exp"]), tz=UTC)
+                        ),
                     ),
-                ),
-            )
+                )
 
         return AccessToken(
             token=token,
