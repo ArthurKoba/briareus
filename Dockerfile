@@ -135,16 +135,12 @@ COPY src/modules/ghidra ./src/modules/ghidra
 ENV ASGI_APP=modules.ghidra.runtime:app
 
 
-FROM runtime-base AS signoz
+FROM runtime-base AS observability
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/signoz ./src/modules/signoz
-ENV ASGI_APP=modules.signoz.runtime:app
-
-
-FROM runtime-base AS coolify
-COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/coolify ./src/modules/coolify
-ENV ASGI_APP=modules.coolify.runtime:app
+COPY src/modules/observability ./src/modules/observability
+ENV ASGI_APP=modules.observability.runtime:app
 
 
 FROM gateway AS final

@@ -10,8 +10,7 @@ MCP_SURFACE_PATHS: dict[str, str] = {
     "web": "/web/mcp",
     "analysis": "/analysis/mcp",
     "terminal": "/terminal/mcp",
-    "signoz": "/signoz/mcp",
-    "coolify": "/coolify/mcp",
+    "observability": "/observability/mcp",
 }
 
 

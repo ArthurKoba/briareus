@@ -22,8 +22,7 @@ gateway
   +-- /web/mcp      -------------> web (curl + persistent Chromium)
   +-- /analysis/mcp -------------> analysis ---> ghidra (private)
   +-- /terminal/mcp -------------> terminal
-  +-- /signoz/mcp  -------------> signoz (read-only)
-  +-- /coolify/mcp -------------> coolify (read-only)
+  +-- /observability/mcp -------> observability (SigNoz + Coolify, read-only)
   +-- /admin        -------------> management
 ```
 
@@ -40,8 +39,7 @@ public domain. Auth and all provider runtimes remain private on the Compose netw
 /web/mcp
 /analysis/mcp
 /terminal/mcp
-/signoz/mcp
-/coolify/mcp
+/observability/mcp
 /admin
 ```
 
@@ -98,7 +96,7 @@ src/
 
 Production is one Git-backed Coolify Docker Compose application. The Compose file is the
 topology authority and starts separate containers for `auth`, `gateway`, `management`,
-`github`, `gitlab`, `files`, `curl`, `terminal`, `analysis`, and `ghidra`.
+`github`, `gitlab`, `files`, `curl`, `terminal`, `analysis`, `ghidra`, and `observability`.
 
 Deployments may rebuild or recreate the stack. Runtime correctness does not depend on
 selective-restart scripts. Each service has its own restart policy, and Compose
@@ -180,19 +178,14 @@ refresh activity, token expiry, revocation and the latest authentication error. 
 rotation keeps a short bounded replay grace window so concurrent client refresh requests
 reuse the same rotated result instead of spuriously forcing a full reauthorization.
 
-## SigNoz
+## Observability
 
-SigNoz is a dedicated read-only MCP surface at `/signoz/mcp`. Connections are created in
-Management under **SigNoz Accounts** with an alias, instance URL and service-account API key.
-Every data-bearing tool requires an explicit `account_id` selector. The runtime supports
-read-only log and trace search, Query Builder v5 requests, service discovery and field
-discovery. It does not expose alert/dashboard/view mutation tools.
+Observability is one unified read-only MCP surface at `/observability/mcp`. Management keeps
+SigNoz and Coolify connections as separate account types because their credentials and APIs are
+different, but ChatGPT connects to only this one surface. `observability_sources` lists both
+provider types and their aliases; data tools require an explicit account selector.
 
-## Coolify
-
-Coolify is a dedicated read-only MCP surface at `/coolify/mcp`. Connections are created in
-Management under **Coolify Accounts** with an alias, instance URL and API token. The intended
-token permission is ordinary `Read`. The MCP contract exposes team, application and deployment
-metadata only. Runtime logs, environment variables, secrets, configuration mutation, deploy,
-restart and cancellation operations are deliberately absent. Runtime application diagnostics
-belong to the SigNoz telemetry surface instead of requiring Coolify `read:sensitive`.
+SigNoz-backed tools provide runtime logs, traces, metrics/query access, service discovery and
+field discovery. Coolify-backed tools provide application and deployment state. Coolify runtime
+logs, environment variables, secrets and all deploy/restart/mutation operations are deliberately
+absent; runtime diagnostics belong to the SigNoz side of the same Observability interface.
