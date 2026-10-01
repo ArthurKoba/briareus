@@ -63,7 +63,14 @@ class GitHubRuntimeContext:
     @staticmethod
     def _potential_capabilities(auth_type: str) -> list[str]:
         if auth_type == "public":
-            return ["repository_read", "issues", "pull_requests", "actions", "checks", "git_history"]
+            return [
+                "repository_read",
+                "issues",
+                "pull_requests",
+                "actions",
+                "checks",
+                "git_history",
+            ]
         capabilities = [
             "repository_read",
             "repository_write",
