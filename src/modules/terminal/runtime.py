@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-from common.runtime_common import build_private_mcp, management_client, private_http_app
-from common.settings import (
-    FileSettings,
-    ManagementClientSettings,
-    PrivateRuntimeSettings,
-    TerminalSettings,
-)
-from modules.files.file_store import FileStore
+from common.runtime_common import build_private_mcp, private_http_app
+from common.settings import PrivateRuntimeSettings, TerminalSettings
 
+from .files_client import TerminalFilesClient
 from .manager import TerminalManager
 from .tools import register_terminal_tools
 
 _private_settings = PrivateRuntimeSettings()
-_management = management_client(ManagementClientSettings())
 _terminal_settings = TerminalSettings()
-_file_store = FileStore(FileSettings())
+_files = TerminalFilesClient(_terminal_settings.files_url)
 
-mcp = build_private_mcp("terminal", _management, observability_scope="terminal")
-_manager = TerminalManager(_terminal_settings, _file_store)
+mcp = build_private_mcp("terminal", observability_scope="terminal")
+_manager = TerminalManager(_terminal_settings, _files)
 register_terminal_tools(mcp, _manager)
 
 app = private_http_app(mcp, _private_settings)
