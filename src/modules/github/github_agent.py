@@ -8,10 +8,12 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import jwt
 
 from common.http_transport import HttpTransportError, PooledHttpTransport
+from common.repository_checkout import checkout_repository
 from common.models import (
     JsonContainer,
     JsonObject,
@@ -46,6 +48,7 @@ class GitHubAppClient:
     _tokens: dict[int, tuple[str, float]] = field(default_factory=dict)
     repository_cache_ttl_seconds: float = 30.0
     max_connections: int = 8
+    workspace_root: Path = Path("/workspace")
     protected_branches: frozenset[str] = frozenset({"main", "master"})
     required_checks: tuple[str, ...] = ("test", "docker")
     required_reviewers: tuple[str, ...] = ()
@@ -324,6 +327,39 @@ class GitHubAppClient:
             payload=payload,
             allowed_errors=allowed_errors,
         )
+
+    def checkout_repository(
+        self,
+        repository: str,
+        destination: str,
+        *,
+        mode: str = "snapshot",
+        ref: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        repository = self._assert_allowed(repository)
+        token = ""
+        if self.token:
+            token = self.token
+        else:
+            try:
+                token = self._installation_token(repository)
+            except GitHubAgentError as exc:
+                if "is not installed for GitHub App" not in str(exc):
+                    raise
+        result = checkout_repository(
+            f"https://github.com/{repository}.git",
+            destination,
+            workspace_root=self.workspace_root,
+            mode=mode,
+            ref=ref,
+            overwrite=overwrite,
+            auth_scope="https://github.com/",
+            auth_header=f"Authorization: Bearer {token}" if token else "",
+            fallback_without_auth=False,
+        )
+        result["repository"] = repository
+        return result
 
     def _installation_ids_from_github(self) -> list[int]:
         installation_ids: list[int] = []
