@@ -62,6 +62,7 @@ class BrowserManager:
                 executable_path=self.executable_path,
                 headless=self.headless,
                 accept_downloads=True,
+                args=["--no-sandbox"],
                 viewport={"width": self.viewport_width, "height": self.viewport_height},
             )
         except Exception:
