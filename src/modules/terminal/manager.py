@@ -358,23 +358,29 @@ class TerminalManager:
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
+        assert process.stdout is not None
+        assert process.stderr is not None
+        stdout_task = asyncio.create_task(self._drain_bounded(process.stdout, limit))
+        stderr_task = asyncio.create_task(self._drain_bounded(process.stderr, limit))
         timed_out = False
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+            await asyncio.wait_for(
+                process.wait(),
                 timeout=max(0.1, timeout_seconds),
             )
         except TimeoutError:
             timed_out = True
             self._signal_process_group(process.pid, signal.SIGTERM)
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=2)
+                await asyncio.wait_for(process.wait(), timeout=2)
             except TimeoutError:
                 self._signal_process_group(process.pid, signal.SIGKILL)
-                stdout, stderr = await process.communicate()
+                await process.wait()
+        stdout, stdout_truncated = await stdout_task
+        stderr, stderr_truncated = await stderr_task
         ended = time.time()
-        stdout_value, stdout_truncated = self._decode_bounded(stdout, limit)
-        stderr_value, stderr_truncated = self._decode_bounded(stderr, limit)
+        stdout_value = stdout.decode("utf-8", errors="replace")
+        stderr_value = stderr.decode("utf-8", errors="replace")
         return {
             "workspace_id": workspace_id,
             "command": command,
@@ -391,10 +397,22 @@ class TerminalManager:
         }
 
     @staticmethod
-    def _decode_bounded(value: bytes, limit: int) -> tuple[str, bool]:
-        truncated = len(value) > limit
-        data = value[:limit]
-        return data.decode("utf-8", errors="replace"), truncated
+    async def _drain_bounded(
+        stream: asyncio.StreamReader,
+        limit: int,
+    ) -> tuple[bytes, bool]:
+        buffer = bytearray()
+        truncated = False
+        while True:
+            chunk = await stream.read(65536)
+            if not chunk:
+                break
+            remaining = max(0, limit - len(buffer))
+            if remaining:
+                buffer.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                truncated = True
+        return bytes(buffer), truncated
 
     def _job_dir(self, job_id: str) -> Path:
         return self.jobs_root / job_id
