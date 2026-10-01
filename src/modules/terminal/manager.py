@@ -648,18 +648,76 @@ class TerminalManager:
     def job_status(self, job_id: str) -> JsonObject:
         return self._job_public(self._get_job(job_id))
 
-    def job_list(self, workspace_id: str = "", state: str = "") -> JsonObject:
+    def job_list(
+        self,
+        workspace_id: str = "",
+        state: str = "",
+        offset: int = 0,
+        limit: int = 100,
+    ) -> JsonObject:
         workspace = workspace_id.strip()
         if workspace:
             self._require_workspace(workspace)
+        if offset < 0:
+            raise TerminalError("offset must be >= 0")
+        if not 1 <= limit <= 1000:
+            raise TerminalError("limit must be between 1 and 1000")
         state_filter = state.strip()
-        jobs: list[JsonValue] = [
-            self._job_public(job)
+        matched = [
+            job
             for job in sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)
             if (not workspace or job.workspace_id == workspace)
             and (not state_filter or job.state == state_filter)
         ]
-        return {"jobs": jobs, "count": len(jobs)}
+        selected: list[JsonValue] = [
+            self._job_public(job)
+            for job in matched[offset : offset + limit]
+        ]
+        return {
+            "jobs": selected,
+            "count": len(selected),
+            "total": len(matched),
+            "offset": offset,
+            "limit": limit,
+            "truncated": offset + len(selected) < len(matched),
+        }
+
+    def job_delete(self, job_id: str) -> JsonObject:
+        job = self._get_job(job_id)
+        if job.state in {"running", "cancelling"}:
+            raise TerminalError("running jobs must be cancelled before deletion")
+        with suppress(OSError):
+            shutil.rmtree(job.metadata_path.parent)
+        self._jobs.pop(job.job_id, None)
+        return {"job_id": job.job_id, "deleted": True}
+
+    def job_cleanup(
+        self,
+        older_than_hours: int = 168,
+        dry_run: bool = True,
+        limit: int = 1000,
+    ) -> JsonObject:
+        if not 1 <= older_than_hours <= 24 * 3650:
+            raise TerminalError("older_than_hours must be between 1 and 87600")
+        if not 1 <= limit <= 10000:
+            raise TerminalError("limit must be between 1 and 10000")
+        cutoff = time.time() - older_than_hours * 3600
+        candidates = [
+            job
+            for job in sorted(self._jobs.values(), key=lambda item: item.ended_at or item.created_at)
+            if job.state not in {"running", "cancelling"}
+            and (job.ended_at or job.created_at) <= cutoff
+        ][:limit]
+        ids = [job.job_id for job in candidates]
+        if not dry_run:
+            for job_id in ids:
+                self.job_delete(job_id)
+        return {
+            "dry_run": dry_run,
+            "older_than_hours": older_than_hours,
+            "job_ids": ids,
+            "count": len(ids),
+        }
 
     async def job_read(
         self,
