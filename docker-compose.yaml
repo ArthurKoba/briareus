@@ -117,6 +117,17 @@ services:
     environment:
       <<: [*management-client, *observability]
 
+  terminal:
+    <<: *private-service
+    build:
+      <<: *build
+      target: terminal
+    environment:
+      <<: *observability
+    volumes:
+      - terminal-workspace:/workspace
+      - terminal-home:/home/agent
+
   analysis:
     <<: *private-service
     depends_on:
@@ -144,6 +155,8 @@ volumes:
   management:
   files:
   auth:
+  terminal-workspace:
+  terminal-home:
 
 networks:
   coolify:

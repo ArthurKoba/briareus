@@ -86,6 +86,24 @@ COPY src/modules/curl ./src/modules/curl
 ENV ASGI_APP=modules.curl.runtime:app
 
 
+FROM runtime-base AS terminal
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash build-essential sed git git-lfs gh openssh-client wget ripgrep findutils patch diffutils rsync jq \
+        tar zip unzip gzip bzip2 xz-utils make gcc g++ binutils cmake ninja-build pkg-config \
+        ccache autoconf automake libtool \
+        python3-venv bc bison flex gawk gettext cpio file perl which libncurses-dev \
+        procps psmisc lsof strace gdb iproute2 socat netcat-openbsd \
+        picocom python3-serial \
+    && rm -rf /var/lib/apt/lists/*
+COPY src/modules/__init__.py ./src/modules/__init__.py
+COPY src/modules/terminal ./src/modules/terminal
+ENV ASGI_APP=modules.terminal.runtime:app \
+    HOME=/home/agent \
+    TERMINAL_WORKSPACE_ROOT=/workspace \
+    TERMINAL_HOME=/home/agent
+
+
 FROM runtime-base AS analysis
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/analysis ./src/modules/analysis

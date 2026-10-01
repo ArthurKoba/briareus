@@ -8,6 +8,10 @@ Accepted ADRs:
 
 - [ADR 0001: Provider account management](0001-account-management.md)
 
+Proposed ADRs:
+
+- [ADR 0002: Persistent terminal workspaces](0002-terminal-workspaces.md)
+
 Remaining ADR candidates:
 
 - modular runtime/service boundaries;

@@ -17,6 +17,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "curl:*",
     "analysis:*",
     "ghidra:*",
+    "terminal:*",
     "auth:*",
 )
 _DEFAULT_PRIVATE_ORIGINS = (
@@ -121,6 +122,10 @@ class BridgeSettings(ProcessSettings):
         "http://ghidra:8000/mcp",
         validation_alias="GHIDRA_URL",
     )
+    terminal_url: str = Field(
+        "http://terminal:8000/mcp",
+        validation_alias="TERMINAL_URL",
+    )
     build_sha: str = Field(
         "unknown",
         validation_alias=AliasChoices("BUILD_SHA", "SOURCE_COMMIT"),
@@ -142,6 +147,7 @@ class BridgeSettings(ProcessSettings):
         "curl_url",
         "analysis_url",
         "ghidra_url",
+        "terminal_url",
         "build_sha",
         "build_time",
         mode="before",
@@ -164,6 +170,7 @@ class BridgeSettings(ProcessSettings):
             "web": self.curl_url or "http://curl:8000/mcp",
             "analysis": self.analysis_url or "http://analysis:8000/mcp",
             "ghidra": self.ghidra_url or "http://ghidra:8000/mcp",
+            "terminal": self.terminal_url or "http://terminal:8000/mcp",
         }
 
     @property
@@ -540,6 +547,58 @@ class FileSettings(ProcessSettings):
         if not value.is_absolute():
             raise ValueError("FILE_ROOT must be absolute")
         return value.resolve(strict=False)
+
+
+class TerminalSettings(ProcessSettings):
+    files_url: str = Field(
+        "http://files:8000/mcp",
+        validation_alias="TERMINAL_FILES_URL",
+    )
+    workspace_root: Path = Field(
+        Path("/workspace"),
+        validation_alias="TERMINAL_WORKSPACE_ROOT",
+    )
+    home: Path = Field(
+        Path("/home/agent"),
+        validation_alias="TERMINAL_HOME",
+    )
+    shell: str = Field("/bin/bash", validation_alias="TERMINAL_SHELL")
+    path: str = Field(
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        validation_alias="TERMINAL_PATH",
+    )
+    lang: str = Field("C.UTF-8", validation_alias="TERMINAL_LANG")
+    term: str = Field("xterm-256color", validation_alias="TERMINAL_TERM")
+    max_exec_output_bytes: int = Field(
+        2 * 1024 * 1024,
+        ge=1024,
+        le=64 * 1024 * 1024,
+        validation_alias="TERMINAL_MAX_EXEC_OUTPUT_BYTES",
+    )
+    max_job_read_bytes: int = Field(
+        1024 * 1024,
+        ge=1024,
+        le=16 * 1024 * 1024,
+        validation_alias="TERMINAL_MAX_JOB_READ_BYTES",
+    )
+    max_job_log_bytes: int = Field(
+        256 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=8 * 1024 * 1024 * 1024,
+        validation_alias="TERMINAL_MAX_JOB_LOG_BYTES",
+    )
+
+    @field_validator("workspace_root", "home")
+    @classmethod
+    def _absolute_terminal_path(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("terminal paths must be absolute")
+        return value.resolve(strict=False)
+
+    @field_validator("files_url", "shell", "path", "lang", "term", mode="before")
+    @classmethod
+    def _strip_terminal_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class CurlSettings(ProcessSettings):

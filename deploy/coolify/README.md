@@ -15,6 +15,7 @@ Traefik -> gateway
              +-- gitlab
              +-- files
              +-- curl
+             +-- terminal
              +-- analysis -> ghidra
 ```
 
@@ -96,12 +97,14 @@ policy defaults and database/file paths. Public OAuth/HTTP identity is deploymen
 
 ## Persistent storage
 
-The Compose stack owns three named volumes with minimal logical names:
+The Compose stack owns five named volumes with minimal logical names:
 
 ```text
 management -> /management
 files      -> /files
 auth       -> /auth
+terminal-workspace -> /workspace
+terminal-home      -> /home/agent
 ```
 
 All mount destinations are absolute paths inside containers. No host bind paths are used.
@@ -110,8 +113,8 @@ names, so Docker/Coolify keeps them in managed volume storage and they can be ba
 independently of container filesystems.
 
 Production has already migrated to the clean logical names. The active project should
-therefore contain only `<project>_management`, `<project>_files` and
-`<project>_auth` for this stack.
+therefore contain the core `<project>_management`, `<project>_files`, `<project>_auth` volumes plus the
+Terminal workspace/home volumes for this stack.
 
 ## Build and deploy behaviour
 
@@ -153,7 +156,7 @@ Native Ghidra remains private; ChatGPT uses `/analysis/mcp`.
 
 Every runtime exports the same service name (`mcp-bridge`) and a distinct
 resource scope: `auth`, `gateway`, `management`, `github`, `gitlab`,
-`files`, `web`, `analysis`, or `ghidra`.
+`files`, `web`, `terminal`, `analysis`, or `ghidra`.
 
 The runtime uses the official OpenTelemetry Python SDK and exports all three
 signals over OTLP/HTTP:

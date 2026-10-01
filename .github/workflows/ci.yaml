@@ -48,6 +48,7 @@ jobs:
           - gitlab
           - files
           - curl
+          - terminal
           - analysis
           - ghidra
     steps:

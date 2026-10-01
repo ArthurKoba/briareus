@@ -79,3 +79,25 @@ async def test_analysis_runtime_surface_is_dynamic_and_isolated() -> None:
     assert "curl_request" not in names
     assert "github_agent_status" not in names
     assert "accounts" not in names
+
+
+@pytest.mark.asyncio
+async def test_terminal_runtime_surface_is_isolated(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TERMINAL_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("TERMINAL_HOME", str(tmp_path / "home"))
+
+    from modules.terminal.runtime import mcp as terminal
+
+    names = await _tool_names(terminal)
+
+    assert "terminal_status" in names
+    assert "workspace_create" in names
+    assert "terminal_exec" in names
+    assert "job_start" in names
+    assert "job_read" in names
+    assert "job_write" in names
+    assert "job_delete" in names
+    assert "job_cleanup" in names
+    assert "github_agent_status" not in names
+    assert "curl_request" not in names
+    assert "accounts" not in names

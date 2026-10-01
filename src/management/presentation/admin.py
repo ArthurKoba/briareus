@@ -60,6 +60,7 @@ from management.infrastructure.database import (
 )
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.reverse import ReverseAdminClient
+from management.infrastructure.terminal import TerminalAdminClient
 from management.presentation.admin_ui import ManagementUiPlugin
 
 
@@ -578,6 +579,124 @@ class ReverseView(CustomView):
         return RedirectResponse("/admin/reverse", status_code=303)
 
 
+class TerminalView(CustomView):
+    menu_label = "Terminal"
+    icon = "fa fa-terminal"
+    path = "/terminal"
+
+    def __init__(self, terminal: TerminalAdminClient) -> None:
+        super().__init__()
+        self.terminal = terminal
+
+    @route("")
+    async def index(self, request: Request) -> Response:
+        try:
+            overview = await self.terminal.overview()
+            error = ""
+        except Exception as exc:
+            overview = {"status": {}, "workspaces": [], "jobs": []}
+            error = str(exc)
+        status = overview.get("status")
+        workspaces = overview.get("workspaces")
+        jobs = overview.get("jobs")
+        status_obj = status if isinstance(status, dict) else {}
+        workspace_items = workspaces if isinstance(workspaces, list) else []
+        job_items = jobs if isinstance(jobs, list) else []
+        running = sum(
+            1 for item in job_items
+            if isinstance(item, dict) and item.get("state") in {"running", "cancelling"}
+        )
+        failed = sum(
+            1 for item in job_items
+            if isinstance(item, dict) and item.get("state") in {"failed", "interrupted"}
+        )
+        return _view_templates(self).TemplateResponse(
+            request=request,
+            name="management_terminal.html",
+            context={
+                "title": "Terminal",
+                "status": status_obj,
+                "workspaces": workspace_items,
+                "jobs": job_items,
+                "running_jobs": running,
+                "failed_jobs": failed,
+                "error": error,
+            },
+        )
+
+    @route("/job/{job_id:path}")
+    async def job_detail(self, request: Request) -> Response:
+        job_id = request.path_params["job_id"]
+        try:
+            job, tail = await asyncio.gather(
+                self.terminal.job_status(job_id),
+                self.terminal.job_tail(job_id),
+            )
+            error = ""
+        except Exception as exc:
+            job = {"job_id": job_id}
+            tail = {}
+            error = str(exc)
+        return _view_templates(self).TemplateResponse(
+            request=request,
+            name="management_terminal_job.html",
+            context={
+                "title": "Terminal Job",
+                "job": job,
+                "tail": tail,
+                "error": error,
+            },
+        )
+
+    @route("/job/{job_id:path}/cancel", methods=["POST"])
+    async def cancel_job(self, request: Request) -> Response:
+        job_id = request.path_params["job_id"]
+        try:
+            await self.terminal.cancel_job(job_id)
+        except Exception as exc:
+            flash(request, f"Cancel job failed: {exc}", "error")
+        else:
+            flash(request, "Job cancelled", "success")
+        return RedirectResponse("/admin/terminal", status_code=303)
+
+    @route("/job/{job_id:path}/delete", methods=["POST"])
+    async def delete_job(self, request: Request) -> Response:
+        job_id = request.path_params["job_id"]
+        try:
+            await self.terminal.delete_job(job_id)
+        except Exception as exc:
+            flash(request, f"Delete job failed: {exc}", "error")
+        else:
+            flash(request, "Job log deleted", "success")
+        return RedirectResponse("/admin/terminal", status_code=303)
+
+    @route("/cleanup-jobs", methods=["POST"])
+    async def cleanup_jobs(self, request: Request) -> Response:
+        form = await request.form()
+        try:
+            older_than_hours = int(str(form.get("older_than_hours", "168")))
+            result = await self.terminal.cleanup_jobs(
+                older_than_hours=older_than_hours,
+                dry_run=False,
+            )
+        except Exception as exc:
+            flash(request, f"Job cleanup failed: {exc}", "error")
+        else:
+            flash(request, f"Deleted {result.get('count', 0)} retained jobs", "success")
+        return RedirectResponse("/admin/terminal", status_code=303)
+
+    @route("/workspace/{workspace_id:path}/delete", methods=["POST"])
+    async def delete_workspace(self, request: Request) -> Response:
+        workspace_id = request.path_params["workspace_id"]
+        try:
+            await self.terminal.delete_workspace(workspace_id)
+        except Exception as exc:
+            flash(request, f"Delete workspace failed: {exc}", "error")
+        else:
+            flash(request, f"Deleted workspace {workspace_id}", "success")
+        return RedirectResponse("/admin/terminal", status_code=303)
+
+
 class SettingsView(CustomView):
     menu_label = "Settings"
     icon = "fa fa-sliders"
@@ -991,6 +1110,7 @@ def build_admin(
     files: FileAdminStore,
 ) -> Admin:
     reverse = ReverseAdminClient()
+    terminal = TerminalAdminClient()
     admin = Admin(
         engine,
         title="MCP Management",
@@ -1021,6 +1141,7 @@ def build_admin(
         )
     )
     admin.add_view(ReverseView(reverse))
+    admin.add_view(TerminalView(terminal))
     admin.add_view(InvocationView(InvocationRecord, audit))
     admin.add_view(SettingsView(config, audit, reverse))
     return admin
