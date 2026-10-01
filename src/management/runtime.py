@@ -16,6 +16,7 @@ from management.application.services import (
     InvocationAuditService,
     ManagementConfigService,
     OAuthSessionService,
+    RuntimeSettingsService,
     SnapshotService,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -30,6 +31,7 @@ from management.infrastructure.repositories import (
     SqlAlchemyInvocationRepository,
     SqlAlchemyManagementConfigRepository,
     SqlAlchemyOAuthSessionRepository,
+    SqlAlchemyRuntimeSettingsRepository,
     SqlAlchemySnapshotRepository,
 )
 from management.infrastructure.reverse import ReverseAdminClient
@@ -52,9 +54,11 @@ cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
 config_repository = SqlAlchemyManagementConfigRepository(sessions)
+runtime_settings_repository = SqlAlchemyRuntimeSettingsRepository(sessions)
 oauth_session_repository = SqlAlchemyOAuthSessionRepository(sessions)
 snapshot_repository = SqlAlchemySnapshotRepository(sessions)
 config_service = ManagementConfigService(config_repository)
+runtime_settings = RuntimeSettingsService(runtime_settings_repository)
 oauth_sessions = OAuthSessionService(oauth_session_repository)
 snapshots = SnapshotService(snapshot_repository)
 config_service.get()
@@ -71,7 +75,19 @@ async def _maintenance_loop() -> None:
         try:
             config = await asyncio.to_thread(config_service.get)
             interval_seconds = config.maintenance_interval_minutes * 60
-            await asyncio.to_thread(audit.cleanup)
+            logger.info(
+                "management cleanup scan started retention_days=%d "
+                "max_records=%d interval_minutes=%d",
+                config.logging_retention_days,
+                config.logging_max_records,
+                config.maintenance_interval_minutes,
+            )
+            removed = await asyncio.to_thread(audit.cleanup)
+            logger.info(
+                "management cleanup scan completed reason=retention_or_max_records "
+                "removed_records=%d",
+                removed,
+            )
         except Exception:
             logger.exception("management maintenance cycle failed")
         await asyncio.sleep(interval_seconds)
@@ -123,6 +139,7 @@ app.include_router(
             accounts=accounts,
             audit=audit,
             oauth_sessions=oauth_sessions,
+            runtime_settings=runtime_settings,
             service_token=settings.service_token,
         )
     )
@@ -143,6 +160,7 @@ admin = build_admin(
     oauth_sessions,
     snapshots,
     config_service,
+    runtime_settings,
     files,
     reverse,
 )
