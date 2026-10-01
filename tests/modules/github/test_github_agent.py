@@ -248,3 +248,37 @@ def test_invalid_app_auth_does_not_silently_fallback() -> None:
     client = BrokenAppClient(app_id="123", private_key="unused")
     with pytest.raises(GitHubAgentError, match="authentication failed"):
         client._repo_request("public/repo", "GET", "/repos/public/repo")
+
+
+def test_public_github_checkout_skips_installation_auth(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_checkout(clone_url, destination, **kwargs):
+        captured["clone_url"] = clone_url
+        captured["destination"] = destination
+        captured.update(kwargs)
+        return {
+            "path": destination,
+            "mode": kwargs["mode"],
+            "ref": kwargs["ref"],
+            "git_metadata": False,
+            "auth_mode": "anonymous",
+        }
+
+    monkeypatch.setattr(
+        "modules.github.github_agent.checkout_repository",
+        fake_checkout,
+    )
+    client = GitHubAppClient(
+        account_id="public",
+        auth_type="public",
+        public_only=True,
+    )
+
+    result = client.checkout_repository(
+        "octocat/Hello-World",
+        "repos/hello",
+    )
+
+    assert result["repository"] == "octocat/Hello-World"
+    assert captured["auth_header"] == ""
