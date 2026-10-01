@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 from common.models import JsonObject, JsonValue, json_value
-from modules.files.file_store import FileStore
 from modules.files.workspace_store import WorkspaceFileStore
 
 from .errors import CurlError
@@ -52,7 +51,7 @@ def curl_request_impl(
     body_json: JsonObject | list[JsonValue] | None = None,
     body_form: JsonObject | None = None,
     body_base64: str | None = None,
-    body_file_id: str | None = None,
+    body_workspace_path: str | None = None,
     body_content_type: str = "",
     preset: str = DEFAULT_CURL_PRESET,
     follow_redirects: bool = True,
@@ -65,7 +64,8 @@ def curl_request_impl(
     forward_sensitive_headers_on_redirect: bool = False,
     preview_bytes: int = _DEFAULT_PREVIEW_BYTES,
     *,
-    store: FileStore,
+    workspace: WorkspaceFileStore,
+    max_file_bytes: int,
     curl_binary: str | None = None,
 ) -> JsonObject:
     curl_binary = curl_binary or _system_curl_binary()
@@ -75,7 +75,8 @@ def curl_request_impl(
             "use curl_download for larger responses"
         )
     metadata, header_path, output_path = _execute_curl(
-        store=store,
+        workspace=workspace,
+        max_file_bytes=max_file_bytes,
         curl_binary=curl_binary,
         method=method,
         url=url,
@@ -86,7 +87,7 @@ def curl_request_impl(
         body_json=body_json,
         body_form=body_form,
         body_base64=body_base64,
-        body_file_id=body_file_id,
+        body_workspace_path=body_workspace_path,
         body_content_type=body_content_type,
         preset=preset,
         follow_redirects=follow_redirects,
@@ -121,7 +122,7 @@ def curl_download_impl(
     body_json: JsonObject | list[JsonValue] | None = None,
     body_form: JsonObject | None = None,
     body_base64: str | None = None,
-    body_file_id: str | None = None,
+    body_workspace_path: str | None = None,
     body_content_type: str = "",
     file_name: str = "",
     workspace_path: str = "",
@@ -138,13 +139,14 @@ def curl_download_impl(
     forward_sensitive_headers_on_redirect: bool = False,
     preview_bytes: int = _DEFAULT_PREVIEW_BYTES,
     *,
-    store: FileStore,
-    workspace: WorkspaceFileStore | None = None,
+    workspace: WorkspaceFileStore,
+    max_file_bytes: int,
     curl_binary: str | None = None,
 ) -> JsonObject:
     curl_binary = curl_binary or _system_curl_binary()
     metadata, header_path, output_path = _execute_curl(
-        store=store,
+        workspace=workspace,
+        max_file_bytes=max_file_bytes,
         curl_binary=curl_binary,
         method=method,
         url=url,
@@ -155,7 +157,7 @@ def curl_download_impl(
         body_json=body_json,
         body_form=body_form,
         body_base64=body_base64,
-        body_file_id=body_file_id,
+        body_workspace_path=body_workspace_path,
         body_content_type=body_content_type,
         preset=preset,
         follow_redirects=follow_redirects,
@@ -224,23 +226,13 @@ def curl_download_impl(
             "curl_error": str(metadata.get("curl_error") or ""),
             **_preview(data, final_block, metadata, preview_bytes),
         }
-        if workspace_path.strip():
-            if workspace is None:
-                raise CurlError("workspace_path requires shared workspace storage")
-            result["workspace_file"] = workspace.place_file(
-                output_path,
-                workspace_path,
-                overwrite=workspace_overwrite,
-                consume=True,
-            )
-        else:
-            result["file"] = store.put_file(
-                output_path,
-                name=name,
-                mime_type=ctype,
-                source="curl-download",
-                consume=True,
-            )
+        destination = workspace_path.strip() or f"downloads/{name}"
+        result["workspace_file"] = workspace.place_file(
+            output_path,
+            destination,
+            overwrite=workspace_overwrite,
+            consume=True,
+        )
         return result
     finally:
         header_path.unlink(missing_ok=True)
@@ -257,7 +249,7 @@ def curl_stream_capture_impl(
     body_json: JsonObject | list[JsonValue] | None = None,
     body_form: JsonObject | None = None,
     body_base64: str | None = None,
-    body_file_id: str | None = None,
+    body_workspace_path: str | None = None,
     body_content_type: str = "",
     file_name: str = "",
     workspace_path: str = "",
@@ -273,8 +265,8 @@ def curl_stream_capture_impl(
     forward_sensitive_headers_on_redirect: bool = False,
     preview_bytes: int = _DEFAULT_PREVIEW_BYTES,
     *,
-    store: FileStore,
-    workspace: WorkspaceFileStore | None = None,
+    workspace: WorkspaceFileStore,
+    max_file_bytes: int,
     curl_binary: str | None = None,
 ) -> JsonObject:
     curl_binary = curl_binary or _system_curl_binary()
@@ -282,12 +274,11 @@ def curl_stream_capture_impl(
         raise CurlError(
             f"duration_seconds must be greater than 0 and at most {_MAX_DURATION_SECONDS}"
         )
-    if max_bytes <= 0 or max_bytes > store.settings.upload_max_bytes:
+    if max_bytes <= 0 or max_bytes > max_file_bytes:
         raise CurlError(
-            f"max_bytes must be between 1 and {store.settings.upload_max_bytes}"
+            f"max_bytes must be between 1 and {max_file_bytes}"
         )
 
-    store.ensure()
     clean_method = _validate_method(method)
     request_url = _with_query(_validate_url(url), query)
     merged = _merged_headers(preset, headers)
@@ -296,19 +287,20 @@ def curl_stream_capture_impl(
         body_json=body_json,
         body_form=body_form,
         body_base64=body_base64,
-        body_file_id=body_file_id,
+        body_workspace_path=body_workspace_path,
         body_content_type=body_content_type,
         headers=merged,
-        store=store,
+        workspace=workspace,
+        max_file_bytes=max_file_bytes,
     )
 
     fd_headers, raw_headers = tempfile.mkstemp(
-        prefix="curl-stream-headers-", dir=store.tmp
+        prefix="curl-stream-headers-"
     )
     os.close(fd_headers)
     header_path = Path(raw_headers)
     fd_output, raw_output = tempfile.mkstemp(
-        prefix="curl-stream-output-", dir=store.tmp
+        prefix="curl-stream-output-"
     )
     os.close(fd_output)
     output_path = Path(raw_output)
@@ -431,23 +423,13 @@ def curl_stream_capture_impl(
             ),
             **_preview(data, final_block, metadata, preview_bytes),
         }
-        if workspace_path.strip():
-            if workspace is None:
-                raise CurlError("workspace_path requires shared workspace storage")
-            result["workspace_file"] = workspace.place_file(
-                output_path,
-                workspace_path,
-                overwrite=workspace_overwrite,
-                consume=True,
-            )
-        else:
-            result["file"] = store.put_file(
-                output_path,
-                name=name,
-                mime_type=ctype,
-                source="curl-stream-capture",
-                consume=True,
-            )
+        destination = workspace_path.strip() or f"captures/{name}"
+        result["workspace_file"] = workspace.place_file(
+            output_path,
+            destination,
+            overwrite=workspace_overwrite,
+            consume=True,
+        )
         return result
     finally:
         header_path.unlink(missing_ok=True)
