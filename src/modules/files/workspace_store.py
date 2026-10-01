@@ -17,9 +17,12 @@ class WorkspaceFileError(RuntimeError):
 class WorkspaceFileStore:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve(strict=False)
+
+    def ensure(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, value: str, *, allow_root: bool = False) -> Path:
+        self.ensure()
         raw = value.strip().replace("\\", "/")
         if not raw or raw == ".":
             if allow_root:
@@ -42,6 +45,7 @@ class WorkspaceFileStore:
         return "/" if not value else value
 
     def status(self) -> JsonObject:
+        self.ensure()
         usage = shutil.disk_usage(self.root)
         return {
             "root": str(self.root),
