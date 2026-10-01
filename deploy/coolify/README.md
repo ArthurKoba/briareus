@@ -97,12 +97,11 @@ policy defaults and database/file paths. Public OAuth/HTTP identity is deploymen
 
 ## Persistent storage
 
-The Compose stack owns five named volumes with minimal logical names:
+The Compose stack owns four named volumes with minimal logical names:
 
 ```text
-management -> /management
-files      -> /files
-auth       -> /auth
+management         -> /management
+auth               -> /auth
 terminal-workspace -> /workspace (shared by Terminal, Files, Curl and Management Admin)
 terminal-home      -> /home/agent
 ```
@@ -112,9 +111,10 @@ The volumes are ordinary Compose volumes, not `external` volumes with hard-coded
 names, so Docker/Coolify keeps them in managed volume storage and they can be backed up
 independently of container filesystems.
 
-Production has already migrated to the clean logical names. The active project should
-therefore contain the core `<project>_management`, `<project>_files`, `<project>_auth` volumes plus the
-Terminal workspace/home volumes for this stack.
+Production file data lives only in the shared workspace volume. The active project should
+therefore contain `<project>_management`, `<project>_auth` and the Terminal
+workspace/home volumes. The former `<project>_files` CAS volume is no longer part of the
+runtime topology after migration.
 
 ## Build and deploy behaviour
 
