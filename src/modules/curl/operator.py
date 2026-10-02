@@ -171,6 +171,12 @@ async def browser_operator_websocket(
                         str(message.get("url") or ""),
                     )
                     await select_page(str(result["page_id"]))
+                elif kind == "open_internal":
+                    result = await browser.operator_open_internal(
+                        owner_token,
+                        str(message.get("destination") or ""),
+                    )
+                    await select_page(str(result["page_id"]))
                 elif kind == "back":
                     await browser.operator_back(owner_token, selected_page_id)
                     await send_state()

@@ -5,9 +5,13 @@ from typing import Any, cast
 
 import pytest
 
+from common.settings import BrowserSettings
 from modules.curl.browser import BrowserError, BrowserManager
 from modules.files.workspace_store import WorkspaceFileStore
 
+
+def test_browser_defaults_to_headed_runtime() -> None:
+    assert BrowserSettings().headless is False
 
 def _browser(tmp_path: Path) -> BrowserManager:
     return BrowserManager(
@@ -188,3 +192,40 @@ async def test_wrong_operator_token_cannot_control_browser(tmp_path: Path) -> No
 
     with pytest.raises(BrowserError, match="not active"):
         await browser.operator_state("other")
+
+
+def test_operator_url_allows_browser_ui_without_exposing_it_to_agents(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    assert browser._operator_url("chrome://extensions/") == "chrome://extensions/"
+    assert browser._operator_url("chrome://inspect/#pages") == "chrome://inspect/#pages"
+    assert browser._operator_url("about:blank") == "about:blank"
+    assert browser._operator_url("https://example.test/path") == "https://example.test/path"
+
+    with pytest.raises(BrowserError, match="absolute http"):
+        browser._url("chrome://extensions/")
+    with pytest.raises(BrowserError, match="allowed Chromium page"):
+        browser._operator_url("chrome://flags/")
+
+
+@pytest.mark.asyncio
+async def test_operator_internal_destinations_are_allowlisted(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+    opened: list[str] = []
+
+    async def fake_new_page(owner_token: str, url: str = "") -> dict[str, object]:
+        assert owner_token == "owner"
+        opened.append(url)
+        return {"page_id": f"page-{len(opened)}", "url": url}
+
+    browser.operator_new_page = fake_new_page  # type: ignore[method-assign]
+
+    extensions = await browser.operator_open_internal("owner", "extensions")
+    devtools = await browser.operator_open_internal("owner", "devtools")
+
+    assert extensions["url"] == "chrome://extensions/"
+    assert devtools["url"] == "chrome://inspect/#pages"
+    assert opened == ["chrome://extensions/", "chrome://inspect/#pages"]
+    with pytest.raises(BrowserError, match="unsupported"):
+        await browser.operator_open_internal("owner", "flags")

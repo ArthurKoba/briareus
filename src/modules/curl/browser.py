@@ -108,7 +108,11 @@ class BrowserManager:
                 executable_path=self.executable_path,
                 headless=self.headless,
                 accept_downloads=True,
-                args=["--no-sandbox"],
+                ignore_default_args=["--disable-extensions"],
+                args=[
+                    "--no-sandbox",
+                    f"--window-size={self.viewport_width},{self.viewport_height}",
+                ],
                 viewport={"width": self.viewport_width, "height": self.viewport_height},
             )
         except Exception:
@@ -164,6 +168,26 @@ class BrowserManager:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise BrowserError("browser URL must be absolute http(s)")
         return value
+
+    @staticmethod
+    def _operator_url(value: str) -> str:
+        value = value.strip()
+        if value == "about:blank":
+            return value
+        parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return value
+        if parsed.scheme == "chrome" and parsed.netloc in {
+            "extensions",
+            "inspect",
+            "settings",
+            "downloads",
+            "version",
+        }:
+            return value
+        if parsed.scheme == "chrome-extension" and parsed.netloc:
+            return value
+        raise BrowserError("operator URL must be http(s), about:blank, or an allowed Chromium page")
 
     async def _summary(self, page_id: str, page: Page) -> JsonObject:
         return {
@@ -605,7 +629,7 @@ class BrowserManager:
         page = await context.new_page()
         page_id = self._register_page(page)
         if url.strip():
-            await page.goto(self._url(url), wait_until="domcontentloaded")
+            await page.goto(self._operator_url(url), wait_until="domcontentloaded")
         async with self._operator_lock:
             self._operator_pages[owner_token] = page_id
         return await self._summary(page_id, page)
@@ -613,10 +637,23 @@ class BrowserManager:
     async def operator_navigate(self, owner_token: str, page_id: str, url: str) -> JsonObject:
         self._require_operator(owner_token)
         page = await self._page(page_id)
-        response = await page.goto(self._url(url), wait_until="domcontentloaded")
+        response = await page.goto(self._operator_url(url), wait_until="domcontentloaded")
         result = await self._summary(page_id, page)
         result["http_status"] = response.status if response is not None else None
         return result
+
+    async def operator_open_internal(
+        self, owner_token: str, destination: str
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        targets = {
+            "extensions": "chrome://extensions/",
+            "devtools": "chrome://inspect/#pages",
+        }
+        target = targets.get(destination)
+        if target is None:
+            raise BrowserError("unsupported browser operator destination")
+        return await self.operator_new_page(owner_token, target)
 
     async def operator_back(self, owner_token: str, page_id: str) -> JsonObject:
         self._require_operator(owner_token)

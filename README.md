@@ -164,9 +164,13 @@ Terminal command/stdin/output payloads are bounded or omitted in Management MCP-
 
 The Web MCP combines structured curl operations with a persistent Playwright/Chromium
 browser profile. Browser cookies and local session state live in a dedicated persistent
-volume, while screenshots, uploads and downloads use the shared `/workspace`. Browser
-snapshots return bounded page text plus short-lived interactive element refs so agents can
-click and fill without serializing full page HTML into model context. Browser page content
+volume, while screenshots, uploads and downloads use the shared `/workspace`. Production
+Chromium runs in headed mode on an internal virtual display so the persistent profile keeps
+normal browser UI capabilities such as extensions and Chromium developer pages while the
+Management Browser Operator remains the remote control surface. Operator-only controls may
+open allowlisted `chrome://` pages; public agent navigation remains restricted to HTTP(S).
+Browser snapshots return bounded page text plus short-lived interactive element refs so agents
+can click and fill without serializing full page HTML into model context. Browser page content
 and filled values are omitted from Management audit payloads; tool/status metadata remains
 observable.
 

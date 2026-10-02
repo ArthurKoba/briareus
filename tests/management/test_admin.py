@@ -126,6 +126,13 @@ def test_browser_operator_template_refreshes_shared_state() -> None:
         "src/management/presentation/templates/management_browser.html"
     ).read_text()
     assert "setInterval(() => send({type:'refresh_state'}), 1500);" in source
+    assert "browser-extensions" in source
+    assert "browser-devtools" in source
+    assert "navigator.clipboard.writeText" in source
+    assert "const tabNodes = new Map();" in source
+    assert "tabs.innerHTML = ''" not in source
+    assert "destination:'extensions'" in source
+    assert "destination:'devtools'" in source
 
 
 def test_analysis_invocation_tool_uses_public_semantic_name() -> None:

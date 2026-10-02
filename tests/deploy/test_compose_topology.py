@@ -321,3 +321,12 @@ def test_entrypoint_owns_browser_profile_volume_before_dropping_privileges() -> 
         'chown 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")" "${BROWSER_PROFILE_PATH}"'
         in entrypoint
     )
+
+
+def test_browser_runtime_uses_virtual_display_for_headed_chromium() -> None:
+    dockerfile = Path("Dockerfile").read_text()
+    entrypoint = Path("docker-entrypoint.sh").read_text()
+    assert "chromium xvfb" in dockerfile
+    assert 'BROWSER_HEADLESS="${BROWSER_HEADLESS:-false}"' in entrypoint
+    assert 'gosu 1000:1000 Xvfb "${DISPLAY}"' in entrypoint
+    assert "-nolisten tcp" in entrypoint

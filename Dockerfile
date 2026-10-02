@@ -88,7 +88,7 @@ ENV ASGI_APP=modules.files.runtime:app \
 
 FROM runtime-base AS curl
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
+    && apt-get install -y --no-install-recommends chromium xvfb fonts-liberation fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/* \
     && uv sync --frozen --no-dev --group web --no-install-project
 COPY src/modules/__init__.py ./src/modules/__init__.py

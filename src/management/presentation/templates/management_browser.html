@@ -3,7 +3,7 @@
 <div class="d-flex justify-content-between align-items-center">
   <div>
     <h1>Browser Operator</h1>
-    <div class="text-secondary">Shared live control of the persistent Chromium profile</div>
+    <div class="text-secondary">Persistent Chromium · shared human and agent control</div>
   </div>
   <ol class="breadcrumb">
     <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
@@ -13,50 +13,76 @@
 {% endblock %}
 {% block content %}
 <style>
-  .browser-operator-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:1rem; }
-  .browser-tabs { max-height:70vh; overflow:auto; }
-  .browser-tab { cursor:pointer; border:1px solid var(--tblr-border-color); border-radius:.4rem; padding:.6rem; margin-bottom:.5rem; }
-  .browser-tab.active { border-color:var(--tblr-primary); box-shadow:0 0 0 1px var(--tblr-primary); }
-  .browser-tab-label { min-width:0; height:1.9rem !important; min-height:1.9rem !important; padding:.2rem .4rem !important; font-weight:600; }
-  .browser-tab-id { font-family:var(--tblr-font-monospace); font-size:.72rem; }
-  .browser-tab-policy { flex:0 0 auto; white-space:nowrap; }
-  .browser-screen-wrap { background:#111; min-height:360px; border-radius:.4rem; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; }
-  #browser-screen { max-width:100%; max-height:72vh; display:block; user-select:none; -webkit-user-drag:none; }
+  .browser-shell { display:flex; flex-direction:column; gap:.65rem; }
+  .browser-toolbar { display:flex; gap:.35rem; flex-wrap:wrap; align-items:center; }
+  .browser-toolbar .btn { padding:.28rem .5rem; font-size:.78rem; line-height:1.25; }
+  .browser-url-row { display:flex; gap:.35rem; }
+  .browser-url-row .form-control { min-height:2rem; height:2rem; font-size:.82rem; padding:.25rem .55rem; }
+  .browser-operator-grid { display:grid; grid-template-columns:250px minmax(0,1fr); gap:.65rem; align-items:start; }
+  .browser-tabs { max-height:76vh; overflow:auto; padding:.35rem !important; }
+  .browser-tab { cursor:pointer; border:1px solid var(--tblr-border-color); border-radius:.3rem; padding:.35rem .4rem; margin-bottom:.3rem; background:var(--tblr-bg-surface); }
+  .browser-tab:last-child { margin-bottom:0; }
+  .browser-tab.active { border-color:var(--tblr-primary); box-shadow:0 0 0 1px color-mix(in srgb, var(--tblr-primary) 65%, transparent); }
+  .browser-tab-title { min-width:0; font-size:.78rem; font-weight:600; line-height:1.15; }
+  .browser-tab-label { min-width:0; height:1.55rem !important; min-height:1.55rem !important; padding:.08rem .3rem !important; font-size:.72rem !important; }
+  .browser-tab-url { font-size:.68rem; line-height:1.15; margin-top:.2rem; }
+  .browser-tab-id { font-family:var(--tblr-font-monospace); font-size:.63rem; line-height:1.1; }
+  .browser-tab-policy { width:1.6rem; height:1.55rem; padding:0 !important; font-size:.68rem; font-weight:700; flex:0 0 auto; }
+  .browser-copy-id { padding:.08rem .28rem !important; font-size:.62rem !important; line-height:1.1; }
+  .browser-screen-wrap { background:#111; min-height:360px; border-radius:.3rem; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; }
+  #browser-screen { max-width:100%; max-height:78vh; display:block; user-select:none; -webkit-user-drag:none; }
   #browser-screen:focus { outline:2px solid var(--tblr-primary); }
-  @media (max-width: 900px) { .browser-operator-grid { grid-template-columns:1fr; } .browser-tabs { max-height:240px; } }
+  #operator-alert { min-height:1.2rem; font-size:.75rem; }
+  .browser-card-header { min-height:2.25rem; padding:.45rem .65rem; }
+  @media (max-width: 900px) {
+    .browser-operator-grid { grid-template-columns:1fr; }
+    .browser-tabs { max-height:260px; }
+  }
 </style>
-<div id="operator-alert" class="alert alert-info">Connecting to persistent Chromium…</div>
-<div class="card mb-3">
-  <div class="card-body d-flex gap-2 flex-wrap align-items-center">
-    <button id="browser-back" class="btn" type="button" disabled>Back</button>
-    <button id="browser-reload" class="btn" type="button" disabled>Reload</button>
-    <button id="browser-new" class="btn" type="button" disabled>New tab</button>
-    <button id="browser-close" class="btn btn-outline-danger" type="button" disabled>Close tab</button>
-    <button id="agent-access-toggle" class="btn btn-outline-success" type="button" disabled>Agent access: On</button>
-    <span id="operator-status" class="badge bg-secondary-lt ms-auto">disconnected</span>
-  </div>
-  <div class="card-body border-top">
-    <div class="input-group">
-      <input id="browser-url" class="form-control" type="url" placeholder="https://example.com" autocomplete="off">
-      <button id="browser-go" class="btn btn-primary" type="button" disabled>Go</button>
-    </div>
-  </div>
-</div>
-<div class="browser-operator-grid">
+<div class="browser-shell">
   <div class="card">
-    <div class="card-header"><h3 class="card-title">Tabs</h3></div>
-    <div id="browser-tabs" class="card-body browser-tabs"><span class="text-secondary">No browser state yet.</span></div>
-  </div>
-  <div class="card">
-    <div class="card-header d-flex align-items-center justify-content-between">
-      <h3 class="card-title">Live browser</h3>
-      <small id="frame-info" class="text-secondary"></small>
-    </div>
     <div class="card-body p-2">
-      <div class="browser-screen-wrap">
-        <img id="browser-screen" tabindex="0" alt="Live Chromium tab">
+      <div class="browser-toolbar">
+        <button id="browser-back" class="btn btn-sm" type="button" disabled title="Back">← Back</button>
+        <button id="browser-reload" class="btn btn-sm" type="button" disabled title="Reload">↻ Reload</button>
+        <button id="browser-new" class="btn btn-sm" type="button" disabled title="New tab">+ Tab</button>
+        <button id="browser-close" class="btn btn-sm btn-outline-danger" type="button" disabled title="Close selected tab">× Close</button>
+        <span class="vr mx-1"></span>
+        <button id="browser-extensions" class="btn btn-sm btn-outline-primary" type="button" disabled title="Open chrome://extensions">Extensions</button>
+        <button id="browser-devtools" class="btn btn-sm btn-outline-primary" type="button" disabled title="Open chrome://inspect/#pages">DevTools</button>
+        <span class="vr mx-1"></span>
+        <button id="agent-access-toggle" class="btn btn-sm btn-outline-success" type="button" disabled title="Global agent access">Agent On</button>
+        <span id="operator-status" class="badge bg-secondary-lt ms-auto">disconnected</span>
       </div>
-      <div class="text-secondary small mt-2">Click the live view to focus keyboard input. Agent and operator can interact with the same browser concurrently.</div>
+      <div class="browser-url-row mt-2">
+        <input id="browser-url" class="form-control" type="text" placeholder="https://example.com or chrome://extensions" autocomplete="off" spellcheck="false">
+        <button id="browser-go" class="btn btn-sm btn-primary" type="button" disabled>Go</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="operator-alert" class="text-secondary">Connecting to persistent Chromium…</div>
+
+  <div class="browser-operator-grid">
+    <div class="card">
+      <div class="card-header browser-card-header d-flex align-items-center justify-content-between">
+        <h3 class="card-title mb-0">Tabs</h3>
+        <span id="tab-count" class="badge bg-secondary-lt">0</span>
+      </div>
+      <div id="browser-tabs" class="card-body browser-tabs"><span id="browser-tabs-empty" class="text-secondary small">No browser state yet.</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header browser-card-header d-flex align-items-center justify-content-between">
+        <h3 class="card-title mb-0">Live browser</h3>
+        <small id="frame-info" class="text-secondary"></small>
+      </div>
+      <div class="card-body p-2">
+        <div class="browser-screen-wrap">
+          <img id="browser-screen" tabindex="0" alt="Live Chromium tab">
+        </div>
+        <div class="text-secondary small mt-1">Focus the live view for keyboard input. Human and agent control remain shared.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -68,13 +94,18 @@
   let frameWidth = 1440;
   let frameHeight = 900;
   let lastMove = 0;
+  const tabNodes = new Map();
   const operatorTicket = {{ browser_operator_ticket | tojson }};
   const screen = document.getElementById('browser-screen');
   const tabs = document.getElementById('browser-tabs');
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
+  const tabCount = document.getElementById('tab-count');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','agent-access-toggle'];
+  const controls = [
+    'browser-back','browser-reload','browser-new','browser-close','browser-go',
+    'browser-extensions','browser-devtools','agent-access-toggle'
+  ];
   const agentAccessToggle = document.getElementById('agent-access-toggle');
 
   function setConnected(on) {
@@ -82,97 +113,204 @@
     status.className = 'badge ms-auto ' + (on ? 'bg-green-lt' : 'bg-secondary-lt');
     controls.forEach(id => document.getElementById(id).disabled = !on);
   }
-  function send(payload) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); }
+
+  function send(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+  }
+
   setInterval(() => send({type:'refresh_state'}), 1500);
+
   function renderAgentAccess(enabled) {
-    agentAccessToggle.textContent = enabled ? 'Agent access: On' : 'Agent access: Blocked';
-    agentAccessToggle.className = 'btn ' + (enabled ? 'btn-outline-success' : 'btn-danger');
+    agentAccessToggle.textContent = enabled ? 'Agent On' : 'Agent Blocked';
+    agentAccessToggle.className = 'btn btn-sm ' + (enabled ? 'btn-outline-success' : 'btn-danger');
     agentAccessToggle.disabled = false;
   }
-  function renderState(next) {
-    state = next; selectedPage = next.selected_page_id || '';
-    renderAgentAccess(next.agent_access_enabled !== false);
-    const pages = next.pages || [];
-    const editingLabel = document.activeElement && document.activeElement.classList.contains('browser-tab-label');
-    if (!editingLabel) {
-      tabs.innerHTML = '';
-      pages.forEach(page => {
-        const div = document.createElement('div');
-        div.className = 'browser-tab' + (page.page_id === selectedPage ? ' active' : '');
 
-        const top = document.createElement('div');
-        top.className = 'd-flex gap-2 align-items-center mb-1';
-        const label = document.createElement('input');
-        label.type = 'text';
-        label.maxLength = 120;
-        label.className = 'form-control browser-tab-label';
-        label.placeholder = page.title || 'Tab label';
-        label.value = page.label || '';
-        label.title = 'Human-readable tab name shared with agents';
-        label.onclick = event => event.stopPropagation();
-        label.onkeydown = event => {
-          event.stopPropagation();
-          if (event.key === 'Enter') { event.preventDefault(); label.blur(); }
-        };
-        label.onchange = event => {
-          event.stopPropagation();
-          send({type:'set_label', page_id:page.page_id, label:label.value});
-        };
-
-        const policy = document.createElement('button');
-        const allowed = page.page_agent_access !== false;
-        policy.type = 'button';
-        policy.className = 'btn btn-sm browser-tab-policy ' + (allowed ? 'btn-outline-success' : 'btn-danger');
-        policy.textContent = allowed ? 'Agent: On' : 'Agent: Locked';
-        policy.title = allowed ? 'Block agent access to this tab' : 'Allow agent access to this tab';
-        policy.onclick = event => {
-          event.stopPropagation();
-          send({type:'set_page_agent_access', page_id:page.page_id, allowed:!allowed});
-        };
-        top.append(label, policy);
-
-        const title = document.createElement('div');
-        title.className='small fw-bold text-truncate';
-        title.textContent = page.title || '(untitled)';
-        const url = document.createElement('div');
-        url.className='small text-secondary text-truncate';
-        url.textContent = page.url || '';
-        const pageId = document.createElement('div');
-        pageId.className='browser-tab-id text-secondary text-truncate mt-1';
-        pageId.textContent = page.page_id || '';
-        div.append(top,title,url,pageId);
-        div.onclick = event => {
-          if (event.target.closest('input,button')) return;
-          send({type:'select_page', page_id:page.page_id});
-        };
-        tabs.appendChild(div);
-        if (page.page_id === selectedPage) urlInput.value = page.url || '';
-      });
-      if (!pages.length) tabs.innerHTML = '<span class="text-secondary">No open tabs.</span>';
+  async function copyText(value, button) {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch (_) {
+      const input = document.createElement('textarea');
+      input.value = value;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
     }
-    if (next.viewport) { frameWidth = next.viewport.width || frameWidth; frameHeight = next.viewport.height || frameHeight; }
+    const previous = button.textContent;
+    button.textContent = 'Copied';
+    window.setTimeout(() => { button.textContent = previous; }, 900);
   }
+
+  function createTabNode(page) {
+    const div = document.createElement('div');
+    div.className = 'browser-tab';
+    div.dataset.pageId = page.page_id;
+
+    const top = document.createElement('div');
+    top.className = 'd-flex gap-1 align-items-center';
+
+    const title = document.createElement('div');
+    title.className = 'browser-tab-title text-truncate flex-grow-1';
+
+    const policy = document.createElement('button');
+    policy.type = 'button';
+    policy.className = 'btn btn-sm browser-tab-policy';
+    policy.onclick = event => {
+      event.stopPropagation();
+      const allowed = div.dataset.agentAllowed !== 'false';
+      send({type:'set_page_agent_access', page_id:div.dataset.pageId, allowed:!allowed});
+    };
+
+    top.append(title, policy);
+
+    const label = document.createElement('input');
+    label.type = 'text';
+    label.maxLength = 120;
+    label.className = 'form-control browser-tab-label mt-1';
+    label.placeholder = 'Tab label';
+    label.title = 'Human-readable tab name shared with agents';
+    label.onclick = event => event.stopPropagation();
+    label.onkeydown = event => {
+      event.stopPropagation();
+      if (event.key === 'Enter') { event.preventDefault(); label.blur(); }
+    };
+    label.onchange = event => {
+      event.stopPropagation();
+      send({type:'set_label', page_id:div.dataset.pageId, label:label.value});
+    };
+
+    const url = document.createElement('div');
+    url.className = 'browser-tab-url text-secondary text-truncate';
+
+    const footer = document.createElement('div');
+    footer.className = 'd-flex gap-1 align-items-center mt-1';
+    const pageId = document.createElement('code');
+    pageId.className = 'browser-tab-id text-secondary text-truncate flex-grow-1';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn btn-sm btn-ghost-secondary browser-copy-id';
+    copy.textContent = 'Copy';
+    copy.title = 'Copy page ID';
+    copy.onclick = event => {
+      event.stopPropagation();
+      copyText(div.dataset.pageId || '', copy);
+    };
+    footer.append(pageId, copy);
+
+    div.append(top, label, url, footer);
+    div._koba = {title, policy, label, url, pageId};
+    div.onclick = event => {
+      if (event.target.closest('input,button')) return;
+      send({type:'select_page', page_id:div.dataset.pageId});
+    };
+    return div;
+  }
+
+  function updateTabNode(div, page) {
+    const refs = div._koba;
+    const selected = page.page_id === selectedPage;
+    const allowed = page.page_agent_access !== false;
+    div.className = 'browser-tab' + (selected ? ' active' : '');
+    div.dataset.pageId = page.page_id || '';
+    div.dataset.agentAllowed = allowed ? 'true' : 'false';
+    refs.title.textContent = page.title || page.label || '(untitled)';
+    refs.title.title = page.title || '';
+    refs.url.textContent = page.url || '';
+    refs.url.title = page.url || '';
+    refs.pageId.textContent = page.page_id || '';
+    refs.policy.className = 'btn btn-sm browser-tab-policy ' + (allowed ? 'btn-outline-success' : 'btn-danger');
+    refs.policy.textContent = allowed ? 'A' : '×';
+    refs.policy.title = allowed ? 'Agent access enabled — click to block' : 'Agent access blocked — click to allow';
+    if (document.activeElement !== refs.label && refs.label.value !== (page.label || '')) {
+      refs.label.value = page.label || '';
+    }
+    if (selected && document.activeElement !== urlInput) urlInput.value = page.url || '';
+  }
+
+  function renderTabs(pages) {
+    const liveIds = new Set(pages.map(page => page.page_id));
+    for (const [pageId, node] of tabNodes) {
+      if (!liveIds.has(pageId)) {
+        node.remove();
+        tabNodes.delete(pageId);
+      }
+    }
+    pages.forEach(page => {
+      let node = tabNodes.get(page.page_id);
+      if (!node) {
+        node = createTabNode(page);
+        tabNodes.set(page.page_id, node);
+      }
+      updateTabNode(node, page);
+      tabs.appendChild(node);
+    });
+    let empty = document.getElementById('browser-tabs-empty');
+    if (!pages.length) {
+      if (!empty) {
+        empty = document.createElement('span');
+        empty.id = 'browser-tabs-empty';
+        empty.className = 'text-secondary small';
+        empty.textContent = 'No open tabs.';
+        tabs.appendChild(empty);
+      }
+    } else if (empty) {
+      empty.remove();
+    }
+    tabCount.textContent = String(pages.length);
+  }
+
+  function renderState(next) {
+    state = next;
+    selectedPage = next.selected_page_id || '';
+    renderAgentAccess(next.agent_access_enabled !== false);
+    renderTabs(next.pages || []);
+    if (next.viewport) {
+      frameWidth = next.viewport.width || frameWidth;
+      frameHeight = next.viewport.height || frameHeight;
+    }
+  }
+
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
-    alertBox.className='alert alert-info'; alertBox.textContent='Connecting to persistent Chromium…';
+    alertBox.className='text-secondary';
+    alertBox.textContent='Connecting to persistent Chromium…';
     ws.onopen = () => { ws.send(JSON.stringify({type:'auth', ticket:operatorTicket})); };
-    ws.onclose = () => { ws = null; setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Live view reconnecting…'; window.setTimeout(connect, 1000); };
-    ws.onerror = () => { alertBox.className='alert alert-danger'; alertBox.textContent='Browser operator connection failed.'; };
+    ws.onclose = () => {
+      ws = null;
+      setConnected(false);
+      alertBox.className='text-secondary';
+      alertBox.textContent='Live view reconnecting…';
+      window.setTimeout(connect, 1000);
+    };
+    ws.onerror = () => {
+      alertBox.className='text-danger';
+      alertBox.textContent='Browser operator connection failed.';
+    };
     ws.onmessage = event => {
       const msg = JSON.parse(event.data);
-      if (msg.type === 'state') { setConnected(true); alertBox.className='alert alert-success'; alertBox.textContent='Shared control active. Agent and operator can interact concurrently.'; renderState(msg); }
-      else if (msg.type === 'frame' && msg.page_id === selectedPage) {
+      if (msg.type === 'state') {
+        setConnected(true);
+        alertBox.className='text-success';
+        alertBox.textContent='Shared control active.';
+        renderState(msg);
+      } else if (msg.type === 'frame' && msg.page_id === selectedPage) {
         screen.src = `data:image/jpeg;base64,${msg.data}`;
         const meta = msg.metadata || {};
-        frameWidth = meta.deviceWidth || frameWidth; frameHeight = meta.deviceHeight || frameHeight;
+        frameWidth = meta.deviceWidth || frameWidth;
+        frameHeight = meta.deviceHeight || frameHeight;
         document.getElementById('frame-info').textContent = `${Math.round(frameWidth)}×${Math.round(frameHeight)}`;
       } else if (msg.type === 'error') {
-        alertBox.className='alert alert-danger'; alertBox.textContent=msg.message || 'Browser operator error';
+        alertBox.className='text-danger';
+        alertBox.textContent=msg.message || 'Browser operator error';
       }
     };
   }
+
   function pointer(event, type, button='none', clickCount=0) {
     if (!selectedPage || !screen.src) return;
     const rect = screen.getBoundingClientRect();
@@ -180,23 +318,51 @@
     const y = (event.clientY - rect.top) * frameHeight / rect.height;
     send({type:'mouse', event:type, x, y, button, click_count:clickCount});
   }
+
   document.getElementById('browser-back').onclick = () => send({type:'back'});
   document.getElementById('browser-reload').onclick = () => send({type:'reload'});
   document.getElementById('browser-new').onclick = () => send({type:'new_page'});
   document.getElementById('browser-close').onclick = () => send({type:'close_page'});
+  document.getElementById('browser-extensions').onclick = () => send({type:'open_internal', destination:'extensions'});
+  document.getElementById('browser-devtools').onclick = () => send({type:'open_internal', destination:'devtools'});
   document.getElementById('browser-go').onclick = () => send({type:'navigate', url:urlInput.value});
   agentAccessToggle.onclick = () => send({type:'set_agent_access', allowed:state ? state.agent_access_enabled === false : false});
-  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send({type:'navigate', url:urlInput.value}); } });
-  screen.addEventListener('mousedown', e => { screen.focus(); pointer(e,'mousePressed',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
-  screen.addEventListener('mouseup', e => { pointer(e,'mouseReleased',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
-  screen.addEventListener('mousemove', e => { const now=performance.now(); if (now-lastMove>33) { lastMove=now; pointer(e,'mouseMoved'); } });
-  screen.addEventListener('wheel', e => { const rect=screen.getBoundingClientRect(); send({type:'mouse',event:'mouseWheel',x:(e.clientX-rect.left)*frameWidth/rect.width,y:(e.clientY-rect.top)*frameHeight/rect.height,delta_x:e.deltaX,delta_y:e.deltaY}); e.preventDefault(); }, {passive:false});
+  urlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); send({type:'navigate', url:urlInput.value}); }
+  });
+  screen.addEventListener('mousedown', e => {
+    screen.focus();
+    pointer(e,'mousePressed',e.button===2?'right':e.button===1?'middle':'left',1);
+    e.preventDefault();
+  });
+  screen.addEventListener('mouseup', e => {
+    pointer(e,'mouseReleased',e.button===2?'right':e.button===1?'middle':'left',1);
+    e.preventDefault();
+  });
+  screen.addEventListener('mousemove', e => {
+    const now=performance.now();
+    if (now-lastMove>33) { lastMove=now; pointer(e,'mouseMoved'); }
+  });
+  screen.addEventListener('wheel', e => {
+    const rect=screen.getBoundingClientRect();
+    send({type:'mouse',event:'mouseWheel',x:(e.clientX-rect.left)*frameWidth/rect.width,y:(e.clientY-rect.top)*frameHeight/rect.height,delta_x:e.deltaX,delta_y:e.deltaY});
+    e.preventDefault();
+  }, {passive:false});
   screen.addEventListener('contextmenu', e => e.preventDefault());
   screen.addEventListener('keydown', e => {
     if (e.ctrlKey || e.altKey || e.metaKey || e.key.length > 1) {
-      const parts=[]; if(e.ctrlKey)parts.push('Control'); if(e.altKey)parts.push('Alt'); if(e.metaKey)parts.push('Meta'); if(e.shiftKey && e.key.length>1)parts.push('Shift'); parts.push(e.key);
-      send({type:'key',key:parts.join('+')}); e.preventDefault();
-    } else if (e.key.length === 1) { send({type:'text',text:e.key}); e.preventDefault(); }
+      const parts=[];
+      if(e.ctrlKey)parts.push('Control');
+      if(e.altKey)parts.push('Alt');
+      if(e.metaKey)parts.push('Meta');
+      if(e.shiftKey && e.key.length>1)parts.push('Shift');
+      parts.push(e.key);
+      send({type:'key',key:parts.join('+')});
+      e.preventDefault();
+    } else if (e.key.length === 1) {
+      send({type:'text',text:e.key});
+      e.preventDefault();
+    }
   });
   connect();
 })();

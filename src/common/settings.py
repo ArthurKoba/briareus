@@ -598,7 +598,7 @@ class BrowserSettings(ProcessSettings):
         "/usr/bin/chromium",
         validation_alias="BROWSER_EXECUTABLE_PATH",
     )
-    headless: bool = Field(True, validation_alias="BROWSER_HEADLESS")
+    headless: bool = Field(False, validation_alias="BROWSER_HEADLESS")
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
     viewport_width: int = Field(1440, ge=320, le=3840, validation_alias="BROWSER_VIEWPORT_WIDTH")
     viewport_height: int = Field(900, ge=240, le=2160, validation_alias="BROWSER_VIEWPORT_HEIGHT")
