@@ -23,6 +23,18 @@ class FakeBrowser:
     async def open(self, url, page_id=""):
         return {"page_id": page_id or "page-1", "url": url, "title": "Example"}
 
+    async def developer_status(self):
+        return {"developer_mode_enabled": False, "agent_developer_access_enabled": False}
+
+    async def extension_list(self):
+        return {"extensions": []}
+
+    async def extension_load_unpacked(self, workspace_path):
+        return {"id": "ext-1", "workspace_path": workspace_path}
+
+    async def extension_uninstall(self, extension_id):
+        return {"extension_id": extension_id, "uninstalled": True}
+
     async def set_page_label(self, page_id, label):
         return {"page_id": page_id, "label": label}
 
@@ -83,6 +95,10 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
         "browser_status",
         "browser_pages",
         "browser_open",
+        "browser_developer_status",
+        "browser_extensions",
+        "browser_extension_load_unpacked",
+        "browser_extension_uninstall",
         "browser_set_page_label",
         "browser_snapshot",
         "browser_click",
@@ -109,4 +125,5 @@ def test_browser_rejects_non_http_urls() -> None:
 
 def test_browser_runtime_uses_container_safe_chromium_sandbox_flag() -> None:
     source = Path("src/modules/curl/browser.py").read_text()
-    assert 'args=["--no-sandbox"]' in source
+    assert '"--no-sandbox"' in source
+    assert '"--enable-unsafe-extension-debugging"' in source
