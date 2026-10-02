@@ -33,6 +33,8 @@
     <button id="browser-new" class="btn" type="button" disabled>New tab</button>
     <button id="browser-close" class="btn btn-outline-danger" type="button" disabled>Close tab</button>
     <button id="agent-access-toggle" class="btn btn-outline-success" type="button" disabled>Agent access: On</button>
+    <button id="developer-mode-toggle" class="btn btn-outline-secondary" type="button" disabled>Developer mode: Off</button>
+    <button id="agent-developer-toggle" class="btn btn-outline-secondary" type="button" disabled>Agent dev access: Blocked</button>
     <span id="operator-status" class="badge bg-secondary-lt ms-auto">disconnected</span>
   </div>
   <div class="card-body border-top">
@@ -40,6 +42,29 @@
       <input id="browser-url" class="form-control" type="url" placeholder="https://example.com" autocomplete="off">
       <button id="browser-go" class="btn btn-primary" type="button" disabled>Go</button>
     </div>
+  </div>
+</div>
+<div id="developer-panel" class="card mb-3" hidden>
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <div>
+      <h3 class="card-title">Developer mode</h3>
+      <div class="text-secondary small">Internal Chromium pages and unpacked extensions. Raw CDP is not exposed publicly.</div>
+    </div>
+    <button id="extensions-refresh" class="btn btn-sm" type="button">Refresh extensions</button>
+  </div>
+  <div class="card-body">
+    <div class="d-flex gap-2 flex-wrap mb-3">
+      <button class="btn btn-sm developer-url" data-url="chrome://extensions" type="button">Extensions</button>
+      <button class="btn btn-sm developer-url" data-url="chrome://settings" type="button">Settings</button>
+      <button class="btn btn-sm developer-url" data-url="chrome://version" type="button">Version</button>
+      <button class="btn btn-sm developer-url" data-url="chrome://inspect" type="button">Inspect</button>
+    </div>
+    <label class="form-label" for="extension-workspace-path">Load unpacked extension from /workspace</label>
+    <div class="input-group mb-3">
+      <input id="extension-workspace-path" class="form-control" type="text" placeholder="projects/my-extension" autocomplete="off">
+      <button id="extension-load" class="btn btn-primary" type="button">Load unpacked</button>
+    </div>
+    <div id="extension-list" class="vstack gap-2"><span class="text-secondary">Extension list not loaded.</span></div>
   </div>
 </div>
 <div class="browser-operator-grid">
@@ -74,8 +99,14 @@
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','agent-access-toggle'];
+  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','agent-access-toggle','developer-mode-toggle'];
   const agentAccessToggle = document.getElementById('agent-access-toggle');
+  const developerModeToggle = document.getElementById('developer-mode-toggle');
+  const agentDeveloperToggle = document.getElementById('agent-developer-toggle');
+  const developerPanel = document.getElementById('developer-panel');
+  const extensionList = document.getElementById('extension-list');
+  const extensionPath = document.getElementById('extension-workspace-path');
+  let extensionsLoaded = false;
 
   function setConnected(on) {
     status.textContent = on ? 'live' : 'disconnected';
@@ -89,9 +120,52 @@
     agentAccessToggle.className = 'btn ' + (enabled ? 'btn-outline-success' : 'btn-danger');
     agentAccessToggle.disabled = false;
   }
+  function renderDeveloperPolicy(next) {
+    const enabled = next.developer_mode_enabled === true;
+    const agentEnabled = enabled && next.agent_developer_access_enabled === true;
+    developerModeToggle.textContent = enabled ? 'Developer mode: On' : 'Developer mode: Off';
+    developerModeToggle.className = 'btn ' + (enabled ? 'btn-warning' : 'btn-outline-secondary');
+    developerModeToggle.disabled = false;
+    agentDeveloperToggle.textContent = agentEnabled ? 'Agent dev access: On' : 'Agent dev access: Blocked';
+    agentDeveloperToggle.className = 'btn ' + (agentEnabled ? 'btn-outline-warning' : 'btn-outline-secondary');
+    agentDeveloperToggle.disabled = !enabled;
+    developerPanel.hidden = !enabled;
+    if (!enabled) { extensionsLoaded = false; }
+    if (enabled && !extensionsLoaded) { send({type:'extension_list'}); }
+  }
+  function renderExtensions(items) {
+    extensionsLoaded = true;
+    extensionList.innerHTML = '';
+    const extensions = Array.isArray(items) ? items : [];
+    if (!extensions.length) {
+      extensionList.innerHTML = '<span class="text-secondary">No unpacked extensions loaded.</span>';
+      return;
+    }
+    extensions.forEach(extension => {
+      const row = document.createElement('div');
+      row.className = 'd-flex gap-2 align-items-center border rounded p-2';
+      const body = document.createElement('div');
+      body.className = 'flex-fill min-w-0';
+      const name = document.createElement('div');
+      name.className = 'fw-bold text-truncate';
+      name.textContent = `${extension.name || extension.id || 'Extension'} ${extension.version || ''}`.trim();
+      const details = document.createElement('div');
+      details.className = 'small text-secondary text-truncate';
+      details.textContent = `${extension.id || ''} ${extension.path || ''}`.trim();
+      body.append(name, details);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-sm btn-outline-danger';
+      remove.textContent = 'Uninstall';
+      remove.onclick = () => send({type:'extension_uninstall', extension_id:extension.id || ''});
+      row.append(body, remove);
+      extensionList.appendChild(row);
+    });
+  }
   function renderState(next) {
     state = next; selectedPage = next.selected_page_id || '';
     renderAgentAccess(next.agent_access_enabled !== false);
+    renderDeveloperPolicy(next);
     const pages = next.pages || [];
     const editingLabel = document.activeElement && document.activeElement.classList.contains('browser-tab-label');
     if (!editingLabel) {
@@ -168,6 +242,8 @@
         const meta = msg.metadata || {};
         frameWidth = meta.deviceWidth || frameWidth; frameHeight = meta.deviceHeight || frameHeight;
         document.getElementById('frame-info').textContent = `${Math.round(frameWidth)}×${Math.round(frameHeight)}`;
+      } else if (msg.type === 'extensions') {
+        renderExtensions(msg.extensions || []);
       } else if (msg.type === 'error') {
         alertBox.className='alert alert-danger'; alertBox.textContent=msg.message || 'Browser operator error';
       }
@@ -186,6 +262,21 @@
   document.getElementById('browser-close').onclick = () => send({type:'close_page'});
   document.getElementById('browser-go').onclick = () => send({type:'navigate', url:urlInput.value});
   agentAccessToggle.onclick = () => send({type:'set_agent_access', allowed:state ? state.agent_access_enabled === false : false});
+  developerModeToggle.onclick = () => send({type:'set_developer_mode', enabled:!(state && state.developer_mode_enabled === true)});
+  agentDeveloperToggle.onclick = () => send({type:'set_agent_developer_access', enabled:!(state && state.agent_developer_access_enabled === true)});
+  document.getElementById('extensions-refresh').onclick = () => { extensionsLoaded = false; send({type:'extension_list'}); };
+  document.getElementById('extension-load').onclick = () => {
+    const workspacePath = extensionPath.value.trim();
+    if (workspacePath) send({type:'extension_load_unpacked', workspace_path:workspacePath});
+  };
+  document.querySelectorAll('.developer-url').forEach(button => {
+    button.addEventListener('click', () => {
+      const url = button.dataset.url || '';
+      if (!url) return;
+      if (selectedPage) send({type:'navigate', url});
+      else send({type:'new_page', url});
+    });
+  });
   urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send({type:'navigate', url:urlInput.value}); } });
   screen.addEventListener('mousedown', e => { screen.focus(); pointer(e,'mousePressed',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
   screen.addEventListener('mouseup', e => { pointer(e,'mouseReleased',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
