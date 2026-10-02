@@ -171,6 +171,32 @@ async def browser_operator_websocket(
                         str(message.get("url") or ""),
                     )
                     await select_page(str(result["page_id"]))
+                elif kind == "open_devtools":
+                    if not selected_page_id:
+                        raise BrowserError("no browser page selected")
+                    result = await browser.operator_open_devtools(
+                        owner_token,
+                        selected_page_id,
+                        panel=str(message.get("panel") or "elements"),
+                    )
+                    new_page_id = str(result.get("page_id") or "")
+                    if new_page_id and new_page_id != selected_page_id:
+                        await select_page(new_page_id)
+                    else:
+                        await send_state()
+                elif kind == "clean_browser":
+                    if stream_task is not None:
+                        stream_task.cancel()
+                        await asyncio.gather(stream_task, return_exceptions=True)
+                        stream_task = None
+                    result = await browser.operator_clean_browser(owner_token)
+                    selected_page_id = str(result.get("selected_page_id") or "")
+                    if selected_page_id:
+                        stream_task = asyncio.create_task(
+                            stream(selected_page_id),
+                            name="browser-operator-stream",
+                        )
+                    await send_state()
                 elif kind == "back":
                     await browser.operator_back(owner_token, selected_page_id)
                     await send_state()

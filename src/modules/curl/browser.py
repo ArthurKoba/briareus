@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -47,6 +49,7 @@ class BrowserManager:
         self._pages: dict[str, Page] = {}
         self._page_ids: dict[int, str] = {}
         self._start_lock = asyncio.Lock()
+        self._reset_lock = asyncio.Lock()
         self._operator_lock = asyncio.Lock()
         self._operator_pages: dict[str, str] = {}
         self._policy_lock = asyncio.Lock()
@@ -164,6 +167,20 @@ class BrowserManager:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise BrowserError("browser URL must be absolute http(s)")
         return value
+
+    @classmethod
+    def _operator_url(cls, value: str) -> str:
+        value = value.strip()
+        if value in {
+            "chrome://extensions",
+            "chrome://extensions/",
+            "chrome://settings",
+            "chrome://settings/",
+            "chrome://version",
+            "chrome://version/",
+        }:
+            return value
+        return cls._url(value)
 
     async def _summary(self, page_id: str, page: Page) -> JsonObject:
         return {
@@ -605,7 +622,7 @@ class BrowserManager:
         page = await context.new_page()
         page_id = self._register_page(page)
         if url.strip():
-            await page.goto(self._url(url), wait_until="domcontentloaded")
+            await page.goto(self._operator_url(url), wait_until="domcontentloaded")
         async with self._operator_lock:
             self._operator_pages[owner_token] = page_id
         return await self._summary(page_id, page)
@@ -613,10 +630,117 @@ class BrowserManager:
     async def operator_navigate(self, owner_token: str, page_id: str, url: str) -> JsonObject:
         self._require_operator(owner_token)
         page = await self._page(page_id)
-        response = await page.goto(self._url(url), wait_until="domcontentloaded")
+        response = await page.goto(self._operator_url(url), wait_until="domcontentloaded")
         result = await self._summary(page_id, page)
         result["http_status"] = response.status if response is not None else None
         return result
+
+
+    async def operator_open_devtools(
+        self,
+        owner_token: str,
+        page_id: str,
+        *,
+        panel: str = "elements",
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        context = await self._ensure_started()
+        page = await self._page(page_id)
+        before = {id(candidate) for candidate in context.pages}
+        session = await context.new_cdp_session(page)
+        try:
+            info = await session.send("Target.getTargetInfo")
+            target_info = info.get("targetInfo") if isinstance(info, dict) else None
+            target_id = (
+                str(target_info.get("targetId") or "")
+                if isinstance(target_info, dict)
+                else ""
+            )
+            if not target_id:
+                raise BrowserError("selected browser tab has no DevTools target")
+            try:
+                opened = await session.send(
+                    "Target.openDevTools",
+                    {"targetId": target_id, "panelId": panel},
+                )
+            except Exception as exc:
+                raise BrowserError(f"Chromium could not open DevTools: {exc}") from exc
+        finally:
+            await session.detach()
+
+        devtools_target_id = (
+            str(opened.get("targetId") or "") if isinstance(opened, dict) else ""
+        )
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            for candidate in context.pages:
+                if id(candidate) in before or candidate.is_closed():
+                    continue
+                candidate_id = self._register_page(candidate)
+                async with self._operator_lock:
+                    self._operator_pages[owner_token] = candidate_id
+                result = await self._summary(candidate_id, candidate)
+                result["devtools_target_id"] = devtools_target_id
+                result["opened_devtools"] = True
+                return result
+        return {
+            "opened_devtools": True,
+            "devtools_target_id": devtools_target_id,
+            "page_id": page_id,
+        }
+
+    async def operator_clean_browser(self, owner_token: str) -> JsonObject:
+        self._require_operator(owner_token)
+        async with self._reset_lock:
+            # Block agents before destroying the credential-bearing profile.
+            async with self._policy_lock:
+                self._agent_access_enabled = False
+
+            context = self._context
+            playwright = self._playwright
+            self._context = None
+            self._playwright = None
+            if context is not None:
+                with contextlib.suppress(Exception):
+                    await context.close()
+            if playwright is not None:
+                with contextlib.suppress(Exception):
+                    await playwright.stop()
+
+            self._pages.clear()
+            self._page_ids.clear()
+            self._page_labels.clear()
+            self._page_agent_access.clear()
+            await asyncio.to_thread(shutil.rmtree, self.profile_dir, True)
+            state_root = self.profile_dir.parent
+            for name in ("cache", "config", "crash"):
+                await asyncio.to_thread(shutil.rmtree, state_root / name, True)
+            self.profile_dir.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(self._persist_policy)
+
+            async with self._start_lock:
+                await self._start_locked()
+            page_items = await self._operator_page_items()
+            if not page_items:
+                context = await self._ensure_started()
+                page = await context.new_page()
+                page_id = self._register_page(page)
+                page_items = [await self._summary(page_id, page)]
+            first_page = page_items[0] if page_items else None
+            selected_page_id = (
+                str(first_page.get("page_id") or "")
+                if isinstance(first_page, dict)
+                else ""
+            )
+            async with self._operator_lock:
+                for token in list(self._operator_pages):
+                    self._operator_pages[token] = selected_page_id
+            return {
+                "cleaned": True,
+                "agent_access_enabled": False,
+                "selected_page_id": selected_page_id,
+                "page_count": len(page_items),
+            }
 
     async def operator_back(self, owner_token: str, page_id: str) -> JsonObject:
         self._require_operator(owner_token)

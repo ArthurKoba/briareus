@@ -170,6 +170,14 @@ click and fill without serializing full page HTML into model context. Browser pa
 and filled values are omitted from Management audit payloads; tool/status metadata remains
 observable.
 
+Management `/admin/browser` is the operator surface for the same persistent Chromium
+profile. It provides compact shared tabs, per-tab and browser-wide agent access controls,
+page-ID copy, Chromium extension management through `chrome://extensions`, and DevTools
+for the selected tab. `Clean browser` is deliberately destructive: it stops Chromium,
+erases the persistent profile plus browser cache/config/crash state, starts one clean
+`about:blank` tab, and leaves agent access disabled. The runtime uses normal Chromium
+capabilities; it does not add fingerprint spoofing or site-control bypass logic.
+
 ## OAuth sessions
 
 The authorization runtime reports safe OAuth session metadata to Management without
