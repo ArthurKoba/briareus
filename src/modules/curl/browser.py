@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import uuid
 from pathlib import Path
@@ -48,10 +49,48 @@ class BrowserManager:
         self._start_lock = asyncio.Lock()
         self._operator_lock = asyncio.Lock()
         self._operator_pages: dict[str, str] = {}
+        self._policy_lock = asyncio.Lock()
+        self._policy_path = self.profile_dir / "koba-browser-policy.json"
+        self._agent_access_enabled = True
+        self._page_labels: dict[str, str] = {}
+        self._page_agent_access: dict[str, bool] = {}
+        self._load_policy()
+
+    def _load_policy(self) -> None:
+        try:
+            payload = json.loads(self._policy_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if isinstance(payload, dict) and isinstance(payload.get("agent_access_enabled"), bool):
+            self._agent_access_enabled = payload["agent_access_enabled"]
+
+    def _persist_policy(self) -> None:
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self._policy_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(
+                {"agent_access_enabled": self._agent_access_enabled},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(self._policy_path)
 
     def _require_operator(self, owner_token: str) -> None:
         if not owner_token or owner_token not in self._operator_pages:
             raise BrowserError("browser operator session is not active")
+
+    def _agent_access_allowed(self, page_id: str = "") -> bool:
+        if not self._agent_access_enabled:
+            return False
+        return not (page_id and not self._page_agent_access.get(page_id, True))
+
+    def _require_agent_access(self, page_id: str = "") -> None:
+        if not self._agent_access_enabled:
+            raise BrowserError("browser agent access is disabled by operator")
+        if page_id and not self._page_agent_access.get(page_id, True):
+            raise BrowserError(f"browser page is locked by operator: {page_id}")
 
     async def _start_locked(self) -> None:
         if self._context is not None:
@@ -104,6 +143,11 @@ class BrowserManager:
         page = self._pages.pop(page_id, None)
         if page is not None:
             self._page_ids.pop(id(page), None)
+        self._page_labels.pop(page_id, None)
+        self._page_agent_access.pop(page_id, None)
+        for owner_token, selected_page_id in list(self._operator_pages.items()):
+            if selected_page_id == page_id:
+                self._operator_pages[owner_token] = ""
 
     async def _page(self, page_id: str) -> Page:
         await self._ensure_started()
@@ -124,8 +168,24 @@ class BrowserManager:
     async def _summary(self, page_id: str, page: Page) -> JsonObject:
         return {
             "page_id": page_id,
+            "label": self._page_labels.get(page_id, ""),
+            "page_agent_access": self._page_agent_access.get(page_id, True),
+            "agent_access": self._agent_access_allowed(page_id),
             "url": page.url,
             "title": await page.title(),
+        }
+
+    async def _agent_summary(self, page_id: str, page: Page) -> JsonObject:
+        if self._agent_access_allowed(page_id):
+            return await self._summary(page_id, page)
+        return {
+            "page_id": page_id,
+            "label": self._page_labels.get(page_id, ""),
+            "page_agent_access": self._page_agent_access.get(page_id, True),
+            "agent_access": False,
+            "locked": True,
+            "url": "",
+            "title": "",
         }
 
     async def diagnostics(self) -> JsonObject:
@@ -182,9 +242,10 @@ class BrowserManager:
             if page.is_closed():
                 continue
             page_id = self._register_page(page)
-            pages.append(await self._summary(page_id, page))
+            pages.append(await self._agent_summary(page_id, page))
         return {
             "running": True,
+            "agent_access_enabled": self._agent_access_enabled,
             "headless": self.headless,
             "browser": "chromium",
             "executable_path": self.executable_path,
@@ -202,6 +263,7 @@ class BrowserManager:
     async def open(self, url: str, page_id: str = "") -> JsonObject:
         context = await self._ensure_started()
         target_url = self._url(url)
+        self._require_agent_access(page_id)
         if page_id:
             page = await self._page(page_id)
         else:
@@ -219,6 +281,7 @@ class BrowserManager:
         max_text_chars: int | None = None,
         max_elements: int | None = None,
     ) -> JsonObject:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         text_limit = min(
             max_text_chars or self.max_snapshot_text_chars,
@@ -292,6 +355,7 @@ class BrowserManager:
         return summary
 
     async def _locator(self, page_id: str, ref: str) -> tuple[Page, Locator]:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         ref = ref.strip()
         if not ref:
@@ -369,6 +433,7 @@ class BrowserManager:
         full_page: bool,
         overwrite: bool,
     ) -> JsonObject:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         target = self.workspace.target_path(workspace_path)
         if target.exists() and not overwrite:
@@ -384,6 +449,7 @@ class BrowserManager:
         state: str,
         timeout_seconds: float,
     ) -> JsonObject:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         normalized = state.strip().casefold()
         if normalized not in {"load", "domcontentloaded", "networkidle"}:
@@ -398,11 +464,13 @@ class BrowserManager:
         return await self._summary(page_id, page)
 
     async def back(self, page_id: str) -> JsonObject:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         await page.go_back(wait_until="domcontentloaded")
         return await self._summary(page_id, page)
 
     async def reload(self, page_id: str) -> JsonObject:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         response = await page.reload(wait_until="domcontentloaded")
         result = await self._summary(page_id, page)
@@ -410,16 +478,74 @@ class BrowserManager:
         return result
 
     async def close_page(self, page_id: str) -> JsonObject:
+        self._require_agent_access(page_id)
         page = await self._page(page_id)
         await page.close()
         self._forget_page(page_id)
         return {"page_id": page_id, "closed": True}
 
+    async def set_page_label(self, page_id: str, label: str) -> JsonObject:
+        self._require_agent_access(page_id)
+        page = await self._page(page_id)
+        normalized = label.strip()
+        if len(normalized) > 120:
+            raise BrowserError("browser page label must be at most 120 characters")
+        async with self._policy_lock:
+            if normalized:
+                self._page_labels[page_id] = normalized
+            else:
+                self._page_labels.pop(page_id, None)
+        return await self._summary(page_id, page)
+
+    async def operator_set_page_label(
+        self, owner_token: str, page_id: str, label: str
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        page = await self._page(page_id)
+        normalized = label.strip()
+        if len(normalized) > 120:
+            raise BrowserError("browser page label must be at most 120 characters")
+        async with self._policy_lock:
+            if normalized:
+                self._page_labels[page_id] = normalized
+            else:
+                self._page_labels.pop(page_id, None)
+        return await self._summary(page_id, page)
+
+    async def operator_set_page_agent_access(
+        self, owner_token: str, page_id: str, allowed: bool
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        page = await self._page(page_id)
+        async with self._policy_lock:
+            if allowed:
+                self._page_agent_access.pop(page_id, None)
+            else:
+                self._page_agent_access[page_id] = False
+        return await self._summary(page_id, page)
+
+    async def operator_set_agent_access(
+        self, owner_token: str, allowed: bool
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        async with self._policy_lock:
+            self._agent_access_enabled = allowed
+            await asyncio.to_thread(self._persist_policy)
+        return {"agent_access_enabled": self._agent_access_enabled}
+
+    async def _operator_page_items(self) -> list[JsonValue]:
+        context = await self._ensure_started()
+        items: list[JsonValue] = []
+        for page in list(context.pages):
+            if page.is_closed():
+                continue
+            page_id = self._register_page(page)
+            items.append(await self._summary(page_id, page))
+        return items
+
     async def operator_acquire(self) -> JsonObject:
         await self._ensure_started()
-        pages = await self.pages()
-        raw_pages = pages.get("pages")
-        page_items = raw_pages if isinstance(raw_pages, list) else []
+        page_items = await self._operator_page_items()
         selected_page_id = (
             str(page_items[0].get("page_id") or "")
             if page_items and isinstance(page_items[0], dict)
@@ -439,9 +565,7 @@ class BrowserManager:
 
     async def operator_state(self, owner_token: str) -> JsonObject:
         self._require_operator(owner_token)
-        pages = await self.pages()
-        raw_pages = pages.get("pages")
-        page_items = raw_pages if isinstance(raw_pages, list) else []
+        page_items = await self._operator_page_items()
         valid_ids = {
             str(item.get("page_id"))
             for item in page_items
@@ -459,6 +583,7 @@ class BrowserManager:
             "pages": page_items,
             "page_count": len(page_items),
             "operator_count": len(self._operator_pages),
+            "agent_access_enabled": self._agent_access_enabled,
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
         }
 

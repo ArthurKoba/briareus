@@ -17,6 +17,9 @@
   .browser-tabs { max-height:70vh; overflow:auto; }
   .browser-tab { cursor:pointer; border:1px solid var(--tblr-border-color); border-radius:.4rem; padding:.6rem; margin-bottom:.5rem; }
   .browser-tab.active { border-color:var(--tblr-primary); box-shadow:0 0 0 1px var(--tblr-primary); }
+  .browser-tab-label { min-width:0; height:1.9rem !important; min-height:1.9rem !important; padding:.2rem .4rem !important; font-weight:600; }
+  .browser-tab-id { font-family:var(--tblr-font-monospace); font-size:.72rem; }
+  .browser-tab-policy { flex:0 0 auto; white-space:nowrap; }
   .browser-screen-wrap { background:#111; min-height:360px; border-radius:.4rem; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; }
   #browser-screen { max-width:100%; max-height:72vh; display:block; user-select:none; -webkit-user-drag:none; }
   #browser-screen:focus { outline:2px solid var(--tblr-primary); }
@@ -29,6 +32,7 @@
     <button id="browser-reload" class="btn" type="button" disabled>Reload</button>
     <button id="browser-new" class="btn" type="button" disabled>New tab</button>
     <button id="browser-close" class="btn btn-outline-danger" type="button" disabled>Close tab</button>
+    <button id="agent-access-toggle" class="btn btn-outline-success" type="button" disabled>Agent access: On</button>
     <span id="operator-status" class="badge bg-secondary-lt ms-auto">disconnected</span>
   </div>
   <div class="card-body border-top">
@@ -70,7 +74,8 @@
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go'];
+  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','agent-access-toggle'];
+  const agentAccessToggle = document.getElementById('agent-access-toggle');
 
   function setConnected(on) {
     status.textContent = on ? 'live' : 'disconnected';
@@ -79,21 +84,72 @@
   }
   function send(payload) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); }
   setInterval(() => send({type:'refresh_state'}), 1500);
+  function renderAgentAccess(enabled) {
+    agentAccessToggle.textContent = enabled ? 'Agent access: On' : 'Agent access: Blocked';
+    agentAccessToggle.className = 'btn ' + (enabled ? 'btn-outline-success' : 'btn-danger');
+    agentAccessToggle.disabled = false;
+  }
   function renderState(next) {
     state = next; selectedPage = next.selected_page_id || '';
+    renderAgentAccess(next.agent_access_enabled !== false);
     const pages = next.pages || [];
-    tabs.innerHTML = '';
-    pages.forEach(page => {
-      const div = document.createElement('div');
-      div.className = 'browser-tab' + (page.page_id === selectedPage ? ' active' : '');
-      const title = document.createElement('div'); title.className='fw-bold text-truncate'; title.textContent = page.title || '(untitled)';
-      const url = document.createElement('div'); url.className='small text-secondary text-truncate'; url.textContent = page.url || '';
-      div.append(title,url);
-      div.onclick = () => send({type:'select_page', page_id:page.page_id});
-      tabs.appendChild(div);
-      if (page.page_id === selectedPage) urlInput.value = page.url || '';
-    });
-    if (!pages.length) tabs.innerHTML = '<span class="text-secondary">No open tabs.</span>';
+    const editingLabel = document.activeElement && document.activeElement.classList.contains('browser-tab-label');
+    if (!editingLabel) {
+      tabs.innerHTML = '';
+      pages.forEach(page => {
+        const div = document.createElement('div');
+        div.className = 'browser-tab' + (page.page_id === selectedPage ? ' active' : '');
+
+        const top = document.createElement('div');
+        top.className = 'd-flex gap-2 align-items-center mb-1';
+        const label = document.createElement('input');
+        label.type = 'text';
+        label.maxLength = 120;
+        label.className = 'form-control browser-tab-label';
+        label.placeholder = page.title || 'Tab label';
+        label.value = page.label || '';
+        label.title = 'Human-readable tab name shared with agents';
+        label.onclick = event => event.stopPropagation();
+        label.onkeydown = event => {
+          event.stopPropagation();
+          if (event.key === 'Enter') { event.preventDefault(); label.blur(); }
+        };
+        label.onchange = event => {
+          event.stopPropagation();
+          send({type:'set_label', page_id:page.page_id, label:label.value});
+        };
+
+        const policy = document.createElement('button');
+        const allowed = page.page_agent_access !== false;
+        policy.type = 'button';
+        policy.className = 'btn btn-sm browser-tab-policy ' + (allowed ? 'btn-outline-success' : 'btn-danger');
+        policy.textContent = allowed ? 'Agent: On' : 'Agent: Locked';
+        policy.title = allowed ? 'Block agent access to this tab' : 'Allow agent access to this tab';
+        policy.onclick = event => {
+          event.stopPropagation();
+          send({type:'set_page_agent_access', page_id:page.page_id, allowed:!allowed});
+        };
+        top.append(label, policy);
+
+        const title = document.createElement('div');
+        title.className='small fw-bold text-truncate';
+        title.textContent = page.title || '(untitled)';
+        const url = document.createElement('div');
+        url.className='small text-secondary text-truncate';
+        url.textContent = page.url || '';
+        const pageId = document.createElement('div');
+        pageId.className='browser-tab-id text-secondary text-truncate mt-1';
+        pageId.textContent = page.page_id || '';
+        div.append(top,title,url,pageId);
+        div.onclick = event => {
+          if (event.target.closest('input,button')) return;
+          send({type:'select_page', page_id:page.page_id});
+        };
+        tabs.appendChild(div);
+        if (page.page_id === selectedPage) urlInput.value = page.url || '';
+      });
+      if (!pages.length) tabs.innerHTML = '<span class="text-secondary">No open tabs.</span>';
+    }
     if (next.viewport) { frameWidth = next.viewport.width || frameWidth; frameHeight = next.viewport.height || frameHeight; }
   }
   function connect() {
@@ -129,6 +185,7 @@
   document.getElementById('browser-new').onclick = () => send({type:'new_page'});
   document.getElementById('browser-close').onclick = () => send({type:'close_page'});
   document.getElementById('browser-go').onclick = () => send({type:'navigate', url:urlInput.value});
+  agentAccessToggle.onclick = () => send({type:'set_agent_access', allowed:state ? state.agent_access_enabled === false : false});
   urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send({type:'navigate', url:urlInput.value}); } });
   screen.addEventListener('mousedown', e => { screen.focus(); pointer(e,'mousePressed',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
   screen.addEventListener('mouseup', e => { pointer(e,'mouseReleased',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });

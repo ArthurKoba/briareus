@@ -35,6 +35,11 @@ def register_browser_tools(
         """Open a URL in a new page, or navigate an existing page_id."""
         return await browser.open(url, page_id)
 
+    @mcp.tool(title="Browser set page label", annotations=write_annotations)
+    async def browser_set_page_label(page_id: str, label: str) -> JsonObject:
+        """Assign or clear a short human-readable label for one browser tab."""
+        return await browser.set_page_label(page_id, label)
+
     @mcp.tool(title="Browser snapshot", annotations=read_annotations)
     async def browser_snapshot(
         page_id: str,
