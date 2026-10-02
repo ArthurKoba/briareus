@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,6 +22,10 @@ from management.application.services import (
     OAuthSessionService,
     RuntimeSettingsService,
     SnapshotService,
+)
+from management.browser_operator_auth import (
+    BrowserOperatorAuthError,
+    verify_browser_operator_ticket,
 )
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -156,21 +161,36 @@ def health() -> dict[str, str]:
 
 @app.websocket("/admin/browser/ws")
 async def browser_operator_socket(websocket: WebSocket) -> None:
-    session = websocket.scope.get("session")
-    if not isinstance(session, dict) or session.get("management_admin") != settings.admin_username:
-        await websocket.close(code=4401)
-        return
-
     origin = websocket.headers.get("origin", "")
     public_host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host", "")
     if origin and urlsplit(origin).netloc.casefold() != public_host.casefold():
         await websocket.close(code=4403)
         return
 
+    await websocket.accept()
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        message = json.loads(raw)
+        if not isinstance(message, dict) or message.get("type") != "auth":
+            raise BrowserOperatorAuthError("browser operator auth message is required")
+        verify_browser_operator_ticket(
+            str(message.get("ticket") or ""),
+            settings.session_secret,
+            settings.admin_username,
+        )
+    except (
+        TimeoutError,
+        json.JSONDecodeError,
+        BrowserOperatorAuthError,
+    ):
+        await websocket.close(code=4401)
+        return
+
     await relay_websocket(
         websocket,
         "ws://curl:8000/operator/ws",
         headers={"Authorization": f"Bearer {settings.service_token}"},
+        accept_downstream=False,
     )
 
 
