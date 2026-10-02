@@ -25,8 +25,6 @@
 <div id="operator-alert" class="alert alert-info">Connecting to persistent Chromium…</div>
 <div class="card mb-3">
   <div class="card-body d-flex gap-2 flex-wrap align-items-center">
-    <button id="take-control" class="btn btn-primary" type="button">Connect live view</button>
-    <button id="release-control" class="btn btn-outline-secondary" type="button" disabled>Disconnect live view</button>
     <button id="browser-back" class="btn" type="button" disabled>Back</button>
     <button id="browser-reload" class="btn" type="button" disabled>Reload</button>
     <button id="browser-new" class="btn" type="button" disabled>New tab</button>
@@ -72,12 +70,11 @@
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['release-control','browser-back','browser-reload','browser-new','browser-close','browser-go'];
+  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go'];
 
   function setConnected(on) {
-    status.textContent = on ? 'shared control' : 'disconnected';
+    status.textContent = on ? 'live' : 'disconnected';
     status.className = 'badge ms-auto ' + (on ? 'bg-green-lt' : 'bg-secondary-lt');
-    document.getElementById('take-control').disabled = on;
     controls.forEach(id => document.getElementById(id).disabled = !on);
   }
   function send(payload) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); }
@@ -105,7 +102,7 @@
     ws = new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
     alertBox.className='alert alert-info'; alertBox.textContent='Connecting to persistent Chromium…';
     ws.onopen = () => { ws.send(JSON.stringify({type:'auth', ticket:operatorTicket})); };
-    ws.onclose = () => { setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Live view disconnected. Agent control remains available.'; };
+    ws.onclose = () => { ws = null; setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Live view reconnecting…'; window.setTimeout(connect, 1000); };
     ws.onerror = () => { alertBox.className='alert alert-danger'; alertBox.textContent='Browser operator connection failed.'; };
     ws.onmessage = event => {
       const msg = JSON.parse(event.data);
@@ -127,8 +124,6 @@
     const y = (event.clientY - rect.top) * frameHeight / rect.height;
     send({type:'mouse', event:type, x, y, button, click_count:clickCount});
   }
-  document.getElementById('take-control').onclick = connect;
-  document.getElementById('release-control').onclick = () => { send({type:'release'}); if (ws) ws.close(); };
   document.getElementById('browser-back').onclick = () => send({type:'back'});
   document.getElementById('browser-reload').onclick = () => send({type:'reload'});
   document.getElementById('browser-new').onclick = () => send({type:'new_page'});
