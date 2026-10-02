@@ -129,11 +129,17 @@ def test_browser_operator_template_refreshes_shared_state() -> None:
     assert "const tabNodes = new Map();" in source
     assert "browser-extensions" in source
     assert "browser-devtools" in source
+    assert "browser-devtools-tab" in source
+    assert "browser-reopen" in source
+    assert "devtools-card" in source
     assert "browser-clean-app" in source
     assert "browser-clean" in source
     assert "Copy page ID" in source
     assert "chrome://extensions/" in source
     assert "type:'open_devtools'" in source
+    assert "dock:true" in source
+    assert "type:'reopen_closed_page'" in source
+    assert "document.activeElement!==urlInput" in source
     assert "type:'clean_app'" in source
     assert "type:'clean_browser'" in source
     assert "/admin/browser/ticket" in source

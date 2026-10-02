@@ -412,3 +412,132 @@ async def test_operator_clean_browser_erases_profile_and_blocks_agents(
     assert '"agent_access_enabled":false' in policy
     with pytest.raises(BrowserError, match="agent access is disabled"):
         browser._require_agent_access()
+
+
+@pytest.mark.asyncio
+async def test_operator_docks_devtools_without_replacing_selected_page(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        def __init__(self, url: str, title: str) -> None:
+            self.url = url
+            self._title = title
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def title(self) -> str:
+            return self._title
+
+        async def goto(self, url: str, *, wait_until: str):
+            assert wait_until == "domcontentloaded"
+            self.url = url
+            self._title = "DevTools"
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class FakeSession:
+        async def send(self, method: str, params: object | None = None):
+            del params
+            assert method == "Target.getTargetInfo"
+            return {"targetInfo": {"targetId": "target-main"}}
+
+        async def detach(self) -> None:
+            return
+
+    main_page = FakePage("https://example.test/", "Example")
+    devtools_page = FakePage("about:blank", "")
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.pages = [main_page]
+
+        async def new_cdp_session(self, _page: object) -> FakeSession:
+            return FakeSession()
+
+        async def new_page(self) -> FakePage:
+            self.pages.append(devtools_page)
+            return devtools_page
+
+    context = FakeContext()
+    main_id = browser._register_page(cast(Any, main_page))
+    browser._operator_pages["owner"] = main_id
+    browser._operator_devtools_pages["owner"] = ""
+    browser._operator_devtools_targets["owner"] = ""
+
+    async def fake_started() -> Any:
+        return cast(Any, context)
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    result = await browser.operator_open_devtools("owner", main_id, dock=True)
+    devtools_id = str(result["page_id"])
+
+    assert result["docked"] is True
+    assert browser._operator_pages["owner"] == main_id
+    assert browser._operator_devtools_pages["owner"] == devtools_id
+    state = await browser.operator_state("owner")
+    assert state["selected_page_id"] == main_id
+    assert state["devtools_page_id"] == devtools_id
+
+
+@pytest.mark.asyncio
+async def test_operator_reopens_last_closed_tab_with_label_and_policy(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        def __init__(self, url: str = "about:blank", title: str = "") -> None:
+            self.url = url
+            self._title = title
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def title(self) -> str:
+            return self._title
+
+        async def close(self) -> None:
+            self.closed = True
+
+        async def goto(self, url: str, *, wait_until: str):
+            assert wait_until == "domcontentloaded"
+            self.url = url
+            self._title = "Reopened"
+
+    original = FakePage("https://example.test/path", "Original")
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.pages = [original]
+
+        async def new_page(self) -> FakePage:
+            page = FakePage()
+            self.pages.append(page)
+            return page
+
+    context = FakeContext()
+    page_id = browser._register_page(cast(Any, original))
+    browser._page_labels[page_id] = "Work"
+    browser._page_agent_access[page_id] = False
+    browser._operator_pages["owner"] = page_id
+    browser._operator_devtools_pages["owner"] = ""
+    browser._operator_devtools_targets["owner"] = ""
+
+    async def fake_started() -> Any:
+        return cast(Any, context)
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    closed = await browser.operator_close_page("owner", page_id)
+    assert closed["closed"] is True
+    assert browser._closed_pages
+
+    reopened = await browser.operator_reopen_closed_page("owner")
+    reopened_id = str(reopened["page_id"])
+    assert reopened["reopened"] is True
+    assert reopened["url"] == "https://example.test/path"
+    assert reopened["label"] == "Work"
+    assert reopened["page_agent_access"] is False
+    assert browser._operator_pages["owner"] == reopened_id
+    assert browser._closed_pages == []

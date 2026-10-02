@@ -41,13 +41,14 @@ async def browser_operator_websocket(
     owner_token = str(owner["owner_token"])
     selected_page_id = str(owner.get("selected_page_id") or "")
     stream_task: asyncio.Task[None] | None = None
+    devtools_stream_task: asyncio.Task[None] | None = None
 
     async def send_state() -> None:
         state = await browser.operator_state(owner_token)
         state["type"] = "state"
         await websocket.send_json(state)
 
-    async def stream(page_id: str) -> None:
+    async def stream(page_id: str, *, role: str = "main") -> None:
         page, session = await browser.operator_cdp_session(owner_token, page_id)
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=2)
         loop = asyncio.get_running_loop()
@@ -87,6 +88,7 @@ async def browser_operator_websocket(
                 await websocket.send_json(
                     {
                         "type": "frame",
+                        "role": role,
                         "page_id": page_id,
                         "data": payload.get("data", ""),
                         "metadata": payload.get("metadata", {}),
@@ -106,14 +108,17 @@ async def browser_operator_websocket(
         if stream_task is not None:
             stream_task.cancel()
             await asyncio.gather(stream_task, return_exceptions=True)
-        stream_task = asyncio.create_task(stream(page_id), name="browser-operator-stream")
+        stream_task = asyncio.create_task(
+            stream(page_id, role="main"),
+            name="browser-operator-stream",
+        )
         await send_state()
 
     try:
         await send_state()
         if selected_page_id:
             stream_task = asyncio.create_task(
-                stream(selected_page_id),
+                stream(selected_page_id, role="main"),
                 name="browser-operator-stream",
             )
 
@@ -174,16 +179,42 @@ async def browser_operator_websocket(
                 elif kind == "open_devtools":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")
+                    dock = message.get("dock") is True
                     result = await browser.operator_open_devtools(
                         owner_token,
                         selected_page_id,
                         panel=str(message.get("panel") or "elements"),
+                        dock=dock,
                     )
                     new_page_id = str(result.get("page_id") or "")
-                    if new_page_id and new_page_id != selected_page_id:
+                    if dock:
+                        if devtools_stream_task is not None:
+                            devtools_stream_task.cancel()
+                            await asyncio.gather(
+                                devtools_stream_task, return_exceptions=True
+                            )
+                        if new_page_id:
+                            devtools_stream_task = asyncio.create_task(
+                                stream(new_page_id, role="devtools"),
+                                name="browser-operator-devtools-stream",
+                            )
+                        await send_state()
+                    elif new_page_id and new_page_id != selected_page_id:
                         await select_page(new_page_id)
                     else:
                         await send_state()
+                elif kind == "close_devtools":
+                    await browser.operator_close_devtools(owner_token)
+                    if devtools_stream_task is not None:
+                        devtools_stream_task.cancel()
+                        await asyncio.gather(
+                            devtools_stream_task, return_exceptions=True
+                        )
+                        devtools_stream_task = None
+                    await send_state()
+                elif kind == "reopen_closed_page":
+                    result = await browser.operator_reopen_closed_page(owner_token)
+                    await select_page(str(result["page_id"]))
                 elif kind == "clean_app":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")
@@ -194,11 +225,17 @@ async def browser_operator_websocket(
                         stream_task.cancel()
                         await asyncio.gather(stream_task, return_exceptions=True)
                         stream_task = None
+                    if devtools_stream_task is not None:
+                        devtools_stream_task.cancel()
+                        await asyncio.gather(
+                            devtools_stream_task, return_exceptions=True
+                        )
+                        devtools_stream_task = None
                     result = await browser.operator_clean_browser(owner_token)
                     selected_page_id = str(result.get("selected_page_id") or "")
                     if selected_page_id:
                         stream_task = asyncio.create_task(
-                            stream(selected_page_id),
+                            stream(selected_page_id, role="main"),
                             name="browser-operator-stream",
                         )
                     await send_state()
@@ -209,7 +246,15 @@ async def browser_operator_websocket(
                     await browser.operator_reload(owner_token, selected_page_id)
                     await send_state()
                 elif kind == "close_page":
-                    await browser.operator_close_page(owner_token, selected_page_id)
+                    closed = await browser.operator_close_page(
+                        owner_token, selected_page_id
+                    )
+                    if closed.get("closed_devtools_page_id") and devtools_stream_task is not None:
+                        devtools_stream_task.cancel()
+                        await asyncio.gather(
+                            devtools_stream_task, return_exceptions=True
+                        )
+                        devtools_stream_task = None
                     state = await browser.operator_state(owner_token)
                     next_page = str(state.get("selected_page_id") or "")
                     if next_page:
@@ -222,9 +267,10 @@ async def browser_operator_websocket(
                         selected_page_id = ""
                         await send_state()
                 elif kind == "mouse":
+                    target_page_id = str(message.get("page_id") or selected_page_id)
                     await browser.operator_mouse(
                         owner_token,
-                        selected_page_id,
+                        target_page_id,
                         event_type=str(message.get("event") or ""),
                         x=float(message.get("x") or 0),
                         y=float(message.get("y") or 0),
@@ -234,15 +280,17 @@ async def browser_operator_websocket(
                         delta_y=float(message.get("delta_y") or 0),
                     )
                 elif kind == "key":
+                    target_page_id = str(message.get("page_id") or selected_page_id)
                     await browser.operator_key(
                         owner_token,
-                        selected_page_id,
+                        target_page_id,
                         str(message.get("key") or ""),
                     )
                 elif kind == "text":
+                    target_page_id = str(message.get("page_id") or selected_page_id)
                     await browser.operator_text(
                         owner_token,
-                        selected_page_id,
+                        target_page_id,
                         str(message.get("text") or ""),
                     )
                 elif kind == "release":
@@ -255,6 +303,9 @@ async def browser_operator_websocket(
         if stream_task is not None:
             stream_task.cancel()
             await asyncio.gather(stream_task, return_exceptions=True)
+        if devtools_stream_task is not None:
+            devtools_stream_task.cancel()
+            await asyncio.gather(devtools_stream_task, return_exceptions=True)
         await browser.operator_release(owner_token)
         with contextlib.suppress(RuntimeError):
             await websocket.close()

@@ -172,15 +172,19 @@ observable.
 
 Management `/admin/browser` is the operator surface for the same persistent Chromium
 profile. It provides compact shared tabs, per-tab and browser-wide agent access controls,
-page-ID copy, Chromium extension management through `chrome://extensions`, and DevTools
-for the selected tab. DevTools uses a Chromium remote-debugging endpoint bound only to
-`127.0.0.1` inside the Web container; no debugging port is published by Compose. `Clean App`
-clears cookies and origin-scoped site data only for the selected HTTP(S) application, while
-`Clean browser` is deliberately destructive: it stops Chromium, erases the persistent
-profile plus browser cache/config/crash state, starts one clean `about:blank` tab, and leaves
-agent access disabled. Browser-operator WebSocket reconnects mint a fresh short-lived Admin
-ticket instead of reusing an expired page-load ticket. The runtime uses normal Chromium
-capabilities; it does not add fingerprint spoofing or site-control bypass logic.
+page-ID copy, Chromium extension management through `chrome://extensions`, docked DevTools
+beside the selected page, optional separate DevTools tabs, and reopening the last closed tab.
+Chromium is launched as the persistent browser process with a remote-debugging endpoint bound
+only to `127.0.0.1` inside the Web container; Playwright attaches to that same process through
+CDP, so the bundled Chromium DevTools frontend and agent/operator automation share one target
+transport. No debugging port is published by Compose. `Clean App` clears cookies and
+origin-scoped site data only for the selected HTTP(S) application, while `Clean browser` is
+deliberately destructive: it stops Chromium, erases the persistent profile plus browser
+cache/config/crash state, starts one clean `about:blank` tab, and leaves agent access disabled.
+Browser-operator WebSocket reconnects mint a fresh short-lived Admin ticket instead of reusing
+an expired page-load ticket. Periodic state refreshes do not overwrite an address currently
+being edited. The runtime uses normal Chromium capabilities; it does not add fingerprint
+spoofing or site-control bypass logic.
 
 ## OAuth sessions
 
