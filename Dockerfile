@@ -91,7 +91,7 @@ ENV ASGI_APP=modules.files.runtime:app \
     FILE_WORKSPACE_ROOT=/workspace
 
 
-FROM runtime-base AS curl
+FROM runtime-base AS web
 COPY --from=chrome-devtools-mcp /usr/local/bin/node /usr/local/bin/node
 COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp /opt/chrome-devtools-mcp
 RUN apt-get update \
@@ -100,8 +100,8 @@ RUN apt-get update \
     && uv sync --frozen --no-dev --group web --no-install-project
 COPY src/modules/__init__.py ./src/modules/__init__.py
 COPY src/modules/files ./src/modules/files
-COPY src/modules/curl ./src/modules/curl
-ENV ASGI_APP=modules.curl.runtime:app \
+COPY src/modules/web ./src/modules/web
+ENV ASGI_APP=modules.web.runtime:app \
     FILE_WORKSPACE_ROOT=/workspace \
     BROWSER_PROFILE_PATH=/browser/profile \
     BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \

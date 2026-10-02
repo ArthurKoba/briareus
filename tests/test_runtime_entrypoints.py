@@ -4,11 +4,11 @@ import pytest
 from fastmcp import Client
 
 from modules.analysis.runtime import mcp as analysis
-from modules.curl.runtime import mcp as curl
 from modules.files.runtime import mcp as files
 from modules.github.runtime import mcp as github
 from modules.gitlab.runtime import mcp as gitlab
 from modules.observability.runtime import mcp as observability
+from modules.web.runtime import mcp as web
 
 
 async def _tool_names(mcp) -> set[str]:
@@ -73,7 +73,7 @@ async def test_files_runtime_surface_is_isolated() -> None:
 
 @pytest.mark.asyncio
 async def test_http_runtime_surface_is_isolated() -> None:
-    names = await _tool_names(curl)
+    names = await _tool_names(web)
 
     assert "curl_presets" in names
     assert "curl_request" in names

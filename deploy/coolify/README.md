@@ -14,7 +14,7 @@ Traefik -> gateway
              +-- github
              +-- gitlab
              +-- files
-             +-- curl
+             +-- web
              +-- terminal
              +-- observability (SigNoz + Coolify read-only MCP adapter)
              +-- analysis -> ghidra

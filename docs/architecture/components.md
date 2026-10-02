@@ -9,7 +9,7 @@
 | `modules.github` | `github` | GitHub repository, review, history and Actions capabilities |
 | `modules.gitlab` | `gitlab` | GitLab projects, repositories, merge requests, issues and CI |
 | `modules.files` | `files` | immutable storage, metadata, uploads, collections and lifecycle |
-| `modules.curl` | `curl` | structured requests, downloads and stream capture |
+| `modules.web` | `web` | structured HTTP, browser and DevTools operations |
 | `modules.analysis` | `analysis` | structured analysis facade |
 | `modules.ghidra` | `ghidra` | private native backend adapter |
 

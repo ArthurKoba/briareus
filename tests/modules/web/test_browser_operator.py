@@ -5,8 +5,8 @@ from typing import Any, cast
 
 import pytest
 
-from modules.curl.browser import BrowserError, BrowserManager
 from modules.files.workspace_store import WorkspaceFileStore
+from modules.web.browser import BrowserError, BrowserManager
 
 
 def _browser(tmp_path: Path) -> BrowserManager:

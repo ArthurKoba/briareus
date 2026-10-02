@@ -16,7 +16,7 @@ mcp-bridge/
 │       ├── github/
 │       ├── gitlab/
 │       ├── files/
-│       ├── curl/
+│       ├── web/
 │       ├── analysis/
 │       └── terminal/
 ├── tests/

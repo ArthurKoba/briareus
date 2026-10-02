@@ -123,11 +123,11 @@ services:
     environment:
       <<: [*management-client, *observability]
 
-  curl:
+  web:
     <<: *file-service
     build:
       <<: *build
-      target: curl
+      target: web
     environment:
       <<: [*management-client, *observability]
     volumes:

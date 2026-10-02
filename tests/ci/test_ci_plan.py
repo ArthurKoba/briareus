@@ -11,11 +11,11 @@ plan = ci_plan.plan
 
 
 def test_browser_change_is_targeted() -> None:
-    result = plan(["src/modules/curl/browser.py", "tests/modules/curl/test_browser_tools.py"])
+    result = plan(["src/modules/web/browser.py", "tests/modules/web/test_browser_tools.py"])
     assert result["full"] is False
-    assert result["areas"] == ["curl"]
-    assert result["pytest_paths"] == ["tests/modules/curl"]
-    assert result["mypy_paths"] == ["src/modules/curl"]
+    assert result["areas"] == ["web"]
+    assert result["pytest_paths"] == ["tests/modules/web"]
+    assert result["mypy_paths"] == ["src/modules/web"]
 
 
 def test_terminal_change_is_targeted() -> None:
@@ -46,14 +46,14 @@ def test_shared_or_build_changes_force_full_gate() -> None:
 
 
 def test_manual_full_gate_can_be_forced() -> None:
-    result = plan(["src/modules/curl/browser.py"], force_full=True)
+    result = plan(["src/modules/web/browser.py"], force_full=True)
     assert result["full"] is True
 
 
 def test_main_push_uses_targeted_plan_by_default() -> None:
-    result = plan(["src/modules/curl/browser.py"])
+    result = plan(["src/modules/web/browser.py"])
     assert result["full"] is False
-    assert result["pytest_paths"] == ["tests/modules/curl"]
+    assert result["pytest_paths"] == ["tests/modules/web"]
 
 
 def test_docs_only_change_has_no_runtime_validation() -> None:

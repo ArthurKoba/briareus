@@ -114,7 +114,7 @@ class BridgeSettings(ProcessSettings):
     github_url: str = Field("http://github:8000/mcp", validation_alias="GITHUB_URL")
     gitlab_url: str = Field("http://gitlab:8000/mcp", validation_alias="GITLAB_URL")
     files_url: str = Field("http://files:8000/mcp", validation_alias="FILES_URL")
-    curl_url: str = Field("http://curl:8000/mcp", validation_alias="CURL_URL")
+    web_url: str = Field("http://web:8000/mcp", validation_alias="WEB_URL")
     analysis_url: str = Field(
         "http://analysis:8000/mcp",
         validation_alias="ANALYSIS_URL",
@@ -149,7 +149,7 @@ class BridgeSettings(ProcessSettings):
         "github_url",
         "gitlab_url",
         "files_url",
-        "curl_url",
+        "web_url",
         "analysis_url",
         "ghidra_url",
         "terminal_url",
@@ -173,7 +173,7 @@ class BridgeSettings(ProcessSettings):
             "github": self.github_url or "http://github:8000/mcp",
             "gitlab": self.gitlab_url or "http://gitlab:8000/mcp",
             "files": self.files_url or "http://files:8000/mcp",
-            "web": self.curl_url or "http://curl:8000/mcp",
+            "web": self.web_url or "http://web:8000/mcp",
             "analysis": self.analysis_url or "http://analysis:8000/mcp",
             "ghidra": self.ghidra_url or "http://ghidra:8000/mcp",
             "terminal": self.terminal_url or "http://terminal:8000/mcp",

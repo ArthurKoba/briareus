@@ -86,7 +86,7 @@ src/
     ├── github/
     ├── gitlab/
     ├── files/
-    ├── curl/
+    ├── web/
     ├── analysis/
     ├── ghidra/
     └── terminal/
@@ -96,7 +96,7 @@ src/
 
 Production is one Git-backed Coolify Docker Compose application. The Compose file is the
 topology authority and starts separate containers for `auth`, `gateway`, `management`,
-`github`, `gitlab`, `files`, `curl`, `terminal`, `analysis`, `ghidra`, and `observability`.
+`github`, `gitlab`, `files`, `web`, `terminal`, `analysis`, `ghidra`, and `observability`.
 
 Deployments may rebuild or recreate the stack. Runtime correctness does not depend on
 selective-restart scripts. Each service has its own restart policy, and Compose

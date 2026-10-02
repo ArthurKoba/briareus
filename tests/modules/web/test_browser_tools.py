@@ -6,8 +6,8 @@ import pytest
 from fastmcp import Client, FastMCP
 from mcp.types import ToolAnnotations
 
-from modules.curl.browser import BrowserError, BrowserManager
-from modules.curl.browser_tools import register_browser_tools
+from modules.web.browser import BrowserError, BrowserManager
+from modules.web.browser_tools import register_browser_tools
 
 
 class FakeBrowser:
@@ -108,7 +108,7 @@ def test_browser_rejects_non_http_urls() -> None:
 
 
 def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
-    source = Path("src/modules/curl/browser.py").read_text()
+    source = Path("src/modules/web/browser.py").read_text()
     assert '"--no-sandbox"' in source
     assert '_REMOTE_DEBUGGING_HOST = "127.0.0.1"' in source
     assert '_REMOTE_DEBUGGING_PORT = 9222' in source
