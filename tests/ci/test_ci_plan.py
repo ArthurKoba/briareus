@@ -39,6 +39,7 @@ def test_shared_or_build_changes_force_full_gate() -> None:
         "pyproject.toml",
         "Dockerfile",
         ".github/workflows/ci.yaml",
+        "scripts/ci_plan.py",
     )
     for path in full_paths:
         result = plan([path])

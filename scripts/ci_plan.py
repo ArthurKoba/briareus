@@ -26,6 +26,7 @@ FULL_TRIGGERS = (
     "pyproject.toml",
     "uv.lock",
     "docker-entrypoint.sh",
+    "scripts/ci_plan.py",
     "src/common/",
     "tests/common/",
     "tests/test_architecture_boundaries.py",
