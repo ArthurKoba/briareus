@@ -765,6 +765,22 @@ class MultiResourceGitHubProvider(GitHubProvider):
                         error_message=str(error)[:2048],
                     )
                 )
+                if reauth_required:
+                    await self._refresh_token_store.delete(
+                        key=hashlib.sha256(refresh_token.token.encode()).hexdigest()
+                    )
+                    if old_refresh_jti:
+                        await self._jti_mapping_store.delete(key=old_refresh_jti)
+                    self._log_refresh_flow(
+                        "invalidated_dead_refresh",
+                        flow_id=flow_id,
+                        client_id=client_id,
+                        resource=resource,
+                        refresh_jti=old_refresh_jti,
+                        session_id=session_id,
+                        detail="deleted client refresh metadata and JTI mapping",
+                        level=logging.WARNING,
+                    )
                 if error is exc:
                     raise
                 raise error from exc

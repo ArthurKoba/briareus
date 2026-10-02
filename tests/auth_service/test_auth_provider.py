@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from types import SimpleNamespace
 
@@ -342,3 +343,91 @@ async def test_bad_upstream_refresh_is_marked_reauth_required(monkeypatch, caplo
     assert "terminal_failure" in caplog.text
     assert "reauth_required=true" in caplog.text
     assert "dead-refresh-token" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_bad_upstream_refresh_invalidates_dead_client_refresh(monkeypatch) -> None:
+    from fastmcp.server.auth.oauth_proxy.models import (
+        JTIMapping,
+        RefreshTokenMetadata,
+        UpstreamTokenSet,
+    )
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from mcp.server.auth.provider import RefreshToken, TokenError
+
+    provider = MultiResourceGitHubProvider(_settings())
+    analysis = resource_url(provider.settings.public_base_url, "analysis")
+    old_jti = f"dead-jti-{time.time_ns()}"
+    upstream_id = f"dead-upstream-{time.time_ns()}"
+    old_token = provider.issuer_for_resource(analysis).issue_refresh_token(
+        client_id="chatgpt-client",
+        scopes=["read:user"],
+        jti=old_jti,
+        expires_in=60,
+    )
+    refresh = RefreshToken(
+        token=old_token,
+        client_id="chatgpt-client",
+        resource=analysis,
+        expires_at=int(time.time()) + 60,
+        scopes=["read:user"],
+    )
+    refresh_hash = hashlib.sha256(old_token.encode()).hexdigest()
+    await provider._refresh_token_store.put(
+        key=refresh_hash,
+        value=RefreshTokenMetadata(
+            client_id="chatgpt-client",
+            scopes=["read:user"],
+            expires_at=int(time.time()) + 60,
+            created_at=time.time(),
+        ),
+        ttl=60,
+    )
+    await provider._jti_mapping_store.put(
+        key=old_jti,
+        value=JTIMapping(
+            jti=old_jti,
+            upstream_token_id=upstream_id,
+            created_at=time.time(),
+        ),
+        ttl=60,
+    )
+    await provider._upstream_token_store.put(
+        key=upstream_id,
+        value=UpstreamTokenSet(
+            upstream_token_id=upstream_id,
+            access_token="upstream-access",
+            refresh_token="dead-upstream-refresh",
+            refresh_token_expires_at=time.time() + 3600,
+            expires_at=time.time() + 3600,
+            token_type="bearer",
+            scope="read:user",
+            client_id="github-client",
+            created_at=time.time(),
+        ),
+        ttl=3600,
+    )
+
+    async def fail_exchange(self, client, refresh_token, scopes):
+        del self, client, refresh_token, scopes
+        raise TokenError(
+            "invalid_grant",
+            "Upstream refresh failed: bad_refresh_token: expired",
+        )
+
+    monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fail_exchange)
+
+    with pytest.raises(TokenError, match="bad_refresh_token"):
+        await provider.exchange_refresh_token(
+            SimpleNamespace(client_id="chatgpt-client"),  # type: ignore[arg-type]
+            refresh,
+            ["read:user"],
+        )
+
+    assert await provider._refresh_token_store.get(key=refresh_hash) is None
+    assert await provider._jti_mapping_store.get(key=old_jti) is None
+    loaded_again = await provider.load_refresh_token(
+        SimpleNamespace(client_id="chatgpt-client"),  # type: ignore[arg-type]
+        old_token,
+    )
+    assert loaded_again is None
