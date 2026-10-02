@@ -156,6 +156,16 @@ target. The dependency layer copies only `pyproject.toml` and `uv.lock` and runs
 `uv sync --frozen --no-dev --no-install-project` before runtime-specific source is
 copied. Normal source changes therefore reuse the server-local dependency cache.
 
+GitHub CI intentionally does not build production container images. CI owns static analysis
+and pytest validation; Coolify owns the single production image build on the deployment host.
+This avoids building the same image once on a hosted CI runner and again on the server.
+
+Compose overrides the image healthcheck for deployment responsiveness. The shared runtime
+probe uses a 2-second interval and start period, a 1-second timeout, and 10 retries. A healthy
+service is therefore released to dependent services quickly while retaining roughly 20 seconds
+of failure tolerance. Keeping this override in Compose avoids invalidating Docker image layers
+when deployment-health timing is tuned.
+
 A full Compose reconcile may restart healthy containers briefly, but a failure in one
 runtime must not cascade into another runtime after startup. Keep orchestration simple
 and preserve that failure-isolation contract instead of adding selective-restart state.

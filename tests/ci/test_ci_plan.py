@@ -7,7 +7,6 @@ assert _SPEC is not None and _SPEC.loader is not None
 ci_plan = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = ci_plan
 _SPEC.loader.exec_module(ci_plan)
-ALL_DOCKER_TARGETS = ci_plan.ALL_DOCKER_TARGETS
 plan = ci_plan.plan
 
 
@@ -17,20 +16,19 @@ def test_browser_change_is_targeted() -> None:
     assert result["areas"] == ["curl"]
     assert result["pytest_paths"] == ["tests/modules/curl"]
     assert result["mypy_paths"] == ["src/modules/curl"]
-    assert result["docker_targets"] == ["curl"]
 
 
 def test_terminal_change_is_targeted() -> None:
     result = plan(["src/modules/terminal/manager.py"])
     assert result["full"] is False
     assert result["pytest_paths"] == ["tests/modules/terminal"]
-    assert result["docker_targets"] == ["terminal"]
 
 
-def test_files_change_builds_dependent_images() -> None:
+def test_files_change_selects_files_validation() -> None:
     result = plan(["src/modules/files/workspace_store.py"])
     assert result["full"] is False
-    assert result["docker_targets"] == ["files", "management", "analysis", "curl"]
+    assert result["pytest_paths"] == ["tests/modules/files"]
+    assert result["mypy_paths"] == ["src/modules/files"]
 
 
 def test_shared_or_build_changes_force_full_gate() -> None:
@@ -45,7 +43,6 @@ def test_shared_or_build_changes_force_full_gate() -> None:
         result = plan([path])
         assert result["full"] is True
         assert result["pytest_paths"] == ["tests"]
-        assert result["docker_targets"] == list(ALL_DOCKER_TARGETS)
 
 
 def test_manual_full_gate_can_be_forced() -> None:
@@ -57,15 +54,13 @@ def test_main_push_uses_targeted_plan_by_default() -> None:
     result = plan(["src/modules/curl/browser.py"])
     assert result["full"] is False
     assert result["pytest_paths"] == ["tests/modules/curl"]
-    assert result["docker_targets"] == ["curl"]
 
 
-def test_docs_only_change_has_no_test_or_docker_work() -> None:
+def test_docs_only_change_has_no_runtime_validation() -> None:
     result = plan(["README.md", "docs/OPERATIONS.md"])
     assert result["full"] is False
     assert result["areas"] == ["non-code"]
     assert result["pytest_paths"] == []
-    assert result["docker_targets"] == []
 
 
 def test_unknown_source_change_escalates_to_full() -> None:
