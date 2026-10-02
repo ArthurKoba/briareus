@@ -976,7 +976,7 @@ class BrowserView(CustomView):
             self.settings.session_secret,
             self.settings.admin_username,
         )
-        return _view_templates(self).TemplateResponse(
+        response = _view_templates(self).TemplateResponse(
             request=request,
             name="management_browser.html",
             context={
@@ -984,6 +984,9 @@ class BrowserView(CustomView):
                 "browser_operator_ticket": ticket,
             },
         )
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
     @route("/ticket")
     async def ticket(self, request: Request) -> Response:

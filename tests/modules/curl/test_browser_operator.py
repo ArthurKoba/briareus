@@ -412,3 +412,104 @@ async def test_operator_clean_browser_erases_profile_and_blocks_agents(
     assert '"agent_access_enabled":false' in policy
     with pytest.raises(BrowserError, match="agent access is disabled"):
         browser._require_agent_access()
+
+
+@pytest.mark.asyncio
+async def test_docked_devtools_is_hidden_from_normal_tabs_and_released(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        def __init__(self, url: str, title: str) -> None:
+            self.url = url
+            self._title = title
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def title(self) -> str:
+            return self._title
+
+        async def goto(self, url: str, *, wait_until: str):
+            assert wait_until == "domcontentloaded"
+            self.url = url
+            self._title = "DevTools"
+            return
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class FakeSession:
+        async def send(self, method: str, params: object | None = None):
+            del params
+            assert method == "Target.getTargetInfo"
+            return {"targetInfo": {"targetId": "site-target"}}
+
+        async def detach(self) -> None:
+            return
+
+    site = FakePage("https://example.test/", "Example")
+    devtools = FakePage("about:blank", "")
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.pages = [site]
+
+        async def new_cdp_session(self, _page: object) -> FakeSession:
+            return FakeSession()
+
+        async def new_page(self) -> FakePage:
+            self.pages.append(devtools)
+            return devtools
+
+    context = FakeContext()
+    site_id = browser._register_page(cast(Any, site))
+    browser._operator_pages["owner"] = site_id
+
+    async def fake_started() -> Any:
+        return cast(Any, context)
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    result = await browser.operator_open_docked_devtools("owner", site_id)
+    devtools_id = str(result["page_id"])
+
+    state = await browser.operator_state("owner")
+    assert state["selected_page_id"] == site_id
+    assert state["docked_devtools_page_id"] == devtools_id
+    assert [item["page_id"] for item in state["pages"]] == [site_id]  # type: ignore[index]
+    public_pages = await browser.pages()
+    assert [item["page_id"] for item in public_pages["pages"]] == [site_id]  # type: ignore[index]
+
+    await browser.operator_release("owner")
+    assert devtools.closed is True
+    assert devtools_id not in browser._internal_page_ids
+    assert "owner" not in browser._operator_devtools_pages
+
+
+@pytest.mark.asyncio
+async def test_devtools_cannot_inspect_another_devtools_tab(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        url = "devtools://devtools/bundled/inspector.html"
+
+        def is_closed(self) -> bool:
+            return False
+
+        async def title(self) -> str:
+            return "DevTools"
+
+    page = FakePage()
+    page_id = browser._register_page(cast(Any, page))
+    browser._operator_pages["owner"] = page_id
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.pages = [page]
+
+    async def fake_started() -> Any:
+        return cast(Any, FakeContext())
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    with pytest.raises(BrowserError, match="select an application tab"):
+        await browser.operator_open_docked_devtools("owner", page_id)
