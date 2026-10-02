@@ -34,6 +34,8 @@ def invocation_arguments_payload(
     normalized_module = module.strip().casefold()
     if normalized_module == "terminal":
         return _terminal_arguments_payload(arguments)
+    if normalized_module == "web" and tool.startswith("devtools_"):
+        return render_payload({"detail": "Chrome DevTools arguments omitted from Management audit"})
     if normalized_module == "web" and tool.startswith("browser_") and isinstance(arguments, dict):
         bounded = dict(arguments)
         if tool == "browser_fill" and "value" in bounded:
@@ -46,6 +48,8 @@ def invocation_result_payload(module: str, result: object, tool: str = "") -> st
     normalized_module = module.strip().casefold()
     if normalized_module == "terminal":
         return render_payload({"detail": "terminal result omitted from Management audit"})
+    if normalized_module == "web" and tool.startswith("devtools_"):
+        return render_payload({"detail": "Chrome DevTools result omitted from Management audit"})
     if normalized_module == "web" and tool.startswith("browser_"):
         return render_payload({"detail": "browser result omitted from Management audit"})
     return render_payload(result)

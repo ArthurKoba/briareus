@@ -599,6 +599,10 @@ class BrowserSettings(ProcessSettings):
         validation_alias="BROWSER_EXECUTABLE_PATH",
     )
     headless: bool = Field(True, validation_alias="BROWSER_HEADLESS")
+    devtools_mcp_script_path: Path = Field(
+        Path("/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
+        validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
+    )
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
     viewport_width: int = Field(1440, ge=320, le=3840, validation_alias="BROWSER_VIEWPORT_WIDTH")
     viewport_height: int = Field(900, ge=240, le=2160, validation_alias="BROWSER_VIEWPORT_HEIGHT")
@@ -615,11 +619,11 @@ class BrowserSettings(ProcessSettings):
         validation_alias="BROWSER_MAX_SNAPSHOT_ELEMENTS",
     )
 
-    @field_validator("profile_dir")
+    @field_validator("profile_dir", "devtools_mcp_script_path")
     @classmethod
     def _absolute_profile_dir(cls, value: Path) -> Path:
         if not value.is_absolute():
-            raise ValueError("BROWSER_PROFILE_PATH must be absolute")
+            raise ValueError("browser paths must be absolute")
         return value.resolve(strict=False)
 
     @field_validator("executable_path", mode="before")

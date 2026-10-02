@@ -179,6 +179,12 @@ async def browser_operator_websocket(
                         raise BrowserError("allowed must be a boolean")
                     await browser.operator_set_agent_access(owner_token, allowed)
                     await send_state()
+                elif kind == "set_developer_access":
+                    allowed = message.get("allowed")
+                    if not isinstance(allowed, bool):
+                        raise BrowserError("allowed must be a boolean")
+                    await browser.operator_set_developer_access(owner_token, allowed)
+                    await send_state()
                 elif kind == "navigate":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")

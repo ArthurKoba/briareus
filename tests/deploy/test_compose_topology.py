@@ -212,6 +212,7 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "BROWSER_PROFILE_PATH",
         "BROWSER_EXECUTABLE_PATH",
         "BROWSER_HEADLESS",
+        "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
         "BROWSER_TIMEOUT_MS",
         "BROWSER_VIEWPORT_WIDTH",
         "BROWSER_VIEWPORT_HEIGHT",
@@ -309,6 +310,16 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
     assert "uv sync --frozen --no-dev --group web --no-install-project" in web_stage
     assert "BROWSER_PROFILE_PATH=/browser/profile" in web_stage
     assert "BROWSER_EXECUTABLE_PATH=/usr/bin/chromium" in web_stage
+    assert "COPY --from=chrome-devtools-mcp /usr/local/bin/node /usr/local/bin/node" in web_stage
+    assert (
+        "COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp "
+        "/opt/chrome-devtools-mcp"
+    ) in web_stage
+    assert "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH=/opt/chrome-devtools-mcp" in web_stage
+    assert "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1" in web_stage
+    assert "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1" in web_stage
+    assert "CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY=1" in web_stage
+    assert "chrome-devtools-mcp@1.10.1" in dockerfile
     assert "XDG_CONFIG_HOME=/browser/config" in web_stage
     assert "XDG_CACHE_HOME=/browser/cache" in web_stage
     assert "BREAKPAD_DUMP_LOCATION=/browser/crash" in web_stage

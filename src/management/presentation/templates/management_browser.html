@@ -46,6 +46,7 @@
     <button id="browser-devtools" class="btn btn-outline-primary" type="button" disabled title="Dock Chromium DevTools beside the selected tab">DevTools</button>
     <button id="browser-devtools-tab" class="btn btn-outline-primary" type="button" disabled title="Open Chromium DevTools as a separate tab">DevTools tab</button>
     <button id="agent-access-toggle" class="btn btn-outline-success" type="button" disabled>Agents: On</button>
+    <button id="developer-access-toggle" class="btn btn-outline-secondary" type="button" disabled title="Grant agents full Chrome DevTools, network, console, JavaScript and extension access">Developer: Off</button>
     <button id="browser-clean-app" class="btn btn-outline-warning browser-danger" type="button" disabled title="Clear cookies and site data only for the selected application">Clean App</button>
     <button id="browser-clean" class="btn btn-outline-danger" type="button" disabled title="Erase the complete persistent browser profile and block agent access">Clean browser</button>
     <span id="operator-status" class="badge bg-secondary-lt">disconnected</span>
@@ -108,8 +109,9 @@
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-reopen','browser-go','browser-extensions','browser-devtools','browser-devtools-tab','browser-clean-app','browser-clean','agent-access-toggle'];
+  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-reopen','browser-go','browser-extensions','browser-devtools','browser-devtools-tab','browser-clean-app','browser-clean','agent-access-toggle','developer-access-toggle'];
   const agentAccessToggle = document.getElementById('agent-access-toggle');
+  const developerAccessToggle = document.getElementById('developer-access-toggle');
 
   function setConnected(on) {
     status.textContent = on ? 'live' : 'disconnected';
@@ -122,6 +124,11 @@
     agentAccessToggle.textContent = enabled ? 'Agents: On' : 'Agents: Blocked';
     agentAccessToggle.className = 'btn ' + (enabled ? 'btn-outline-success' : 'btn-danger');
     agentAccessToggle.disabled = false;
+  }
+  function renderDeveloperAccess(enabled,effective) {
+    developerAccessToggle.textContent = enabled ? (effective ? 'Developer: On' : 'Developer: Armed') : 'Developer: Off';
+    developerAccessToggle.className = 'btn ' + (effective ? 'btn-danger' : enabled ? 'btn-outline-warning' : 'btn-outline-secondary');
+    developerAccessToggle.disabled = false;
   }
   function copyText(value) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -180,6 +187,7 @@
     liveGrid.classList.toggle('with-devtools',showDevtools);
     if(!showDevtools)devtoolsScreen.removeAttribute('src');
     renderAgentAccess(next.agent_access_enabled!==false);
+    renderDeveloperAccess(next.developer_access_enabled===true,next.developer_access_effective===true);
     const pages=next.pages||[]; const live=new Set();
     pages.forEach(page=>{
       live.add(page.page_id);
@@ -232,6 +240,7 @@
   document.getElementById('browser-clean').onclick=()=>{if(window.confirm('Erase the complete persistent Chromium profile? This removes cookies, sessions, local storage, cache, extensions and open tabs. Agent access will be blocked afterwards.'))send({type:'clean_browser'});};
   document.getElementById('browser-go').onclick=()=>{urlDirty=false;send({type:'navigate',url:urlInput.value});};
   agentAccessToggle.onclick=()=>send({type:'set_agent_access',allowed:state?state.agent_access_enabled===false:false});
+  developerAccessToggle.onclick=()=>{const enabling=!(state&&state.developer_access_enabled===true);if(enabling&&!window.confirm('Enable full agent developer access? Agents will be able to inspect network requests and cookies, execute JavaScript, use Chrome DevTools and install/reload/uninstall extensions from /workspace.'))return;send({type:'set_developer_access',allowed:enabling});};
   urlInput.addEventListener('input',()=>{urlDirty=true;});
   urlInput.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();urlDirty=false;send({type:'navigate',url:urlInput.value});}});
   bindSurface(screen,()=>selectedPage,()=>frameWidth,()=>frameHeight,()=>lastMove,value=>{lastMove=value;});

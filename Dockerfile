@@ -16,6 +16,11 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 
+
+
+FROM node:22-bookworm-slim AS chrome-devtools-mcp
+RUN npm install --global --prefix /opt/chrome-devtools-mcp chrome-devtools-mcp@1.10.1
+
 FROM dependencies AS runtime-base
 
 ARG BUILD_SHA=unknown
@@ -87,6 +92,8 @@ ENV ASGI_APP=modules.files.runtime:app \
 
 
 FROM runtime-base AS curl
+COPY --from=chrome-devtools-mcp /usr/local/bin/node /usr/local/bin/node
+COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp /opt/chrome-devtools-mcp
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/* \
@@ -98,6 +105,10 @@ ENV ASGI_APP=modules.curl.runtime:app \
     FILE_WORKSPACE_ROOT=/workspace \
     BROWSER_PROFILE_PATH=/browser/profile \
     BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
+    BROWSER_DEVTOOLS_MCP_SCRIPT_PATH=/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js \
+    CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1 \
+    CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1 \
+    CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY=1 \
     XDG_CONFIG_HOME=/browser/config \
     XDG_CACHE_HOME=/browser/cache \
     BREAKPAD_DUMP_LOCATION=/browser/crash
