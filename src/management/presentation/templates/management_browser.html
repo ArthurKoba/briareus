@@ -3,7 +3,7 @@
 <div class="d-flex justify-content-between align-items-center">
   <div>
     <h1>Browser Operator</h1>
-    <div class="text-secondary">Human takeover of the persistent Chromium profile</div>
+    <div class="text-secondary">Shared live control of the persistent Chromium profile</div>
   </div>
   <ol class="breadcrumb">
     <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
@@ -25,8 +25,8 @@
 <div id="operator-alert" class="alert alert-info">Connecting to persistent Chromium…</div>
 <div class="card mb-3">
   <div class="card-body d-flex gap-2 flex-wrap align-items-center">
-    <button id="take-control" class="btn btn-primary" type="button">Take control</button>
-    <button id="release-control" class="btn btn-outline-warning" type="button" disabled>Release control</button>
+    <button id="take-control" class="btn btn-primary" type="button">Connect live view</button>
+    <button id="release-control" class="btn btn-outline-secondary" type="button" disabled>Disconnect live view</button>
     <button id="browser-back" class="btn" type="button" disabled>Back</button>
     <button id="browser-reload" class="btn" type="button" disabled>Reload</button>
     <button id="browser-new" class="btn" type="button" disabled>New tab</button>
@@ -54,7 +54,7 @@
       <div class="browser-screen-wrap">
         <img id="browser-screen" tabindex="0" alt="Live Chromium tab">
       </div>
-      <div class="text-secondary small mt-2">Click the live view to focus keyboard input. Agent write-actions are paused while human control is active.</div>
+      <div class="text-secondary small mt-2">Click the live view to focus keyboard input. Agent and operator can interact with the same browser concurrently.</div>
     </div>
   </div>
 </div>
@@ -75,7 +75,7 @@
   const controls = ['release-control','browser-back','browser-reload','browser-new','browser-close','browser-go'];
 
   function setConnected(on) {
-    status.textContent = on ? 'human control' : 'disconnected';
+    status.textContent = on ? 'shared control' : 'disconnected';
     status.className = 'badge ms-auto ' + (on ? 'bg-green-lt' : 'bg-secondary-lt');
     document.getElementById('take-control').disabled = on;
     controls.forEach(id => document.getElementById(id).disabled = !on);
@@ -104,11 +104,11 @@
     ws = new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
     alertBox.className='alert alert-info'; alertBox.textContent='Connecting to persistent Chromium…';
     ws.onopen = () => { ws.send(JSON.stringify({type:'auth', ticket:operatorTicket})); };
-    ws.onclose = () => { setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Human control released.'; };
+    ws.onclose = () => { setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Live view disconnected. Agent control remains available.'; };
     ws.onerror = () => { alertBox.className='alert alert-danger'; alertBox.textContent='Browser operator connection failed.'; };
     ws.onmessage = event => {
       const msg = JSON.parse(event.data);
-      if (msg.type === 'state') { setConnected(true); alertBox.className='alert alert-success'; alertBox.textContent='Human control active. Browser credentials stay inside the persistent profile.'; renderState(msg); }
+      if (msg.type === 'state') { setConnected(true); alertBox.className='alert alert-success'; alertBox.textContent='Shared control active. Agent and operator can interact concurrently.'; renderState(msg); }
       else if (msg.type === 'frame' && msg.page_id === selectedPage) {
         screen.src = `data:image/jpeg;base64,${msg.data}`;
         const meta = msg.metadata || {};
