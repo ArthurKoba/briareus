@@ -47,15 +47,10 @@ class BrowserManager:
         self._page_ids: dict[int, str] = {}
         self._start_lock = asyncio.Lock()
         self._operator_lock = asyncio.Lock()
-        self._operator_token: str | None = None
-        self._operator_page_id = ""
-
-    def _require_agent_control(self) -> None:
-        if self._operator_token is not None:
-            raise BrowserError("browser is under human control; retry after control is released")
+        self._operator_pages: dict[str, str] = {}
 
     def _require_operator(self, owner_token: str) -> None:
-        if not owner_token or owner_token != self._operator_token:
+        if not owner_token or owner_token not in self._operator_pages:
             raise BrowserError("browser operator session is not active")
 
     async def _start_locked(self) -> None:
@@ -205,7 +200,6 @@ class BrowserManager:
         return {"count": len(pages), "pages": pages}
 
     async def open(self, url: str, page_id: str = "") -> JsonObject:
-        self._require_agent_control()
         context = await self._ensure_started()
         target_url = self._url(url)
         if page_id:
@@ -310,14 +304,12 @@ class BrowserManager:
         return page, locator
 
     async def click(self, page_id: str, ref: str) -> JsonObject:
-        self._require_agent_control()
         page, locator = await self._locator(page_id, ref)
         await locator.click()
         await page.wait_for_timeout(150)
         return await self._summary(page_id, page)
 
     async def fill(self, page_id: str, ref: str, value: str, *, press_enter: bool) -> JsonObject:
-        self._require_agent_control()
         page, locator = await self._locator(page_id, ref)
         await locator.fill(value)
         if press_enter:
@@ -326,14 +318,12 @@ class BrowserManager:
         return await self._summary(page_id, page)
 
     async def press(self, page_id: str, ref: str, key: str) -> JsonObject:
-        self._require_agent_control()
         page, locator = await self._locator(page_id, ref)
         await locator.press(key)
         await page.wait_for_timeout(100)
         return await self._summary(page_id, page)
 
     async def select_option(self, page_id: str, ref: str, value: str) -> JsonObject:
-        self._require_agent_control()
         page, locator = await self._locator(page_id, ref)
         selected = await locator.select_option(value=value)
         result = await self._summary(page_id, page)
@@ -341,7 +331,6 @@ class BrowserManager:
         return result
 
     async def upload(self, page_id: str, ref: str, workspace_path: str) -> JsonObject:
-        self._require_agent_control()
         page, locator = await self._locator(page_id, ref)
         source = self.workspace.path_for(workspace_path)
         if not source.is_file():
@@ -359,7 +348,6 @@ class BrowserManager:
         *,
         overwrite: bool,
     ) -> JsonObject:
-        self._require_agent_control()
         page, locator = await self._locator(page_id, ref)
         target = self.workspace.target_path(workspace_path)
         if target.exists() and not overwrite:
@@ -410,13 +398,11 @@ class BrowserManager:
         return await self._summary(page_id, page)
 
     async def back(self, page_id: str) -> JsonObject:
-        self._require_agent_control()
         page = await self._page(page_id)
         await page.go_back(wait_until="domcontentloaded")
         return await self._summary(page_id, page)
 
     async def reload(self, page_id: str) -> JsonObject:
-        self._require_agent_control()
         page = await self._page(page_id)
         response = await page.reload(wait_until="domcontentloaded")
         result = await self._summary(page_id, page)
@@ -424,7 +410,6 @@ class BrowserManager:
         return result
 
     async def close_page(self, page_id: str) -> JsonObject:
-        self._require_agent_control()
         page = await self._page(page_id)
         await page.close()
         self._forget_page(page_id)
@@ -432,28 +417,25 @@ class BrowserManager:
 
     async def operator_acquire(self) -> JsonObject:
         await self._ensure_started()
+        pages = await self.pages()
+        raw_pages = pages.get("pages")
+        page_items = raw_pages if isinstance(raw_pages, list) else []
+        selected_page_id = (
+            str(page_items[0].get("page_id") or "")
+            if page_items and isinstance(page_items[0], dict)
+            else ""
+        )
+        owner_token = uuid.uuid4().hex
         async with self._operator_lock:
-            if self._operator_token is not None:
-                raise BrowserError("browser is already under human control")
-            self._operator_token = uuid.uuid4().hex
-            pages = await self.pages()
-            raw_pages = pages.get("pages")
-            page_items = raw_pages if isinstance(raw_pages, list) else []
-            self._operator_page_id = (
-                str(page_items[0].get("page_id") or "")
-                if page_items and isinstance(page_items[0], dict)
-                else ""
-            )
-            return {
-                "owner_token": self._operator_token,
-                "selected_page_id": self._operator_page_id,
-            }
+            self._operator_pages[owner_token] = selected_page_id
+        return {
+            "owner_token": owner_token,
+            "selected_page_id": selected_page_id,
+        }
 
     async def operator_release(self, owner_token: str) -> None:
         async with self._operator_lock:
-            if owner_token == self._operator_token:
-                self._operator_token = None
-                self._operator_page_id = ""
+            self._operator_pages.pop(owner_token, None)
 
     async def operator_state(self, owner_token: str) -> JsonObject:
         self._require_operator(owner_token)
@@ -465,20 +447,26 @@ class BrowserManager:
             for item in page_items
             if isinstance(item, dict) and item.get("page_id")
         }
-        if self._operator_page_id not in valid_ids:
-            self._operator_page_id = next(iter(valid_ids), "")
+        selected_page_id = self._operator_pages.get(owner_token, "")
+        if selected_page_id not in valid_ids:
+            selected_page_id = next(iter(valid_ids), "")
+            async with self._operator_lock:
+                if owner_token in self._operator_pages:
+                    self._operator_pages[owner_token] = selected_page_id
         return {
-            "control": "human",
-            "selected_page_id": self._operator_page_id,
+            "control": "shared",
+            "selected_page_id": selected_page_id,
             "pages": page_items,
             "page_count": len(page_items),
+            "operator_count": len(self._operator_pages),
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
         }
 
     async def operator_select_page(self, owner_token: str, page_id: str) -> None:
         self._require_operator(owner_token)
         await self._page(page_id)
-        self._operator_page_id = page_id
+        async with self._operator_lock:
+            self._operator_pages[owner_token] = page_id
 
     async def operator_cdp_session(self, owner_token: str, page_id: str) -> tuple[Page, CDPSession]:
         self._require_operator(owner_token)
@@ -493,7 +481,8 @@ class BrowserManager:
         page_id = self._register_page(page)
         if url.strip():
             await page.goto(self._url(url), wait_until="domcontentloaded")
-        self._operator_page_id = page_id
+        async with self._operator_lock:
+            self._operator_pages[owner_token] = page_id
         return await self._summary(page_id, page)
 
     async def operator_navigate(self, owner_token: str, page_id: str, url: str) -> JsonObject:
@@ -521,8 +510,9 @@ class BrowserManager:
         page = await self._page(page_id)
         await page.close()
         self._forget_page(page_id)
-        if self._operator_page_id == page_id:
-            self._operator_page_id = ""
+        async with self._operator_lock:
+            if self._operator_pages.get(owner_token) == page_id:
+                self._operator_pages[owner_token] = ""
         return {"page_id": page_id, "closed": True}
 
     async def operator_mouse(
