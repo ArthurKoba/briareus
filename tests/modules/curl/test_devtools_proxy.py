@@ -120,7 +120,7 @@ def test_devtools_proxy_pins_official_server_and_restricts_workspace(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_devtools_catalog_is_hidden_and_upstream_is_not_started_when_access_is_off(
+async def test_devtools_catalog_stays_visible_but_upstream_disconnects_when_access_is_off(
     tmp_path: Path,
 ) -> None:
     browser = _browser(tmp_path)
@@ -139,15 +139,12 @@ async def test_devtools_catalog_is_hidden_and_upstream_is_not_started_when_acces
         description="Evaluate JavaScript in the selected page.",
     )
 
-    called = False
-
     async def call_next(_context: Any):
-        nonlocal called
-        called = True
         return [upstream_tool]
 
     tools = await middleware.on_list_tools(cast(Any, object()), call_next)
 
-    assert tools == []
-    assert called is False
+    assert len(tools) == 1
+    assert tools[0].name == "evaluate_script"
+    assert "Developer access is OFF" in (tools[0].description or "")
     assert transport.disconnects == 1
