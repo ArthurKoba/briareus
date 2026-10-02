@@ -199,17 +199,96 @@ def test_operator_allows_only_bounded_chromium_internal_pages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_operator_opens_devtools_for_selected_tab(tmp_path: Path) -> None:
+async def test_operator_opens_devtools_frontend_for_selected_tab(tmp_path: Path) -> None:
     browser = _browser(tmp_path)
 
     class FakePage:
-        url = "https://example.test/"
+        def __init__(self, url: str, title: str) -> None:
+            self.url = url
+            self._title = title
+            self.closed = False
+            self.navigated_to = ""
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def title(self) -> str:
+            return self._title
+
+        async def goto(self, url: str, *, wait_until: str):
+            assert wait_until == "domcontentloaded"
+            self.url = url
+            self.navigated_to = url
+            self._title = "DevTools"
+            return
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.detached = False
+
+        async def send(self, method: str, params: object | None = None):
+            del params
+            assert method == "Target.getTargetInfo"
+            return {"targetInfo": {"targetId": "target-page"}}
+
+        async def detach(self) -> None:
+            self.detached = True
+
+    page = FakePage("https://example.test/", "Example")
+    devtools_page = FakePage("about:blank", "")
+    session = FakeSession()
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.pages = [page]
+
+        async def new_cdp_session(self, _page: object) -> FakeSession:
+            return session
+
+        async def new_page(self) -> FakePage:
+            self.pages.append(devtools_page)
+            return devtools_page
+
+    context = FakeContext()
+    page_id = browser._register_page(cast(Any, page))
+    browser._operator_pages["owner"] = page_id
+
+    async def fake_started() -> Any:
+        return cast(Any, context)
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    result = await browser.operator_open_devtools("owner", page_id)
+
+    assert result["opened_devtools"] is True
+    assert result["devtools_target_id"] == "target-page"
+    assert result["inspected_page_id"] == page_id
+    assert result["page_id"] != page_id
+    assert session.detached is True
+    assert devtools_page.navigated_to == (
+        "devtools://devtools/bundled/inspector.html?panel=elements"
+        "&ws=127.0.0.1:9222/devtools/page/target-page"
+    )
+
+
+@pytest.mark.asyncio
+async def test_operator_clean_app_clears_only_selected_origin(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        url = "https://app.example.test/account?tab=1"
 
         def is_closed(self) -> bool:
             return False
 
         async def title(self) -> str:
-            return "Example"
+            return "App"
+
+        async def reload(self, *, wait_until: str):
+            assert wait_until == "domcontentloaded"
+            return
 
     class FakeSession:
         def __init__(self) -> None:
@@ -218,10 +297,13 @@ async def test_operator_opens_devtools_for_selected_tab(tmp_path: Path) -> None:
 
         async def send(self, method: str, params: object | None = None):
             self.calls.append((method, params))
-            if method == "Target.getTargetInfo":
-                return {"targetInfo": {"targetId": "target-page"}}
-            if method == "Target.openDevTools":
-                return {"targetId": "target-devtools"}
+            if method == "Network.getCookies":
+                return {
+                    "cookies": [
+                        {"name": "sid", "domain": ".example.test", "path": "/"},
+                        {"name": "csrf", "domain": "app.example.test", "path": "/"},
+                    ]
+                }
             return {}
 
         async def detach(self) -> None:
@@ -231,9 +313,6 @@ async def test_operator_opens_devtools_for_selected_tab(tmp_path: Path) -> None:
     session = FakeSession()
 
     class FakeContext:
-        def __init__(self) -> None:
-            self.pages = [page]
-
         async def new_cdp_session(self, _page: object) -> FakeSession:
             return session
 
@@ -244,15 +323,19 @@ async def test_operator_opens_devtools_for_selected_tab(tmp_path: Path) -> None:
         return cast(Any, FakeContext())
 
     browser._ensure_started = fake_started  # type: ignore[method-assign]
-    result = await browser.operator_open_devtools("owner", page_id)
+    result = await browser.operator_clean_app("owner", page_id)
 
-    assert result["opened_devtools"] is True
-    assert result["devtools_target_id"] == "target-devtools"
-    assert result["page_id"] == page_id
+    assert result["cleaned_app"] is True
+    assert result["cleaned_origin"] == "https://app.example.test"
+    assert result["deleted_cookie_count"] == 2
     assert session.detached is True
     assert (
-        "Target.openDevTools",
-        {"targetId": "target-page", "panelId": "elements"},
+        "Storage.clearDataForOrigin",
+        {"origin": "https://app.example.test", "storageTypes": "all"},
+    ) in session.calls
+    assert (
+        "Network.deleteCookies",
+        {"name": "sid", "domain": ".example.test", "path": "/"},
     ) in session.calls
 
 

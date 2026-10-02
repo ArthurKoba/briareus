@@ -107,6 +107,10 @@ def test_browser_rejects_non_http_urls() -> None:
     assert BrowserManager._url("https://example.com/path") == "https://example.com/path"
 
 
-def test_browser_runtime_uses_container_safe_chromium_sandbox_flag() -> None:
+def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     source = Path("src/modules/curl/browser.py").read_text()
-    assert 'args=["--no-sandbox"]' in source
+    assert '"--no-sandbox"' in source
+    assert '_REMOTE_DEBUGGING_HOST = "127.0.0.1"' in source
+    assert '_REMOTE_DEBUGGING_PORT = 9222' in source
+    assert 'f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}"' in source
+    assert 'f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}"' in source

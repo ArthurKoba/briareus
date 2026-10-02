@@ -521,9 +521,13 @@ class SqlAlchemyOAuthSessionRepository:
             record.status = value.status
             record.last_event = value.event
             record.updated_at = value.occurred_at
-            if value.event in {"authorized", "access_used", "refresh_success", "refresh_replay"}:
+            successful_refresh = (
+                value.event.startswith("refresh_success")
+                or value.event.startswith("refresh_replay")
+            )
+            if value.event in {"authorized", "access_used"} or successful_refresh:
                 record.last_used_at = value.occurred_at
-            if value.event == "refresh_success":
+            if successful_refresh:
                 record.last_refresh_at = value.occurred_at
             if value.event == "revoked":
                 record.revoked_at = value.occurred_at

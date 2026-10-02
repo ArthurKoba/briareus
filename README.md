@@ -173,9 +173,13 @@ observable.
 Management `/admin/browser` is the operator surface for the same persistent Chromium
 profile. It provides compact shared tabs, per-tab and browser-wide agent access controls,
 page-ID copy, Chromium extension management through `chrome://extensions`, and DevTools
-for the selected tab. `Clean browser` is deliberately destructive: it stops Chromium,
-erases the persistent profile plus browser cache/config/crash state, starts one clean
-`about:blank` tab, and leaves agent access disabled. The runtime uses normal Chromium
+for the selected tab. DevTools uses a Chromium remote-debugging endpoint bound only to
+`127.0.0.1` inside the Web container; no debugging port is published by Compose. `Clean App`
+clears cookies and origin-scoped site data only for the selected HTTP(S) application, while
+`Clean browser` is deliberately destructive: it stops Chromium, erases the persistent
+profile plus browser cache/config/crash state, starts one clean `about:blank` tab, and leaves
+agent access disabled. Browser-operator WebSocket reconnects mint a fresh short-lived Admin
+ticket instead of reusing an expired page-load ticket. The runtime uses normal Chromium
 capabilities; it does not add fingerprint spoofing or site-control bypass logic.
 
 ## OAuth sessions
@@ -185,7 +189,13 @@ copying access or refresh tokens. Management shows client/resource identity, las
 refresh activity, token expiry, revocation and the latest authentication error. Refresh
 rotation keeps a bounded two-minute idempotency window in the encrypted persistent OAuth
 store. Concurrent requests and retries that cross an auth-container restart reuse the same
-rotated result instead of spending the one-time upstream refresh token again.
+rotated result instead of spending the one-time upstream refresh token again. Client-facing
+FastMCP access tokens use a 30-day lifetime; every request still validates the upstream GitHub
+session, so upstream expiry/revocation is not extended, while unnecessary daily client refresh
+rotation is avoided. Refresh attempts emit token-safe correlation logs for request, replay,
+upstream exchange, race recovery and terminal `reauth_required` branches; raw tokens are never
+logged. An upstream refresh token that was already invalid before these protections cannot be
+reconstructed and requires one fresh user authorization.
 
 ## Observability
 

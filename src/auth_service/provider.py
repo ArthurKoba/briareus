@@ -34,7 +34,7 @@ from common.settings import AuthServiceSettings
 
 _RESOURCE_BINDING_TTL_SECONDS = 10 * 60
 _TRANSACTION_TTL_SECONDS = 15 * 60
-_FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS = 24 * 60 * 60
+_FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
 _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
 _REFRESH_REPLAY_SECONDS = 120.0
 _REFRESH_REPLAY_WAIT_ATTEMPTS = 6
@@ -141,6 +141,46 @@ class MultiResourceGitHubProvider(GitHubProvider):
     @staticmethod
     def _refresh_replay_key(client_id: str, refresh_token: str) -> str:
         return hashlib.sha256((client_id + "\0" + refresh_token).encode()).hexdigest()
+
+    @staticmethod
+    def _safe_id(value: str) -> str:
+        return value[:12] if value else "-"
+
+    @staticmethod
+    def _safe_fingerprint(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()[:12] if value else "-"
+
+    def _log_refresh_flow(
+        self,
+        stage: str,
+        *,
+        flow_id: str,
+        client_id: str,
+        resource: str,
+        refresh_jti: str = "",
+        session_id: str = "",
+        upstream_token_id: str = "",
+        upstream_refresh_fingerprint: str = "",
+        detail: str = "",
+        level: int = logging.INFO,
+    ) -> None:
+        resource_path = urlsplit(resource).path or "/"
+        logger.log(
+            level,
+            (
+                "OAuth refresh flow stage=%s flow=%s client=%s resource=%s "
+                "refresh_jti=%s session=%s upstream=%s upstream_fp=%s detail=%s"
+            ),
+            stage,
+            flow_id,
+            self._safe_fingerprint(client_id),
+            resource_path,
+            self._safe_id(refresh_jti),
+            self._safe_id(session_id),
+            self._safe_id(upstream_token_id),
+            upstream_refresh_fingerprint[:12] or "-",
+            detail or "-",
+        )
 
     async def _load_refresh_exchange_replay(
         self,
@@ -468,6 +508,15 @@ class MultiResourceGitHubProvider(GitHubProvider):
         replay_key = self._refresh_replay_key(client_id, refresh_token)
         replay = await self._wait_refresh_exchange_replay(replay_key)
         if replay is not None:
+            self._log_refresh_flow(
+                "load_replay",
+                flow_id=replay_key[:12],
+                client_id=client_id,
+                resource=resource,
+                refresh_jti=refresh_jti if isinstance(refresh_jti, str) else "",
+                session_id=session_id,
+                detail="rotated client refresh token replayed from persistent storage",
+            )
             scope_text = replay.result.scope
             if not scope_text:
                 raw_scope = payload.get("scope")
@@ -480,6 +529,16 @@ class MultiResourceGitHubProvider(GitHubProvider):
                 resource=resource,
             )
 
+        self._log_refresh_flow(
+            "load_missing",
+            flow_id=replay_key[:12],
+            client_id=client_id,
+            resource=resource,
+            refresh_jti=refresh_jti if isinstance(refresh_jti, str) else "",
+            session_id=session_id,
+            detail="client refresh metadata missing and no replay result exists",
+            level=logging.WARNING,
+        )
         await self._record_session(
             OAuthSessionEvent(
                 session_id=session_id,
@@ -523,11 +582,30 @@ class MultiResourceGitHubProvider(GitHubProvider):
         refresh_jti = refresh_payload.get("jti")
         old_refresh_jti = refresh_jti if isinstance(refresh_jti, str) else ""
         session_id = await self._session_id_from_jti(old_refresh_jti)
+        flow_id = replay_key[:12]
+        self._log_refresh_flow(
+            "request",
+            flow_id=flow_id,
+            client_id=client_id,
+            resource=resource,
+            refresh_jti=old_refresh_jti,
+            session_id=session_id,
+            detail=f"scope_count={len(scopes)}",
+        )
 
         lock = self._refresh_exchange_locks.setdefault(replay_key, asyncio.Lock())
         async with lock:
             replay = await self._load_refresh_exchange_replay(replay_key)
             if replay is not None:
+                self._log_refresh_flow(
+                    "replay_hit",
+                    flow_id=flow_id,
+                    client_id=client_id,
+                    resource=resource,
+                    refresh_jti=old_refresh_jti,
+                    session_id=session_id,
+                    detail="returning previously rotated token pair",
+                )
                 await self._record_token_result(
                     client=client,
                     resource=resource,
@@ -540,14 +618,46 @@ class MultiResourceGitHubProvider(GitHubProvider):
             before_token_id, before_refresh_fingerprint = (
                 await self._upstream_refresh_identity(old_refresh_jti)
             )
+            self._log_refresh_flow(
+                "upstream_exchange",
+                flow_id=flow_id,
+                client_id=client_id,
+                resource=resource,
+                refresh_jti=old_refresh_jti,
+                session_id=session_id,
+                upstream_token_id=before_token_id,
+                upstream_refresh_fingerprint=before_refresh_fingerprint,
+                detail="calling GitHub refresh endpoint",
+            )
             try:
                 result = await self._exchange_refresh_once(
                     client, refresh_token, scopes, resource
                 )
             except Exception as exc:
                 error = exc
+                self._log_refresh_flow(
+                    "upstream_failed",
+                    flow_id=flow_id,
+                    client_id=client_id,
+                    resource=resource,
+                    refresh_jti=old_refresh_jti,
+                    session_id=session_id,
+                    upstream_token_id=before_token_id,
+                    upstream_refresh_fingerprint=before_refresh_fingerprint,
+                    detail=f"{type(exc).__name__}:{str(exc)[:240]}",
+                    level=logging.WARNING,
+                )
                 replay = await self._wait_refresh_exchange_replay(replay_key)
                 if replay is not None:
+                    self._log_refresh_flow(
+                        "replay_recovered",
+                        flow_id=flow_id,
+                        client_id=client_id,
+                        resource=resource,
+                        refresh_jti=old_refresh_jti,
+                        session_id=session_id,
+                        detail="parallel refresh completed while upstream request failed",
+                    )
                     await self._record_token_result(
                         client=client,
                         resource=resource,
@@ -568,7 +678,29 @@ class MultiResourceGitHubProvider(GitHubProvider):
                     and bool(after_refresh_fingerprint)
                     and before_refresh_fingerprint != after_refresh_fingerprint
                 )
+                self._log_refresh_flow(
+                    "post_failure_state",
+                    flow_id=flow_id,
+                    client_id=client_id,
+                    resource=resource,
+                    refresh_jti=old_refresh_jti,
+                    session_id=session_id,
+                    upstream_token_id=after_token_id,
+                    upstream_refresh_fingerprint=after_refresh_fingerprint,
+                    detail=f"rotated_elsewhere={str(upstream_rotated_elsewhere).lower()}",
+                )
                 if upstream_rotated_elsewhere:
+                    self._log_refresh_flow(
+                        "retry_after_rotation",
+                        flow_id=flow_id,
+                        client_id=client_id,
+                        resource=resource,
+                        refresh_jti=old_refresh_jti,
+                        session_id=session_id,
+                        upstream_token_id=after_token_id,
+                        upstream_refresh_fingerprint=after_refresh_fingerprint,
+                        detail="retrying once with refreshed upstream state",
+                    )
                     try:
                         result = await self._exchange_refresh_once(
                             client, refresh_token, scopes, resource
@@ -576,6 +708,16 @@ class MultiResourceGitHubProvider(GitHubProvider):
                     except Exception as retry_exc:
                         error = retry_exc
                     else:
+                        self._log_refresh_flow(
+                            "success_after_rotation",
+                            flow_id=flow_id,
+                            client_id=client_id,
+                            resource=resource,
+                            refresh_jti=old_refresh_jti,
+                            session_id=session_id,
+                            upstream_token_id=after_token_id,
+                            upstream_refresh_fingerprint=after_refresh_fingerprint,
+                        )
                         await self._store_refresh_exchange_replay(replay_key, result)
                         await self._record_token_result(
                             client=client,
@@ -586,6 +728,25 @@ class MultiResourceGitHubProvider(GitHubProvider):
                         )
                         return result
 
+                reauth_required = "bad_refresh_token" in str(error).casefold()
+                self._log_refresh_flow(
+                    "terminal_failure",
+                    flow_id=flow_id,
+                    client_id=client_id,
+                    resource=resource,
+                    refresh_jti=old_refresh_jti,
+                    session_id=session_id,
+                    upstream_token_id=after_token_id or before_token_id,
+                    upstream_refresh_fingerprint=(
+                        after_refresh_fingerprint or before_refresh_fingerprint
+                    ),
+                    detail=(
+                        "reauth_required=true"
+                        if reauth_required
+                        else f"reauth_required=false error={type(error).__name__}"
+                    ),
+                    level=logging.ERROR,
+                )
                 await self._record_session(
                     OAuthSessionEvent(
                         session_id=session_id,
@@ -593,8 +754,12 @@ class MultiResourceGitHubProvider(GitHubProvider):
                         client_name=self._client_name(client),
                         resource=resource,
                         scopes=list(scopes),
-                        status="refresh_error",
-                        event="refresh_error",
+                        status="invalid" if reauth_required else "refresh_error",
+                        event=(
+                            "refresh_reauth_required"
+                            if reauth_required
+                            else "refresh_error"
+                        ),
                         refresh_jti=old_refresh_jti,
                         error_type=type(error).__name__,
                         error_message=str(error)[:2048],
@@ -604,6 +769,16 @@ class MultiResourceGitHubProvider(GitHubProvider):
                     raise
                 raise error from exc
 
+            self._log_refresh_flow(
+                "success",
+                flow_id=flow_id,
+                client_id=client_id,
+                resource=resource,
+                refresh_jti=old_refresh_jti,
+                session_id=session_id,
+                upstream_token_id=before_token_id,
+                upstream_refresh_fingerprint=before_refresh_fingerprint,
+            )
             await self._store_refresh_exchange_replay(replay_key, result)
             await self._record_token_result(
                 client=client,

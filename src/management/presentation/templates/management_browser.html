@@ -41,7 +41,8 @@
     <button id="browser-extensions" class="btn btn-outline-primary" type="button" disabled title="Open chrome://extensions for Developer mode and extension management">Extensions</button>
     <button id="browser-devtools" class="btn btn-outline-primary" type="button" disabled title="Open Chromium DevTools for the selected tab">DevTools</button>
     <button id="agent-access-toggle" class="btn btn-outline-success" type="button" disabled>Agents: On</button>
-    <button id="browser-clean" class="btn btn-outline-danger browser-danger" type="button" disabled title="Erase the complete persistent browser profile and block agent access">Clean browser</button>
+    <button id="browser-clean-app" class="btn btn-outline-warning browser-danger" type="button" disabled title="Clear cookies and site data only for the selected application">Clean App</button>
+    <button id="browser-clean" class="btn btn-outline-danger" type="button" disabled title="Erase the complete persistent browser profile and block agent access">Clean browser</button>
     <span id="operator-status" class="badge bg-secondary-lt">disconnected</span>
   </div>
   <div class="card-body py-2 border-top">
@@ -75,13 +76,13 @@
   let frameHeight = 900;
   let lastMove = 0;
   const tabNodes = new Map();
-  const operatorTicket = {{ browser_operator_ticket | tojson }};
+  let operatorTicket = {{ browser_operator_ticket | tojson }};
   const screen = document.getElementById('browser-screen');
   const tabs = document.getElementById('browser-tabs');
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','browser-extensions','browser-devtools','browser-clean','agent-access-toggle'];
+  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','browser-extensions','browser-devtools','browser-clean-app','browser-clean','agent-access-toggle'];
   const agentAccessToggle = document.getElementById('agent-access-toggle');
 
   function setConnected(on) {
@@ -155,12 +156,20 @@
     if(!pages.length){ const span=document.createElement('span'); span.dataset.emptyTabs='1'; span.className='text-secondary small px-2 py-1'; span.textContent='No open tabs.'; tabs.appendChild(span); }
     if(next.viewport){ frameWidth=next.viewport.width||frameWidth; frameHeight=next.viewport.height||frameHeight; }
   }
-  function connect() {
+  async function refreshOperatorTicket() {
+    const response=await fetch('/admin/browser/ticket',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+    if(!response.ok)throw new Error(`ticket refresh failed: ${response.status}`);
+    const payload=await response.json();
+    if(!payload.ticket)throw new Error('ticket refresh returned no ticket');
+    operatorTicket=payload.ticket;
+  }
+  async function connect() {
     if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
-    const scheme=location.protocol==='https:'?'wss:':'ws:'; ws=new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
     alertBox.className='alert alert-info py-2'; alertBox.textContent='Connecting to persistent Chromium…';
+    try{await refreshOperatorTicket();}catch(error){setConnected(false);alertBox.className='alert alert-danger py-2';alertBox.textContent='Browser operator authorization refresh failed. Reload the Admin session.';window.setTimeout(connect,3000);return;}
+    const scheme=location.protocol==='https:'?'wss:':'ws:'; ws=new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
     ws.onopen=()=>ws.send(JSON.stringify({type:'auth',ticket:operatorTicket}));
-    ws.onclose=()=>{ws=null;setConnected(false);alertBox.className='alert alert-secondary py-2';alertBox.textContent='Live view reconnecting…';window.setTimeout(connect,1000);};
+    ws.onclose=event=>{ws=null;setConnected(false);alertBox.className='alert alert-secondary py-2';alertBox.textContent=event.code===4401?'Browser operator authorization expired; renewing…':'Live view reconnecting…';window.setTimeout(connect,1000);};
     ws.onerror=()=>{alertBox.className='alert alert-danger py-2';alertBox.textContent='Browser operator connection failed.';};
     ws.onmessage=event=>{const msg=JSON.parse(event.data);if(msg.type==='state'){setConnected(true);alertBox.className='alert alert-success py-2';alertBox.textContent='Shared control active.';renderState(msg);}else if(msg.type==='frame'&&msg.page_id===selectedPage){screen.src=`data:image/jpeg;base64,${msg.data}`;const meta=msg.metadata||{};frameWidth=meta.deviceWidth||frameWidth;frameHeight=meta.deviceHeight||frameHeight;document.getElementById('frame-info').textContent=`${Math.round(frameWidth)}×${Math.round(frameHeight)}`;}else if(msg.type==='error'){alertBox.className='alert alert-danger py-2';alertBox.textContent=msg.message||'Browser operator error';}};
   }
@@ -171,6 +180,7 @@
   document.getElementById('browser-close').onclick=()=>send({type:'close_page'});
   document.getElementById('browser-extensions').onclick=()=>send({type:'new_page',url:'chrome://extensions/'});
   document.getElementById('browser-devtools').onclick=()=>send({type:'open_devtools',panel:'elements'});
+  document.getElementById('browser-clean-app').onclick=()=>{if(window.confirm('Clear cookies, sessions and site data only for the selected application? Other browser sites remain untouched.'))send({type:'clean_app'});};
   document.getElementById('browser-clean').onclick=()=>{if(window.confirm('Erase the complete persistent Chromium profile? This removes cookies, sessions, local storage, cache, extensions and open tabs. Agent access will be blocked afterwards.'))send({type:'clean_browser'});};
   document.getElementById('browser-go').onclick=()=>send({type:'navigate',url:urlInput.value});
   agentAccessToggle.onclick=()=>send({type:'set_agent_access',allowed:state?state.agent_access_enabled===false:false});

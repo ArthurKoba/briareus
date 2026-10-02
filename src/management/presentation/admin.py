@@ -18,7 +18,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import FileResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette_admin import (
     BooleanField,
@@ -983,6 +983,18 @@ class BrowserView(CustomView):
                 "title": "Browser Operator",
                 "browser_operator_ticket": ticket,
             },
+        )
+
+    @route("/ticket")
+    async def ticket(self, request: Request) -> Response:
+        del request
+        ticket = issue_browser_operator_ticket(
+            self.settings.session_secret,
+            self.settings.admin_username,
+        )
+        return JSONResponse(
+            {"ticket": ticket},
+            headers={"Cache-Control": "no-store"},
         )
 
 

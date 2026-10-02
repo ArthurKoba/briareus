@@ -79,7 +79,7 @@ async def test_upstream_claims_embed_only_allowed_identity() -> None:
 
 
 def test_fastmcp_token_lifetimes_are_client_friendly() -> None:
-    assert _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS == 24 * 60 * 60
+    assert _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS == 30 * 24 * 60 * 60
     assert _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS == 30 * 24 * 60 * 60
 
 
@@ -260,3 +260,85 @@ async def test_refresh_retries_once_when_upstream_rotation_wins_race(monkeypatch
     assert result.access_token == "recovered-access"
     assert result.refresh_token == "recovered-refresh"
 
+
+
+@pytest.mark.asyncio
+async def test_bad_upstream_refresh_is_marked_reauth_required(monkeypatch, caplog) -> None:
+    from fastmcp.server.auth.oauth_proxy.models import JTIMapping, UpstreamTokenSet
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from mcp.server.auth.provider import RefreshToken, TokenError
+
+    class ManagementStub:
+        def __init__(self) -> None:
+            self.events = []
+
+        def record_oauth_session(self, event) -> None:
+            self.events.append(event)
+
+    management = ManagementStub()
+    provider = MultiResourceGitHubProvider(_settings(), management=management)  # type: ignore[arg-type]
+    analysis = resource_url(provider.settings.public_base_url, "analysis")
+    old_jti = f"bad-refresh-jti-{time.time_ns()}"
+    upstream_id = f"bad-upstream-{time.time_ns()}"
+    old_token = provider.issuer_for_resource(analysis).issue_refresh_token(
+        client_id="chatgpt-client",
+        scopes=["read:user"],
+        jti=old_jti,
+        expires_in=60,
+    )
+    refresh = RefreshToken(
+        token=old_token,
+        client_id="chatgpt-client",
+        resource=analysis,
+        expires_at=int(time.time()) + 60,
+        scopes=["read:user"],
+    )
+    await provider._jti_mapping_store.put(
+        key=old_jti,
+        value=JTIMapping(
+            jti=old_jti,
+            upstream_token_id=upstream_id,
+            created_at=time.time(),
+        ),
+        ttl=60,
+    )
+    await provider._upstream_token_store.put(
+        key=upstream_id,
+        value=UpstreamTokenSet(
+            upstream_token_id=upstream_id,
+            access_token="upstream-access",
+            refresh_token="dead-refresh-token",
+            refresh_token_expires_at=time.time() + 3600,
+            expires_at=time.time() + 3600,
+            token_type="bearer",
+            scope="read:user",
+            client_id="github-client",
+            created_at=time.time(),
+        ),
+        ttl=3600,
+    )
+
+    async def fail_exchange(self, client, refresh_token, scopes):
+        del self, client, refresh_token, scopes
+        raise TokenError(
+            "invalid_grant",
+            "Upstream refresh failed: bad_refresh_token: expired",
+        )
+
+    monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fail_exchange)
+    caplog.set_level("INFO", logger="auth_service.provider")
+
+    with pytest.raises(TokenError, match="bad_refresh_token"):
+        await provider.exchange_refresh_token(
+            SimpleNamespace(client_id="chatgpt-client"),  # type: ignore[arg-type]
+            refresh,
+            ["read:user"],
+        )
+
+    assert management.events
+    terminal = management.events[-1]
+    assert terminal.event == "refresh_reauth_required"
+    assert terminal.status == "invalid"
+    assert "terminal_failure" in caplog.text
+    assert "reauth_required=true" in caplog.text
+    assert "dead-refresh-token" not in caplog.text
