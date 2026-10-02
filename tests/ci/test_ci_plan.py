@@ -48,9 +48,16 @@ def test_shared_or_build_changes_force_full_gate() -> None:
         assert result["docker_targets"] == list(ALL_DOCKER_TARGETS)
 
 
-def test_main_push_can_force_full_gate() -> None:
+def test_manual_full_gate_can_be_forced() -> None:
     result = plan(["src/modules/curl/browser.py"], force_full=True)
     assert result["full"] is True
+
+
+def test_main_push_uses_targeted_plan_by_default() -> None:
+    result = plan(["src/modules/curl/browser.py"])
+    assert result["full"] is False
+    assert result["pytest_paths"] == ["tests/modules/curl"]
+    assert result["docker_targets"] == ["curl"]
 
 
 def test_docs_only_change_has_no_test_or_docker_work() -> None:

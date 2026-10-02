@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -28,15 +29,32 @@ jobs:
         name: Build targeted CI plan
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
         run: |
-          if [ "$EVENT_NAME" = "push" ]; then
-            python scripts/ci_plan.py --force-full --github-output "$GITHUB_OUTPUT"
-          else
-            mapfile -t changed < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-            python scripts/ci_plan.py --github-output "$GITHUB_OUTPUT" "${changed[@]}"
-          fi
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              python scripts/ci_plan.py --force-full --github-output "$GITHUB_OUTPUT"
+              ;;
+            pull_request)
+              mapfile -t changed < <(git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA")
+              python scripts/ci_plan.py --github-output "$GITHUB_OUTPUT" "${changed[@]}"
+              ;;
+            push)
+              if [[ ! "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
+                mapfile -t changed < <(git diff --name-only "$PUSH_BEFORE_SHA" "$PUSH_AFTER_SHA")
+                python scripts/ci_plan.py --github-output "$GITHUB_OUTPUT" "${changed[@]}"
+              else
+                python scripts/ci_plan.py --force-full --github-output "$GITHUB_OUTPUT"
+              fi
+              ;;
+            *)
+              echo "Unsupported event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
       - name: Show plan
         run: |
           echo 'areas=${{ steps.plan.outputs.areas }}'
