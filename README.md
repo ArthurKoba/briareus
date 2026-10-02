@@ -175,8 +175,9 @@ observable.
 The authorization runtime reports safe OAuth session metadata to Management without
 copying access or refresh tokens. Management shows client/resource identity, last use,
 refresh activity, token expiry, revocation and the latest authentication error. Refresh
-rotation keeps a short bounded replay grace window so concurrent client refresh requests
-reuse the same rotated result instead of spuriously forcing a full reauthorization.
+rotation keeps a bounded two-minute idempotency window in the encrypted persistent OAuth
+store. Concurrent requests and retries that cross an auth-container restart reuse the same
+rotated result instead of spending the one-time upstream refresh token again.
 
 ## Observability
 
