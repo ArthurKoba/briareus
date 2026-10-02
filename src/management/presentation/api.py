@@ -67,6 +67,12 @@ def build_internal_router(services: ApiServices) -> APIRouter:
     ) -> JsonObject:
         return services.runtime_settings.terminal_policy().to_json()
 
+    @router.get("/runtime-settings/mcp")
+    def mcp_runtime_settings(
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        return services.runtime_settings.mcp_policy().to_json()
+
     @router.post("/events", status_code=204)
     def record_event(
         event: InvocationEvent,
