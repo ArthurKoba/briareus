@@ -8,7 +8,7 @@ import urllib.request
 from .account_contracts import AccountList, InvocationEvent, ResolvedAccount
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
-from .runtime_policy_contracts import TerminalRuntimePolicy
+from .runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
 from .settings import ManagementClientSettings
 
 
@@ -107,6 +107,10 @@ class ManagementClient:
     def terminal_runtime_policy(self) -> TerminalRuntimePolicy:
         data = self._request("GET", "/internal/runtime-settings/terminal")
         return TerminalRuntimePolicy.model_validate(data)
+
+    def mcp_runtime_policy(self) -> McpRuntimePolicy:
+        data = self._request("GET", "/internal/runtime-settings/mcp")
+        return McpRuntimePolicy.model_validate(data)
 
     def record_oauth_session(self, event: OAuthSessionEvent) -> None:
         self._request(
