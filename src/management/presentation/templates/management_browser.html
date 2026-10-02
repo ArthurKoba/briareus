@@ -1,0 +1,150 @@
+{% extends "layout.html" %}
+{% block header %}
+<div class="d-flex justify-content-between align-items-center">
+  <div>
+    <h1>Browser Operator</h1>
+    <div class="text-secondary">Human takeover of the persistent Chromium profile</div>
+  </div>
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
+    <li class="breadcrumb-item active">Browser</li>
+  </ol>
+</div>
+{% endblock %}
+{% block content %}
+<style>
+  .browser-operator-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:1rem; }
+  .browser-tabs { max-height:70vh; overflow:auto; }
+  .browser-tab { cursor:pointer; border:1px solid var(--tblr-border-color); border-radius:.4rem; padding:.6rem; margin-bottom:.5rem; }
+  .browser-tab.active { border-color:var(--tblr-primary); box-shadow:0 0 0 1px var(--tblr-primary); }
+  .browser-screen-wrap { background:#111; min-height:360px; border-radius:.4rem; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; }
+  #browser-screen { max-width:100%; max-height:72vh; display:block; user-select:none; -webkit-user-drag:none; }
+  #browser-screen:focus { outline:2px solid var(--tblr-primary); }
+  @media (max-width: 900px) { .browser-operator-grid { grid-template-columns:1fr; } .browser-tabs { max-height:240px; } }
+</style>
+<div id="operator-alert" class="alert alert-info">Connecting to persistent Chromium…</div>
+<div class="card mb-3">
+  <div class="card-body d-flex gap-2 flex-wrap align-items-center">
+    <button id="take-control" class="btn btn-primary" type="button">Take control</button>
+    <button id="release-control" class="btn btn-outline-warning" type="button" disabled>Release control</button>
+    <button id="browser-back" class="btn" type="button" disabled>Back</button>
+    <button id="browser-reload" class="btn" type="button" disabled>Reload</button>
+    <button id="browser-new" class="btn" type="button" disabled>New tab</button>
+    <button id="browser-close" class="btn btn-outline-danger" type="button" disabled>Close tab</button>
+    <span id="operator-status" class="badge bg-secondary-lt ms-auto">disconnected</span>
+  </div>
+  <div class="card-body border-top">
+    <div class="input-group">
+      <input id="browser-url" class="form-control" type="url" placeholder="https://example.com" autocomplete="off">
+      <button id="browser-go" class="btn btn-primary" type="button" disabled>Go</button>
+    </div>
+  </div>
+</div>
+<div class="browser-operator-grid">
+  <div class="card">
+    <div class="card-header"><h3 class="card-title">Tabs</h3></div>
+    <div id="browser-tabs" class="card-body browser-tabs"><span class="text-secondary">No browser state yet.</span></div>
+  </div>
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <h3 class="card-title">Live browser</h3>
+      <small id="frame-info" class="text-secondary"></small>
+    </div>
+    <div class="card-body p-2">
+      <div class="browser-screen-wrap">
+        <img id="browser-screen" tabindex="0" alt="Live Chromium tab">
+      </div>
+      <div class="text-secondary small mt-2">Click the live view to focus keyboard input. Agent write-actions are paused while human control is active.</div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  let ws = null;
+  let state = null;
+  let selectedPage = "";
+  let frameWidth = 1440;
+  let frameHeight = 900;
+  let lastMove = 0;
+  const screen = document.getElementById('browser-screen');
+  const tabs = document.getElementById('browser-tabs');
+  const alertBox = document.getElementById('operator-alert');
+  const status = document.getElementById('operator-status');
+  const urlInput = document.getElementById('browser-url');
+  const controls = ['release-control','browser-back','browser-reload','browser-new','browser-close','browser-go'];
+
+  function setConnected(on) {
+    status.textContent = on ? 'human control' : 'disconnected';
+    status.className = 'badge ms-auto ' + (on ? 'bg-green-lt' : 'bg-secondary-lt');
+    document.getElementById('take-control').disabled = on;
+    controls.forEach(id => document.getElementById(id).disabled = !on);
+  }
+  function send(payload) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); }
+  function renderState(next) {
+    state = next; selectedPage = next.selected_page_id || '';
+    const pages = next.pages || [];
+    tabs.innerHTML = '';
+    pages.forEach(page => {
+      const div = document.createElement('div');
+      div.className = 'browser-tab' + (page.page_id === selectedPage ? ' active' : '');
+      const title = document.createElement('div'); title.className='fw-bold text-truncate'; title.textContent = page.title || '(untitled)';
+      const url = document.createElement('div'); url.className='small text-secondary text-truncate'; url.textContent = page.url || '';
+      div.append(title,url);
+      div.onclick = () => send({type:'select_page', page_id:page.page_id});
+      tabs.appendChild(div);
+      if (page.page_id === selectedPage) urlInput.value = page.url || '';
+    });
+    if (!pages.length) tabs.innerHTML = '<span class="text-secondary">No open tabs.</span>';
+    if (next.viewport) { frameWidth = next.viewport.width || frameWidth; frameHeight = next.viewport.height || frameHeight; }
+  }
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
+    alertBox.className='alert alert-info'; alertBox.textContent='Connecting to persistent Chromium…';
+    ws.onopen = () => { setConnected(true); alertBox.className='alert alert-success'; alertBox.textContent='Human control active. Browser credentials stay inside the persistent profile.'; };
+    ws.onclose = () => { setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Human control released.'; };
+    ws.onerror = () => { alertBox.className='alert alert-danger'; alertBox.textContent='Browser operator connection failed.'; };
+    ws.onmessage = event => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'state') renderState(msg);
+      else if (msg.type === 'frame' && msg.page_id === selectedPage) {
+        screen.src = `data:image/jpeg;base64,${msg.data}`;
+        const meta = msg.metadata || {};
+        frameWidth = meta.deviceWidth || frameWidth; frameHeight = meta.deviceHeight || frameHeight;
+        document.getElementById('frame-info').textContent = `${Math.round(frameWidth)}×${Math.round(frameHeight)}`;
+      } else if (msg.type === 'error') {
+        alertBox.className='alert alert-danger'; alertBox.textContent=msg.message || 'Browser operator error';
+      }
+    };
+  }
+  function pointer(event, type, button='none', clickCount=0) {
+    if (!selectedPage || !screen.src) return;
+    const rect = screen.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * frameWidth / rect.width;
+    const y = (event.clientY - rect.top) * frameHeight / rect.height;
+    send({type:'mouse', event:type, x, y, button, click_count:clickCount});
+  }
+  document.getElementById('take-control').onclick = connect;
+  document.getElementById('release-control').onclick = () => { send({type:'release'}); if (ws) ws.close(); };
+  document.getElementById('browser-back').onclick = () => send({type:'back'});
+  document.getElementById('browser-reload').onclick = () => send({type:'reload'});
+  document.getElementById('browser-new').onclick = () => send({type:'new_page'});
+  document.getElementById('browser-close').onclick = () => send({type:'close_page'});
+  document.getElementById('browser-go').onclick = () => send({type:'navigate', url:urlInput.value});
+  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send({type:'navigate', url:urlInput.value}); } });
+  screen.addEventListener('mousedown', e => { screen.focus(); pointer(e,'mousePressed',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
+  screen.addEventListener('mouseup', e => { pointer(e,'mouseReleased',e.button===2?'right':e.button===1?'middle':'left',1); e.preventDefault(); });
+  screen.addEventListener('mousemove', e => { const now=performance.now(); if (now-lastMove>33) { lastMove=now; pointer(e,'mouseMoved'); } });
+  screen.addEventListener('wheel', e => { const rect=screen.getBoundingClientRect(); send({type:'mouse',event:'mouseWheel',x:(e.clientX-rect.left)*frameWidth/rect.width,y:(e.clientY-rect.top)*frameHeight/rect.height,delta_x:e.deltaX,delta_y:e.deltaY}); e.preventDefault(); }, {passive:false});
+  screen.addEventListener('contextmenu', e => e.preventDefault());
+  screen.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.altKey || e.metaKey || e.key.length > 1) {
+      const parts=[]; if(e.ctrlKey)parts.push('Control'); if(e.altKey)parts.push('Alt'); if(e.metaKey)parts.push('Meta'); if(e.shiftKey && e.key.length>1)parts.push('Shift'); parts.push(e.key);
+      send({type:'key',key:parts.join('+')}); e.preventDefault();
+    } else if (e.key.length === 1) { send({type:'text',text:e.key}); e.preventDefault(); }
+  });
+  connect();
+})();
+</script>
+{% endblock %}
