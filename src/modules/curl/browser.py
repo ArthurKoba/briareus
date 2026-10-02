@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import uuid
 from pathlib import Path
@@ -49,9 +50,32 @@ class BrowserManager:
         self._operator_lock = asyncio.Lock()
         self._operator_pages: dict[str, str] = {}
         self._policy_lock = asyncio.Lock()
+        self._policy_path = self.profile_dir / "koba-browser-policy.json"
         self._agent_access_enabled = True
         self._page_labels: dict[str, str] = {}
         self._page_agent_access: dict[str, bool] = {}
+        self._load_policy()
+
+    def _load_policy(self) -> None:
+        try:
+            payload = json.loads(self._policy_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if isinstance(payload, dict) and isinstance(payload.get("agent_access_enabled"), bool):
+            self._agent_access_enabled = payload["agent_access_enabled"]
+
+    def _persist_policy(self) -> None:
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self._policy_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(
+                {"agent_access_enabled": self._agent_access_enabled},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(self._policy_path)
 
     def _require_operator(self, owner_token: str) -> None:
         if not owner_token or owner_token not in self._operator_pages:
@@ -506,6 +530,7 @@ class BrowserManager:
         self._require_operator(owner_token)
         async with self._policy_lock:
             self._agent_access_enabled = allowed
+            await asyncio.to_thread(self._persist_policy)
         return {"agent_access_enabled": self._agent_access_enabled}
 
     async def _operator_page_items(self) -> list[JsonValue]:
