@@ -35,6 +35,26 @@ def register_browser_tools(
         """Open a URL in a new page, or navigate an existing page_id."""
         return await browser.open(url, page_id)
 
+    @mcp.tool(title="Browser developer status", annotations=read_annotations)
+    async def browser_developer_status() -> JsonObject:
+        """Report whether operator-enabled developer mode is available to this agent."""
+        return await browser.developer_status()
+
+    @mcp.tool(title="Browser extensions", annotations=read_annotations)
+    async def browser_extensions() -> JsonObject:
+        """List unpacked Chromium extensions when agent developer access is enabled."""
+        return await browser.extension_list()
+
+    @mcp.tool(title="Browser load unpacked extension", annotations=write_annotations)
+    async def browser_extension_load_unpacked(workspace_path: str) -> JsonObject:
+        """Load an unpacked extension directory from /workspace in developer mode."""
+        return await browser.extension_load_unpacked(workspace_path)
+
+    @mcp.tool(title="Browser uninstall extension", annotations=write_annotations)
+    async def browser_extension_uninstall(extension_id: str) -> JsonObject:
+        """Uninstall one unpacked extension by Chromium extension ID."""
+        return await browser.extension_uninstall(extension_id)
+
     @mcp.tool(title="Browser set page label", annotations=write_annotations)
     async def browser_set_page_label(page_id: str, label: str) -> JsonObject:
         """Assign or clear a short human-readable label for one browser tab."""
