@@ -27,7 +27,7 @@ _file_settings = FileSettings()
 _curl_settings = CurlSettings()
 _browser_settings = BrowserSettings()
 
-mcp = build_private_mcp("curl", _management, observability_scope="web")
+mcp = build_private_mcp("web", _management)
 _workspace = WorkspaceFileStore(_file_settings.workspace_root)
 _curl_binary = resolve_curl_binary(_curl_settings)
 _browser = BrowserManager(

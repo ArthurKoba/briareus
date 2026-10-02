@@ -12,7 +12,7 @@ flowchart TB
     GW --> GH[github]
     GW --> GL[gitlab]
     GW --> FI[files]
-    GW --> CU[curl]
+    GW --> WEB[web]
     GW --> AN[analysis]
     GW --> CP[management]
 
@@ -39,7 +39,7 @@ flowchart TB
 - `modules.github` — GitHub repository/review/actions capabilities.
 - `modules.gitlab` — GitLab project/repository/CI capabilities.
 - `modules.files` — path-based shared workspace file management.
-- `modules.curl` — structured Web/curl operations.
+- `modules.web` — structured HTTP, persistent browser and DevTools operations.
 - `modules.analysis` — public structured-analysis facade.
 - `modules.ghidra` — private native backend adapter.
 

@@ -51,7 +51,7 @@ def test_provider_packages_do_not_import_each_other_or_management_implementation
         "github": _SRC / "modules" / "github",
         "gitlab": _SRC / "modules" / "gitlab",
         "files": _SRC / "modules" / "files",
-        "curl": _SRC / "modules" / "curl",
+        "web": _SRC / "modules" / "web",
         "analysis": _SRC / "modules" / "analysis",
         "ghidra": _SRC / "modules" / "ghidra",
         "terminal": _SRC / "modules" / "terminal",

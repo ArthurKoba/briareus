@@ -50,10 +50,10 @@ AREAS: dict[str, Area] = {
         ("tests/modules/files",),
         ("src/modules/files",),
     ),
-    "curl": Area(
-        ("src/modules/curl/",),
-        ("tests/modules/curl",),
-        ("src/modules/curl",),
+    "web": Area(
+        ("src/modules/web/",),
+        ("tests/modules/web",),
+        ("src/modules/web",),
     ),
     "terminal": Area(
         ("src/modules/terminal/",),

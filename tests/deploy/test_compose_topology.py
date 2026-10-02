@@ -12,7 +12,7 @@ EXPECTED_SERVICES = {
     "github",
     "gitlab",
     "files",
-    "curl",
+    "web",
     "terminal",
     "analysis",
     "ghidra",
@@ -103,11 +103,11 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     assert services["files"]["volumes"] == [
         "terminal-workspace:/workspace",
     ]
-    assert services["curl"]["volumes"] == [
+    assert services["web"]["volumes"] == [
         "terminal-workspace:/workspace",
         "web-browser:/browser",
     ]
-    assert services["curl"]["shm_size"] == "1gb"
+    assert services["web"]["shm_size"] == "1gb"
     assert services["auth"]["volumes"] == ["auth:/auth"]
     assert services["terminal"]["volumes"] == [
         "terminal-workspace:/workspace",
@@ -167,7 +167,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "github": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "curl": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "web": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
@@ -190,7 +190,7 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "GITHUB_URL",
         "GITLAB_URL",
         "FILES_URL",
-        "CURL_URL",
+        "WEB_URL",
         "ANALYSIS_URL",
         "GHIDRA_URL",
         "TERMINAL_URL",
@@ -302,7 +302,7 @@ def test_analysis_image_packages_workspace_dependency() -> None:
 
 def test_web_image_packages_persistent_browser_runtime() -> None:
     dockerfile = Path("Dockerfile").read_text()
-    web_stage = dockerfile.split("FROM runtime-base AS curl", 1)[1].split(
+    web_stage = dockerfile.split("FROM runtime-base AS web", 1)[1].split(
         "FROM runtime-base AS terminal", 1
     )[0]
 

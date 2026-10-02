@@ -9,13 +9,13 @@ from fastmcp.exceptions import ToolError
 from fastmcp.tools import FunctionTool, ToolResult
 
 from common.settings import BrowserSettings
-from modules.curl.browser import BrowserManager
-from modules.curl.devtools_proxy import (
+from modules.files.workspace_store import WorkspaceFileStore
+from modules.web.browser import BrowserManager
+from modules.web.devtools_proxy import (
     CHROME_DEVTOOLS_MCP_VERSION,
     DeveloperAccessMiddleware,
     DevToolsProxyRuntime,
 )
-from modules.files.workspace_store import WorkspaceFileStore
 
 
 def _browser(tmp_path: Path) -> BrowserManager:

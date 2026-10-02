@@ -188,7 +188,7 @@ async def browser_operator_socket(websocket: WebSocket) -> None:
 
     await relay_websocket(
         websocket,
-        "ws://curl:8000/operator/ws",
+        "ws://web:8000/operator/ws",
         headers={"Authorization": f"Bearer {settings.service_token}"},
         accept_downstream=False,
     )

@@ -9,7 +9,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from modules.curl.curl_tools import (
+from modules.files.workspace_store import WorkspaceFileStore
+from modules.web.curl_tools import (
     DEFAULT_CURL_PRESET,
     CurlError,
     _curl_failure_diagnostic,
@@ -19,7 +20,6 @@ from modules.curl.curl_tools import (
     curl_request_impl,
     curl_stream_capture_impl,
 )
-from modules.files.workspace_store import WorkspaceFileStore
 
 _MAX_FILE_BYTES = 64 * 1024 * 1024
 
