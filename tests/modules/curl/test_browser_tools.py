@@ -23,6 +23,9 @@ class FakeBrowser:
     async def open(self, url, page_id=""):
         return {"page_id": page_id or "page-1", "url": url, "title": "Example"}
 
+    async def set_page_label(self, page_id, label):
+        return {"page_id": page_id, "label": label}
+
     async def snapshot(self, page_id, *, max_text_chars=None, max_elements=None):
         return {"page_id": page_id, "text": "hello", "elements": []}
 
@@ -80,6 +83,7 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
         "browser_status",
         "browser_pages",
         "browser_open",
+        "browser_set_page_label",
         "browser_snapshot",
         "browser_click",
         "browser_fill",
