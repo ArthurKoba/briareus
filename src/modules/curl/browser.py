@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
-    from playwright.async_api import BrowserContext, CDPSession, Locator, Page, Playwright
+    from playwright.async_api import Browser, BrowserContext, CDPSession, Locator, Page, Playwright
 
 from common.models import JsonObject, JsonValue
 from modules.files.workspace_store import WorkspaceFileStore
@@ -48,6 +48,8 @@ class BrowserManager:
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
         self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
+        self._browser_process: asyncio.subprocess.Process | None = None
         self._context: BrowserContext | None = None
         self._pages: dict[str, Page] = {}
         self._page_ids: dict[int, str] = {}
@@ -62,6 +64,7 @@ class BrowserManager:
         self._agent_access_enabled = True
         self._page_labels: dict[str, str] = {}
         self._page_agent_access: dict[str, bool] = {}
+        self._closed_pages: list[dict[str, object]] = []
         self._load_policy()
 
     def _load_policy(self) -> None:
@@ -100,6 +103,44 @@ class BrowserManager:
         if page_id and not self._page_agent_access.get(page_id, True):
             raise BrowserError(f"browser page is locked by operator: {page_id}")
 
+    async def _wait_for_debugging_endpoint(self, process: asyncio.subprocess.Process) -> None:
+        deadline = asyncio.get_running_loop().time() + 12.0
+        last_error = ""
+        while asyncio.get_running_loop().time() < deadline:
+            if process.returncode is not None:
+                raise BrowserError(
+                    f"Chromium exited before remote debugging became ready: {process.returncode}"
+                )
+            try:
+                reader, writer = await asyncio.open_connection(
+                    _REMOTE_DEBUGGING_HOST,
+                    _REMOTE_DEBUGGING_PORT,
+                )
+                writer.close()
+                await writer.wait_closed()
+                del reader
+                return
+            except OSError as exc:
+                last_error = str(exc)
+                await asyncio.sleep(0.1)
+        raise BrowserError(
+            "Chromium remote debugging endpoint did not become ready"
+            + (f": {last_error}" if last_error else "")
+        )
+
+    async def _terminate_browser_process(
+        self,
+        process: asyncio.subprocess.Process | None,
+    ) -> None:
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+
     async def _start_locked(self) -> None:
         if self._context is not None:
             return
@@ -110,25 +151,46 @@ class BrowserManager:
         from playwright.async_api import async_playwright
 
         playwright = await async_playwright().start()
+        command = [
+            self.executable_path,
+            "--no-sandbox",
+            f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}",
+            f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}",
+            f"--user-data-dir={self.profile_dir}",
+            f"--window-size={self.viewport_width},{self.viewport_height}",
+        ]
+        if self.headless:
+            command.append("--headless=new")
+        command.append("about:blank")
+        process: asyncio.subprocess.Process | None = None
+        browser: Browser | None = None
         try:
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(self.profile_dir),
-                executable_path=self.executable_path,
-                headless=self.headless,
-                accept_downloads=True,
-                args=[
-                    "--no-sandbox",
-                    f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}",
-                    f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}",
-                ],
-                viewport={"width": self.viewport_width, "height": self.viewport_height},
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
             )
+            await self._wait_for_debugging_endpoint(process)
+            browser = await playwright.chromium.connect_over_cdp(
+                f"http://{_REMOTE_DEBUGGING_HOST}:{_REMOTE_DEBUGGING_PORT}",
+                timeout=10_000,
+            )
+            if not browser.contexts:
+                raise BrowserError("Chromium exposed no persistent browser context")
+            context = browser.contexts[0]
         except Exception:
+            if browser is not None:
+                with contextlib.suppress(Exception):
+                    await browser.close()
+            await self._terminate_browser_process(process)
             await playwright.stop()
             raise
         context.set_default_timeout(self.timeout_ms)
         context.set_default_navigation_timeout(self.timeout_ms)
         self._playwright = playwright
+        self._browser = browser
+        self._browser_process = process
         self._context = context
         for page in context.pages:
             self._register_page(page)
@@ -626,6 +688,7 @@ class BrowserManager:
             "operator_count": len(self._operator_pages),
             "agent_access_enabled": self._agent_access_enabled,
             "docked_devtools_page_id": self._operator_devtools_pages.get(owner_token, ""),
+            "can_reopen_closed_tab": bool(self._closed_pages),
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
         }
 
@@ -837,12 +900,20 @@ class BrowserManager:
                 self._agent_access_enabled = False
 
             context = self._context
+            browser = self._browser
+            process = self._browser_process
             playwright = self._playwright
             self._context = None
+            self._browser = None
+            self._browser_process = None
             self._playwright = None
             if context is not None:
                 with contextlib.suppress(Exception):
                     await context.close()
+            if browser is not None:
+                with contextlib.suppress(Exception):
+                    await browser.close()
+            await self._terminate_browser_process(process)
             if playwright is not None:
                 with contextlib.suppress(Exception):
                     await playwright.stop()
@@ -896,9 +967,42 @@ class BrowserManager:
         await page.reload(wait_until="domcontentloaded")
         return await self._summary(page_id, page)
 
+    async def operator_reopen_closed_page(self, owner_token: str) -> JsonObject:
+        self._require_operator(owner_token)
+        if not self._closed_pages:
+            raise BrowserError("no recently closed browser tab")
+        item = self._closed_pages.pop()
+        context = await self._ensure_started()
+        page = await context.new_page()
+        page_id = self._register_page(page)
+        url = str(item.get("url") or "about:blank")
+        if url != "about:blank":
+            await page.goto(self._operator_url(url), wait_until="domcontentloaded")
+        label = str(item.get("label") or "")
+        if label:
+            self._page_labels[page_id] = label
+        if item.get("page_agent_access") is False:
+            self._page_agent_access[page_id] = False
+        async with self._operator_lock:
+            self._operator_pages[owner_token] = page_id
+        result = await self._summary(page_id, page)
+        result["reopened"] = True
+        return result
+
     async def operator_close_page(self, owner_token: str, page_id: str) -> JsonObject:
         self._require_operator(owner_token)
         page = await self._page(page_id)
+        summary = await self._summary(page_id, page)
+        url = str(summary.get("url") or "")
+        if page_id not in self._internal_page_ids and not url.startswith("devtools://"):
+            self._closed_pages.append(
+                {
+                    "url": url or "about:blank",
+                    "label": summary.get("label") or "",
+                    "page_agent_access": summary.get("page_agent_access") is not False,
+                }
+            )
+            del self._closed_pages[:-20]
         await page.close()
         self._forget_page(page_id)
         async with self._operator_lock:

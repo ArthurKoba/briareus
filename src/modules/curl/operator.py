@@ -194,6 +194,9 @@ async def browser_operator_websocket(
                         str(message.get("url") or ""),
                     )
                     await select_page(str(result["page_id"]))
+                elif kind == "reopen_closed_page":
+                    result = await browser.operator_reopen_closed_page(owner_token)
+                    await select_page(str(result["page_id"]))
                 elif kind == "open_docked_devtools":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")
