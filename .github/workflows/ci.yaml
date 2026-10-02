@@ -70,14 +70,14 @@ jobs:
         env:
           PATHS_JSON: ${{ needs.plan.outputs.ruff_paths }}
         run: |
-          mapfile -t paths < <(python -c 'import json, os; print("\\n".join(json.loads(os.environ["PATHS_JSON"])))')
+          mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
           uv run ruff check "${paths[@]}"
       - name: Mypy selected paths
         if: needs.plan.outputs.mypy_paths != '[]'
         env:
           PATHS_JSON: ${{ needs.plan.outputs.mypy_paths }}
         run: |
-          mapfile -t paths < <(python -c 'import json, os; print("\\n".join(json.loads(os.environ["PATHS_JSON"])))')
+          mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
           uv run mypy "${paths[@]}"
 
   test:
@@ -104,7 +104,7 @@ jobs:
         env:
           PATHS_JSON: ${{ needs.plan.outputs.pytest_paths }}
         run: |
-          mapfile -t paths < <(python -c 'import json, os; print("\\n".join(json.loads(os.environ["PATHS_JSON"])))')
+          mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
           uv run pytest "${paths[@]}"
       - name: No tests required
         if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths == '[]'
