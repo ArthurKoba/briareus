@@ -66,6 +66,7 @@
   let frameWidth = 1440;
   let frameHeight = 900;
   let lastMove = 0;
+  const operatorTicket = {{ browser_operator_ticket | tojson }};
   const screen = document.getElementById('browser-screen');
   const tabs = document.getElementById('browser-tabs');
   const alertBox = document.getElementById('operator-alert');
@@ -102,12 +103,12 @@
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${scheme}//${location.host}/admin/browser/ws`);
     alertBox.className='alert alert-info'; alertBox.textContent='Connecting to persistent Chromium…';
-    ws.onopen = () => { setConnected(true); alertBox.className='alert alert-success'; alertBox.textContent='Human control active. Browser credentials stay inside the persistent profile.'; };
+    ws.onopen = () => { ws.send(JSON.stringify({type:'auth', ticket:operatorTicket})); };
     ws.onclose = () => { setConnected(false); alertBox.className='alert alert-secondary'; alertBox.textContent='Human control released.'; };
     ws.onerror = () => { alertBox.className='alert alert-danger'; alertBox.textContent='Browser operator connection failed.'; };
     ws.onmessage = event => {
       const msg = JSON.parse(event.data);
-      if (msg.type === 'state') renderState(msg);
+      if (msg.type === 'state') { setConnected(true); alertBox.className='alert alert-success'; alertBox.textContent='Human control active. Browser credentials stay inside the persistent profile.'; renderState(msg); }
       else if (msg.type === 'frame' && msg.page_id === selectedPage) {
         screen.src = `data:image/jpeg;base64,${msg.data}`;
         const meta = msg.metadata || {};
