@@ -10,7 +10,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      areas: ${{ steps.plan.outputs.areas }}
+      pytest_paths: ${{ steps.plan.outputs.pytest_paths }}
+      mypy_paths: ${{ steps.plan.outputs.mypy_paths }}
+      ruff_paths: ${{ steps.plan.outputs.ruff_paths }}
+      docker_targets: ${{ steps.plan.outputs.docker_targets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: plan
+        name: Build targeted CI plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            python scripts/ci_plan.py --force-full --github-output "$GITHUB_OUTPUT"
+          else
+            mapfile -t changed < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+            python scripts/ci_plan.py --github-output "$GITHUB_OUTPUT" "${changed[@]}"
+          fi
+      - name: Show plan
+        run: |
+          echo 'areas=${{ steps.plan.outputs.areas }}'
+          echo 'full=${{ steps.plan.outputs.full }}'
+          echo 'tests=${{ steps.plan.outputs.pytest_paths }}'
+          echo 'docker=${{ steps.plan.outputs.docker_targets }}'
+
   static:
+    needs: plan
+    if: needs.plan.outputs.ruff_paths != '[]' || needs.plan.outputs.mypy_paths != '[]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,28 +63,81 @@ jobs:
           restore-keys: |
             mypy-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}-
       - run: uv lock --check
+        if: needs.plan.outputs.full == 'true'
       - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run mypy src
+      - name: Ruff selected paths
+        if: needs.plan.outputs.ruff_paths != '[]'
+        env:
+          PATHS_JSON: ${{ needs.plan.outputs.ruff_paths }}
+        run: |
+          mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
+          uv run ruff check "${paths[@]}"
+      - name: Mypy selected paths
+        if: needs.plan.outputs.mypy_paths != '[]'
+        env:
+          PATHS_JSON: ${{ needs.plan.outputs.mypy_paths }}
+        run: |
+          mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
+          uv run mypy "${paths[@]}"
 
   test:
+    needs: plan
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require valid plan
+        run: test '${{ needs.plan.result }}' = success
       - uses: actions/checkout@v4
+        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
       - uses: astral-sh/setup-uv@v6
+        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
         with:
           enable-cache: true
       - uses: actions/setup-python@v5
+        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
         with:
           python-version: "3.13"
       - run: uv sync --frozen
-      - run: uv run pytest
+        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
+      - name: Pytest selected paths
+        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
+        env:
+          PATHS_JSON: ${{ needs.plan.outputs.pytest_paths }}
+        run: |
+          mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
+          uv run pytest "${paths[@]}"
+      - name: No tests required
+        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths == '[]'
+        run: echo 'No runtime tests selected for this diff.'
 
-  docker:
+  docker-target:
+    needs: plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.docker_targets != '[]'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.docker_targets) }}
     env:
       DOCKER_BUILD_RECORD_UPLOAD: "false"
       DOCKER_BUILD_SUMMARY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: false
+          tags: mcp-bridge:${{ matrix.target }}-ci
+          cache-from: type=gha,scope=mcp-bridge-${{ matrix.target }}
+          cache-to: type=gha,scope=mcp-bridge-${{ matrix.target }},ignore-error=true
+
+  docker:
+    needs: [plan, docker-target]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
       MANAGEMENT_ENCRYPTION_KEY: ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=
       MANAGEMENT_SERVICE_TOKEN: ci-management-token
       MANAGEMENT_ADMIN_USERNAME: ci-admin
@@ -62,105 +151,15 @@ jobs:
       GITHUB_OAUTH_JWT_SIGNING_KEY: ci-jwt-signing-key
       GITHUB_OAUTH_ALLOWED_USERS: ci-user
     steps:
+      - name: Require successful Docker plan
+        run: |
+          test '${{ needs.plan.result }}' = success
+          case '${{ needs.docker-target.result }}' in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - run: docker compose config >/dev/null
-      - name: Build github (prime shared cache)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: github
-          push: false
-          tags: mcp-bridge:github-ci
-          cache-from: type=gha,scope=mcp-bridge-core
-          cache-to: type=gha,scope=mcp-bridge-core,ignore-error=true
-      - name: Build auth
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: auth
-          push: false
-          tags: mcp-bridge:auth-ci
-      - name: Build gateway
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: gateway
-          push: false
-          tags: mcp-bridge:gateway-ci
-      - name: Build management
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: management
-          push: false
-          tags: mcp-bridge:management-ci
-      - name: Build gitlab
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: gitlab
-          push: false
-          tags: mcp-bridge:gitlab-ci
-      - name: Build files
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: files
-          push: false
-          tags: mcp-bridge:files-ci
-      - name: Build analysis
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: analysis
-          push: false
-          tags: mcp-bridge:analysis-ci
-      - name: Build ghidra
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: ghidra
-          push: false
-          tags: mcp-bridge:ghidra-ci
-      - name: Build observability
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: observability
-          push: false
-          tags: mcp-bridge:observability-ci
-
-  docker-curl:
-    runs-on: ubuntu-latest
-    env:
-      DOCKER_BUILD_RECORD_UPLOAD: "false"
-      DOCKER_BUILD_SUMMARY: "false"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: curl
-          push: false
-          tags: mcp-bridge:curl-ci
-          cache-from: type=gha,scope=mcp-bridge-curl
-          cache-to: type=gha,scope=mcp-bridge-curl,ignore-error=true
-
-  docker-terminal:
-    runs-on: ubuntu-latest
-    env:
-      DOCKER_BUILD_RECORD_UPLOAD: "false"
-      DOCKER_BUILD_SUMMARY: "false"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: terminal
-          push: false
-          tags: mcp-bridge:terminal-ci
-          cache-from: type=gha,scope=mcp-bridge-terminal
-          cache-to: type=gha,scope=mcp-bridge-terminal,ignore-error=true
+        if: needs.plan.outputs.full == 'true'
+      - name: Validate Compose topology
+        if: needs.plan.outputs.full == 'true'
+        run: docker compose config >/dev/null
