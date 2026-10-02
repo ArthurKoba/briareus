@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import platform
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 
 from fastmcp import FastMCP
-from fastmcp.server import create_proxy
 from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.routing import BaseRoute
 
-from common.management_client import ManagementClient
+from common.management_client import ManagementClient, ManagementClientError
 from common.mcp_surfaces import (
     MCP_SURFACE_PATHS,
     resource_url,
@@ -25,6 +27,7 @@ from common.runtime_annotations import (
     READ_EXTERNAL,
     READ_ONLY_LOCAL,
 )
+from common.runtime_policy_contracts import McpRuntimePolicy
 from common.settings import (
     BridgeSettings,
     GatewayAuthSettings,
@@ -54,8 +57,30 @@ _AUTH_PROXY_PATHS = (
 )
 
 
+async def _backend_timeout_seconds() -> float:
+    try:
+        policy = await asyncio.wait_for(
+            asyncio.to_thread(_management.mcp_runtime_policy),
+            timeout=1.0,
+        )
+    except (TimeoutError, ManagementClientError, ValueError):
+        policy = McpRuntimePolicy()
+    return float(policy.call_timeout_seconds)
+
+
+def _proxy_target(name: str, target: str | FastMCP[Any]) -> FastMCP:
+    async def client_factory() -> ProxyClient[Any]:
+        timeout = await _backend_timeout_seconds()
+        return ProxyClient(target, timeout=timeout, mode="auto")
+
+    return FastMCPProxy(
+        client_factory=client_factory,
+        name=f"{name}-backend",
+    )
+
+
 def _proxy(name: str, url: str) -> FastMCP:
-    return create_proxy(url, name=f"{name}-backend", mode="auto")
+    return _proxy_target(name, url)
 
 
 def _build_auth_reverse_proxy() -> ReverseProxy:
@@ -157,7 +182,8 @@ _backend_router = BackendRouter(
             MCP_SURFACE_PATHS["observability"],
             "Unified read-only infrastructure state, logs, traces, metrics and deployments",
         ),
-    )
+    ),
+    timeout_provider=_backend_timeout_seconds,
 )
 
 mcp = FastMCP(

@@ -46,7 +46,7 @@ from starlette_admin.fields import BaseField
 from common.mcp_surfaces import MCP_SURFACE_PATHS
 from common.models import JsonObject, JsonValue, json_int, json_str
 from common.public_tool_names import public_tool_name
-from common.runtime_policy_contracts import TerminalRuntimePolicy
+from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
@@ -999,17 +999,24 @@ class SettingsView(CustomView):
                     raise ValueError("Reverse idle timeout must be between 0 and 86400 seconds")
                 terminal_policy = TerminalRuntimePolicy(
                     max_exec_timeout_seconds=int(
-                        str(form.get("terminal_max_exec_timeout_seconds", "300"))
+                        str(form.get("terminal_max_exec_timeout_seconds", "21600"))
                     ),
                     max_job_runtime_seconds=int(
-                        str(form.get("terminal_max_job_runtime_seconds", "3600"))
+                        str(form.get("terminal_max_job_runtime_seconds", "43200"))
                     ),
+                )
+                mcp_policy = McpRuntimePolicy(
+                    call_timeout_seconds=int(str(form.get("mcp_call_timeout_seconds", "5")))
                 )
                 await self.reverse.set_idle_timeout(reverse_idle_timeout)
                 await asyncio.to_thread(self.config.update, config)
                 await asyncio.to_thread(
                     self.runtime_settings.update_terminal_policy,
                     terminal_policy,
+                )
+                await asyncio.to_thread(
+                    self.runtime_settings.update_mcp_policy,
+                    mcp_policy,
                 )
             except (TypeError, ValueError, RuntimeError) as exc:
                 flash(request, f"Invalid settings: {exc}", "error")
@@ -1019,6 +1026,7 @@ class SettingsView(CustomView):
 
         config = await asyncio.to_thread(self.config.get)
         terminal_policy = await asyncio.to_thread(self.runtime_settings.terminal_policy)
+        mcp_policy = await asyncio.to_thread(self.runtime_settings.mcp_policy)
         try:
             reverse_settings = await self.reverse.session_settings()
             reverse_error = ""
@@ -1037,6 +1045,7 @@ class SettingsView(CustomView):
                 "title": "Settings",
                 "config": config,
                 "terminal_policy": terminal_policy,
+                "mcp_policy": mcp_policy,
                 "reverse_settings": reverse_settings,
                 "reverse_error": reverse_error,
             },

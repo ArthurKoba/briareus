@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
-from common.runtime_policy_contracts import TerminalRuntimePolicy
+from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -24,6 +24,7 @@ from .database import (
     GitLabAccountRecord,
     InvocationRecord,
     ManagementConfigRecord,
+    McpRuntimeSettingsRecord,
     OAuthSessionRecord,
     RuntimeSettingsRecord,
     SigNozAccountRecord,
@@ -715,6 +716,13 @@ class SqlAlchemyRuntimeSettingsRepository:
                 record = RuntimeSettingsRecord(id=1)
                 session.add(record)
                 session.flush()
+            elif (
+                record.terminal_max_exec_timeout_seconds == 300
+                and record.terminal_max_job_runtime_seconds == 3600
+            ):
+                record.terminal_max_exec_timeout_seconds = 21_600
+                record.terminal_max_job_runtime_seconds = 43_200
+                session.flush()
             return self._domain(record)
 
     def save_terminal_policy(
@@ -728,4 +736,22 @@ class SqlAlchemyRuntimeSettingsRepository:
                 session.add(record)
             record.terminal_max_exec_timeout_seconds = policy.max_exec_timeout_seconds
             record.terminal_max_job_runtime_seconds = policy.max_job_runtime_seconds
+        return policy
+
+    def get_mcp_policy(self) -> McpRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(McpRuntimeSettingsRecord, 1)
+            if record is None:
+                record = McpRuntimeSettingsRecord(id=1)
+                session.add(record)
+                session.flush()
+            return McpRuntimePolicy(call_timeout_seconds=record.call_timeout_seconds)
+
+    def save_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(McpRuntimeSettingsRecord, 1)
+            if record is None:
+                record = McpRuntimeSettingsRecord(id=1)
+                session.add(record)
+            record.call_timeout_seconds = policy.call_timeout_seconds
         return policy
