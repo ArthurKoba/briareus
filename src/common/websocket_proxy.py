@@ -7,6 +7,7 @@ from typing import cast
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
 
@@ -67,6 +68,10 @@ async def relay_websocket(
             with contextlib.suppress(RuntimeError):
                 await websocket.close(code=1000)
     except WebSocketDisconnect:
+        return
+    except ConnectionClosed as exc:
+        with contextlib.suppress(RuntimeError):
+            await websocket.close(code=int(exc.code), reason=str(exc.reason or ""))
         return
     except Exception:
         with contextlib.suppress(RuntimeError):

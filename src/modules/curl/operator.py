@@ -184,6 +184,11 @@ async def browser_operator_websocket(
                         await select_page(new_page_id)
                     else:
                         await send_state()
+                elif kind == "clean_app":
+                    if not selected_page_id:
+                        raise BrowserError("no browser page selected")
+                    await browser.operator_clean_app(owner_token, selected_page_id)
+                    await send_state()
                 elif kind == "clean_browser":
                     if stream_task is not None:
                         stream_task.cancel()

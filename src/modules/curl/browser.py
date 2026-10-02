@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 from common.models import JsonObject, JsonValue
 from modules.files.workspace_store import WorkspaceFileStore
 
+_REMOTE_DEBUGGING_HOST = "127.0.0.1"
+_REMOTE_DEBUGGING_PORT = 9222
+
 
 class BrowserError(RuntimeError):
     """Browser operation failed."""
@@ -111,7 +114,11 @@ class BrowserManager:
                 executable_path=self.executable_path,
                 headless=self.headless,
                 accept_downloads=True,
-                args=["--no-sandbox"],
+                args=[
+                    "--no-sandbox",
+                    f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}",
+                    f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}",
+                ],
                 viewport={"width": self.viewport_width, "height": self.viewport_height},
             )
         except Exception:
@@ -646,48 +653,99 @@ class BrowserManager:
         self._require_operator(owner_token)
         context = await self._ensure_started()
         page = await self._page(page_id)
-        before = {id(candidate) for candidate in context.pages}
         session = await context.new_cdp_session(page)
         try:
             info = await session.send("Target.getTargetInfo")
-            target_info = info.get("targetInfo") if isinstance(info, dict) else None
-            target_id = (
-                str(target_info.get("targetId") or "")
-                if isinstance(target_info, dict)
-                else ""
-            )
-            if not target_id:
-                raise BrowserError("selected browser tab has no DevTools target")
-            try:
-                opened = await session.send(
-                    "Target.openDevTools",
-                    {"targetId": target_id, "panelId": panel},
-                )
-            except Exception as exc:
-                raise BrowserError(f"Chromium could not open DevTools: {exc}") from exc
         finally:
             await session.detach()
-
-        devtools_target_id = (
-            str(opened.get("targetId") or "") if isinstance(opened, dict) else ""
+        target_info = info.get("targetInfo") if isinstance(info, dict) else None
+        target_id = (
+            str(target_info.get("targetId") or "")
+            if isinstance(target_info, dict)
+            else ""
         )
-        for _ in range(10):
-            await asyncio.sleep(0.1)
-            for candidate in context.pages:
-                if id(candidate) in before or candidate.is_closed():
-                    continue
-                candidate_id = self._register_page(candidate)
-                async with self._operator_lock:
-                    self._operator_pages[owner_token] = candidate_id
-                result = await self._summary(candidate_id, candidate)
-                result["devtools_target_id"] = devtools_target_id
-                result["opened_devtools"] = True
-                return result
-        return {
-            "opened_devtools": True,
-            "devtools_target_id": devtools_target_id,
-            "page_id": page_id,
+        if not target_id:
+            raise BrowserError("selected browser tab has no DevTools target")
+        supported_panels = {
+            "elements",
+            "console",
+            "network",
+            "sources",
+            "resources",
+            "timeline",
+            "security",
         }
+        normalized_panel = panel if panel in supported_panels else "elements"
+        devtools_url = (
+            "devtools://devtools/bundled/inspector.html"
+            f"?panel={normalized_panel}"
+            f"&ws={_REMOTE_DEBUGGING_HOST}:{_REMOTE_DEBUGGING_PORT}"
+            f"/devtools/page/{target_id}"
+        )
+        devtools_page = await context.new_page()
+        devtools_page_id = self._register_page(devtools_page)
+        try:
+            await devtools_page.goto(devtools_url, wait_until="domcontentloaded")
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await devtools_page.close()
+            self._forget_page(devtools_page_id)
+            raise BrowserError(f"Chromium could not open DevTools frontend: {exc}") from exc
+        async with self._operator_lock:
+            self._operator_pages[owner_token] = devtools_page_id
+        result = await self._summary(devtools_page_id, devtools_page)
+        result["inspected_page_id"] = page_id
+        result["devtools_target_id"] = target_id
+        result["opened_devtools"] = True
+        return result
+
+    async def operator_clean_app(
+        self,
+        owner_token: str,
+        page_id: str,
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        context = await self._ensure_started()
+        page = await self._page(page_id)
+        parsed = urlsplit(page.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise BrowserError("Clean App requires an http(s) application tab")
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        session = await context.new_cdp_session(page)
+        deleted_cookies = 0
+        try:
+            cookie_payload = await session.send("Network.getCookies", {"urls": [page.url]})
+            cookies = (
+                cookie_payload.get("cookies", [])
+                if isinstance(cookie_payload, dict)
+                else []
+            )
+            if isinstance(cookies, list):
+                for cookie in cookies:
+                    if not isinstance(cookie, dict):
+                        continue
+                    name = cookie.get("name")
+                    domain = cookie.get("domain")
+                    path = cookie.get("path")
+                    if not all(isinstance(value, str) for value in (name, domain, path)):
+                        continue
+                    await session.send(
+                        "Network.deleteCookies",
+                        {"name": name, "domain": domain, "path": path},
+                    )
+                    deleted_cookies += 1
+            await session.send(
+                "Storage.clearDataForOrigin",
+                {"origin": origin, "storageTypes": "all"},
+            )
+        finally:
+            await session.detach()
+        await page.reload(wait_until="domcontentloaded")
+        result = await self._summary(page_id, page)
+        result["cleaned_app"] = True
+        result["cleaned_origin"] = origin
+        result["deleted_cookie_count"] = deleted_cookies
+        return result
 
     async def operator_clean_browser(self, owner_token: str) -> JsonObject:
         self._require_operator(owner_token)

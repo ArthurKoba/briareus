@@ -53,7 +53,24 @@ def test_oauth_session_events_track_rotation_activity_and_errors(tmp_path) -> No
     assert refreshed.previous_refresh_jti == "refresh-1"
     assert refreshed.last_refresh_at == refreshed_at
 
-    error_at = refreshed_at + timedelta(seconds=2)
+    recovered_at = refreshed_at + timedelta(seconds=1)
+    recovered = service.record(
+        OAuthSessionEvent(
+            session_id="upstream-session-1",
+            client_id="chatgpt-client",
+            resource="https://mcp.example.test/web/mcp",
+            status="active",
+            event="refresh_success_after_upstream_race",
+            access_jti="access-3",
+            refresh_jti="refresh-3",
+            occurred_at=recovered_at,
+        )
+    )
+    assert recovered.last_refresh_at == recovered_at
+    assert recovered.last_used_at == recovered_at
+    assert recovered.previous_refresh_jti == "refresh-2"
+
+    error_at = recovered_at + timedelta(seconds=1)
     failed = service.record(
         OAuthSessionEvent(
             client_id="chatgpt-client",
