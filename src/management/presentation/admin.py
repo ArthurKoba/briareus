@@ -56,6 +56,7 @@ from management.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
+from management.browser_operator_auth import issue_browser_operator_ticket
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -965,12 +966,23 @@ class BrowserView(CustomView):
     icon = "fa fa-globe"
     path = "/browser"
 
+    def __init__(self, settings: ManagementSettings) -> None:
+        super().__init__()
+        self.settings = settings
+
     @route("")
     async def index(self, request: Request) -> Response:
+        ticket = issue_browser_operator_ticket(
+            self.settings.session_secret,
+            self.settings.admin_username,
+        )
         return _view_templates(self).TemplateResponse(
             request=request,
             name="management_browser.html",
-            context={"title": "Browser Operator"},
+            context={
+                "title": "Browser Operator",
+                "browser_operator_ticket": ticket,
+            },
         )
 
 
@@ -1441,7 +1453,7 @@ def build_admin(
     admin.add_view(CoolifyAccountView(cipher, accounts))
     admin.add_view(ReverseView(reverse, snapshots))
     admin.add_view(TerminalView(terminal))
-    admin.add_view(BrowserView())
+    admin.add_view(BrowserView(settings))
     admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))
     admin.add_view(InvocationView(InvocationRecord, audit))
     admin.add_view(SettingsView(config, runtime_settings, audit, reverse))
