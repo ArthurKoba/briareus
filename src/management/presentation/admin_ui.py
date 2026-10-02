@@ -12,7 +12,7 @@ class ManagementUiPlugin(BasePlugin):
     package = "management.presentation.admin_ui_plugin"
 
     def css_links(self, request: Request) -> list[str]:
-        return [static_url(request, "plugins/management-ui/admin.css", v=3)]
+        return [static_url(request, "plugins/management-ui/admin.css", v=4)]
 
     def js_links(self, request: Request) -> list[str]:
-        return [static_url(request, "plugins/management-ui/admin.js", v=1)]
+        return [static_url(request, "plugins/management-ui/admin.js", v=2)]
