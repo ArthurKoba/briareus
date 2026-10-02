@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -65,20 +66,33 @@ def _decode_call_result(result: object) -> JsonValue | None:
 
 
 class BackendRouter:
-    def __init__(self, backends: tuple[BackendDescriptor, ...]) -> None:
+    def __init__(
+        self,
+        backends: tuple[BackendDescriptor, ...],
+        *,
+        timeout_provider: Callable[[], Awaitable[float]] | None = None,
+    ) -> None:
         self._backends = {backend.name: backend for backend in backends}
+        self._timeout_provider = timeout_provider
+
+    async def _timeout_seconds(self) -> float:
+        if self._timeout_provider is None:
+            return 5.0
+        try:
+            return max(1.0, float(await self._timeout_provider()))
+        except Exception:
+            return 5.0
 
     def _get(self, name: str) -> BackendDescriptor:
         key = name.strip().casefold()
         backend = self._backends.get(key)
         if backend is None:
-            raise ValueError(
-                f"unknown backend {name!r}; expected one of {sorted(self._backends)}"
-            )
+            raise ValueError(f"unknown backend {name!r}; expected one of {sorted(self._backends)}")
         return backend
 
     async def _catalog(self, backend: BackendDescriptor) -> list[_RemoteTool]:
-        async with Client(backend.url) as client:
+        timeout = await self._timeout_seconds()
+        async with Client(backend.url, timeout=timeout) as client:
             return list(cast(list[_RemoteTool], await client.list_tools()))
 
     async def describe(self) -> JsonObject:
@@ -102,9 +116,7 @@ class BackendRouter:
                 "tool_count": len(tools),
             }
 
-        values = await asyncio.gather(
-            *(probe(backend) for backend in self._backends.values())
-        )
+        values = await asyncio.gather(*(probe(backend) for backend in self._backends.values()))
         return {
             "status": "ok",
             "backends": json_array(values, context="bridge backends"),
@@ -139,15 +151,23 @@ class BackendRouter:
     ) -> JsonObject:
         backend = self._get(name)
         try:
-            async with Client(backend.url) as client:
+            timeout = await self._timeout_seconds()
+            async with Client(backend.url, timeout=timeout) as client:
                 result = await client.call_tool(tool_name, arguments or {})
         except Exception as exc:
+            message = str(exc)[:1000]
+            timed_out = "timed out" in message.casefold() or isinstance(exc, TimeoutError)
             return {
                 "backend": backend.name,
                 "tool": tool_name,
                 "status": "error",
-                "error_type": type(exc).__name__,
-                "message": str(exc)[:1000],
+                "error_type": "MCP_BACKEND_TIMEOUT" if timed_out else type(exc).__name__,
+                "message": message,
+                "hint": (
+                    "Retry, narrow the request, or use an asynchronous job tool when available."
+                    if timed_out
+                    else ""
+                ),
             }
         return {
             "backend": backend.name,
