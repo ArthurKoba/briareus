@@ -30,17 +30,22 @@ class DeveloperAccessMiddleware(Middleware):
         context: MiddlewareContext[mt.ListToolsRequest],
         call_next: CallNext[mt.ListToolsRequest, Sequence[Tool]],
     ) -> Sequence[Tool]:
-        if not self.browser.developer_access_effective:
-            disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
-            await disconnect()
-            return []
-
-        tools = await call_next(context)
-        prefix = "Koba privileged browser developer tool. Developer access is ON. "
-        return [
-            tool.model_copy(update={"description": prefix + (tool.description or "")})
-            for tool in tools
-        ]
+        try:
+            tools = await call_next(context)
+            state = (
+                "Developer access is ON. "
+                if self.browser.developer_access_effective
+                else "Developer access is OFF; ask the operator to enable it before use. "
+            )
+            prefix = f"Koba privileged browser developer tool. {state}"
+            return [
+                tool.model_copy(update={"description": prefix + (tool.description or "")})
+                for tool in tools
+            ]
+        finally:
+            if not self.browser.developer_access_effective:
+                disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
+                await disconnect()
 
     async def on_call_tool(
         self,
