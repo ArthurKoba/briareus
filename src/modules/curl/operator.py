@@ -133,6 +133,29 @@ async def browser_operator_websocket(
                     await select_page(str(message.get("page_id") or ""))
                 elif kind == "refresh_state":
                     await send_state()
+                elif kind == "set_label":
+                    page_id = str(message.get("page_id") or "")
+                    await browser.operator_set_page_label(
+                        owner_token,
+                        page_id,
+                        str(message.get("label") or ""),
+                    )
+                    await send_state()
+                elif kind == "set_page_agent_access":
+                    page_id = str(message.get("page_id") or "")
+                    allowed = message.get("allowed")
+                    if not isinstance(allowed, bool):
+                        raise BrowserError("allowed must be a boolean")
+                    await browser.operator_set_page_agent_access(
+                        owner_token, page_id, allowed
+                    )
+                    await send_state()
+                elif kind == "set_agent_access":
+                    allowed = message.get("allowed")
+                    if not isinstance(allowed, bool):
+                        raise BrowserError("allowed must be a boolean")
+                    await browser.operator_set_agent_access(owner_token, allowed)
+                    await send_state()
                 elif kind == "navigate":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")
