@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from common.account_contracts import AccountPublic, ResolvedAccount
 from common.models import JsonObject, json_object
-from common.runtime_policy_contracts import TerminalRuntimePolicy
+from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -207,3 +207,9 @@ class RuntimeSettingsService:
         policy: TerminalRuntimePolicy,
     ) -> TerminalRuntimePolicy:
         return self.repository.save_terminal_policy(policy)
+
+    def mcp_policy(self) -> McpRuntimePolicy:
+        return self.repository.get_mcp_policy()
+
+    def update_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy:
+        return self.repository.save_mcp_policy(policy)
