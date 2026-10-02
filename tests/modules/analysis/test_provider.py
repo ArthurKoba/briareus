@@ -347,7 +347,7 @@ def test_catalog_references_use_public_tool_names() -> None:
     assert "function_address" not in encoded
     assert "RE documentation" not in encoded
     assert "set_action_name" in encoded
-    assert "get_action_contextness" in encoded
+    assert "assess_action_documentation" in encoded
     assert "action_address" in encoded
     assert "analysis documentation" in encoded
 

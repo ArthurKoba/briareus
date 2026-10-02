@@ -177,11 +177,11 @@ _TEXT_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"delete_function_tag", re.IGNORECASE), "delete_action_tag"),
     (
         re.compile(r"analyze_function_completeness", re.IGNORECASE),
-        "analyze_action_completeness",
+        "assess_action_documentation",
     ),
-    (re.compile(r"rename_function", re.IGNORECASE), "name_action"),
+    (re.compile(r"rename_function", re.IGNORECASE), "set_action_name"),
     (re.compile(r"set_function_this_type", re.IGNORECASE), "set_action_this_type"),
-    (re.compile(r"add_memory_reference", re.IGNORECASE), "add_data_link"),
+    (re.compile(r"add_memory_reference", re.IGNORECASE), "create_data_link"),
     (
         re.compile(r"GHIDRA_MCP_ALLOW_SCRIPTS", re.IGNORECASE),
         "analysis scripting setting",
