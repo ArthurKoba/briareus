@@ -16,6 +16,7 @@ async def relay_websocket(
     *,
     headers: Mapping[str, str] | None = None,
     origin: str | None = None,
+    accept_downstream: bool = True,
 ) -> None:
     """Relay one authenticated Starlette WebSocket to an internal WebSocket."""
 
@@ -29,7 +30,8 @@ async def relay_websocket(
             open_timeout=10,
             close_timeout=5,
         ) as upstream:
-            await websocket.accept()
+            if accept_downstream:
+                await websocket.accept()
 
             async def client_to_upstream() -> None:
                 while True:
