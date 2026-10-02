@@ -513,3 +513,64 @@ async def test_devtools_cannot_inspect_another_devtools_tab(tmp_path: Path) -> N
     browser._ensure_started = fake_started  # type: ignore[method-assign]
     with pytest.raises(BrowserError, match="select an application tab"):
         await browser.operator_open_docked_devtools("owner", page_id)
+
+
+@pytest.mark.asyncio
+async def test_operator_reopens_last_closed_tab_with_label_and_policy(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        def __init__(self, url: str = "about:blank", title: str = "") -> None:
+            self.url = url
+            self._title = title
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def title(self) -> str:
+            return self._title
+
+        async def close(self) -> None:
+            self.closed = True
+
+        async def goto(self, url: str, *, wait_until: str):
+            assert wait_until == "domcontentloaded"
+            self.url = url
+            self._title = "Reopened"
+
+    original = FakePage("https://example.test/path", "Original")
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.pages = [original]
+
+        async def new_page(self) -> FakePage:
+            page = FakePage()
+            self.pages.append(page)
+            return page
+
+    context = FakeContext()
+    page_id = browser._register_page(cast(Any, original))
+    browser._page_labels[page_id] = "Work"
+    browser._page_agent_access[page_id] = False
+    browser._operator_pages["owner"] = page_id
+
+    async def fake_started() -> Any:
+        return cast(Any, context)
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    closed = await browser.operator_close_page("owner", page_id)
+    assert closed["closed"] is True
+    assert browser._closed_pages
+    state = await browser.operator_state("owner")
+    assert state["can_reopen_closed_tab"] is True
+
+    reopened = await browser.operator_reopen_closed_page("owner")
+    reopened_id = str(reopened["page_id"])
+    assert reopened["reopened"] is True
+    assert reopened["url"] == "https://example.test/path"
+    assert reopened["label"] == "Work"
+    assert reopened["page_agent_access"] is False
+    assert browser._operator_pages["owner"] == reopened_id
+    assert browser._closed_pages == []

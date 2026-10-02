@@ -40,6 +40,7 @@
     <button id="browser-reload" class="btn" type="button" disabled>Reload</button>
     <button id="browser-new" class="btn" type="button" disabled>New tab</button>
     <button id="browser-close" class="btn" type="button" disabled>Close</button>
+    <button id="browser-reopen" class="btn" type="button" disabled title="Reopen the last closed tab (Ctrl+Shift+T)">Reopen</button>
     <span class="vr mx-1"></span>
     <button id="browser-extensions" class="btn btn-outline-primary" type="button" disabled title="Open chrome://extensions for Developer mode and extension management">Extensions</button>
     <button id="browser-devtools" class="btn btn-outline-primary" type="button" disabled title="Dock Chromium DevTools beside the selected tab">DevTools</button>
@@ -107,7 +108,7 @@
   const alertBox = document.getElementById('operator-alert');
   const status = document.getElementById('operator-status');
   const urlInput = document.getElementById('browser-url');
-  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-go','browser-extensions','browser-devtools','browser-devtools-tab','browser-clean-app','browser-clean','agent-access-toggle'];
+  const controls = ['browser-back','browser-reload','browser-new','browser-close','browser-reopen','browser-go','browser-extensions','browser-devtools','browser-devtools-tab','browser-clean-app','browser-clean','agent-access-toggle'];
   const agentAccessToggle = document.getElementById('agent-access-toggle');
 
   function setConnected(on) {
@@ -173,6 +174,7 @@
     if(selectionChanged)urlDirty=false;
     selectedPage=nextSelected;
     dockedDevtoolsPage=next.docked_devtools_page_id||'';
+    document.getElementById('browser-reopen').disabled = !(next.can_reopen_closed_tab === true);
     const showDevtools=Boolean(dockedDevtoolsPage);
     devtoolsPane.classList.toggle('d-none',!showDevtools);
     liveGrid.classList.toggle('with-devtools',showDevtools);
@@ -215,12 +217,13 @@
     image.addEventListener('mousemove',e=>{const now=performance.now();if(now-lastMoveValue()>33){setLastMove(now);pointer(targetPage(),image,widthValue(),heightValue(),e,'mouseMoved');}});
     image.addEventListener('wheel',e=>{const rect=image.getBoundingClientRect();send({type:'mouse',page_id:targetPage(),event:'mouseWheel',x:(e.clientX-rect.left)*widthValue()/rect.width,y:(e.clientY-rect.top)*heightValue()/rect.height,delta_x:e.deltaX,delta_y:e.deltaY});e.preventDefault();},{passive:false});
     image.addEventListener('contextmenu',e=>e.preventDefault());
-    image.addEventListener('keydown',e=>{if(e.ctrlKey||e.altKey||e.metaKey||e.key.length>1){const parts=[];if(e.ctrlKey)parts.push('Control');if(e.altKey)parts.push('Alt');if(e.metaKey)parts.push('Meta');if(e.shiftKey&&e.key.length>1)parts.push('Shift');parts.push(e.key);send({type:'key',page_id:targetPage(),key:parts.join('+')});e.preventDefault();}else if(e.key.length===1){send({type:'text',page_id:targetPage(),text:e.key});e.preventDefault();}});
+    image.addEventListener('keydown',e=>{if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='t'){send({type:'reopen_closed_page'});e.preventDefault();return;}if(e.ctrlKey||e.altKey||e.metaKey||e.key.length>1){const parts=[];if(e.ctrlKey)parts.push('Control');if(e.altKey)parts.push('Alt');if(e.metaKey)parts.push('Meta');if(e.shiftKey&&e.key.length>1)parts.push('Shift');parts.push(e.key);send({type:'key',page_id:targetPage(),key:parts.join('+')});e.preventDefault();}else if(e.key.length===1){send({type:'text',page_id:targetPage(),text:e.key});e.preventDefault();}});
   }
   document.getElementById('browser-back').onclick=()=>send({type:'back'});
   document.getElementById('browser-reload').onclick=()=>send({type:'reload'});
   document.getElementById('browser-new').onclick=()=>send({type:'new_page'});
   document.getElementById('browser-close').onclick=()=>send({type:'close_page'});
+  document.getElementById('browser-reopen').onclick=()=>send({type:'reopen_closed_page'});
   document.getElementById('browser-extensions').onclick=()=>send({type:'new_page',url:'chrome://extensions/'});
   document.getElementById('browser-devtools').onclick=()=>send({type:'open_docked_devtools',panel:'elements'});
   document.getElementById('browser-devtools-tab').onclick=()=>send({type:'open_devtools',panel:'elements'});

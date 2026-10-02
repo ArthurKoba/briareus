@@ -114,3 +114,7 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     assert '_REMOTE_DEBUGGING_PORT = 9222' in source
     assert 'f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}"' in source
     assert 'f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}"' in source
+    assert 'playwright.chromium.connect_over_cdp(' in source
+    assert 'asyncio.create_subprocess_exec(' in source
+    assert 'launch_persistent_context(' not in source
+    assert 'command.append("--headless=new")' in source

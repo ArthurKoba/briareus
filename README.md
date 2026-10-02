@@ -175,9 +175,12 @@ profile. It provides compact shared tabs, per-tab and browser-wide agent access 
 page-ID copy, Chromium extension management through `chrome://extensions`, docked DevTools
 beside the selected application, and an optional separate DevTools tab. Docked DevTools runs
 as an internal Chromium target hidden from the normal browser-tab/agent catalog, while both
-site and DevTools screencasts remain independently interactive. DevTools uses a Chromium
-remote-debugging endpoint bound only to `127.0.0.1` inside the Web container; no debugging
-port is published by Compose. The Browser Operator page is served with `no-store` headers so
+site and DevTools screencasts remain independently interactive. Chromium is launched as the
+persistent process with a remote-debugging endpoint bound only to `127.0.0.1` inside the Web
+container, and Playwright attaches to that same process through CDP. This gives the bundled
+DevTools frontend a real target transport without publishing a debugging port by Compose. The
+operator can also reopen the last closed application tab with `Reopen` or Ctrl+Shift+T. The
+Browser Operator page is served with `no-store` headers so
 old operator UI versions are not resurrected after deployments. `Clean App`
 clears cookies and origin-scoped site data only for the selected HTTP(S) application, while
 `Clean browser` is deliberately destructive: it stops Chromium, erases the persistent
