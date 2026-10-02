@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import tempfile
 import uuid
@@ -52,6 +53,8 @@ class BrowserManager:
         self._policy_lock = asyncio.Lock()
         self._policy_path = self.profile_dir / "koba-browser-policy.json"
         self._agent_access_enabled = True
+        self._developer_mode_enabled = False
+        self._agent_developer_access_enabled = False
         self._page_labels: dict[str, str] = {}
         self._page_agent_access: dict[str, bool] = {}
         self._load_policy()
@@ -61,15 +64,25 @@ class BrowserManager:
             payload = json.loads(self._policy_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        if isinstance(payload, dict) and isinstance(payload.get("agent_access_enabled"), bool):
+        if not isinstance(payload, dict):
+            return
+        if isinstance(payload.get("agent_access_enabled"), bool):
             self._agent_access_enabled = payload["agent_access_enabled"]
+        if isinstance(payload.get("developer_mode_enabled"), bool):
+            self._developer_mode_enabled = payload["developer_mode_enabled"]
+        if isinstance(payload.get("agent_developer_access_enabled"), bool):
+            self._agent_developer_access_enabled = payload["agent_developer_access_enabled"]
 
     def _persist_policy(self) -> None:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         temporary = self._policy_path.with_suffix(".tmp")
         temporary.write_text(
             json.dumps(
-                {"agent_access_enabled": self._agent_access_enabled},
+                {
+                    "agent_access_enabled": self._agent_access_enabled,
+                    "developer_mode_enabled": self._developer_mode_enabled,
+                    "agent_developer_access_enabled": self._agent_developer_access_enabled,
+                },
                 separators=(",", ":"),
                 sort_keys=True,
             ),
@@ -92,6 +105,24 @@ class BrowserManager:
         if page_id and not self._page_agent_access.get(page_id, True):
             raise BrowserError(f"browser page is locked by operator: {page_id}")
 
+    def _require_developer_mode(self, *, agent: bool) -> None:
+        if not self._developer_mode_enabled:
+            raise BrowserError("browser developer mode is disabled by operator")
+        if agent and not self._agent_developer_access_enabled:
+            raise BrowserError("browser developer access is disabled for agents")
+
+    @staticmethod
+    def _is_developer_url(value: str) -> bool:
+        parsed = urlsplit(value.strip())
+        return parsed.scheme in {"chrome", "chrome-extension"}
+
+    async def _agent_page(self, page_id: str) -> Page:
+        self._require_agent_access(page_id)
+        page = await self._page(page_id)
+        if self._is_developer_url(page.url):
+            self._require_developer_mode(agent=True)
+        return page
+
     async def _start_locked(self) -> None:
         if self._context is not None:
             return
@@ -108,7 +139,7 @@ class BrowserManager:
                 executable_path=self.executable_path,
                 headless=self.headless,
                 accept_downloads=True,
-                args=["--no-sandbox"],
+                args=["--no-sandbox", "--enable-unsafe-extension-debugging"],
                 viewport={"width": self.viewport_width, "height": self.viewport_height},
             )
         except Exception:
@@ -165,6 +196,23 @@ class BrowserManager:
             raise BrowserError("browser URL must be absolute http(s)")
         return value
 
+    def _developer_url(self, value: str, *, agent: bool) -> str:
+        value = value.strip()
+        parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return value
+        self._require_developer_mode(agent=agent)
+        if parsed.scheme == "chrome" and value.startswith((
+            "chrome://extensions",
+            "chrome://settings",
+            "chrome://version",
+            "chrome://inspect",
+        )):
+            return value
+        if parsed.scheme == "chrome-extension" and parsed.netloc:
+            return value
+        raise BrowserError("developer URL must be approved chrome:// or chrome-extension://")
+
     async def _summary(self, page_id: str, page: Page) -> JsonObject:
         return {
             "page_id": page_id,
@@ -176,7 +224,11 @@ class BrowserManager:
         }
 
     async def _agent_summary(self, page_id: str, page: Page) -> JsonObject:
-        if self._agent_access_allowed(page_id):
+        policy_allowed = self._agent_access_allowed(page_id)
+        developer_allowed = not self._is_developer_url(page.url) or (
+            self._developer_mode_enabled and self._agent_developer_access_enabled
+        )
+        if policy_allowed and developer_allowed:
             return await self._summary(page_id, page)
         return {
             "page_id": page_id,
@@ -184,6 +236,7 @@ class BrowserManager:
             "page_agent_access": self._page_agent_access.get(page_id, True),
             "agent_access": False,
             "locked": True,
+            "developer_locked": not developer_allowed,
             "url": "",
             "title": "",
         }
@@ -246,6 +299,8 @@ class BrowserManager:
         return {
             "running": True,
             "agent_access_enabled": self._agent_access_enabled,
+            "developer_mode_enabled": self._developer_mode_enabled,
+            "agent_developer_access_enabled": self._agent_developer_access_enabled,
             "headless": self.headless,
             "browser": "chromium",
             "executable_path": self.executable_path,
@@ -262,10 +317,10 @@ class BrowserManager:
 
     async def open(self, url: str, page_id: str = "") -> JsonObject:
         context = await self._ensure_started()
-        target_url = self._url(url)
+        target_url = self._developer_url(url, agent=True)
         self._require_agent_access(page_id)
         if page_id:
-            page = await self._page(page_id)
+            page = await self._agent_page(page_id)
         else:
             page = await context.new_page()
             page_id = self._register_page(page)
@@ -281,8 +336,7 @@ class BrowserManager:
         max_text_chars: int | None = None,
         max_elements: int | None = None,
     ) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         text_limit = min(
             max_text_chars or self.max_snapshot_text_chars,
             self.max_snapshot_text_chars,
@@ -355,8 +409,7 @@ class BrowserManager:
         return summary
 
     async def _locator(self, page_id: str, ref: str) -> tuple[Page, Locator]:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         ref = ref.strip()
         if not ref:
             raise BrowserError("element ref is required")
@@ -433,8 +486,7 @@ class BrowserManager:
         full_page: bool,
         overwrite: bool,
     ) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         target = self.workspace.target_path(workspace_path)
         if target.exists() and not overwrite:
             raise BrowserError(f"destination already exists: {workspace_path}")
@@ -449,8 +501,7 @@ class BrowserManager:
         state: str,
         timeout_seconds: float,
     ) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         normalized = state.strip().casefold()
         if normalized not in {"load", "domcontentloaded", "networkidle"}:
             raise BrowserError("wait state must be load, domcontentloaded, or networkidle")
@@ -464,29 +515,91 @@ class BrowserManager:
         return await self._summary(page_id, page)
 
     async def back(self, page_id: str) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         await page.go_back(wait_until="domcontentloaded")
         return await self._summary(page_id, page)
 
     async def reload(self, page_id: str) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         response = await page.reload(wait_until="domcontentloaded")
         result = await self._summary(page_id, page)
         result["http_status"] = response.status if response is not None else None
         return result
 
     async def close_page(self, page_id: str) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         await page.close()
         self._forget_page(page_id)
         return {"page_id": page_id, "closed": True}
 
+    async def _browser_cdp_session(self) -> CDPSession:
+        context = await self._ensure_started()
+        browser = context.browser
+        if browser is None:
+            raise BrowserError("browser-level CDP session is unavailable")
+        return await browser.new_browser_cdp_session()
+
+    async def _extension_command(
+        self, method: str, params: JsonObject | None = None
+    ) -> JsonObject:
+        session = await self._browser_cdp_session()
+        try:
+            result = await session.send(method, params or {})
+        except Exception as exc:
+            raise BrowserError(
+                f"Chromium extension developer API failed for {method}: {exc}"
+            ) from exc
+        finally:
+            with contextlib.suppress(Exception):
+                await session.detach()
+        if not isinstance(result, dict):
+            raise BrowserError(f"Chromium extension API returned invalid data for {method}")
+        return cast(JsonObject, result)
+
+    async def developer_status(self) -> JsonObject:
+        self._require_agent_access()
+        return {
+            "developer_mode_enabled": self._developer_mode_enabled,
+            "agent_developer_access_enabled": self._agent_developer_access_enabled,
+        }
+
+    async def extension_list(self, *, agent: bool = True) -> JsonObject:
+        if agent:
+            self._require_agent_access()
+        self._require_developer_mode(agent=agent)
+        return await self._extension_command("Extensions.getExtensions")
+
+    async def extension_load_unpacked(
+        self, workspace_path: str, *, agent: bool = True
+    ) -> JsonObject:
+        if agent:
+            self._require_agent_access()
+        self._require_developer_mode(agent=agent)
+        source = self.workspace.path_for(workspace_path)
+        if not source.is_dir():
+            raise BrowserError(f"extension path is not a directory: {workspace_path}")
+        if not (source / "manifest.json").is_file():
+            raise BrowserError(f"extension manifest not found: {workspace_path}/manifest.json")
+        result = await self._extension_command(
+            "Extensions.loadUnpacked", {"path": str(source)}
+        )
+        result["workspace_path"] = self.workspace.relative(source)
+        return result
+
+    async def extension_uninstall(
+        self, extension_id: str, *, agent: bool = True
+    ) -> JsonObject:
+        if agent:
+            self._require_agent_access()
+        self._require_developer_mode(agent=agent)
+        normalized = extension_id.strip()
+        if not normalized:
+            raise BrowserError("extension_id is required")
+        await self._extension_command("Extensions.uninstall", {"id": normalized})
+        return {"extension_id": normalized, "uninstalled": True}
+
     async def set_page_label(self, page_id: str, label: str) -> JsonObject:
-        self._require_agent_access(page_id)
-        page = await self._page(page_id)
+        page = await self._agent_page(page_id)
         normalized = label.strip()
         if len(normalized) > 120:
             raise BrowserError("browser page label must be at most 120 characters")
@@ -532,6 +645,50 @@ class BrowserManager:
             self._agent_access_enabled = allowed
             await asyncio.to_thread(self._persist_policy)
         return {"agent_access_enabled": self._agent_access_enabled}
+
+    async def operator_set_developer_mode(
+        self, owner_token: str, enabled: bool
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        async with self._policy_lock:
+            self._developer_mode_enabled = enabled
+            if not enabled:
+                self._agent_developer_access_enabled = False
+            await asyncio.to_thread(self._persist_policy)
+        return {
+            "developer_mode_enabled": self._developer_mode_enabled,
+            "agent_developer_access_enabled": self._agent_developer_access_enabled,
+        }
+
+    async def operator_set_agent_developer_access(
+        self, owner_token: str, enabled: bool
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        if enabled and not self._developer_mode_enabled:
+            raise BrowserError("enable developer mode before agent developer access")
+        async with self._policy_lock:
+            self._agent_developer_access_enabled = enabled
+            await asyncio.to_thread(self._persist_policy)
+        return {
+            "developer_mode_enabled": self._developer_mode_enabled,
+            "agent_developer_access_enabled": self._agent_developer_access_enabled,
+        }
+
+    async def operator_extension_list(self, owner_token: str) -> JsonObject:
+        self._require_operator(owner_token)
+        return await self.extension_list(agent=False)
+
+    async def operator_extension_load_unpacked(
+        self, owner_token: str, workspace_path: str
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        return await self.extension_load_unpacked(workspace_path, agent=False)
+
+    async def operator_extension_uninstall(
+        self, owner_token: str, extension_id: str
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        return await self.extension_uninstall(extension_id, agent=False)
 
     async def _operator_page_items(self) -> list[JsonValue]:
         context = await self._ensure_started()
@@ -584,6 +741,8 @@ class BrowserManager:
             "page_count": len(page_items),
             "operator_count": len(self._operator_pages),
             "agent_access_enabled": self._agent_access_enabled,
+            "developer_mode_enabled": self._developer_mode_enabled,
+            "agent_developer_access_enabled": self._agent_developer_access_enabled,
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
         }
 
@@ -605,7 +764,9 @@ class BrowserManager:
         page = await context.new_page()
         page_id = self._register_page(page)
         if url.strip():
-            await page.goto(self._url(url), wait_until="domcontentloaded")
+            await page.goto(
+                self._developer_url(url, agent=False), wait_until="domcontentloaded"
+            )
         async with self._operator_lock:
             self._operator_pages[owner_token] = page_id
         return await self._summary(page_id, page)
@@ -613,7 +774,9 @@ class BrowserManager:
     async def operator_navigate(self, owner_token: str, page_id: str, url: str) -> JsonObject:
         self._require_operator(owner_token)
         page = await self._page(page_id)
-        response = await page.goto(self._url(url), wait_until="domcontentloaded")
+        response = await page.goto(
+            self._developer_url(url, agent=False), wait_until="domcontentloaded"
+        )
         result = await self._summary(page_id, page)
         result["http_status"] = response.status if response is not None else None
         return result
