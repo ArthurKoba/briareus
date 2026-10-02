@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -277,3 +279,32 @@ async def test_background_job_is_auto_terminated_by_runtime_policy(
     assert started["timeout_seconds"] == 1.0
     assert status["state"] == "timed_out"
     assert status["timeout_seconds"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_terminal_exec_cancellation_terminates_process_group(
+    manager: TerminalManager,
+) -> None:
+    manager.workspace_create("cancel-exec")
+    pid_file = manager.workspace_path("cancel-exec") / "pid"
+    task = asyncio.create_task(
+        manager.terminal_exec(
+            "cancel-exec",
+            "echo $$ > pid; sleep 30",
+            timeout_seconds=3600,
+        )
+    )
+
+    for _ in range(100):
+        if pid_file.exists():
+            break
+        await asyncio.sleep(0.01)
+    assert pid_file.exists()
+    pid = int(pid_file.read_text().strip())
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
