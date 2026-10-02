@@ -156,6 +156,38 @@ async def browser_operator_websocket(
                         raise BrowserError("allowed must be a boolean")
                     await browser.operator_set_agent_access(owner_token, allowed)
                     await send_state()
+                elif kind == "set_developer_mode":
+                    enabled = message.get("enabled")
+                    if not isinstance(enabled, bool):
+                        raise BrowserError("enabled must be a boolean")
+                    await browser.operator_set_developer_mode(owner_token, enabled)
+                    await send_state()
+                elif kind == "set_agent_developer_access":
+                    enabled = message.get("enabled")
+                    if not isinstance(enabled, bool):
+                        raise BrowserError("enabled must be a boolean")
+                    await browser.operator_set_agent_developer_access(
+                        owner_token, enabled
+                    )
+                    await send_state()
+                elif kind == "extension_list":
+                    result = await browser.operator_extension_list(owner_token)
+                    result["type"] = "extensions"
+                    await websocket.send_json(result)
+                elif kind == "extension_load_unpacked":
+                    await browser.operator_extension_load_unpacked(
+                        owner_token, str(message.get("workspace_path") or "")
+                    )
+                    result = await browser.operator_extension_list(owner_token)
+                    result["type"] = "extensions"
+                    await websocket.send_json(result)
+                elif kind == "extension_uninstall":
+                    await browser.operator_extension_uninstall(
+                        owner_token, str(message.get("extension_id") or "")
+                    )
+                    result = await browser.operator_extension_list(owner_token)
+                    result["type"] = "extensions"
+                    await websocket.send_json(result)
                 elif kind == "navigate":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")
