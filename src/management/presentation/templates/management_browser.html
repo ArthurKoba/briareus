@@ -81,6 +81,7 @@
     controls.forEach(id => document.getElementById(id).disabled = !on);
   }
   function send(payload) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); }
+  setInterval(() => send({type:'refresh_state'}), 1500);
   function renderState(next) {
     state = next; selectedPage = next.selected_page_id || '';
     const pages = next.pages || [];
