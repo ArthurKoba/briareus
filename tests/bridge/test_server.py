@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 from starlette.testclient import TestClient
 
+from bridge import server as bridge_server
 from bridge.server import _build_auth_reverse_proxy, app, mcp
 from common.mcp_surfaces import MCP_SURFACE_PATHS
+from common.runtime_policy_contracts import McpRuntimePolicy
 
 
 @pytest.mark.asyncio
@@ -95,3 +99,47 @@ def test_auth_proxy_targets_compose_auth_service() -> None:
     proxy = _build_auth_reverse_proxy()
 
     assert proxy.base_url == "http://auth:8000"
+
+
+@pytest.mark.asyncio
+async def test_gateway_proxy_uses_managed_mcp_timeout(monkeypatch) -> None:
+    monkeypatch.setattr(
+        bridge_server._management,
+        "mcp_runtime_policy",
+        lambda: McpRuntimePolicy(call_timeout_seconds=7),
+    )
+
+    proxy = bridge_server._proxy("test", "http://backend.example.test/mcp")
+    client = await proxy.client_factory()
+
+    assert client._session_kwargs["read_timeout_seconds"] == 7.0
+
+
+@pytest.mark.asyncio
+async def test_gateway_timeout_falls_back_to_five_seconds(monkeypatch) -> None:
+    def broken_policy():
+        raise ValueError("management unavailable")
+
+    monkeypatch.setattr(bridge_server._management, "mcp_runtime_policy", broken_policy)
+
+    assert await bridge_server._backend_timeout_seconds() == 5.0
+
+
+@pytest.mark.asyncio
+async def test_gateway_proxy_returns_timeout_error_instead_of_hanging(monkeypatch) -> None:
+    slow = FastMCP("slow-backend")
+
+    @slow.tool
+    async def slow_tool() -> str:
+        await asyncio.sleep(1)
+        return "late"
+
+    async def short_timeout() -> float:
+        return 0.05
+
+    monkeypatch.setattr(bridge_server, "_backend_timeout_seconds", short_timeout)
+    proxy = bridge_server._proxy_target("slow", slow)
+
+    with pytest.raises(Exception, match="timed out"):
+        async with Client(proxy) as client:
+            await client.call_tool("slow_tool", {})
