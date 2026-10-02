@@ -111,11 +111,11 @@ def test_tool_alias_uses_behavior_terminology() -> None:
 
 
 def test_common_tool_name_translations_are_stable() -> None:
-    assert analysis_tool_name("decompile_function") == "inspect_action_behavior"
-    assert analysis_tool_name("get_function_callers") == "get_inbound_actions"
+    assert analysis_tool_name("decompile_function") == "get_action_behavior_view"
+    assert analysis_tool_name("get_function_callers") == "list_inbound_actions"
     assert (
         analysis_tool_name("analyze_function_completeness")
-        == "analyze_action_completeness"
+        == "assess_action_documentation"
     )
 
 
@@ -273,16 +273,41 @@ def test_comment_read_accepts_semantic_action_selector() -> None:
 
 def test_low_level_backend_tool_names_are_neutralized() -> None:
     expected = {
-        "disassemble_bytes": "analyze_byte_region",
-        "force_decompile": "refresh_action_behavior",
+        "disassemble_bytes": "get_low_level_region_view",
+        "force_decompile": "refresh_action_behavior_view",
         "get_assembly_context": "get_low_level_context",
         "get_action_pcode": "get_action_ir",
         "detect_malware_behaviors": "detect_behavior_patterns",
         "run_ghidra_script": "run_analysis_script",
         "run_script_inline": "run_analysis_script_inline",
         "exit_ghidra": "stop_analysis_runtime",
-        "read_memory": "read_data_region",
+        "read_memory": "read_data_window",
         "search_instructions": "search_low_level_operations",
+    }
+    for backend_name, public_name in expected.items():
+        assert analysis_tool_name(backend_name) == public_name
+        assert not analysis_surface_violations(public_name)
+
+
+def test_issue_triggered_tools_use_project_vocabulary() -> None:
+    expected = {
+        "get_function_callers": "list_inbound_actions",
+        "get_function_callees": "list_outbound_actions",
+        "get_function_call_graph": "get_action_route_map",
+        "decompile_function": "get_action_behavior_view",
+        "disassemble_function": "get_low_level_action_view",
+        "rename_function": "set_action_name",
+        "analyze_function_complete": "get_action_context",
+        "analyze_function_completeness": "assess_action_documentation",
+        "run_analysis": "update_program_model",
+        "list_open_programs": "list_active_programs",
+        "load_program_from_project": "activate_project_program",
+        "open_program": "activate_program",
+        "list_data_items": "list_data_records",
+        "list_calling_conventions": "list_calling_models",
+        "get_comment": "get_annotation",
+        "set_comment": "set_annotation",
+        "add_memory_reference": "create_data_link",
     }
     for backend_name, public_name in expected.items():
         assert analysis_tool_name(backend_name) == public_name
@@ -434,10 +459,10 @@ def test_internal_tool_names_are_removed_from_public_text() -> None:
         assert internal_name not in public
     assert "add_action_tag" in public
     assert "delete_action_tag" in public
-    assert "analyze_action_completeness" in public
-    assert "name_action" in public
+    assert "assess_action_documentation" in public
+    assert "set_action_name" in public
     assert "set_action_this_type" in public
-    assert "add_data_link" in public
+    assert "create_data_link" in public
     assert "remove_action_tag" in public
 
 

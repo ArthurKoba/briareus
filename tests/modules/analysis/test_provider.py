@@ -62,14 +62,14 @@ async def test_provider_adapts_live_backend_catalog(monkeypatch) -> None:
 
     assert seen_urls == ["http://ghidra.internal/mcp"]
     assert {tool.name for tool in tools} == {
-        "inspect_action_behavior",
+        "get_action_behavior_view",
         "search_tools",
         "check_tools",
         "get_analysis_vocabulary",
     }
 
-    tool = next(tool for tool in tools if tool.name == "inspect_action_behavior")
-    assert tool.name == "inspect_action_behavior"
+    tool = next(tool for tool in tools if tool.name == "get_action_behavior_view")
+    assert tool.name == "get_action_behavior_view"
     assert "inspect behavior" in tool.description
     assert "inbound actions" in tool.description
     assert "function_name" not in tool.description
@@ -96,7 +96,7 @@ def test_provider_rejects_tool_alias_collisions() -> None:
         provider._adapt_catalog(
             [
                 _backend_tool("decompile_function"),
-                _backend_tool("inspect_action_behavior"),
+                _backend_tool("get_action_behavior_view"),
             ]
         )
 
@@ -124,7 +124,7 @@ def test_provider_exposes_typed_defaults_and_semantic_selectors() -> None:
             "required": [],
         },
     )
-    tool = provider._adapt_tool(backend, "get_outbound_actions")
+    tool = provider._adapt_tool(backend, "list_outbound_actions")
     props = tool.parameters["properties"]
     assert set(props) == {"action", "offset", "limit", "program"}
     assert props["offset"]["default"] == 0
@@ -165,10 +165,10 @@ def test_provider_neutralizes_backend_metadata() -> None:
             "required": ["start_address"],
         },
     )
-    tool = provider._adapt_tool(backend, "analyze_byte_region")
+    tool = provider._adapt_tool(backend, "get_low_level_region_view")
     provider._validate_public_catalog([tool])
 
-    assert tool.name == "analyze_byte_region"
+    assert tool.name == "get_low_level_region_view"
     encoded = str(
         {
             "name": tool.name,
@@ -245,14 +245,14 @@ async def test_public_catalog_search_and_check_use_semantic_names() -> None:
     search_tool, check_tool = provider._catalog_tools(public)
 
     search = await search_tool.fn(query="outbound actions", limit=10)
-    assert search["matches"][0]["name"] == "get_outbound_actions"
+    assert search["matches"][0]["name"] == "list_outbound_actions"
     assert "get_function_callees" not in str(search)
 
     checked = await check_tool.fn(
-        tools="get_outbound_actions,get_function_callees,analyze_action_complete"
+        tools="list_outbound_actions,get_function_callees,get_action_context"
     )
-    assert checked["results"]["get_outbound_actions"]["status"] == "callable"
-    assert checked["results"]["analyze_action_complete"]["status"] == "callable"
+    assert checked["results"]["list_outbound_actions"]["status"] == "callable"
+    assert checked["results"]["get_action_context"]["status"] == "callable"
     assert checked["results"]["get_function_callees"]["status"] == "not_found"
 
 
@@ -346,8 +346,8 @@ def test_catalog_references_use_public_tool_names() -> None:
     assert "analyze_function_completeness" not in encoded
     assert "function_address" not in encoded
     assert "RE documentation" not in encoded
-    assert "name_action" in encoded
-    assert "analyze_action_completeness" in encoded
+    assert "set_action_name" in encoded
+    assert "get_action_contextness" in encoded
     assert "action_address" in encoded
     assert "analysis documentation" in encoded
 
@@ -488,6 +488,6 @@ async def test_internal_artifact_tools_do_not_zero_analysis_catalog(monkeypatch)
     tools = await provider._list_tools()
     names = {tool.name for tool in tools}
 
-    assert "get_outbound_actions" in names
+    assert "list_outbound_actions" in names
     assert "artifact_file_read" not in names
     assert "artifact_file_delete" not in names
