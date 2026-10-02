@@ -172,9 +172,13 @@ observable.
 
 Management `/admin/browser` is the operator surface for the same persistent Chromium
 profile. It provides compact shared tabs, per-tab and browser-wide agent access controls,
-page-ID copy, Chromium extension management through `chrome://extensions`, and DevTools
-for the selected tab. DevTools uses a Chromium remote-debugging endpoint bound only to
-`127.0.0.1` inside the Web container; no debugging port is published by Compose. `Clean App`
+page-ID copy, Chromium extension management through `chrome://extensions`, docked DevTools
+beside the selected application, and an optional separate DevTools tab. Docked DevTools runs
+as an internal Chromium target hidden from the normal browser-tab/agent catalog, while both
+site and DevTools screencasts remain independently interactive. DevTools uses a Chromium
+remote-debugging endpoint bound only to `127.0.0.1` inside the Web container; no debugging
+port is published by Compose. The Browser Operator page is served with `no-store` headers so
+old operator UI versions are not resurrected after deployments. `Clean App`
 clears cookies and origin-scoped site data only for the selected HTTP(S) application, while
 `Clean browser` is deliberately destructive: it stops Chromium, erases the persistent
 profile plus browser cache/config/crash state, starts one clean `about:blank` tab, and leaves

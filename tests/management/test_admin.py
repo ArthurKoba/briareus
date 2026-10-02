@@ -129,15 +129,23 @@ def test_browser_operator_template_refreshes_shared_state() -> None:
     assert "const tabNodes = new Map();" in source
     assert "browser-extensions" in source
     assert "browser-devtools" in source
+    assert "browser-devtools-tab" in source
+    assert "browser-devtools-pane" in source
     assert "browser-clean-app" in source
     assert "browser-clean" in source
     assert "Copy page ID" in source
     assert "chrome://extensions/" in source
+    assert "type:'open_docked_devtools'" in source
+    assert "type:'close_docked_devtools'" in source
     assert "type:'open_devtools'" in source
     assert "type:'clean_app'" in source
     assert "type:'clean_browser'" in source
     assert "/admin/browser/ticket" in source
     assert "refreshOperatorTicket" in source
+    assert "urlDirty" in source
+    assert "document.activeElement!==urlInput" in source
+    admin_source = Path("src/management/presentation/admin.py").read_text()
+    assert '"no-store, no-cache, must-revalidate, max-age=0"' in admin_source
 
 
 def test_analysis_invocation_tool_uses_public_semantic_name() -> None:

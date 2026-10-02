@@ -55,6 +55,8 @@ class BrowserManager:
         self._reset_lock = asyncio.Lock()
         self._operator_lock = asyncio.Lock()
         self._operator_pages: dict[str, str] = {}
+        self._operator_devtools_pages: dict[str, str] = {}
+        self._internal_page_ids: set[str] = set()
         self._policy_lock = asyncio.Lock()
         self._policy_path = self.profile_dir / "koba-browser-policy.json"
         self._agent_access_enabled = True
@@ -155,6 +157,10 @@ class BrowserManager:
             self._page_ids.pop(id(page), None)
         self._page_labels.pop(page_id, None)
         self._page_agent_access.pop(page_id, None)
+        self._internal_page_ids.discard(page_id)
+        for owner_token, devtools_page_id in list(self._operator_devtools_pages.items()):
+            if devtools_page_id == page_id:
+                self._operator_devtools_pages.pop(owner_token, None)
         for owner_token, selected_page_id in list(self._operator_pages.items()):
             if selected_page_id == page_id:
                 self._operator_pages[owner_token] = ""
@@ -266,6 +272,8 @@ class BrowserManager:
             if page.is_closed():
                 continue
             page_id = self._register_page(page)
+            if page_id in self._internal_page_ids:
+                continue
             pages.append(await self._agent_summary(page_id, page))
         return {
             "running": True,
@@ -564,6 +572,8 @@ class BrowserManager:
             if page.is_closed():
                 continue
             page_id = self._register_page(page)
+            if page_id in self._internal_page_ids:
+                continue
             items.append(await self._summary(page_id, page))
         return items
 
@@ -584,6 +594,13 @@ class BrowserManager:
         }
 
     async def operator_release(self, owner_token: str) -> None:
+        devtools_page_id = self._operator_devtools_pages.pop(owner_token, "")
+        if devtools_page_id:
+            with contextlib.suppress(BrowserError):
+                page = await self._page(devtools_page_id)
+                with contextlib.suppress(Exception):
+                    await page.close()
+                self._forget_page(devtools_page_id)
         async with self._operator_lock:
             self._operator_pages.pop(owner_token, None)
 
@@ -608,6 +625,7 @@ class BrowserManager:
             "page_count": len(page_items),
             "operator_count": len(self._operator_pages),
             "agent_access_enabled": self._agent_access_enabled,
+            "docked_devtools_page_id": self._operator_devtools_pages.get(owner_token, ""),
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
         }
 
@@ -643,16 +661,18 @@ class BrowserManager:
         return result
 
 
-    async def operator_open_devtools(
+    async def _operator_devtools_url(
         self,
         owner_token: str,
         page_id: str,
         *,
-        panel: str = "elements",
-    ) -> JsonObject:
+        panel: str,
+    ) -> tuple[str, str]:
         self._require_operator(owner_token)
         context = await self._ensure_started()
         page = await self._page(page_id)
+        if page.url.startswith("devtools://"):
+            raise BrowserError("select an application tab before opening DevTools")
         session = await context.new_cdp_session(page)
         try:
             info = await session.send("Target.getTargetInfo")
@@ -676,11 +696,26 @@ class BrowserManager:
             "security",
         }
         normalized_panel = panel if panel in supported_panels else "elements"
-        devtools_url = (
-            "devtools://devtools/bundled/inspector.html"
-            f"?panel={normalized_panel}"
-            f"&ws={_REMOTE_DEBUGGING_HOST}:{_REMOTE_DEBUGGING_PORT}"
-            f"/devtools/page/{target_id}"
+        return (
+            (
+                "devtools://devtools/bundled/inspector.html"
+                f"?panel={normalized_panel}"
+                f"&ws={_REMOTE_DEBUGGING_HOST}:{_REMOTE_DEBUGGING_PORT}"
+                f"/devtools/page/{target_id}"
+            ),
+            target_id,
+        )
+
+    async def operator_open_devtools(
+        self,
+        owner_token: str,
+        page_id: str,
+        *,
+        panel: str = "elements",
+    ) -> JsonObject:
+        context = await self._ensure_started()
+        devtools_url, target_id = await self._operator_devtools_url(
+            owner_token, page_id, panel=panel
         )
         devtools_page = await context.new_page()
         devtools_page_id = self._register_page(devtools_page)
@@ -698,6 +733,53 @@ class BrowserManager:
         result["devtools_target_id"] = target_id
         result["opened_devtools"] = True
         return result
+
+    async def operator_open_docked_devtools(
+        self,
+        owner_token: str,
+        page_id: str,
+        *,
+        panel: str = "elements",
+    ) -> JsonObject:
+        context = await self._ensure_started()
+        devtools_url, target_id = await self._operator_devtools_url(
+            owner_token, page_id, panel=panel
+        )
+        previous_id = self._operator_devtools_pages.get(owner_token, "")
+        if previous_id:
+            with contextlib.suppress(BrowserError):
+                previous = await self._page(previous_id)
+                with contextlib.suppress(Exception):
+                    await previous.close()
+                self._forget_page(previous_id)
+        devtools_page = await context.new_page()
+        devtools_page_id = self._register_page(devtools_page)
+        self._internal_page_ids.add(devtools_page_id)
+        try:
+            await devtools_page.goto(devtools_url, wait_until="domcontentloaded")
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await devtools_page.close()
+            self._forget_page(devtools_page_id)
+            raise BrowserError(f"Chromium could not open docked DevTools: {exc}") from exc
+        async with self._operator_lock:
+            self._operator_devtools_pages[owner_token] = devtools_page_id
+        result = await self._summary(devtools_page_id, devtools_page)
+        result["inspected_page_id"] = page_id
+        result["devtools_target_id"] = target_id
+        result["docked_devtools"] = True
+        return result
+
+    async def operator_close_docked_devtools(self, owner_token: str) -> JsonObject:
+        self._require_operator(owner_token)
+        page_id = self._operator_devtools_pages.pop(owner_token, "")
+        if page_id:
+            with contextlib.suppress(BrowserError):
+                page = await self._page(page_id)
+                with contextlib.suppress(Exception):
+                    await page.close()
+                self._forget_page(page_id)
+        return {"closed_docked_devtools": bool(page_id)}
 
     async def operator_clean_app(
         self,
@@ -769,6 +851,8 @@ class BrowserManager:
             self._page_ids.clear()
             self._page_labels.clear()
             self._page_agent_access.clear()
+            self._operator_devtools_pages.clear()
+            self._internal_page_ids.clear()
             await asyncio.to_thread(shutil.rmtree, self.profile_dir, True)
             state_root = self.profile_dir.parent
             for name in ("cache", "config", "crash"):
