@@ -134,3 +134,11 @@ html {
   width: max-content;
   min-width: 100%;
 }
+
+.mcp-theme-toggle-floating {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1050;
+  box-shadow: var(--tblr-box-shadow);
+}
