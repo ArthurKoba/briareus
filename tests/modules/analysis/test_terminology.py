@@ -111,11 +111,11 @@ def test_tool_alias_uses_behavior_terminology() -> None:
 
 
 def test_common_tool_name_translations_are_stable() -> None:
-    assert analysis_tool_name("decompile_function") == "inspect_action_behavior"
-    assert analysis_tool_name("get_function_callers") == "get_inbound_actions"
+    assert analysis_tool_name("decompile_function") == "get_high_level_behavior_view"
+    assert analysis_tool_name("get_function_callers") == "get_inbound_action_links"
     assert (
         analysis_tool_name("analyze_function_completeness")
-        == "analyze_action_completeness"
+        == "measure_action_documentation"
     )
 
 
@@ -273,15 +273,15 @@ def test_comment_read_accepts_semantic_action_selector() -> None:
 
 def test_low_level_backend_tool_names_are_neutralized() -> None:
     expected = {
-        "disassemble_bytes": "analyze_byte_region",
-        "force_decompile": "refresh_action_behavior",
+        "disassemble_bytes": "inspect_low_level_region",
+        "force_decompile": "refresh_high_level_behavior_view",
         "get_assembly_context": "get_low_level_context",
         "get_action_pcode": "get_action_ir",
         "detect_malware_behaviors": "detect_behavior_patterns",
         "run_ghidra_script": "run_analysis_script",
         "run_script_inline": "run_analysis_script_inline",
         "exit_ghidra": "stop_analysis_runtime",
-        "read_memory": "read_data_region",
+        "read_memory": "read_program_data",
         "search_instructions": "search_low_level_operations",
     }
     for backend_name, public_name in expected.items():
@@ -434,10 +434,10 @@ def test_internal_tool_names_are_removed_from_public_text() -> None:
         assert internal_name not in public
     assert "add_action_tag" in public
     assert "delete_action_tag" in public
-    assert "analyze_action_completeness" in public
-    assert "name_action" in public
+    assert "measure_action_documentation" in public
+    assert "set_action_name" in public
     assert "set_action_this_type" in public
-    assert "add_data_link" in public
+    assert "add_data_relationship" in public
     assert "remove_action_tag" in public
 
 
@@ -573,3 +573,55 @@ def test_optional_false_and_zero_are_not_dropped() -> None:
 
     assert normalized["min_xrefs"] == 0
     assert normalized["is_external"] is False
+
+
+def test_issue_linked_analysis_tools_use_behavior_vocabulary() -> None:
+    expected = {
+        "open_program": "open_project_program",
+        "load_program_from_project": "load_project_program",
+        "list_open_programs": "list_active_programs",
+        "get_function_callers": "get_inbound_action_links",
+        "get_function_callees": "get_outbound_action_links",
+        "get_function_call_graph": "get_action_route_map",
+        "decompile_function": "get_high_level_behavior_view",
+        "disassemble_function": "get_low_level_action_view",
+        "disassemble_bytes": "inspect_low_level_region",
+        "force_decompile": "refresh_high_level_behavior_view",
+        "read_memory": "read_program_data",
+        "rename_function": "set_action_name",
+        "set_comment": "set_annotation",
+        "add_memory_reference": "add_data_relationship",
+        "list_calling_conventions": "list_action_calling_conventions",
+        "list_data_items": "list_defined_data",
+        "run_analysis": "refresh_program_behavior",
+        "reanalyze": "rebuild_program_behavior",
+        "analyze_function_complete": "inspect_action",
+        "analyze_function_completeness": "measure_action_documentation",
+    }
+    old_public_names = {
+        "open_program",
+        "load_program_from_project",
+        "list_open_programs",
+        "get_inbound_actions",
+        "get_outbound_actions",
+        "get_action_link_map",
+        "inspect_action_behavior",
+        "inspect_low_level_action",
+        "analyze_byte_region",
+        "refresh_action_behavior",
+        "read_data_region",
+        "name_action",
+        "set_comment",
+        "add_data_link",
+        "list_calling_conventions",
+        "list_data_items",
+        "run_analysis",
+        "analyze_action_complete",
+        "analyze_action_completeness",
+    }
+    actual = {analysis_tool_name(name) for name in expected}
+    assert actual == set(expected.values())
+    assert not actual & old_public_names
+    for backend_name, public_name in expected.items():
+        assert analysis_tool_name(backend_name) == public_name
+        assert not analysis_surface_violations(public_name)

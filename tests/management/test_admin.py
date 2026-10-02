@@ -130,11 +130,11 @@ def test_browser_operator_template_refreshes_shared_state() -> None:
 
 def test_analysis_invocation_tool_uses_public_semantic_name() -> None:
     old = SimpleNamespace(module="analysis", tool="disassemble_bytes")
-    current = SimpleNamespace(module="analysis", tool="analyze_byte_region")
+    current = SimpleNamespace(module="analysis", tool="inspect_low_level_region")
     other = SimpleNamespace(module="files", tool="file_list")
 
-    assert _display_invocation_tool(None, old) == "analyze_byte_region"
-    assert _display_invocation_tool(None, current) == "analyze_byte_region"
+    assert _display_invocation_tool(None, old) == "inspect_low_level_region"
+    assert _display_invocation_tool(None, current) == "inspect_low_level_region"
     assert _display_invocation_tool(None, other) == "file_list"
 
 
@@ -149,7 +149,7 @@ def test_invocation_audit_service_records_and_clears_admin_history(tmp_path: Pat
     audit.record(
         Invocation(
             module="analysis",
-            tool="analyze_byte_region",
+            tool="inspect_low_level_region",
             status="success",
             duration_ms=5.5,
         )
@@ -157,7 +157,7 @@ def test_invocation_audit_service_records_and_clears_admin_history(tmp_path: Pat
 
     recent = audit.recent()
     assert len(recent) == 1
-    assert recent[0].tool == "analyze_byte_region"
+    assert recent[0].tool == "inspect_low_level_region"
     assert audit.clear() == 1
     assert audit.recent() == []
     engine.dispose()

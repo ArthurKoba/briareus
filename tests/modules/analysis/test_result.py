@@ -98,9 +98,9 @@ def test_adapt_analysis_result_translates_tool_group_catalog() -> None:
     assert "disassembly" not in group["description"].casefold()
     assert "xref" not in group["description"].casefold()
     assert group["tools"] == [
-        "analyze_byte_region",
-        "refresh_action_behavior",
-        "get_action_link_map",
+        "inspect_low_level_region",
+        "refresh_high_level_behavior_view",
+        "get_action_route_map",
     ]
 
 
