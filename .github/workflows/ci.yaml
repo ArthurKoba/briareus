@@ -11,19 +11,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plan:
+  test:
     runs-on: ubuntu-latest
-    outputs:
-      full: ${{ steps.plan.outputs.full }}
-      areas: ${{ steps.plan.outputs.areas }}
-      pytest_paths: ${{ steps.plan.outputs.pytest_paths }}
-      mypy_paths: ${{ steps.plan.outputs.mypy_paths }}
-      ruff_paths: ${{ steps.plan.outputs.ruff_paths }}
+    env:
+      MANAGEMENT_ENCRYPTION_KEY: ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=
+      MANAGEMENT_SERVICE_TOKEN: ci-management-token
+      MANAGEMENT_ADMIN_USERNAME: ci-admin
+      MANAGEMENT_ADMIN_PASSWORD: ci-admin-password
+      MANAGEMENT_SESSION_SECRET: ci-session-secret
+      MCP_PUBLIC_BASE_URL: https://mcp.example.test
+      MCP_ALLOWED_HOSTS: mcp.example.test
+      MCP_ALLOWED_ORIGINS: https://mcp.example.test
+      GITHUB_OAUTH_CLIENT_ID: ci-client
+      GITHUB_OAUTH_CLIENT_SECRET: ci-secret
+      GITHUB_OAUTH_JWT_SIGNING_KEY: ci-jwt-signing-key
+      GITHUB_OAUTH_ALLOWED_USERS: ci-user
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - id: plan
         name: Build targeted CI plan
         env:
@@ -54,100 +62,70 @@ jobs:
               exit 1
               ;;
           esac
+
       - name: Show plan
         run: |
           echo 'areas=${{ steps.plan.outputs.areas }}'
           echo 'full=${{ steps.plan.outputs.full }}'
           echo 'tests=${{ steps.plan.outputs.pytest_paths }}'
 
-  static:
-    needs: plan
-    if: needs.plan.outputs.ruff_paths != '[]' || needs.plan.outputs.mypy_paths != '[]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Validate Compose topology
+        if: steps.plan.outputs.full == 'true'
+        run: docker compose config >/dev/null
+
       - uses: astral-sh/setup-uv@v6
+        if: steps.plan.outputs.ruff_paths != '[]' || steps.plan.outputs.mypy_paths != '[]' || steps.plan.outputs.pytest_paths != '[]'
         with:
           enable-cache: true
+
       - uses: actions/setup-python@v5
+        if: steps.plan.outputs.ruff_paths != '[]' || steps.plan.outputs.mypy_paths != '[]' || steps.plan.outputs.pytest_paths != '[]'
         with:
           python-version: "3.13"
+
       - uses: actions/cache@v4
+        if: steps.plan.outputs.mypy_paths != '[]'
         with:
           path: .mypy_cache
           key: mypy-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}-${{ github.run_id }}
           restore-keys: |
             mypy-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}-
+
       - run: uv lock --check
-        if: needs.plan.result == 'success' && needs.plan.outputs.full == 'true'
+        if: steps.plan.outputs.full == 'true'
+
       - run: uv sync --frozen
+        if: steps.plan.outputs.ruff_paths != '[]' || steps.plan.outputs.mypy_paths != '[]' || steps.plan.outputs.pytest_paths != '[]'
+
       - name: Ruff selected paths
-        if: needs.plan.outputs.ruff_paths != '[]'
+        if: steps.plan.outputs.ruff_paths != '[]'
         env:
-          PATHS_JSON: ${{ needs.plan.outputs.ruff_paths }}
+          PATHS_JSON: ${{ steps.plan.outputs.ruff_paths }}
         run: |
           mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
           uv run ruff check "${paths[@]}"
+
       - name: Mypy selected paths
-        if: needs.plan.outputs.mypy_paths != '[]'
+        if: steps.plan.outputs.mypy_paths != '[]'
         env:
-          PATHS_JSON: ${{ needs.plan.outputs.mypy_paths }}
+          PATHS_JSON: ${{ steps.plan.outputs.mypy_paths }}
         run: |
           mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
           uv run mypy "${paths[@]}"
 
-  test:
-    needs: plan
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require valid plan
-        run: test '${{ needs.plan.result }}' = success
-      - uses: actions/checkout@v4
-        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
-      - uses: astral-sh/setup-uv@v6
-        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
-        with:
-          enable-cache: true
-      - uses: actions/setup-python@v5
-        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
-        with:
-          python-version: "3.13"
-      - run: uv sync --frozen
-        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
       - name: Pytest selected paths
-        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths != '[]'
+        if: steps.plan.outputs.pytest_paths != '[]'
         env:
-          PATHS_JSON: ${{ needs.plan.outputs.pytest_paths }}
+          PATHS_JSON: ${{ steps.plan.outputs.pytest_paths }}
         run: |
           mapfile -t paths < <(python -c 'import json, os; print(*json.loads(os.environ["PATHS_JSON"]), sep="\n")')
           uv run pytest "${paths[@]}"
-      - name: No tests required
-        if: needs.plan.result == 'success' && needs.plan.outputs.pytest_paths == '[]'
-        run: echo 'No runtime tests selected for this diff.'
+
+      - name: No runtime validation required
+        if: steps.plan.outputs.ruff_paths == '[]' && steps.plan.outputs.mypy_paths == '[]' && steps.plan.outputs.pytest_paths == '[]'
+        run: echo 'No runtime validation selected for this diff.'
 
   docker:
-    needs: plan
-    if: always()
     runs-on: ubuntu-latest
-    env:
-      MANAGEMENT_ENCRYPTION_KEY: ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=
-      MANAGEMENT_SERVICE_TOKEN: ci-management-token
-      MANAGEMENT_ADMIN_USERNAME: ci-admin
-      MANAGEMENT_ADMIN_PASSWORD: ci-admin-password
-      MANAGEMENT_SESSION_SECRET: ci-session-secret
-      MCP_PUBLIC_BASE_URL: https://mcp.example.test
-      MCP_ALLOWED_HOSTS: mcp.example.test
-      MCP_ALLOWED_ORIGINS: https://mcp.example.test
-      GITHUB_OAUTH_CLIENT_ID: ci-client
-      GITHUB_OAUTH_CLIENT_SECRET: ci-secret
-      GITHUB_OAUTH_JWT_SIGNING_KEY: ci-jwt-signing-key
-      GITHUB_OAUTH_ALLOWED_USERS: ci-user
     steps:
-      - name: Require valid CI plan
-        run: test '${{ needs.plan.result }}' = success
-      - uses: actions/checkout@v4
-        if: needs.plan.result == 'success' && needs.plan.outputs.full == 'true'
-      - name: Validate Compose topology
-        if: needs.plan.result == 'success' && needs.plan.outputs.full == 'true'
-        run: docker compose config >/dev/null
+      - run: echo 'Production image build is owned by Coolify.'
