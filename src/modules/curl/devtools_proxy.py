@@ -62,7 +62,15 @@ class DeveloperAccessMiddleware(Middleware):
         # The browser is lazy. Ensure the private CDP endpoint exists before the
         # upstream server attempts to connect to it.
         await self.browser.status()
-        return await call_next(context)
+        try:
+            return await call_next(context)
+        except Exception:
+            # A timed-out or failed upstream request can leave the kept-alive stdio
+            # session wedged. Tear it down so the next call starts a clean official
+            # chrome-devtools-mcp process while preserving the original error.
+            disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
+            await disconnect()
+            raise
 
 
 class DevToolsProxyRuntime:

@@ -96,6 +96,33 @@ async def test_devtools_middleware_runs_upstream_only_with_effective_access(
     assert transport.disconnects == 0
 
 
+
+@pytest.mark.asyncio
+async def test_devtools_middleware_disconnects_failed_upstream_session(
+    tmp_path: Path,
+) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+    await browser.operator_set_developer_access("owner", True)
+    transport = _FakeTransport()
+    middleware = DeveloperAccessMiddleware(
+        browser,
+        cast(StdioTransport, transport),
+    )
+
+    async def fake_status() -> dict[str, object]:
+        return {"running": True}
+
+    browser.status = fake_status  # type: ignore[method-assign]
+
+    async def call_next(_context: Any) -> ToolResult:
+        raise TimeoutError("upstream stalled")
+
+    with pytest.raises(TimeoutError, match="upstream stalled"):
+        await middleware.on_call_tool(cast(Any, object()), call_next)
+
+    assert transport.disconnects == 1
+
 def test_devtools_proxy_pins_official_server_and_restricts_workspace(tmp_path: Path) -> None:
     browser = _browser(tmp_path)
     script = tmp_path / "chrome-devtools-mcp.js"
