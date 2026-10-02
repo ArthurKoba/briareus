@@ -127,6 +127,7 @@ async def test_page_policy_labels_and_redacts_locked_tabs(tmp_path: Path) -> Non
         "page_agent_access": False,
         "agent_access": False,
         "locked": True,
+        "developer_locked": False,
         "url": "",
         "title": "",
     }
@@ -168,6 +169,88 @@ async def test_operator_master_switch_blocks_agent_but_not_operator_state(tmp_pa
         "url": "https://admin.example/",
         "title": "Admin",
     }
+
+
+@pytest.mark.asyncio
+async def test_developer_mode_requires_separate_agent_permission(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+
+    with pytest.raises(BrowserError, match="developer mode is disabled"):
+        browser._developer_url("chrome://extensions", agent=False)
+
+    await browser.operator_set_developer_mode("owner", True)
+    assert browser._developer_url("chrome://settings", agent=False) == "chrome://settings"
+    with pytest.raises(BrowserError, match="developer access is disabled"):
+        browser._developer_url("chrome://extensions", agent=True)
+
+    await browser.operator_set_agent_developer_access("owner", True)
+    assert browser._developer_url("chrome://extensions", agent=True) == "chrome://extensions"
+
+    reloaded = _browser(tmp_path)
+    assert reloaded._developer_mode_enabled is True
+    assert reloaded._agent_developer_access_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_developer_page_is_redacted_when_agent_dev_access_revoked(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+
+    class FakePage:
+        url = "chrome://extensions/"
+
+        def is_closed(self) -> bool:
+            return False
+
+        async def title(self) -> str:
+            return "Extensions"
+
+    class FakeContext:
+        def __init__(self, page: FakePage) -> None:
+            self.pages = [page]
+
+    page = FakePage()
+    page_id = browser._register_page(cast(Any, page))
+
+    async def fake_started() -> Any:
+        return cast(Any, FakeContext(page))
+
+    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    browser._developer_mode_enabled = True
+    browser._agent_developer_access_enabled = False
+
+    state = await browser.status()
+    item = cast(dict[str, object], cast(list[object], state["pages"])[0])
+    assert item["page_id"] == page_id
+    assert item["developer_locked"] is True
+    assert item["url"] == ""
+    assert item["title"] == ""
+    with pytest.raises(BrowserError, match="developer access is disabled"):
+        await browser._agent_page(page_id)
+
+
+@pytest.mark.asyncio
+async def test_unpacked_extension_requires_workspace_manifest(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._developer_mode_enabled = True
+    browser._agent_developer_access_enabled = True
+    extension = tmp_path / "workspace" / "extensions" / "demo"
+    extension.mkdir(parents=True)
+
+    with pytest.raises(BrowserError, match="manifest not found"):
+        await browser.extension_load_unpacked("extensions/demo")
+
+    (extension / "manifest.json").write_text('{"manifest_version":3,"name":"Demo","version":"1"}')
+
+    async def fake_command(method: str, params=None):
+        assert method == "Extensions.loadUnpacked"
+        assert params and params["path"] == str(extension.resolve())
+        return {"id": "abcdefghijklmnop"}
+
+    browser._extension_command = fake_command  # type: ignore[method-assign]
+    result = await browser.extension_load_unpacked("extensions/demo")
+    assert result["id"] == "abcdefghijklmnop"
+    assert result["workspace_path"] == "extensions/demo"
 
 
 @pytest.mark.asyncio
