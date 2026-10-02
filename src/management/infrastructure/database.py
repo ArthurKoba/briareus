@@ -206,8 +206,15 @@ class RuntimeSettingsRecord(Base):
     __tablename__ = "runtime_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    terminal_max_exec_timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
-    terminal_max_job_runtime_seconds: Mapped[int] = mapped_column(Integer, default=3600)
+    terminal_max_exec_timeout_seconds: Mapped[int] = mapped_column(Integer, default=21_600)
+    terminal_max_job_runtime_seconds: Mapped[int] = mapped_column(Integer, default=43_200)
+
+
+class McpRuntimeSettingsRecord(Base):
+    __tablename__ = "mcp_runtime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    call_timeout_seconds: Mapped[int] = mapped_column(Integer, default=5)
 
 
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
