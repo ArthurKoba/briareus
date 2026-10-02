@@ -10,6 +10,7 @@ import pytest
 from auth_service.provider import (
     _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS,
     _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS,
+    _REFRESH_REPLAY_SECONDS,
     MultiResourceGitHubProvider,
 )
 from common.mcp_surfaces import allowed_resource_urls, resource_url
@@ -82,6 +83,7 @@ async def test_upstream_claims_embed_only_allowed_identity() -> None:
 def test_fastmcp_token_lifetimes_are_client_friendly() -> None:
     assert _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS == 24 * 60 * 60
     assert _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS == 30 * 24 * 60 * 60
+    assert _REFRESH_REPLAY_SECONDS == 3 * 60
 
 
 def test_refresh_token_audience_is_recovered_from_token_claims() -> None:
@@ -153,3 +155,87 @@ async def test_concurrent_refresh_requests_are_coalesced(monkeypatch) -> None:
     assert grace.client_id == "chatgpt-client"
     loaded_again = await provider.load_refresh_token(client, "old-refresh")  # type: ignore[arg-type]
     assert loaded_again is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_replay_survives_process_memory_loss(monkeypatch) -> None:
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from mcp.shared.auth import OAuthToken
+
+    provider = MultiResourceGitHubProvider(_settings())
+    analysis = resource_url(provider.settings.public_base_url, "analysis")
+    calls = 0
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        nonlocal calls
+        del self, client, refresh_token, scopes
+        calls += 1
+        return OAuthToken(
+            access_token="persisted-access",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="persisted-refresh",
+            scope="read:user",
+        )
+
+    monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fake_exchange)
+    client = SimpleNamespace(client_id="persistent-replay-client")
+    refresh = SimpleNamespace(
+        token="persistent-old-refresh",
+        resource=analysis,
+        expires_at=int(time.time()) + 600,
+        scopes=["read:user"],
+    )
+
+    first = await provider.exchange_refresh_token(client, refresh, ["read:user"])  # type: ignore[arg-type]
+    provider._refresh_exchange_replays.clear()
+    second = await provider.exchange_refresh_token(client, refresh, ["read:user"])  # type: ignore[arg-type]
+
+    assert calls == 1
+    assert first == second
+    assert second.refresh_token == "persisted-refresh"
+
+
+@pytest.mark.asyncio
+async def test_refresh_retries_once_after_external_upstream_rotation(monkeypatch) -> None:
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from mcp.server.auth.provider import TokenError
+    from mcp.shared.auth import OAuthToken
+
+    provider = MultiResourceGitHubProvider(_settings())
+    analysis = resource_url(provider.settings.public_base_url, "analysis")
+    calls = 0
+    fingerprints = iter([("upstream-session", "old"), ("upstream-session", "new")])
+
+    async def fake_fingerprint(_jti: str) -> tuple[str, str]:
+        return next(fingerprints)
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        nonlocal calls
+        del self, client, refresh_token, scopes
+        calls += 1
+        if calls == 1:
+            raise TokenError("invalid_grant", "Upstream refresh failed: bad_refresh_token")
+        return OAuthToken(
+            access_token="race-recovered-access",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="race-recovered-refresh",
+            scope="read:user",
+        )
+
+    monkeypatch.setattr(provider, "_upstream_refresh_fingerprint", fake_fingerprint)
+    monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fake_exchange)
+    client = SimpleNamespace(client_id="race-recovery-client")
+    refresh = SimpleNamespace(
+        token="race-old-refresh",
+        resource=analysis,
+        expires_at=int(time.time()) + 600,
+        scopes=["read:user"],
+    )
+
+    result = await provider.exchange_refresh_token(client, refresh, ["read:user"])  # type: ignore[arg-type]
+
+    assert calls == 2
+    assert result.access_token == "race-recovered-access"
+    assert result.refresh_token == "race-recovered-refresh"

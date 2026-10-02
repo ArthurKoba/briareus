@@ -37,7 +37,7 @@ _RESOURCE_BINDING_TTL_SECONDS = 10 * 60
 _TRANSACTION_TTL_SECONDS = 15 * 60
 _FASTMCP_ACCESS_TOKEN_EXPIRY_SECONDS = 24 * 60 * 60
 _FALLBACK_REFRESH_TOKEN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
-_REFRESH_REPLAY_SECONDS = 5.0
+_REFRESH_REPLAY_SECONDS = 3 * 60.0
 _SESSION_TOUCH_INTERVAL_SECONDS = 60.0
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,14 @@ class MultiResourceGitHubProvider(GitHubProvider):
             key_value=self._client_storage,
             pydantic_model=ResourceBinding,
             default_collection="koba-oauth-resource-bindings",
+            raise_on_validation_error=True,
+        )
+        self._refresh_replay_store: PydanticAdapter[OAuthToken] = PydanticAdapter[
+            OAuthToken
+        ](
+            key_value=self._client_storage,
+            pydantic_model=OAuthToken,
+            default_collection="koba-oauth-refresh-replays",
             raise_on_validation_error=True,
         )
         self._resource_issuers = {
@@ -378,6 +386,63 @@ class MultiResourceGitHubProvider(GitHubProvider):
             return None
         return loaded.model_copy(update={"resource": resource})
 
+    async def _load_refresh_replay(self, replay_key: str) -> OAuthToken | None:
+        cached = self._refresh_exchange_replays.get(replay_key)
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        persisted = await self._refresh_replay_store.get(key=replay_key)
+        if persisted is None:
+            return None
+        self._refresh_exchange_replays[replay_key] = (
+            time.monotonic() + _REFRESH_REPLAY_SECONDS,
+            persisted,
+        )
+        return persisted
+
+    async def _store_refresh_replay(
+        self,
+        replay_key: str,
+        result: OAuthToken,
+    ) -> None:
+        self._refresh_exchange_replays[replay_key] = (
+            time.monotonic() + _REFRESH_REPLAY_SECONDS,
+            result,
+        )
+        await self._refresh_replay_store.put(
+            key=replay_key,
+            value=result,
+            ttl=_REFRESH_REPLAY_SECONDS,
+        )
+
+    async def _wait_for_refresh_replay(
+        self,
+        replay_key: str,
+        *,
+        attempts: int = 20,
+        delay_seconds: float = 0.1,
+    ) -> OAuthToken | None:
+        for _ in range(attempts):
+            replay = await self._load_refresh_replay(replay_key)
+            if replay is not None:
+                return replay
+            await asyncio.sleep(delay_seconds)
+        return None
+
+    async def _upstream_refresh_fingerprint(
+        self,
+        refresh_jti: str,
+    ) -> tuple[str, str]:
+        if not refresh_jti:
+            return "", ""
+        mapping = await self._jti_mapping_store.get(key=refresh_jti)
+        if mapping is None:
+            return "", ""
+        token_set = await self._upstream_token_store.get(key=mapping.upstream_token_id)
+        if token_set is None or not token_set.refresh_token:
+            return mapping.upstream_token_id, ""
+        fingerprint = hashlib.sha256(token_set.refresh_token.encode()).hexdigest()
+        return mapping.upstream_token_id, fingerprint
+
     async def exchange_refresh_token(
         self,
         client: OAuthClientInformationFull,
@@ -408,17 +473,20 @@ class MultiResourceGitHubProvider(GitHubProvider):
 
         lock = self._refresh_exchange_locks.setdefault(replay_key, asyncio.Lock())
         async with lock:
-            cached = self._refresh_exchange_replays.get(replay_key)
-            if cached is not None and cached[0] > time.monotonic():
+            cached = await self._load_refresh_replay(replay_key)
+            if cached is not None:
                 await self._record_token_result(
                     client=client,
                     resource=resource,
-                    result=cached[1],
+                    result=cached,
                     event_name="refresh_replay",
                     session_id=session_id,
                 )
-                return cached[1]
+                return cached
 
+            upstream_token_id, refresh_fingerprint = (
+                await self._upstream_refresh_fingerprint(old_refresh_jti)
+            )
             token = self._resource_context.set(resource)
             try:
                 try:
@@ -427,29 +495,81 @@ class MultiResourceGitHubProvider(GitHubProvider):
                         refresh_token,
                         scopes,
                     )
-                except Exception as exc:
-                    await self._record_session(
-                        OAuthSessionEvent(
-                            session_id=session_id,
-                            client_id=client.client_id or "",
-                            client_name=self._client_name(client),
+                except Exception as first_exc:
+                    replay = await self._load_refresh_replay(replay_key)
+                    if replay is not None:
+                        await self._record_token_result(
+                            client=client,
                             resource=resource,
-                            scopes=list(scopes),
-                            status="refresh_error",
-                            event="refresh_error",
-                            refresh_jti=old_refresh_jti,
-                            error_type=type(exc).__name__,
-                            error_message=str(exc)[:2048],
+                            result=replay,
+                            event_name="refresh_replay",
+                            session_id=session_id,
                         )
+                        return replay
+
+                    current_token_id, current_fingerprint = (
+                        await self._upstream_refresh_fingerprint(old_refresh_jti)
                     )
-                    raise
+                    upstream_rotated = (
+                        upstream_token_id
+                        and current_token_id == upstream_token_id
+                        and refresh_fingerprint
+                        and current_fingerprint
+                        and current_fingerprint != refresh_fingerprint
+                    )
+                    if upstream_rotated:
+                        try:
+                            result = await super().exchange_refresh_token(
+                                client,
+                                refresh_token,
+                                scopes,
+                            )
+                        except Exception as retry_exc:
+                            await self._record_session(
+                                OAuthSessionEvent(
+                                    session_id=session_id,
+                                    client_id=client.client_id or "",
+                                    client_name=self._client_name(client),
+                                    resource=resource,
+                                    scopes=list(scopes),
+                                    status="refresh_error",
+                                    event="refresh_error",
+                                    refresh_jti=old_refresh_jti,
+                                    error_type=type(retry_exc).__name__,
+                                    error_message=str(retry_exc)[:2048],
+                                )
+                            )
+                            raise
+                    else:
+                        replay = await self._wait_for_refresh_replay(replay_key)
+                        if replay is not None:
+                            await self._record_token_result(
+                                client=client,
+                                resource=resource,
+                                result=replay,
+                                event_name="refresh_replay",
+                                session_id=session_id,
+                            )
+                            return replay
+                        await self._record_session(
+                            OAuthSessionEvent(
+                                session_id=session_id,
+                                client_id=client.client_id or "",
+                                client_name=self._client_name(client),
+                                resource=resource,
+                                scopes=list(scopes),
+                                status="refresh_error",
+                                event="refresh_error",
+                                refresh_jti=old_refresh_jti,
+                                error_type=type(first_exc).__name__,
+                                error_message=str(first_exc)[:2048],
+                            )
+                        )
+                        raise first_exc
             finally:
                 self._resource_context.reset(token)
 
-            self._refresh_exchange_replays[replay_key] = (
-                time.monotonic() + _REFRESH_REPLAY_SECONDS,
-                result,
-            )
+            await self._store_refresh_replay(replay_key, result)
 
             now_epoch = int(time.time())
             if refresh_token.expires_at is None:
