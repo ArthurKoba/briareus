@@ -16,6 +16,7 @@ from modules.files.workspace_store import WorkspaceFileStore
 
 from .browser import BrowserManager
 from .browser_tools import register_browser_tools
+from .devtools_proxy import DevToolsProxyRuntime
 from .executor import resolve_curl_binary
 from .operator import browser_operator_websocket
 from .tools import register_curl_tools
@@ -56,6 +57,9 @@ register_browser_tools(
     WRITE_EXTERNAL,
     browser=_browser,
 )
+
+_devtools = DevToolsProxyRuntime(_browser, _browser_settings)
+mcp.mount(_devtools.server, namespace="devtools")
 
 app = private_http_app(mcp, _private_settings)
 

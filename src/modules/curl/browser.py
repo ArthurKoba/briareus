@@ -6,6 +6,7 @@ import json
 import shutil
 import tempfile
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlsplit
@@ -62,6 +63,8 @@ class BrowserManager:
         self._policy_lock = asyncio.Lock()
         self._policy_path = self.profile_dir / "koba-browser-policy.json"
         self._agent_access_enabled = True
+        self._developer_access_enabled = False
+        self._privileged_access_hooks: list[Callable[[bool], Awaitable[None]]] = []
         self._page_labels: dict[str, str] = {}
         self._page_agent_access: dict[str, bool] = {}
         self._closed_pages: list[dict[str, object]] = []
@@ -72,21 +75,57 @@ class BrowserManager:
             payload = json.loads(self._policy_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        if isinstance(payload, dict) and isinstance(payload.get("agent_access_enabled"), bool):
+        if not isinstance(payload, dict):
+            return
+        if isinstance(payload.get("agent_access_enabled"), bool):
             self._agent_access_enabled = payload["agent_access_enabled"]
+        if isinstance(payload.get("developer_access_enabled"), bool):
+            self._developer_access_enabled = payload["developer_access_enabled"]
 
     def _persist_policy(self) -> None:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         temporary = self._policy_path.with_suffix(".tmp")
         temporary.write_text(
             json.dumps(
-                {"agent_access_enabled": self._agent_access_enabled},
+                {
+                    "agent_access_enabled": self._agent_access_enabled,
+                    "developer_access_enabled": self._developer_access_enabled,
+                },
                 separators=(",", ":"),
                 sort_keys=True,
             ),
             encoding="utf-8",
         )
         temporary.replace(self._policy_path)
+
+    @property
+    def developer_access_enabled(self) -> bool:
+        return self._developer_access_enabled
+
+    @property
+    def developer_access_effective(self) -> bool:
+        return self._agent_access_enabled and self._developer_access_enabled
+
+    def require_developer_access(self) -> None:
+        if not self._agent_access_enabled:
+            raise BrowserError("browser agent access is disabled by operator")
+        if not self._developer_access_enabled:
+            raise BrowserError(
+                "browser developer access is disabled by operator; "
+                "use browser_status to inspect the current access mode"
+            )
+
+    def add_privileged_access_hook(
+        self,
+        hook: Callable[[bool], Awaitable[None]],
+    ) -> None:
+        self._privileged_access_hooks.append(hook)
+
+    async def _notify_privileged_access(self) -> None:
+        enabled = self.developer_access_effective
+        for hook in list(self._privileged_access_hooks):
+            with contextlib.suppress(Exception):
+                await hook(enabled)
 
     def _require_operator(self, owner_token: str) -> None:
         if not owner_token or owner_token not in self._operator_pages:
@@ -340,6 +379,9 @@ class BrowserManager:
         return {
             "running": True,
             "agent_access_enabled": self._agent_access_enabled,
+            "developer_access_enabled": self._developer_access_enabled,
+            "developer_access_effective": self.developer_access_effective,
+            "developer_backend": "chrome-devtools-mcp",
             "headless": self.headless,
             "browser": "chromium",
             "executable_path": self.executable_path,
@@ -625,7 +667,24 @@ class BrowserManager:
         async with self._policy_lock:
             self._agent_access_enabled = allowed
             await asyncio.to_thread(self._persist_policy)
-        return {"agent_access_enabled": self._agent_access_enabled}
+        await self._notify_privileged_access()
+        return {
+            "agent_access_enabled": self._agent_access_enabled,
+            "developer_access_effective": self.developer_access_effective,
+        }
+
+    async def operator_set_developer_access(
+        self, owner_token: str, allowed: bool
+    ) -> JsonObject:
+        self._require_operator(owner_token)
+        async with self._policy_lock:
+            self._developer_access_enabled = allowed
+            await asyncio.to_thread(self._persist_policy)
+        await self._notify_privileged_access()
+        return {
+            "developer_access_enabled": self._developer_access_enabled,
+            "developer_access_effective": self.developer_access_effective,
+        }
 
     async def _operator_page_items(self) -> list[JsonValue]:
         context = await self._ensure_started()
@@ -687,6 +746,9 @@ class BrowserManager:
             "page_count": len(page_items),
             "operator_count": len(self._operator_pages),
             "agent_access_enabled": self._agent_access_enabled,
+            "developer_access_enabled": self._developer_access_enabled,
+            "developer_access_effective": self.developer_access_effective,
+            "developer_backend": "chrome-devtools-mcp",
             "docked_devtools_page_id": self._operator_devtools_pages.get(owner_token, ""),
             "can_reopen_closed_tab": bool(self._closed_pages),
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
@@ -898,6 +960,8 @@ class BrowserManager:
             # Block agents before destroying the credential-bearing profile.
             async with self._policy_lock:
                 self._agent_access_enabled = False
+                self._developer_access_enabled = False
+            await self._notify_privileged_access()
 
             context = self._context
             browser = self._browser
@@ -951,6 +1015,8 @@ class BrowserManager:
             return {
                 "cleaned": True,
                 "agent_access_enabled": False,
+                "developer_access_enabled": False,
+                "developer_access_effective": False,
                 "selected_page_id": selected_page_id,
                 "page_count": len(page_items),
             }

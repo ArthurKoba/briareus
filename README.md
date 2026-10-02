@@ -186,7 +186,23 @@ clears cookies and origin-scoped site data only for the selected HTTP(S) applica
 `Clean browser` is deliberately destructive: it stops Chromium, erases the persistent
 profile plus browser cache/config/crash state, starts one clean `about:blank` tab, and leaves
 agent access disabled. Browser-operator WebSocket reconnects mint a fresh short-lived Admin
-ticket instead of reusing an expired page-load ticket. The runtime uses normal Chromium
+ticket instead of reusing an expired page-load ticket.
+
+The Web surface also mounts Google's official `chrome-devtools-mcp` server (pinned to
+`1.10.1`) under the `devtools_` namespace instead of reimplementing Chrome debugging RPCs.
+It connects only to the same loopback CDP endpoint used by the persistent browser. Agent
+Developer access is a separate browser-wide privilege and defaults to off; privileged calls
+require both `Agents: On` and `Developer: On`. Turning either switch off disconnects the
+privileged stdio upstream. Full Developer mode intentionally sees all browser targets rather
+than honoring per-tab basic-browser locks. The operator UI persists the Developer switch in the
+browser policy; a fresh profile starts with Developer access off.
+
+The upstream exposes its native console, network, JavaScript evaluation, DOM/CSS, performance,
+memory and extension tools without Koba schema translation. Extension/source filesystem access
+is restricted to `/workspace`; file navigations and CrUX URL uploads are disabled. DevTools MCP
+arguments and results are omitted from Management audit payloads because they may contain
+cookies, authorization headers, JavaScript, request bodies or authenticated page data. Tool
+name, status, duration and traces remain observable. The runtime uses normal Chromium
 capabilities; it does not add fingerprint spoofing or site-control bypass logic.
 
 ## OAuth sessions

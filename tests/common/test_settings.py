@@ -10,6 +10,7 @@ from common.settings import (
     AsgiServerSettings,
     AuthServiceSettings,
     BridgeSettings,
+    BrowserSettings,
     FileSettings,
     GatewayAuthSettings,
     GitHubPolicySettings,
@@ -216,3 +217,12 @@ def test_observability_settings_are_disabled_without_otlp_endpoint() -> None:
     assert settings.signal_endpoint("logs") == ""
     assert settings.signal_endpoint("traces") == ""
     assert settings.signal_endpoint("metrics") == ""
+
+
+def test_browser_devtools_upstream_uses_absolute_script_path(monkeypatch) -> None:
+    monkeypatch.delenv("BROWSER_DEVTOOLS_MCP_SCRIPT_PATH", raising=False)
+    settings = BrowserSettings()
+
+    assert settings.devtools_mcp_script_path.is_absolute()
+    with pytest.raises(ValidationError, match="browser paths must be absolute"):
+        BrowserSettings(devtools_mcp_script_path=Path("relative/devtools.js"))

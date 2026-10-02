@@ -403,6 +403,8 @@ async def test_operator_clean_browser_erases_profile_and_blocks_agents(
     assert old_playwright.stopped is True
     assert result["cleaned"] is True
     assert result["agent_access_enabled"] is False
+    assert result["developer_access_enabled"] is False
+    assert result["developer_access_effective"] is False
     assert result["page_count"] == 1
     assert not (browser.profile_dir / "Cookies").exists()
     assert not cache.exists()
@@ -574,3 +576,52 @@ async def test_operator_reopens_last_closed_tab_with_label_and_policy(tmp_path: 
     assert reopened["page_agent_access"] is False
     assert browser._operator_pages["owner"] == reopened_id
     assert browser._closed_pages == []
+
+
+@pytest.mark.asyncio
+async def test_developer_access_is_off_by_default_and_requires_agent_master(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+
+    assert browser.developer_access_enabled is False
+    assert browser.developer_access_effective is False
+    with pytest.raises(BrowserError, match="developer access is disabled"):
+        browser.require_developer_access()
+
+    enabled = await browser.operator_set_developer_access("owner", True)
+    assert enabled["developer_access_enabled"] is True
+    assert enabled["developer_access_effective"] is True
+    browser.require_developer_access()
+
+    blocked = await browser.operator_set_agent_access("owner", False)
+    assert blocked["agent_access_enabled"] is False
+    assert blocked["developer_access_effective"] is False
+    with pytest.raises(BrowserError, match="agent access is disabled"):
+        browser.require_developer_access()
+
+
+@pytest.mark.asyncio
+async def test_developer_access_persists_and_notifies_privileged_hooks(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+    notifications: list[bool] = []
+
+    async def hook(enabled: bool) -> None:
+        notifications.append(enabled)
+
+    browser.add_privileged_access_hook(hook)
+    await browser.operator_set_developer_access("owner", True)
+    await browser.operator_set_agent_access("owner", False)
+    await browser.operator_set_agent_access("owner", True)
+
+    assert notifications == [True, False, True]
+    reloaded = _browser(tmp_path)
+    assert reloaded._agent_access_enabled is True
+    assert reloaded.developer_access_enabled is True
+    assert reloaded.developer_access_effective is True
+
+
+def test_browser_status_contract_exposes_developer_mode_fields(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    assert browser.developer_access_enabled is False
+    assert browser.developer_access_effective is False

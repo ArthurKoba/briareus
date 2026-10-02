@@ -231,3 +231,26 @@ def test_browser_management_audit_omits_fill_values_and_results() -> None:
     assert "<omitted>" in arguments
     assert "private authenticated page" not in result
     assert "browser result omitted" in result
+
+
+def test_devtools_management_audit_omits_privileged_arguments_and_results() -> None:
+    arguments = invocation_arguments_payload(
+        "web",
+        {
+            "function": "() => document.cookie",
+            "headers": {"Cookie": "session=secret-cookie"},
+        },
+        "devtools_evaluate_script",
+    )
+    result = invocation_result_payload(
+        "web",
+        {"value": "secret-cookie", "requestBody": "private-payload"},
+        "devtools_evaluate_script",
+    )
+
+    assert "document.cookie" not in arguments
+    assert "secret-cookie" not in arguments
+    assert "Chrome DevTools arguments omitted" in arguments
+    assert "secret-cookie" not in result
+    assert "private-payload" not in result
+    assert "Chrome DevTools result omitted" in result
