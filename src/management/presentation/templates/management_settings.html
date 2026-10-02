@@ -42,12 +42,24 @@
           <div class="mb-3">
             <label class="form-label">Maximum exec timeout (seconds)</label>
             <input class="form-control" type="number" min="1" max="86400" name="terminal_max_exec_timeout_seconds" value="{{ terminal_policy.max_exec_timeout_seconds }}">
-            <div class="form-hint">Agents may request a shorter timeout, never a longer one.</div>
+            <div class="form-hint">Emergency wall-clock cap for one synchronous terminal command. Default: 6 hours.</div>
           </div>
           <div class="mb-3">
             <label class="form-label">Maximum background job runtime (seconds)</label>
             <input class="form-control" type="number" min="1" max="604800" name="terminal_max_job_runtime_seconds" value="{{ terminal_policy.max_job_runtime_seconds }}">
-            <div class="form-hint">Long-running jobs are automatically terminated after this wall-clock limit.</div>
+            <div class="form-hint">Emergency wall-clock cap for background jobs. Default: 12 hours; use jobs for long work.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-xl-6">
+      <div class="card h-100">
+        <div class="card-header"><h3 class="card-title">MCP request timeout</h3></div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">Backend MCP call timeout (seconds)</label>
+            <input class="form-control" type="number" min="1" max="300" name="mcp_call_timeout_seconds" value="{{ mcp_policy.call_timeout_seconds }}">
+            <div class="form-hint">Limits one MCP backend round-trip. A timeout returns an MCP error to the agent; it does not terminate an already-started background job.</div>
           </div>
         </div>
       </div>
