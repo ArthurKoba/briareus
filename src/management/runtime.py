@@ -4,13 +4,16 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.websockets import WebSocket
 
 from common.observability import announce_runtime_started, build_observability
 from common.settings import FileSettings, ManagementSettings
+from common.websocket_proxy import relay_websocket
 from management.application.services import (
     AccountService,
     InvocationAuditService,
@@ -149,6 +152,26 @@ app.include_router(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.websocket("/admin/browser/ws")
+async def browser_operator_socket(websocket: WebSocket) -> None:
+    session = websocket.scope.get("session")
+    if not isinstance(session, dict) or session.get("management_admin") != settings.admin_username:
+        await websocket.close(code=4401)
+        return
+
+    origin = websocket.headers.get("origin", "")
+    public_host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host", "")
+    if origin and urlsplit(origin).netloc.casefold() != public_host.casefold():
+        await websocket.close(code=4403)
+        return
+
+    await relay_websocket(
+        websocket,
+        "ws://curl:8000/operator/ws",
+        headers={"Authorization": f"Bearer {settings.service_token}"},
+    )
 
 
 admin = build_admin(

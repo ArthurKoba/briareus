@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from starlette.routing import WebSocketRoute
+from starlette.websockets import WebSocket
+
 from common.runtime_annotations import READ_EXTERNAL, READ_ONLY_LOCAL, WRITE_EXTERNAL
 from common.runtime_common import build_private_mcp, management_client, private_http_app
 from common.settings import (
@@ -14,6 +17,7 @@ from modules.files.workspace_store import WorkspaceFileStore
 from .browser import BrowserManager
 from .browser_tools import register_browser_tools
 from .executor import resolve_curl_binary
+from .operator import browser_operator_websocket
 from .tools import register_curl_tools
 
 _private_settings = PrivateRuntimeSettings()
@@ -54,3 +58,14 @@ register_browser_tools(
 )
 
 app = private_http_app(mcp, _private_settings)
+
+
+async def _operator_ws(websocket: WebSocket) -> None:
+    await browser_operator_websocket(
+        websocket,
+        browser=_browser,
+        service_token=_management.service_token,
+    )
+
+
+app.router.routes.append(WebSocketRoute("/operator/ws", _operator_ws))

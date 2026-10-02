@@ -960,6 +960,20 @@ class TerminalView(CustomView):
         return RedirectResponse("/admin/terminal", status_code=303)
 
 
+class BrowserView(CustomView):
+    menu_label = "Browser"
+    icon = "fa fa-globe"
+    path = "/browser"
+
+    @route("")
+    async def index(self, request: Request) -> Response:
+        return _view_templates(self).TemplateResponse(
+            request=request,
+            name="management_browser.html",
+            context={"title": "Browser Operator"},
+        )
+
+
 class SettingsView(CustomView):
     menu_label = "Settings"
     icon = "fa fa-sliders"
@@ -1427,6 +1441,7 @@ def build_admin(
     admin.add_view(CoolifyAccountView(cipher, accounts))
     admin.add_view(ReverseView(reverse, snapshots))
     admin.add_view(TerminalView(terminal))
+    admin.add_view(BrowserView())
     admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))
     admin.add_view(InvocationView(InvocationRecord, audit))
     admin.add_view(SettingsView(config, runtime_settings, audit, reverse))

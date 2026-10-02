@@ -102,6 +102,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     assert "OAuth Sessions" in labels
     assert "Reverse" in labels
     assert "Terminal" in labels
+    assert "Browser" in labels
     assert "Settings" in labels
     assert "Files" in labels
 

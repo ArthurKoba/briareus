@@ -6,13 +6,15 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
-from starlette.routing import BaseRoute
+from starlette.routing import BaseRoute, WebSocketRoute
+from starlette.websockets import WebSocket
 
 from common.management_client import ManagementClient, ManagementClientError
 from common.mcp_surfaces import (
@@ -33,6 +35,7 @@ from common.settings import (
     GatewayAuthSettings,
     ManagementClientSettings,
 )
+from common.websocket_proxy import relay_websocket
 
 from . import __version__
 from .auth_client import LocalAuthTokenVerifier
@@ -377,7 +380,31 @@ if _auth_settings.enabled:
     for _path in _AUTH_PROXY_PATHS:
         app.add_route(_path, _auth_proxy.handle, methods=_PROXY_METHODS)
 
+
+def _websocket_backend_url(base_url: str, path: str) -> str:
+    parsed = urlsplit(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit((scheme, parsed.netloc, path, "", ""))
+
+
+async def _admin_browser_websocket(websocket: WebSocket) -> None:
+    headers: dict[str, str] = {}
+    cookie = websocket.headers.get("cookie")
+    if cookie:
+        headers["Cookie"] = cookie
+    public_host = websocket.headers.get("host", "")
+    headers["X-Forwarded-Host"] = public_host
+    headers["X-Forwarded-Proto"] = websocket.headers.get("x-forwarded-proto", "https")
+    await relay_websocket(
+        websocket,
+        _websocket_backend_url(_management_settings.url, "/admin/browser/ws"),
+        headers=headers,
+        origin=websocket.headers.get("origin"),
+    )
+
+
 _admin_proxy = ReverseProxy(_management_settings.url, backend_name="management")
+app.router.routes.append(WebSocketRoute("/admin/browser/ws", _admin_browser_websocket))
 app.add_route("/admin", _admin_proxy.handle, methods=_PROXY_METHODS)
 app.add_route("/admin/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)
 
