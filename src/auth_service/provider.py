@@ -600,7 +600,9 @@ class MultiResourceGitHubProvider(GitHubProvider):
                         error_message=str(error)[:2048],
                     )
                 )
-                raise error
+                if error is exc:
+                    raise
+                raise error from exc
 
             await self._store_refresh_exchange_replay(replay_key, result)
             await self._record_token_result(
