@@ -44,7 +44,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest
 
-  docker-core:
+  docker:
     runs-on: ubuntu-latest
     env:
       DOCKER_BUILD_RECORD_UPLOAD: "false"
