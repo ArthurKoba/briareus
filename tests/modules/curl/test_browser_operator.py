@@ -24,7 +24,7 @@ def _browser(tmp_path: Path) -> BrowserManager:
 
 
 @pytest.mark.asyncio
-async def test_human_operator_lock_blocks_agent_writes(
+async def test_operator_sessions_share_control_with_agent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -48,27 +48,27 @@ async def test_human_operator_lock_blocks_agent_writes(
     monkeypatch.setattr(browser, "_ensure_started", fake_started)
     monkeypatch.setattr(browser, "pages", fake_pages)
 
-    owner = await browser.operator_acquire()
-    assert owner["selected_page_id"] == "page-one"
+    first = await browser.operator_acquire()
+    second = await browser.operator_acquire()
 
-    with pytest.raises(BrowserError, match="human control"):
-        await browser.open("https://example.test/other")
+    assert first["owner_token"] != second["owner_token"]
+    first_state = await browser.operator_state(str(first["owner_token"]))
+    second_state = await browser.operator_state(str(second["owner_token"]))
+    assert first_state["control"] == "shared"
+    assert first_state["operator_count"] == 2
+    assert second_state["operator_count"] == 2
 
-    with pytest.raises(BrowserError, match="already under human control"):
-        await browser.operator_acquire()
+    # Agent writes are intentionally not blocked while operator views are connected.
+    browser._require_operator(str(first["owner_token"]))
 
-    state = await browser.operator_state(str(owner["owner_token"]))
-    assert state["control"] == "human"
-    assert state["page_count"] == 1
-
-    await browser.operator_release(str(owner["owner_token"]))
-    browser._require_agent_control()
+    await browser.operator_release(str(first["owner_token"]))
+    assert (await browser.operator_state(str(second["owner_token"])))["operator_count"] == 1
 
 
 @pytest.mark.asyncio
 async def test_wrong_operator_token_cannot_control_browser(tmp_path: Path) -> None:
     browser = _browser(tmp_path)
-    browser._operator_token = "owner"
+    browser._operator_pages["owner"] = ""
 
     with pytest.raises(BrowserError, match="not active"):
         await browser.operator_state("other")
