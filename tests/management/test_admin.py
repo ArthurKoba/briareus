@@ -121,6 +121,13 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     engine.dispose()
 
 
+def test_browser_operator_template_refreshes_shared_state() -> None:
+    source = Path(
+        "src/management/presentation/templates/management_browser.html"
+    ).read_text()
+    assert "setInterval(() => send({type:'refresh_state'}), 1500);" in source
+
+
 def test_analysis_invocation_tool_uses_public_semantic_name() -> None:
     old = SimpleNamespace(module="analysis", tool="disassemble_bytes")
     current = SimpleNamespace(module="analysis", tool="analyze_byte_region")
