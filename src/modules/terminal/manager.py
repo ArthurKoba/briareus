@@ -386,12 +386,13 @@ class TerminalManager:
             )
         except TimeoutError:
             timed_out = True
-            self._signal_process_group(process.pid, signal.SIGTERM)
-            try:
-                await asyncio.wait_for(process.wait(), timeout=2)
-            except TimeoutError:
-                self._signal_process_group(process.pid, signal.SIGKILL)
-                await process.wait()
+            await self._terminate_process(process)
+        except asyncio.CancelledError:
+            await self._terminate_process(process)
+            stdout_task.cancel()
+            stderr_task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            raise
         stdout, stdout_truncated = await stdout_task
         stderr, stderr_truncated = await stderr_task
         ended = time.time()
@@ -412,6 +413,16 @@ class TerminalManager:
             "duration_seconds": round(ended - started, 3),
             "timeout_seconds": effective_timeout,
         }
+
+    async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        self._signal_process_group(process.pid, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=2)
+        except TimeoutError:
+            self._signal_process_group(process.pid, signal.SIGKILL)
+            await process.wait()
 
     @staticmethod
     async def _drain_bounded(
