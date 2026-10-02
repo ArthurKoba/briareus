@@ -5,7 +5,32 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}-${{ github.run_id }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}-
+      - run: uv lock --check
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy src
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -16,15 +41,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: uv lock --check
       - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run mypy src
       - run: uv run pytest
 
   docker:
     runs-on: ubuntu-latest
     env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+      DOCKER_BUILD_SUMMARY: "false"
       MANAGEMENT_ENCRYPTION_KEY: ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=
       MANAGEMENT_SERVICE_TOKEN: ci-management-token
       MANAGEMENT_ADMIN_USERNAME: ci-admin
@@ -37,28 +61,106 @@ jobs:
       GITHUB_OAUTH_CLIENT_SECRET: ci-secret
       GITHUB_OAUTH_JWT_SIGNING_KEY: ci-jwt-signing-key
       GITHUB_OAUTH_ALLOWED_USERS: ci-user
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - auth
-          - gateway
-          - management
-          - github
-          - gitlab
-          - files
-          - curl
-          - terminal
-          - analysis
-          - ghidra
-          - observability
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - run: docker compose config >/dev/null
+      - name: Build github (prime shared cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: github
+          push: false
+          tags: mcp-bridge:github-ci
+          cache-from: type=gha,scope=mcp-bridge-core
+          cache-to: type=gha,scope=mcp-bridge-core,ignore-error=true
+      - name: Build auth
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: auth
+          push: false
+          tags: mcp-bridge:auth-ci
+      - name: Build gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: gateway
+          push: false
+          tags: mcp-bridge:gateway-ci
+      - name: Build management
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: management
+          push: false
+          tags: mcp-bridge:management-ci
+      - name: Build gitlab
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: gitlab
+          push: false
+          tags: mcp-bridge:gitlab-ci
+      - name: Build files
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: files
+          push: false
+          tags: mcp-bridge:files-ci
+      - name: Build analysis
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: analysis
+          push: false
+          tags: mcp-bridge:analysis-ci
+      - name: Build ghidra
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ghidra
+          push: false
+          tags: mcp-bridge:ghidra-ci
+      - name: Build observability
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: observability
+          push: false
+          tags: mcp-bridge:observability-ci
+
+  docker-curl:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+      DOCKER_BUILD_SUMMARY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
-          target: ${{ matrix.target }}
+          target: curl
           push: false
-          tags: mcp-bridge:${{ matrix.target }}-ci
+          tags: mcp-bridge:curl-ci
+          cache-from: type=gha,scope=mcp-bridge-curl
+          cache-to: type=gha,scope=mcp-bridge-curl,ignore-error=true
+
+  docker-terminal:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+      DOCKER_BUILD_SUMMARY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: terminal
+          push: false
+          tags: mcp-bridge:terminal-ci
+          cache-from: type=gha,scope=mcp-bridge-terminal
+          cache-to: type=gha,scope=mcp-bridge-terminal,ignore-error=true
