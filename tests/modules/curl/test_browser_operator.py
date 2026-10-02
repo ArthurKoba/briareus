@@ -171,6 +171,17 @@ async def test_operator_master_switch_blocks_agent_but_not_operator_state(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_master_agent_access_persists_in_browser_profile(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+
+    await browser.operator_set_agent_access("owner", False)
+
+    reloaded = _browser(tmp_path)
+    assert reloaded._agent_access_enabled is False
+
+
+@pytest.mark.asyncio
 async def test_wrong_operator_token_cannot_control_browser(tmp_path: Path) -> None:
     browser = _browser(tmp_path)
     browser._operator_pages["owner"] = ""
