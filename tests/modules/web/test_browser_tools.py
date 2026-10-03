@@ -154,11 +154,15 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert browser.display == ":99"
     assert browser.timezone == "Europe/Moscow"
 
-    environment = browser._browser_environment(":99")
-    assert environment["DISPLAY"] == ":99"
-    assert environment["TZ"] == "Europe/Moscow"
-    assert environment["LANG"] == "ru_RU.UTF-8"
-    assert environment["LC_ALL"] == "ru_RU.UTF-8"
+    process_command = browser._browser_process_command(":99")
+    assert process_command[:5] == [
+        "/usr/bin/env",
+        "TZ=Europe/Moscow",
+        "DISPLAY=:99",
+        "LANG=ru_RU.UTF-8",
+        "LC_ALL=ru_RU.UTF-8",
+    ]
+    assert process_command[5] == "/usr/bin/chromium"
 
 
 def test_browser_timezone_defaults_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
