@@ -400,7 +400,7 @@ def _websocket_backend_url(base_url: str, path: str) -> str:
     return urlunsplit((scheme, parsed.netloc, path, "", ""))
 
 
-async def _admin_browser_websocket(websocket: WebSocket) -> None:
+async def _management_websocket(websocket: WebSocket, path: str) -> None:
     headers: dict[str, str] = {}
     cookie = websocket.headers.get("cookie")
     if cookie:
@@ -410,15 +410,33 @@ async def _admin_browser_websocket(websocket: WebSocket) -> None:
     headers["X-Forwarded-Proto"] = websocket.headers.get("x-forwarded-proto", "https")
     await relay_websocket(
         websocket,
-        _websocket_backend_url(_management_settings.url, "/admin/browser/ws"),
+        _websocket_backend_url(_management_settings.url, path),
         headers=headers,
         origin=websocket.headers.get("origin"),
     )
 
 
+async def _admin_browser_websocket(websocket: WebSocket) -> None:
+    await _management_websocket(websocket, "/admin/browser/ws")
+
+
+async def _admin_realtime_websocket(websocket: WebSocket) -> None:
+    await _management_websocket(websocket, "/admin/api/realtime")
+
+
+async def _admin_browser_operator_websocket(websocket: WebSocket) -> None:
+    await _management_websocket(websocket, "/admin/api/browser/operator/ws")
+
+
 _admin_proxy = ReverseProxy(_management_settings.url, backend_name="management")
 _REVERSE_PROXIES.append(_admin_proxy)
-app.router.routes.append(WebSocketRoute("/admin/browser/ws", _admin_browser_websocket))
+app.router.routes.extend(
+    [
+        WebSocketRoute("/admin/browser/ws", _admin_browser_websocket),
+        WebSocketRoute("/admin/api/realtime", _admin_realtime_websocket),
+        WebSocketRoute("/admin/api/browser/operator/ws", _admin_browser_operator_websocket),
+    ]
+)
 app.add_route("/admin", _admin_proxy.handle, methods=_PROXY_METHODS)
 app.add_route("/admin/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)
 

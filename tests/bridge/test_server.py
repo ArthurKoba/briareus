@@ -67,7 +67,11 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
     } <= paths
     assert "/ghidra" not in paths
     assert "/curl" not in paths
-    assert "/admin/browser/ws" in paths
+    assert {
+        "/admin/browser/ws",
+        "/admin/api/realtime",
+        "/admin/api/browser/operator/ws",
+    } <= paths
 
 
 def test_mounted_analysis_http_app_runs_fastmcp_lifespan() -> None:
