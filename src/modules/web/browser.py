@@ -195,6 +195,19 @@ class BrowserManager:
             process.kill()
             await process.wait()
 
+    async def _terminate_display_process(
+        self,
+        process: asyncio.subprocess.Process | None,
+    ) -> None:
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+
     def _browser_command(self) -> list[str]:
         command = [
             self.executable_path,
@@ -292,6 +305,9 @@ class BrowserManager:
                 with contextlib.suppress(Exception):
                     await browser.close()
             await self._terminate_browser_process(process)
+            display_process = self._display_process
+            self._display_process = None
+            await self._terminate_display_process(display_process)
             await playwright.stop()
             raise
         context.set_default_timeout(self.timeout_ms)
@@ -1041,10 +1057,12 @@ class BrowserManager:
             context = self._context
             browser = self._browser
             process = self._browser_process
+            display_process = self._display_process
             playwright = self._playwright
             self._context = None
             self._browser = None
             self._browser_process = None
+            self._display_process = None
             self._playwright = None
             if context is not None:
                 with contextlib.suppress(Exception):
@@ -1053,6 +1071,7 @@ class BrowserManager:
                 with contextlib.suppress(Exception):
                     await browser.close()
             await self._terminate_browser_process(process)
+            await self._terminate_display_process(display_process)
             if playwright is not None:
                 with contextlib.suppress(Exception):
                     await playwright.stop()

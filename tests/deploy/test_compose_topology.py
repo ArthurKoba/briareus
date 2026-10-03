@@ -353,6 +353,18 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
     assert "BREAKPAD_DUMP_LOCATION=/browser/crash" in web_stage
 
 
+def test_entrypoint_repairs_blank_browser_desktop_environment() -> None:
+    entrypoint = Path("docker-entrypoint.sh").read_text()
+
+    assert 'if [ -z "${TZ:-}" ]; then' in entrypoint
+    assert 'TZ=Europe/Moscow' in entrypoint
+    assert 'if [ -z "${LANG:-}" ]; then' in entrypoint
+    assert 'LANG=ru_RU.UTF-8' in entrypoint
+    assert 'if [ -z "${DISPLAY:-}" ]; then' in entrypoint
+    assert 'DISPLAY=:99' in entrypoint
+    assert 'export TZ LANG LC_ALL DISPLAY' in entrypoint
+
+
 def test_entrypoint_owns_browser_profile_volume_before_dropping_privileges() -> None:
     entrypoint = Path("docker-entrypoint.sh").read_text()
     assert 'BROWSER_PROFILE_PATH="${BROWSER_PROFILE_PATH:-}"' in entrypoint

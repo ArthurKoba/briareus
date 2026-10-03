@@ -121,6 +121,7 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     assert 'command.append(f"--lang={self.locale}")' in source
     assert 'command.append(f"--accept-lang={self.accept_language}")' in source
     assert '"Xvfb"' in source
+    assert "_terminate_display_process" in source
 
 
 def test_browser_headful_identity_configuration(tmp_path: Path) -> None:

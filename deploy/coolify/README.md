@@ -133,6 +133,12 @@ container variables cannot silently revert the browser to UTC. A future deployme
 should wire only the specific setting that needs to change instead of duplicating the full browser
 configuration in Compose.
 
+Coolify may materialize an optional application variable as an empty string. For the browser
+desktop environment, the container entrypoint treats blank `TZ`, `LANG`, `LC_ALL`, and `DISPLAY`
+as absent and restores the image defaults before starting the runtime. Explicit non-empty values
+are preserved. This prevents a blank `TZ` from turning Chromium's JavaScript timezone into
+`Etc/Unknown`.
+
 Do not spoof a foreign browser identity by overriding the user agent; use a real headful
 Chromium runtime and consistent locale/display/timezone inputs instead.
 
