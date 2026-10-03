@@ -231,6 +231,7 @@ onMounted(load)
             rel="noreferrer"
             class="inline-flex max-w-full items-center gap-1 truncate text-primary hover:underline"
             data-row-action
+            @click.stop
           >
             <span class="truncate">{{ record.base_url }}</span><ExternalLink class="size-3 shrink-0" />
           </a>
@@ -242,19 +243,20 @@ onMounted(load)
         </template>
         <template v-else-if="column.key === 'updated_at'">{{ formatDate(record.updated_at) }}</template>
         <template v-else-if="column.key === 'actions'">
-          <div class="flex w-full items-center justify-end gap-1" data-row-action>
+          <div class="flex w-full items-center justify-end gap-1" data-row-action @click.stop>
             <button
+              type="button"
               class="grid size-7 place-items-center rounded-md hover:bg-accent"
               :title="String(t('common.test'))"
-              @click="verify(record)"
+              @click.stop="verify(record)"
             >
               <LoaderCircle v-if="verifyStates[record.id] === 'loading'" class="size-4 animate-spin" />
               <CircleCheck v-else-if="verifyStates[record.id] === 'success'" class="size-4 text-emerald-500" />
               <CircleX v-else-if="verifyStates[record.id] === 'error'" class="size-4 text-destructive" />
               <KeyRound v-else class="size-4 text-muted-foreground" />
             </button>
-            <button class="grid size-7 place-items-center rounded-md hover:bg-accent" :title="String(t('common.edit'))" @click="editAccount(record)"><Pencil class="size-4" /></button>
-            <button class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" :title="String(t('common.delete'))" @click="remove(record)"><Trash2 class="size-4" /></button>
+            <button type="button" class="grid size-7 place-items-center rounded-md hover:bg-accent" :title="String(t('common.edit'))" @click.stop="editAccount(record)"><Pencil class="size-4" /></button>
+            <button type="button" class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" :title="String(t('common.delete'))" @click.stop="remove(record)"><Trash2 class="size-4" /></button>
           </div>
         </template>
         <template v-else><span class="truncate">{{ value ?? "—" }}</span></template>

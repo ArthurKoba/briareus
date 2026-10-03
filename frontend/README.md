@@ -86,3 +86,15 @@ The public gateway owns the split:
 - MCP surfaces remain independent.
 
 The frontend nginx serves only static SPA files and `/health`; it must not proxy management API or WebSocket traffic.
+
+## Interaction regression tests
+
+Use `bun install --frozen-lockfile`, then `bun run --bun test:typecheck`,
+`bun run --bun test`, and `bun run --bun build`. The frontend workflow runs
+these checks on changes to this directory.
+
+Component tests mount the real Vue table and account panel. Provider calls are
+mocked, so tests never verify, create, or delete production accounts. Happy DOM
+has no layout: virtual table tests use deterministic virtual positions to test
+both render branches; browser scroll/layout and native keyboard activation still
+require browser acceptance. Keep those validation levels separate.

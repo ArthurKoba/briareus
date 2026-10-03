@@ -11,6 +11,7 @@ import { useVirtualizer } from "@tanstack/vue-virtual"
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-vue-next"
 
 import { uiPreferences } from "@/shared/lib/preferences"
+import { isRowContentClick } from "@/shared/lib/table-interaction"
 
 export interface DataTableColumn {
   title?: string
@@ -107,9 +108,7 @@ function onScroll(event: Event): void {
 }
 
 function onRowClick(event: MouseEvent, record: any): void {
-  if (!props.clickable) return
-  const target = event.target as HTMLElement | null
-  if (target?.closest("button,a,input,select,textarea,[role='switch'],[data-row-action]")) return
+  if (!props.clickable || !isRowContentClick(event)) return
   emit("rowClick", record)
 }
 </script>
