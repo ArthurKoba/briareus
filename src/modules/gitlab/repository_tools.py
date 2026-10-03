@@ -41,6 +41,40 @@ def register_gitlab_repository_tools(
             overwrite=overwrite,
         )
 
+    @mcp.tool(title="Authorize local Git workspace", annotations=write_annotations)
+    def authorize_local_git(
+        account_id: str,
+        project: str,
+        destination: str,
+        remote: str = "origin",
+    ) -> JsonObject:
+        """Authorize an existing GitLab checkout for secure ordinary Git transport."""
+        return client_factory(account_id).authorize_local_git(
+            project,
+            destination,
+            remote=remote,
+        )
+
+    @mcp.tool(title="Push local Git workspace", annotations=write_annotations)
+    def push_local_git(
+        account_id: str,
+        project: str,
+        destination: str,
+        branch: str = "",
+        remote: str = "origin",
+        set_upstream: bool = True,
+        expected_remote_sha: str = "",
+    ) -> JsonObject:
+        """Push local Git HEAD, optionally using CAS-safe force-with-lease."""
+        return client_factory(account_id).push_local_git(
+            project,
+            destination,
+            branch=branch,
+            remote=remote,
+            set_upstream=set_upstream,
+            expected_remote_sha=expected_remote_sha,
+        )
+
     @mcp.tool(title="GitLab get file", annotations=read_annotations)
     def get_file(
         account_id: str,

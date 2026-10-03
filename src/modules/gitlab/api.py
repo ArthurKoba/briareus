@@ -19,7 +19,7 @@ class GitLabApiClient:
         profile: GitLabProfile,
         *,
         max_connections: int = 4,
-        protected_branches: frozenset[str] = frozenset({"main", "master"}),
+        protected_branches: frozenset[str] = frozenset(),
         workspace_root: Path = Path("/workspace"),
         anonymous_only: bool = False,
     ) -> None:

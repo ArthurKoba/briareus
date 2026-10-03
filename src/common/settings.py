@@ -569,7 +569,7 @@ class GitHubPolicySettings(ProcessSettings):
 
 class GitLabSettings(ProcessSettings):
     protected_branches: Annotated[frozenset[str], NoDecode] = Field(
-        frozenset({"main", "master"}),
+        frozenset(),
         validation_alias="GITLAB_PROTECTED_BRANCHES",
     )
     registry_cache_ttl_seconds: float = Field(
