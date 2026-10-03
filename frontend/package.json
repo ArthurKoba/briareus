@@ -7,7 +7,9 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:typecheck": "vue-tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@tanstack/vue-table": "9.2.4",
@@ -26,9 +28,12 @@
   "devDependencies": {
     "@tailwindcss/vite": "4.1.14",
     "@vitejs/plugin-vue": "6.0.0",
+    "@vue/test-utils": "2.5.1",
+    "happy-dom": "20.14.5",
     "tailwindcss": "4.1.14",
     "typescript": "5.9.2",
     "vite": "8.0.0",
+    "vitest": "5.0.3",
     "vue-tsc": "3.0.7"
   }
 }

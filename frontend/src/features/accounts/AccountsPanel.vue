@@ -6,7 +6,7 @@ import {
   CircleCheck,
   CircleX,
   ExternalLink,
-  KeyRound,
+  PlugZap,
   LoaderCircle,
   Pencil,
   Plus,
@@ -19,6 +19,7 @@ import { useI18n } from "vue-i18n"
 import { managementApi, type AccountPayload, type AccountRecord } from "@/shared/api/management"
 import { formatDate } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
+import { useAccountVerification } from "./model/use-account-verification"
 import AppDialog from "@/shared/ui/AppDialog.vue"
 import Button from "@/shared/ui/Button.vue"
 import DataTable from "@/shared/ui/DataTable.vue"
@@ -40,7 +41,7 @@ const editing = ref<AccountRecord | null>(null)
 const saving = ref(false)
 const modalVerified = ref(false)
 const modalVerifying = ref(false)
-const verifyStates = reactive<Record<string, "idle" | "loading" | "success" | "error">>({})
+const verification = useAccountVerification(managementApi.verifyAccount)
 
 const initialProvider = props.defaultProvider ?? props.providers[0] ?? "github"
 const form = reactive<AccountPayload>({
@@ -150,18 +151,16 @@ async function load(): Promise<void> {
   }
 }
 
-async function verify(record: AccountRecord): Promise<boolean> {
-  verifyStates[record.id] = "loading"
-  try {
-    await managementApi.verifyAccount(record)
-    verifyStates[record.id] = "success"
-    notifications.success(String(t("notifications.verified")), record.alias)
-    return true
-  } catch (caught) {
-    verifyStates[record.id] = "error"
-    notifications.error(String(t("notifications.apiError")), caught instanceof Error ? caught.message : "Verification failed")
-    return false
-  }
+function verify(record: AccountRecord): Promise<boolean> {
+  return verification.verify(record)
+}
+
+function verificationLabel(record: AccountRecord): string {
+  const result = verification.stateFor(record)
+  if (result.status === "loading") return String(t("accounts.checking"))
+  if (result.status === "success") return `${t("accounts.connectionVerified")} · ${formatDate(result.checkedAt)}`
+  if (result.status === "error") return `${t("accounts.connectionFailed")}: ${result.message}`
+  return String(t("accounts.testConnection"))
 }
 
 async function verifyCurrent(): Promise<void> {
@@ -221,7 +220,7 @@ onMounted(load)
           </div>
         </template>
         <template v-else-if="column.key === 'auth_type'">
-          <span class="inline-flex items-center gap-1.5 text-xs"><KeyRound class="size-3.5 text-muted-foreground" />{{ authLabel(record.auth_type) }}</span>
+          <span class="text-xs">{{ authLabel(record.auth_type) }}</span>
         </template>
         <template v-else-if="column.key === 'base_url'">
           <a
@@ -231,6 +230,7 @@ onMounted(load)
             rel="noreferrer"
             class="inline-flex max-w-full items-center gap-1 truncate text-primary hover:underline"
             data-row-action
+            @click.stop
           >
             <span class="truncate">{{ record.base_url }}</span><ExternalLink class="size-3 shrink-0" />
           </a>
@@ -242,19 +242,24 @@ onMounted(load)
         </template>
         <template v-else-if="column.key === 'updated_at'">{{ formatDate(record.updated_at) }}</template>
         <template v-else-if="column.key === 'actions'">
-          <div class="flex w-full items-center justify-end gap-1" data-row-action>
+          <div class="flex w-full items-center justify-end gap-1" data-row-action @click.stop>
             <button
-              class="grid size-7 place-items-center rounded-md hover:bg-accent"
-              :title="String(t('common.test'))"
-              @click="verify(record)"
+              type="button"
+              class="grid size-7 place-items-center rounded-md transition-colors hover:bg-accent active:bg-accent/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+              :title="verificationLabel(record)"
+              :aria-label="verificationLabel(record)"
+              :aria-busy="verification.stateFor(record).status === 'loading'"
+              :disabled="verification.stateFor(record).status === 'loading'"
+              @click.stop="verify(record)"
             >
-              <LoaderCircle v-if="verifyStates[record.id] === 'loading'" class="size-4 animate-spin" />
-              <CircleCheck v-else-if="verifyStates[record.id] === 'success'" class="size-4 text-emerald-500" />
-              <CircleX v-else-if="verifyStates[record.id] === 'error'" class="size-4 text-destructive" />
-              <KeyRound v-else class="size-4 text-muted-foreground" />
+              <LoaderCircle v-if="verification.stateFor(record).status === 'loading'" class="size-4 animate-spin" />
+              <CircleCheck v-else-if="verification.stateFor(record).status === 'success'" class="size-4 text-emerald-500" />
+              <CircleX v-else-if="verification.stateFor(record).status === 'error'" class="size-4 text-destructive" />
+              <PlugZap v-else class="size-4 text-muted-foreground" />
             </button>
-            <button class="grid size-7 place-items-center rounded-md hover:bg-accent" :title="String(t('common.edit'))" @click="editAccount(record)"><Pencil class="size-4" /></button>
-            <button class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" :title="String(t('common.delete'))" @click="remove(record)"><Trash2 class="size-4" /></button>
+            <button type="button" class="grid size-7 place-items-center rounded-md hover:bg-accent" :title="String(t('common.edit'))" @click.stop="editAccount(record)"><Pencil class="size-4" /></button>
+            <button type="button" class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" :title="String(t('common.delete'))" @click.stop="remove(record)"><Trash2 class="size-4" /></button>
+            <span class="sr-only" role="status">{{ verificationLabel(record) }}</span>
           </div>
         </template>
         <template v-else><span class="truncate">{{ value ?? "—" }}</span></template>
@@ -280,12 +285,14 @@ onMounted(load)
         <label v-if="form.provider !== 'github'" class="space-y-1 text-sm sm:col-span-2"><span>{{ t("accounts.customCa") }}</span><textarea v-model="form.ca_cert_pem" class="field min-h-24 font-mono text-xs" /></label>
       </div>
 
+      <div v-if="editing && verification.stateFor(editing).status === 'error'" class="mt-3 text-sm text-destructive" role="status">{{ verificationLabel(editing) }}</div>
+
       <template #footer>
         <Button variant="ghost" @click="modalOpen = false">{{ t("common.cancel") }}</Button>
         <Button v-if="editing" variant="outline" :disabled="modalVerifying" @click="verifyCurrent">
           <LoaderCircle v-if="modalVerifying" class="mr-2 size-4 animate-spin" />
           <CircleCheck v-else-if="modalVerified" class="mr-2 size-4 text-emerald-500" />
-          <KeyRound v-else class="mr-2 size-4" />
+          <PlugZap v-else class="mr-2 size-4" />
           {{ t("common.test") }}
         </Button>
         <Button :disabled="saving || Boolean(editing && !modalVerified)" @click="save">
