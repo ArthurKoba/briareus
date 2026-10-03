@@ -30,7 +30,7 @@ async function connect(){
 function pointer(img:HTMLImageElement|null,page:string,d:{w:number;h:number},e:MouseEvent,type:string,button="none",click_count=0){if(!img?.src||!page)return;const r=img.getBoundingClientRect();send({type:"mouse",page_id:page,event:type,x:(e.clientX-r.left)*d.w/r.width,y:(e.clientY-r.top)*d.h/r.height,button,click_count})}
 function wheel(img:HTMLImageElement|null,page:string,d:{w:number;h:number},e:WheelEvent){if(!img?.src||!page)return;const r=img.getBoundingClientRect();send({type:"mouse",page_id:page,event:"mouseWheel",x:(e.clientX-r.left)*d.w/r.width,y:(e.clientY-r.top)*d.h/r.height,delta_x:e.deltaX,delta_y:e.deltaY});e.preventDefault()}
 function key(page:string,e:KeyboardEvent){if(!page)return;if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==="t"){send({type:"reopen_closed_page"});e.preventDefault();return}if(e.ctrlKey||e.altKey||e.metaKey||e.key.length>1){const p=[];if(e.ctrlKey)p.push("Control");if(e.altKey)p.push("Alt");if(e.metaKey)p.push("Meta");if(e.shiftKey&&e.key.length>1)p.push("Shift");p.push(e.key);send({type:"key",page_id:page,key:p.join("+")})}else send({type:"text",page_id:page,text:e.key});e.preventDefault()}
-function now(){ return window.now() }
+function now(){ return window.performance.now() }
 function button(e:MouseEvent){return e.button===2?"right":e.button===1?"middle":"left"}
 function setLabel(page:Page,e:Event){send({type:"set_label",page_id:page.page_id,label:(e.target as HTMLInputElement).value})}
 function developer(){const allow=state.value.developer_access_enabled!==true;if(allow&&!confirm("Enable full agent developer access?"))return;send({type:"set_developer_access",allowed:allow})}
