@@ -180,3 +180,28 @@ def test_management_client_uses_pooled_transport_and_preserves_base_path() -> No
         "/control/internal/accounts?provider=github"
     )
     assert client._transport.connection_count == 0
+
+
+def test_management_client_syncs_authenticated_github_reader() -> None:
+    class SyncClient(ManagementClient):
+        def __init__(self) -> None:
+            super().__init__(
+                ManagementClientSettings(url="http://management:8000", service_token="test"),
+                cache=_MemoryCache(),
+            )
+            self.request = None
+
+        def _request(self, method, path, *, query=None, payload=None, expect_body=True):
+            del query, expect_body
+            self.request = (method, path, payload)
+            return {"alias": "authenticated", "synced": True}
+
+    client = SyncClient()
+    result = client.sync_github_authenticated_reader("oauth-token", login="arthurkoba")
+
+    assert result["synced"] is True
+    assert client.request == (
+        "PUT",
+        "/internal/accounts/github/authenticated-reader",
+        {"token": "oauth-token", "login": "arthurkoba"},
+    )

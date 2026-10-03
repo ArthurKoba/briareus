@@ -428,6 +428,44 @@ class GitHubAppClient:
             )
         return self._installation_token_for_id(installation_ids[0])
 
+    def _assert_public_repository(self, repository: str) -> None:
+        key = repository.casefold()
+        now = time.monotonic()
+        if self.repository_cache_ttl_seconds > 0:
+            with self._cache_lock:
+                cached = self._repository_cache.get(key)
+                if cached is not None and cached[0] > now:
+                    if bool(cached[1].get("private")):
+                        raise GitHubAgentError(
+                            "public GitHub access cannot read private repositories"
+                        )
+                    return
+        _, result = self._request(
+            "GET",
+            f"{_GITHUB_API}/repos/{repository}",
+            token=self.token or None,
+            auth_mode="public_reader" if self.token else "public_anonymous",
+        )
+        try:
+            payload = json_object(result, context="GitHub repository response")
+        except ValueError as exc:
+            raise GitHubAgentError("unexpected repository response") from exc
+        metadata: JsonObject = {
+            "repository": json_str(payload.get("full_name"), default=repository),
+            "default_branch": json_str(payload.get("default_branch")),
+            "private": json_bool(payload.get("private")),
+            "archived": json_bool(payload.get("archived")),
+            "fork": json_bool(payload.get("fork")),
+        }
+        if bool(metadata["private"]):
+            raise GitHubAgentError("public GitHub access cannot read private repositories")
+        if self.repository_cache_ttl_seconds > 0:
+            with self._cache_lock:
+                self._repository_cache[key] = (
+                    time.monotonic() + self.repository_cache_ttl_seconds,
+                    dict(metadata),
+                )
+
     def _repo_request(
         self,
         repository: str,
@@ -442,6 +480,8 @@ class GitHubAppClient:
         if self.public_only:
             if normalized_method not in {"GET", "HEAD"}:
                 raise GitHubAgentError("public GitHub access is read-only")
+            if path.split("?", 1)[0] != f"/repos/{repository}":
+                self._assert_public_repository(repository)
             return self._request(
                 normalized_method,
                 f"{_GITHUB_API}{path}",
@@ -497,6 +537,8 @@ class GitHubAppClient:
     ) -> JsonObject:
         repository = self._assert_allowed(repository)
         token = ""
+        if self.public_only:
+            self._assert_public_repository(repository)
         if self.public_only or self.token:
             token = self.token
         else:

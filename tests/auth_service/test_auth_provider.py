@@ -31,9 +31,10 @@ def test_multi_resource_provider_accepts_only_declared_surfaces() -> None:
     provider = MultiResourceGitHubProvider(settings)
 
     assert provider.allowed_resources == allowed_resource_urls(settings.public_base_url)
-    assert provider.canonical_resource(
-        "https://mcp.example.test/analysis/mcp?kb_name=analysis"
-    ) == "https://mcp.example.test/analysis/mcp"
+    assert (
+        provider.canonical_resource("https://mcp.example.test/analysis/mcp?kb_name=analysis")
+        == "https://mcp.example.test/analysis/mcp"
+    )
 
     with pytest.raises(ValueError, match="unsupported OAuth resource"):
         provider.canonical_resource("https://mcp.example.test/private/mcp")
@@ -160,7 +161,9 @@ async def test_concurrent_refresh_requests_are_coalesced_and_replayed(monkeypatc
     loaded_again = await provider.load_refresh_token(client, old_token)  # type: ignore[arg-type]
     assert loaded_again is not None
     third = await provider.exchange_refresh_token(
-        client, loaded_again, ["read:user"]  # type: ignore[arg-type]
+        client,
+        loaded_again,
+        ["read:user"],  # type: ignore[arg-type]
     )
     assert calls == 1
     assert third.access_token == "new-access"
@@ -254,13 +257,14 @@ async def test_refresh_retries_once_when_upstream_rotation_wins_race(monkeypatch
     monkeypatch.setattr(GitHubProvider, "exchange_refresh_token", fake_exchange)
 
     result = await provider.exchange_refresh_token(
-        client, refresh, ["read:user"]  # type: ignore[arg-type]
+        client,
+        refresh,
+        ["read:user"],  # type: ignore[arg-type]
     )
 
     assert calls == 2
     assert result.access_token == "recovered-access"
     assert result.refresh_token == "recovered-refresh"
-
 
 
 @pytest.mark.asyncio
@@ -431,3 +435,83 @@ async def test_bad_upstream_refresh_invalidates_dead_client_refresh(monkeypatch)
         old_token,
     )
     assert loaded_again is None
+
+
+@pytest.mark.asyncio
+async def test_upstream_github_token_is_synced_as_authenticated_reader() -> None:
+    class ManagementStub:
+        def __init__(self) -> None:
+            self.synced: list[tuple[str, str]] = []
+
+        def sync_github_authenticated_reader(self, token: str, *, login: str):
+            self.synced.append((token, login))
+            return {"synced": True}
+
+    management = ManagementStub()
+    provider = MultiResourceGitHubProvider(_settings(), management=management)  # type: ignore[arg-type]
+
+    class FakeValidator:
+        async def verify_token(self, _token: str):
+            from fastmcp.server.auth import AccessToken
+
+            return AccessToken(
+                token="upstream-token",
+                client_id="github-user",
+                scopes=["read:user"],
+                subject="42",
+                claims={"login": "ArthurKoba"},
+            )
+
+    provider._token_validator = FakeValidator()  # type: ignore[assignment]
+
+    claims = await provider._extract_upstream_claims({"access_token": "upstream-token"})
+
+    assert claims == {"login": "arthurkoba", "sub": "42"}
+    assert management.synced == [("upstream-token", "arthurkoba")]
+
+
+@pytest.mark.asyncio
+async def test_existing_oauth_session_syncs_reader_once_per_upstream_token() -> None:
+    from fastmcp.server.auth.oauth_proxy.models import JTIMapping, UpstreamTokenSet
+
+    class ManagementStub:
+        def __init__(self) -> None:
+            self.synced: list[tuple[str, str]] = []
+
+        def sync_github_authenticated_reader(self, token: str, *, login: str):
+            self.synced.append((token, login))
+            return {"synced": True}
+
+    management = ManagementStub()
+    provider = MultiResourceGitHubProvider(_settings(), management=management)  # type: ignore[arg-type]
+    jti = f"access-jti-{time.time_ns()}"
+    upstream_id = f"upstream-reader-{time.time_ns()}"
+    await provider._jti_mapping_store.put(
+        key=jti,
+        value=JTIMapping(
+            jti=jti,
+            upstream_token_id=upstream_id,
+            created_at=time.time(),
+        ),
+        ttl=60,
+    )
+    await provider._upstream_token_store.put(
+        key=upstream_id,
+        value=UpstreamTokenSet(
+            upstream_token_id=upstream_id,
+            access_token="persisted-upstream-token",
+            refresh_token=None,
+            refresh_token_expires_at=None,
+            expires_at=time.time() + 3600,
+            token_type="bearer",
+            scope="read:user",
+            client_id="github-client",
+            created_at=time.time(),
+        ),
+        ttl=3600,
+    )
+
+    await provider._sync_authenticated_reader_from_jti(jti, login="ArthurKoba")
+    await provider._sync_authenticated_reader_from_jti(jti, login="ArthurKoba")
+
+    assert management.synced == [("persisted-upstream-token", "arthurkoba")]

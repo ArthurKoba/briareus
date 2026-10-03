@@ -5,7 +5,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
-from common.account_contracts import AccountList, InvocationEvent, InvocationEventBatch
+from common.account_contracts import (
+    AccountList,
+    GitHubAuthenticatedReaderSync,
+    InvocationEvent,
+    InvocationEventBatch,
+)
 from common.models import JsonObject
 from common.oauth_session_contracts import OAuthSessionEvent
 from management.application.services import (
@@ -14,7 +19,7 @@ from management.application.services import (
     OAuthSessionService,
     RuntimeSettingsService,
 )
-from management.domain.accounts import Provider
+from management.domain.accounts import Account, AuthType, Provider
 from management.domain.telemetry import Invocation
 
 
@@ -60,6 +65,44 @@ def build_internal_router(services: ApiServices) -> APIRouter:
             return services.accounts.resolve(selector, provider=provider).model_dump(mode="json")
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.put("/accounts/github/authenticated-reader")
+    def sync_github_authenticated_reader(
+        payload: GitHubAuthenticatedReaderSync,
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        try:
+            account = services.accounts.get(
+                "authenticated",
+                provider=Provider.GITHUB,
+                enabled_only=False,
+            )
+        except KeyError:
+            saved = services.accounts.create(
+                Account(
+                    alias="authenticated",
+                    provider=Provider.GITHUB,
+                    auth_type=AuthType.GITHUB_TOKEN,
+                    enabled=True,
+                ),
+                credential=payload.token,
+            )
+            return {**saved.public(), "login": payload.login, "synced": True}
+
+        if account.auth_type is not AuthType.GITHUB_TOKEN:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="authenticated GitHub reader exists with incompatible auth_type",
+            )
+        if not account.enabled:
+            account.enabled = True
+            account = services.accounts.update(account)
+        services.accounts.set_credential(
+            account.id,
+            payload.token,
+            provider=Provider.GITHUB,
+        )
+        return {**account.public(), "login": payload.login, "synced": True}
 
     @router.get("/runtime-settings/terminal")
     def terminal_runtime_settings(

@@ -64,6 +64,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
         self.settings = settings
         self._management = management
         self._session_touch_times: dict[str, float] = {}
+        self._reader_sync_fingerprints: dict[str, str] = {}
         self._resource_context: ContextVar[str | None] = ContextVar(
             "oauth_resource",
             default=None,
@@ -281,6 +282,34 @@ class MultiResourceGitHubProvider(GitHubProvider):
         jti = payload.get("jti")
         return await self._session_id_from_jti(jti if isinstance(jti, str) else "")
 
+    async def _sync_authenticated_reader_from_jti(self, jti: str, *, login: str) -> None:
+        if self._management is None or not jti or not login:
+            return
+        if login.casefold() not in self.settings.oauth_allowed_users:
+            return
+        try:
+            mapping = await self._jti_mapping_store.get(key=jti)
+            if mapping is None:
+                return
+            upstream = await self._upstream_token_store.get(key=mapping.upstream_token_id)
+            if upstream is None or not upstream.access_token:
+                return
+            fingerprint = hashlib.sha256(upstream.access_token.encode()).hexdigest()
+            if self._reader_sync_fingerprints.get(mapping.upstream_token_id) == fingerprint:
+                return
+            await asyncio.to_thread(
+                self._management.sync_github_authenticated_reader,
+                upstream.access_token,
+                login=login.casefold(),
+            )
+            self._reader_sync_fingerprints[mapping.upstream_token_id] = fingerprint
+        except Exception as exc:
+            logger.warning(
+                "GitHub authenticated reader session sync failed login=%s error=%s",
+                login.casefold(),
+                exc,
+            )
+
     async def _record_session(self, event: OAuthSessionEvent) -> None:
         if self._management is None:
             return
@@ -394,6 +423,20 @@ class MultiResourceGitHubProvider(GitHubProvider):
         login = str(claims.get("login", "")).casefold()
         if not login or login not in self.settings.oauth_allowed_users:
             raise TokenError("invalid_grant", "GitHub user is not allowed")
+
+        if self._management is not None:
+            try:
+                await asyncio.to_thread(
+                    self._management.sync_github_authenticated_reader,
+                    access_token,
+                    login=login,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "GitHub authenticated reader sync failed login=%s error=%s",
+                    login,
+                    exc,
+                )
 
         return {
             "login": login,
@@ -874,6 +917,11 @@ class MultiResourceGitHubProvider(GitHubProvider):
                 )
             )
             return None
+
+        await self._sync_authenticated_reader_from_jti(
+            token_jti,
+            login=str(login) if login else "",
+        )
 
         now = time.monotonic()
         last_touch = self._session_touch_times.get(session_id, 0.0)

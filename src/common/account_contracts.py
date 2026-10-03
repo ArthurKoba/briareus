@@ -25,6 +25,11 @@ class ResolvedAccount(AccountPublic):
     credential: str = Field(min_length=1)
 
 
+class GitHubAuthenticatedReaderSync(StrictModel):
+    token: str = Field(min_length=1)
+    login: str = Field(min_length=1, max_length=128)
+
+
 class AccountList(StrictModel):
     accounts: list[AccountPublic]
     count: int = Field(ge=0)
