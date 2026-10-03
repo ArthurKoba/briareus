@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   const backend = env.VITE_MANAGEMENT_DEV_BACKEND || "http://localhost:8000"
 
   return {
-    base: "/",
+    base: "/admin/",
     plugins: [vue(), tailwindcss()],
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
