@@ -30,6 +30,7 @@ from management.application.services import (
     SnapshotService,
 )
 from management.browser_operator_auth import issue_browser_operator_ticket
+from management.dashboard_state import build_dashboard_state
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.infrastructure.files import FileAdminStore
@@ -255,52 +256,9 @@ def build_admin_api_router(
     async def dashboard(request: Request) -> JsonObject:
         require_user(request)
         api = available()
-        accounts, calls, oauth, workspace, reverse_snapshot = await asyncio.gather(
-            asyncio.to_thread(api.accounts.list),
-            asyncio.to_thread(api.audit.summary),
-            asyncio.to_thread(api.oauth_sessions.recent, limit=1000),
-            asyncio.to_thread(api.snapshots.get, WORKSPACE_STATS_KEY),
-            asyncio.to_thread(api.snapshots.get, REVERSE_OVERVIEW_KEY),
+        return await build_dashboard_state(
+            api.accounts, api.audit, api.oauth_sessions, api.snapshots
         )
-        reverse_payload = reverse_snapshot.payload if reverse_snapshot is not None else {}
-        projects = reverse_payload.get("projects")
-        workers = reverse_payload.get("workers")
-        project_items = projects if isinstance(projects, list) else []
-        worker_items = workers if isinstance(workers, list) else []
-        return {
-            "accounts": {
-                "total": len(accounts),
-                "enabled": sum(1 for item in accounts if item.enabled),
-                "by_provider": {
-                    provider.value: sum(
-                        1 for item in accounts if item.provider == provider.value and item.enabled
-                    )
-                    for provider in Provider
-                },
-            },
-            "calls": json_object(calls, context="dashboard calls"),
-            "oauth": {
-                "tracked": len(oauth),
-                "active": sum(1 for item in oauth if item.status == "active"),
-            },
-            "workspace": workspace.payload if workspace is not None else {},
-            "workspace_meta": snapshot_meta(workspace),
-            "analysis": {
-                "projects": len(project_items),
-                "active_sessions": sum(
-                    1
-                    for item in project_items
-                    if isinstance(item, dict) and item.get("session") == "active"
-                ),
-                "workers": len(worker_items),
-                "running_workers": sum(
-                    1
-                    for item in worker_items
-                    if isinstance(item, dict) and bool(item.get("running"))
-                ),
-            },
-            "analysis_meta": snapshot_meta(reverse_snapshot),
-        }
 
     @router.get("/accounts")
     async def accounts(request: Request, provider: Provider | None = None) -> JsonObject:
