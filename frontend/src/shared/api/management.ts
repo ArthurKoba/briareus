@@ -70,7 +70,7 @@ const previewBootstrap: ManagementBootstrap = {
   ],
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, options: { notifyErrors?: boolean } = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json")
   const method=init.method??"GET"
@@ -87,7 +87,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         if (typeof message === "string" && message) detail = message
         else if (message !== undefined) detail = JSON.stringify(message)
       } catch { /* no json */ }
-      notifications.error(`${response.status} · ${String(i18n.global.t("notifications.apiError"))}`, `${method} ${new URL(path, location.origin).pathname} — ${detail}`, `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`)
+      if (options.notifyErrors !== false) notifications.error(`${response.status} · ${String(i18n.global.t("notifications.apiError"))}`, `${method} ${new URL(path, location.origin).pathname} — ${detail}`, `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`)
       throw new Error(detail)
     }
     const contentType = response.headers.get("content-type") || ""
@@ -95,7 +95,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch (caught) {
     if (!(caught instanceof Error && caught.message.startsWith("Management API request failed"))) {
       frontendTelemetry.error("api.network_error",caught,{path,method,duration_ms:performance.now()-started})
-      notifications.error(String(i18n.global.t("notifications.apiError")), `${method} ${new URL(path, location.origin).pathname} — ${caught instanceof Error?caught.message:String(caught)}`, `api:network:${method}:${new URL(path, location.origin).pathname}`)
+      if (options.notifyErrors !== false) notifications.error(String(i18n.global.t("notifications.apiError")), `${method} ${new URL(path, location.origin).pathname} — ${caught instanceof Error?caught.message:String(caught)}`, `api:network:${method}:${new URL(path, location.origin).pathname}`)
     }
     throw caught
   }
@@ -113,7 +113,7 @@ export const managementApi = {
   createAccount: (payload: AccountPayload): Promise<AccountRecord> => request("/api/accounts", { method: "POST", body: jsonBody(payload) }),
   updateAccount: (record: AccountRecord, payload: AccountPayload): Promise<AccountRecord> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "PUT", body: jsonBody(payload) }),
   deleteAccount: (record: AccountRecord): Promise<unknown> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "DELETE" }),
-  verifyAccount: (record: AccountRecord): Promise<Record<string, unknown>> => request(`/api/accounts/${record.provider}/${record.id}/verify`, { method: "POST", body: "{}" }),
+  verifyAccount: (record: AccountRecord): Promise<Record<string, unknown>> => request(`/api/accounts/${record.provider}/${record.id}/verify`, { method: "POST", body: "{}" }, { notifyErrors: false }),
   calls: (limit = 250): Promise<{ events: InvocationRecord[]; count: number }> => request(`/api/calls?limit=${limit}`),
   clearCalls: (): Promise<{ deleted: number }> => request("/api/calls", { method: "DELETE" }),
   deleteCall: (id: string): Promise<unknown> => request(`/api/calls/${id}`, { method: "DELETE" }),
