@@ -45,7 +45,7 @@ const features = tableFeatures({
   sortFns: { alphanumeric: sortFn_alphanumeric },
 })
 
-const tableColumns = computed<ColumnDef<Record<string, unknown>>[]>(() =>
+const tableColumns = computed<ColumnDef<any, any>[]>(() =>
   props.columns.map((column, index) => ({
     id: column.key ?? column.dataIndex ?? `column-${index}`,
     accessorKey: column.dataIndex,
@@ -56,9 +56,9 @@ const tableColumns = computed<ColumnDef<Record<string, unknown>>[]>(() =>
   })),
 )
 
-const data = computed(() => props.dataSource as Record<string, unknown>[])
+const data = computed<any[]>(() => props.dataSource as any[])
 const table = useTable({ features, columns: tableColumns, data })
-const rows = computed(() => table.getRowModel().rows)
+const rows = computed<any[]>(() => table.getRowModel().rows as any[])
 const rowHeight = computed(() => uiPreferences.density.value === "compact" ? 32 : 40)
 const columnTemplate = computed(() => props.columns.map((column) => {
   if (column.width) return `${column.width}px`
@@ -77,14 +77,18 @@ const rowVirtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems())
 const totalSize = computed(() => rowVirtualizer.value.getTotalSize())
 
-function originalKey(record: Record<string, unknown>, index: number): string {
+function originalKey(record: any, index: number): string {
   if (typeof props.rowKey === "function") return props.rowKey(record)
   if (typeof props.rowKey === "string") return String(record[props.rowKey] ?? index)
   return String(record.id ?? record.key ?? index)
 }
 
-function cellValue(record: Record<string, unknown>, column: DataTableColumn): unknown {
+function cellValue(record: any, column: DataTableColumn): unknown {
   return column.dataIndex ? record[column.dataIndex] : undefined
+}
+
+function rowRecord(index: number): any {
+  return rows.value[index]?.original as any
 }
 
 function sortDirection(columnId: string): false | "asc" | "desc" {
@@ -147,7 +151,7 @@ function onScroll(event: Event): void {
         <div class="relative min-w-full" :style="{ height: `${totalSize}px` }">
           <div
             v-for="virtualRow in virtualRows"
-            :key="virtualRow.key"
+            :key="String(virtualRow.key)"
             class="ts-table-row absolute left-0 grid w-full border-b border-border/40 text-[12px] hover:bg-accent/45"
             :style="{
               gridTemplateColumns: columnTemplate,
@@ -167,8 +171,8 @@ function onScroll(event: Event): void {
               <slot
                 name="bodyCell"
                 :column="column"
-                :record="rows[virtualRow.index]!.original"
-                :value="cellValue(rows[virtualRow.index]!.original, column)"
+                :record="rowRecord(virtualRow.index)"
+                :value="cellValue(rowRecord(virtualRow.index), column)"
                 :row-index="virtualRow.index"
               >
                 <span class="truncate">{{ cellValue(rows[virtualRow.index]!.original, column) ?? "—" }}</span>
