@@ -771,10 +771,23 @@ def build_admin_api_router(
             max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
         )
         mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
+        current_github = await asyncio.to_thread(api.runtime_settings.github_policy)
         github_policy = GitHubRuntimePolicy(
-            local_first_guidance=payload.github_local_first_guidance,
-            local_git_transport_enabled=payload.github_local_git_transport_enabled,
-            remote_source_mutations_enabled=payload.github_remote_source_mutations_enabled,
+            local_first_guidance=(
+                payload.github_local_first_guidance
+                if "github_local_first_guidance" in payload.model_fields_set
+                else current_github.local_first_guidance
+            ),
+            local_git_transport_enabled=(
+                payload.github_local_git_transport_enabled
+                if "github_local_git_transport_enabled" in payload.model_fields_set
+                else current_github.local_git_transport_enabled
+            ),
+            remote_source_mutations_enabled=(
+                payload.github_remote_source_mutations_enabled
+                if "github_remote_source_mutations_enabled" in payload.model_fields_set
+                else current_github.remote_source_mutations_enabled
+            ),
         )
         try:
             reverse_settings = await api.reverse.set_idle_timeout(

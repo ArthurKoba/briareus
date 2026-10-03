@@ -146,10 +146,43 @@ def test_settings_round_trip(tmp_path: Path) -> None:
             "mcp_call_timeout_seconds": 15,
             "reverse_idle_timeout_seconds": 600,
         }
+        explicit_policy = client.put(
+            "/admin/api/settings",
+            json={
+                **payload,
+                "github_local_first_guidance": False,
+                "github_local_git_transport_enabled": True,
+                "github_remote_source_mutations_enabled": False,
+            },
+        )
+        assert explicit_policy.status_code == 200
+        assert explicit_policy.json()["github"] == {
+            "local_first_guidance": False,
+            "local_git_transport_enabled": True,
+            "remote_source_mutations_enabled": False,
+        }
+
         saved = client.put("/admin/api/settings", json=payload)
         assert saved.status_code == 200
         assert saved.json()["management"]["logging_retention_days"] == 14
         assert saved.json()["mcp"]["call_timeout_seconds"] == 15
+        assert saved.json()["github"] == explicit_policy.json()["github"]
+
+        explicit_defaults = client.put(
+            "/admin/api/settings",
+            json={
+                **payload,
+                "github_local_first_guidance": True,
+                "github_local_git_transport_enabled": False,
+                "github_remote_source_mutations_enabled": True,
+            },
+        )
+        assert explicit_defaults.status_code == 200
+        assert explicit_defaults.json()["github"] == {
+            "local_first_guidance": True,
+            "local_git_transport_enabled": False,
+            "remote_source_mutations_enabled": True,
+        }
 
 
 def test_mutations_require_session(tmp_path: Path) -> None:
