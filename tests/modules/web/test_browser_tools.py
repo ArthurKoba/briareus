@@ -6,6 +6,7 @@ import pytest
 from fastmcp import Client, FastMCP
 from mcp.types import ToolAnnotations
 
+from common.settings import BrowserSettings
 from modules.web.browser import BrowserError, BrowserManager
 from modules.web.browser_tools import register_browser_tools
 
@@ -152,3 +153,19 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert "--window-size=1440,900" in command
     assert browser.display == ":99"
     assert browser.timezone == "Europe/Moscow"
+
+    environment = browser._browser_environment(":99")
+    assert environment["DISPLAY"] == ":99"
+    assert environment["TZ"] == "Europe/Moscow"
+    assert environment["LANG"] == "ru_RU.UTF-8"
+    assert environment["LC_ALL"] == "ru_RU.UTF-8"
+
+
+def test_browser_timezone_defaults_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TZ", raising=False)
+    assert BrowserSettings().timezone == "UTC"
+
+
+def test_browser_timezone_uses_deployment_tz(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TZ", "Europe/Moscow")
+    assert BrowserSettings().timezone == "Europe/Moscow"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import uuid
@@ -43,7 +44,7 @@ class BrowserManager:
         display: str = ":99",
         color_depth: int = 24,
         xvfb_enabled: bool = True,
-        timezone: str = "Europe/Moscow",
+        timezone: str = "UTC",
     ) -> None:
         self.workspace = workspace
         self.profile_dir = profile_dir.resolve(strict=False)
@@ -216,7 +217,7 @@ class BrowserManager:
             return ""
         display = self.display
         if not display:
-            raise BrowserError("headful Chromium requires BROWSER_DISPLAY or DISPLAY")
+            raise BrowserError("headful Chromium requires a configured display")
         if not self.xvfb_enabled:
             return display
         process = self._display_process
@@ -241,6 +242,19 @@ class BrowserManager:
         self._display_process = process
         return display
 
+    def _browser_environment(self, display: str) -> dict[str, str]:
+        environment = os.environ.copy()
+        if display:
+            environment["DISPLAY"] = display
+        environment["TZ"] = self.timezone or "UTC"
+        if self.locale:
+            system_locale = self.locale.replace("-", "_")
+            if "." not in system_locale:
+                system_locale = f"{system_locale}.UTF-8"
+            environment["LANG"] = system_locale
+            environment["LC_ALL"] = system_locale
+        return environment
+
     async def _start_locked(self) -> None:
         if self._context is not None:
             return
@@ -250,7 +264,7 @@ class BrowserManager:
             (self.profile_dir / lock_name).unlink(missing_ok=True)
         from playwright.async_api import async_playwright
 
-        await self._ensure_display_locked()
+        display = await self._ensure_display_locked()
         playwright = await async_playwright().start()
         command = self._browser_command()
         process: asyncio.subprocess.Process | None = None
@@ -261,6 +275,7 @@ class BrowserManager:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                env=self._browser_environment(display),
             )
             await self._wait_for_debugging_endpoint(process)
             browser = await playwright.chromium.connect_over_cdp(

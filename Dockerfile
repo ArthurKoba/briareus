@@ -107,15 +107,6 @@ COPY src/modules/files ./src/modules/files
 COPY src/modules/web ./src/modules/web
 ENV ASGI_APP=modules.web.runtime:app \
     FILE_WORKSPACE_ROOT=/workspace \
-    TZ=Europe/Moscow \
-    LANG=ru_RU.UTF-8 \
-    LC_ALL=ru_RU.UTF-8 \
-    DISPLAY=:99 \
-    BROWSER_HEADLESS=false \
-    BROWSER_LOCALE=ru-RU \
-    BROWSER_ACCEPT_LANGUAGE=ru-RU,ru,en-US,en \
-    BROWSER_COLOR_DEPTH=24 \
-    BROWSER_XVFB_ENABLED=true \
     BROWSER_PROFILE_PATH=/browser/profile \
     BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
     BROWSER_DEVTOOLS_MCP_SCRIPT_PATH=/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js \

@@ -639,23 +639,23 @@ class BrowserSettings(ProcessSettings):
         "/usr/bin/chromium",
         validation_alias="BROWSER_EXECUTABLE_PATH",
     )
-    headless: bool = Field(False, validation_alias="BROWSER_HEADLESS")
-    locale: str = Field("ru-RU", validation_alias="BROWSER_LOCALE")
-    accept_language: str = Field(
-        "ru-RU,ru,en-US,en",
-        validation_alias="BROWSER_ACCEPT_LANGUAGE",
-    )
-    display: str = Field(":99", validation_alias="DISPLAY")
-    color_depth: int = Field(24, ge=16, le=32, validation_alias="BROWSER_COLOR_DEPTH")
-    xvfb_enabled: bool = Field(True, validation_alias="BROWSER_XVFB_ENABLED")
-    timezone: str = Field("Europe/Moscow", validation_alias="TZ")
+    # Browser identity defaults are source-owned. They are intentionally not
+    # deployment environment inputs; a future Management setting can replace
+    # them without requiring container redeploys.
+    headless: bool = False
+    locale: str = "ru-RU"
+    accept_language: str = "ru-RU,ru,en-US,en"
+    display: str = ":99"
+    color_depth: int = Field(24, ge=16, le=32)
+    xvfb_enabled: bool = True
+    timezone: str = Field("UTC", validation_alias="TZ")
     devtools_mcp_script_path: Path = Field(
         Path("/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
         validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
     )
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
-    viewport_width: int = Field(1440, ge=320, le=3840, validation_alias="BROWSER_VIEWPORT_WIDTH")
-    viewport_height: int = Field(900, ge=240, le=2160, validation_alias="BROWSER_VIEWPORT_HEIGHT")
+    viewport_width: int = Field(1440, ge=320, le=3840)
+    viewport_height: int = Field(900, ge=240, le=2160)
     max_snapshot_text_chars: int = Field(
         30_000,
         ge=1_000,
@@ -676,9 +676,16 @@ class BrowserSettings(ProcessSettings):
             raise ValueError("browser paths must be absolute")
         return value.resolve(strict=False)
 
-    @field_validator("executable_path", mode="before")
+    @field_validator(
+        "executable_path",
+        "locale",
+        "accept_language",
+        "display",
+        "timezone",
+        mode="before",
+    )
     @classmethod
-    def _strip_executable_path(cls, value: object) -> object:
+    def _strip_browser_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
 
