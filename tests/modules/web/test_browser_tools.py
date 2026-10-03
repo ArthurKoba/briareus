@@ -142,6 +142,8 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         timeout_ms=30_000,
         viewport_width=profile.viewport_width,
         viewport_height=profile.viewport_height,
+        screen_width=profile.screen_width,
+        screen_height=profile.screen_height,
         max_snapshot_text_chars=30_000,
         max_snapshot_elements=250,
         locale=profile.locale,
@@ -151,15 +153,19 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         xvfb_enabled=profile.xvfb_enabled,
         timezone="Europe/Moscow",
         posix_locale=profile.posix_locale,
+        chromium_args=profile.chromium_args,
     )
 
     command = browser._browser_command()
     process_command = browser._browser_process_command()
 
     assert "--headless=new" not in command
-    assert "--lang=ru-RU" in command
-    assert "--accept-lang=ru-RU,ru,en-US,en" in command
-    assert "--window-size=1440,900" in command
+    assert "--lang=ru" in command
+    assert "--accept-lang=ru,en" in command
+    assert "--window-size=1536,912" in command
+    assert "--force-device-scale-factor=2" in command
+    assert browser.screen_width == 3072
+    assert browser.screen_height == 1920
     assert process_command[:5] == [
         "/usr/bin/env",
         "DISPLAY=:99",
