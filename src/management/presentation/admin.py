@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import posixpath
 import urllib.parse
 from collections.abc import Sequence
@@ -38,7 +37,6 @@ from starlette_admin import (
     route,
 )
 from starlette_admin.actions import row_action
-from starlette_admin.auth import AdminUser, AuthProvider, LoginFailed
 from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.exceptions import ActionFailed
 from starlette_admin.fields import BaseField
@@ -79,39 +77,11 @@ from management.infrastructure.snapshot_worker import (
 )
 from management.infrastructure.terminal import TerminalAdminClient
 from management.presentation.admin_ui import ManagementUiPlugin
+from management.presentation.auth import ManagementAuthProvider
 
 type AccountRecord = (
     GitHubAccountRecord | GitLabAccountRecord | SigNozAccountRecord | CoolifyAccountRecord
 )
-
-
-class ManagementAuthProvider(AuthProvider):
-    def __init__(self, settings: ManagementSettings) -> None:
-        super().__init__()
-        self.settings = settings
-
-    async def login(
-        self,
-        username: str,
-        password: str,
-        remember_me: bool,
-        request: Request,
-    ) -> None:
-        del remember_me
-        valid_user = hmac.compare_digest(username, self.settings.admin_username)
-        valid_password = hmac.compare_digest(password, self.settings.admin_password)
-        if not (valid_user and valid_password):
-            raise LoginFailed("Invalid username or password")
-        request.session["management_admin"] = self.settings.admin_username
-
-    async def authenticate(self, request: Request) -> AdminUser | None:
-        username = request.session.get("management_admin")
-        if not isinstance(username, str) or not username:
-            return None
-        return AdminUser(username=username)
-
-    async def logout(self, request: Request) -> None:
-        request.session.clear()
 
 
 class _BaseAccountView(ModelView):
@@ -790,7 +760,7 @@ class ReverseView(CustomView):
             flash(request, f"Open session failed: {exc}", "error")
         else:
             flash(request, "Project session opened", "success")
-        return RedirectResponse("/admin/reverse", status_code=303)
+        return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
     @route("/release/{project_id:path}", methods=["POST"])
     async def release_session(self, request: Request) -> Response:
@@ -801,7 +771,7 @@ class ReverseView(CustomView):
             flash(request, f"Release session failed: {exc}", "error")
         else:
             flash(request, "Project session released", "success")
-        return RedirectResponse("/admin/reverse", status_code=303)
+        return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
     @route("/create", methods=["POST"])
     async def create_project(self, request: Request) -> Response:
@@ -810,7 +780,7 @@ class ReverseView(CustomView):
         parent_dir = str(form.get("parent_dir", "")).strip()
         if not name:
             flash(request, "Project name is required", "error")
-            return RedirectResponse("/admin/reverse", status_code=303)
+            return RedirectResponse("/admin/legacy/reverse", status_code=303)
         try:
             result = await self.reverse.create_project(name, parent_dir)
         except Exception as exc:
@@ -820,10 +790,10 @@ class ReverseView(CustomView):
             flash(request, f"Created project {name}", "success")
             if project_id:
                 return RedirectResponse(
-                    f"/admin/reverse/project/{project_id}",
+                    f"/admin/legacy/reverse/project/{project_id}",
                     status_code=303,
                 )
-        return RedirectResponse("/admin/reverse", status_code=303)
+        return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
     @route("/delete/{project_id:path}", methods=["POST"])
     async def delete_project(self, request: Request) -> Response:
@@ -835,7 +805,7 @@ class ReverseView(CustomView):
         else:
             name = str(result.get("name") or project_id)
             flash(request, f"Deleted project {name}", "success")
-        return RedirectResponse("/admin/reverse", status_code=303)
+        return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
     @route("/worker/{worker_index:path}/{action}", methods=["POST"])
     async def worker_control(self, request: Request) -> Response:
@@ -843,12 +813,12 @@ class ReverseView(CustomView):
             worker_index = int(request.path_params["worker_index"])
         except ValueError:
             flash(request, "Invalid worker index", "error")
-            return RedirectResponse("/admin/reverse", status_code=303)
+            return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
         action = request.path_params["action"].casefold()
         if action not in {"enable", "disable"}:
             flash(request, "Invalid worker action", "error")
-            return RedirectResponse("/admin/reverse", status_code=303)
+            return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
         try:
             await self.reverse.set_worker_enabled(
@@ -863,7 +833,7 @@ class ReverseView(CustomView):
                 f"Worker #{worker_index} {action}d",
                 "success",
             )
-        return RedirectResponse("/admin/reverse", status_code=303)
+        return RedirectResponse("/admin/legacy/reverse", status_code=303)
 
 
 class TerminalView(CustomView):
@@ -946,7 +916,7 @@ class TerminalView(CustomView):
             flash(request, f"Cancel job failed: {exc}", "error")
         else:
             flash(request, "Job cancelled", "success")
-        return RedirectResponse("/admin/terminal", status_code=303)
+        return RedirectResponse("/admin/legacy/terminal", status_code=303)
 
     @route("/job/{job_id:path}/delete", methods=["POST"])
     async def delete_job(self, request: Request) -> Response:
@@ -957,7 +927,7 @@ class TerminalView(CustomView):
             flash(request, f"Delete job failed: {exc}", "error")
         else:
             flash(request, "Job log deleted", "success")
-        return RedirectResponse("/admin/terminal", status_code=303)
+        return RedirectResponse("/admin/legacy/terminal", status_code=303)
 
     @route("/cleanup-jobs", methods=["POST"])
     async def cleanup_jobs(self, request: Request) -> Response:
@@ -972,7 +942,7 @@ class TerminalView(CustomView):
             flash(request, f"Job cleanup failed: {exc}", "error")
         else:
             flash(request, f"Deleted {result.get('count', 0)} retained jobs", "success")
-        return RedirectResponse("/admin/terminal", status_code=303)
+        return RedirectResponse("/admin/legacy/terminal", status_code=303)
 
     @route("/workspace/{workspace_id:path}/delete", methods=["POST"])
     async def delete_workspace(self, request: Request) -> Response:
@@ -983,7 +953,7 @@ class TerminalView(CustomView):
             flash(request, f"Delete workspace failed: {exc}", "error")
         else:
             flash(request, f"Deleted workspace {workspace_id}", "success")
-        return RedirectResponse("/admin/terminal", status_code=303)
+        return RedirectResponse("/admin/legacy/terminal", status_code=303)
 
 
 class BrowserView(CustomView):
@@ -1088,7 +1058,7 @@ class SettingsView(CustomView):
                 flash(request, f"Invalid settings: {exc}", "error")
             else:
                 flash(request, "Settings saved", "success")
-                return RedirectResponse("/admin/settings", status_code=303)
+                return RedirectResponse("/admin/legacy/settings", status_code=303)
 
         config = await asyncio.to_thread(self.config.get)
         terminal_policy = await asyncio.to_thread(self.runtime_settings.terminal_policy)
@@ -1121,7 +1091,7 @@ class SettingsView(CustomView):
     async def cleanup_logs(self, request: Request) -> Response:
         removed = await asyncio.to_thread(self.audit.cleanup)
         flash(request, f"Removed {removed} expired MCP call records", "success")
-        return RedirectResponse("/admin/settings", status_code=303)
+        return RedirectResponse("/admin/legacy/settings", status_code=303)
 
 
 class FilesView(CustomView):
@@ -1192,7 +1162,7 @@ class FilesView(CustomView):
             else:
                 flash(request, f"Uploaded {destination}", "success")
         return RedirectResponse(
-            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/legacy/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
@@ -1212,7 +1182,7 @@ class FilesView(CustomView):
             else:
                 flash(request, f"Created {destination}", "success")
         return RedirectResponse(
-            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/legacy/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
@@ -1251,7 +1221,7 @@ class FilesView(CustomView):
         else:
             flash(request, f"Deleted {path}", "success")
         return RedirectResponse(
-            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/legacy/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
@@ -1458,12 +1428,14 @@ def build_admin(
     runtime_settings: RuntimeSettingsService,
     files: FileAdminStore,
     reverse: ReverseAdminClient,
+    *,
+    base_url: str = "/admin",
 ) -> Admin:
     terminal = TerminalAdminClient()
     admin = Admin(
         engine,
         title="MCP Management",
-        base_url="/admin",
+        base_url=base_url,
         auth_provider=ManagementAuthProvider(settings),
         secret_key=settings.session_secret,
         index_view=_dashboard(engine, snapshots),

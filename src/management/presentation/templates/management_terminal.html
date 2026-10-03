@@ -3,7 +3,7 @@
 <div class="d-flex justify-content-between align-items-center">
   <h1>Terminal</h1>
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/legacy/">Admin</a></li>
     <li class="breadcrumb-item active">Terminal</li>
   </ol>
 </div>
@@ -69,7 +69,7 @@
             <td>{% if workspace.get("modified_at") %}<time class="js-local-datetime" datetime="{{ workspace['modified_at'] }}">{{ workspace["modified_at"] }}</time>{% else %}—{% endif %}</td>
             <td><code>{{ workspace.get("path", "—") }}</code></td>
             <td>
-              <form method="post" action="/admin/terminal/workspace/{{ workspace['workspace_id'] }}/delete">
+              <form method="post" action="/admin/legacy/terminal/workspace/{{ workspace['workspace_id'] }}/delete">
                 {{ csrf_input(request) }}
                 <button class="btn btn-danger btn-sm" type="submit" onclick="return confirm('Delete workspace {{ workspace['workspace_id'] }}?')">Delete</button>
               </form>
@@ -86,7 +86,7 @@
   <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <h3 class="card-title">Jobs</h3>
-      <form method="post" action="/admin/terminal/cleanup-jobs" class="d-flex gap-2">
+      <form method="post" action="/admin/legacy/terminal/cleanup-jobs" class="d-flex gap-2">
         {{ csrf_input(request) }}
         <input type="hidden" name="older_than_hours" value="168">
         <button class="btn btn-outline-danger btn-sm" type="submit" onclick="return confirm('Delete retained terminal jobs older than 7 days?')">Cleanup 7d+</button>
@@ -98,21 +98,21 @@
         <tbody>
         {% for job in jobs %}
           <tr>
-            <td><a href="/admin/terminal/job/{{ job['job_id'] }}"><code>{{ job["job_id"][:12] }}</code></a></td>
+            <td><a href="/admin/legacy/terminal/job/{{ job['job_id'] }}"><code>{{ job["job_id"][:12] }}</code></a></td>
             <td>{{ job.get("workspace_id", "—") }}</td>
             <td><span class="badge {% if job.get('state') == 'running' %}bg-green-lt{% elif job.get('state') == 'failed' %}bg-red-lt{% else %}bg-secondary-lt{% endif %}">{{ job.get("state", "—") }}</span></td>
             <td>{{ "yes" if job.get("interactive") else "no" }}</td>
             <td>{{ job.get("duration_seconds", 0) }}s</td>
             <td><code class="text-break">{{ job.get("command", "—") }}</code></td>
             <td class="text-nowrap">
-              <a class="btn btn-sm" href="/admin/terminal/job/{{ job['job_id'] }}">Inspect</a>
+              <a class="btn btn-sm" href="/admin/legacy/terminal/job/{{ job['job_id'] }}">Inspect</a>
               {% if job.get("state") in ["running", "cancelling"] %}
-              <form method="post" action="/admin/terminal/job/{{ job['job_id'] }}/cancel" style="display:inline">
+              <form method="post" action="/admin/legacy/terminal/job/{{ job['job_id'] }}/cancel" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-warning btn-sm" type="submit">Cancel</button>
               </form>
               {% else %}
-              <form method="post" action="/admin/terminal/job/{{ job['job_id'] }}/delete" style="display:inline">
+              <form method="post" action="/admin/legacy/terminal/job/{{ job['job_id'] }}/delete" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-outline-danger btn-sm" type="submit">Delete log</button>
               </form>
