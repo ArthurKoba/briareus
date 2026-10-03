@@ -45,9 +45,10 @@ from management.infrastructure.repositories import (
 )
 from management.infrastructure.reverse import ReverseAdminClient
 from management.infrastructure.snapshot_worker import SnapshotRefresher
+from management.infrastructure.terminal import TerminalAdminClient
 from management.presentation.admin import build_admin
 from management.presentation.api import ApiServices, build_internal_router
-from management.presentation.web_api import build_admin_api_router
+from management.presentation.web_api import WebApiServices, build_admin_api_router
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ audit = InvocationAuditService(invocation_repository, config_service)
 files = FileAdminStore(FileSettings())
 reverse = ReverseAdminClient()
 snapshot_refresher = SnapshotRefresher(snapshots, files, reverse)
+terminal = TerminalAdminClient()
 
 
 async def _maintenance_loop() -> None:
@@ -166,7 +168,23 @@ app.include_router(
         )
     )
 )
-app.include_router(build_admin_api_router(settings))
+app.include_router(
+    build_admin_api_router(
+        settings,
+        WebApiServices(
+            accounts=accounts,
+            audit=audit,
+            oauth_sessions=oauth_sessions,
+            snapshots=snapshots,
+            config=config_service,
+            runtime_settings=runtime_settings,
+            files=files,
+            reverse=reverse,
+            terminal=terminal,
+            snapshot_refresher=snapshot_refresher,
+        ),
+    )
+)
 
 
 @app.get("/health")
