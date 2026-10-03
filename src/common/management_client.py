@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import threading
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,10 +9,11 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 
 from .account_contracts import AccountList, InvocationEvent, ResolvedAccount
+from .cache import CacheBackend, CacheKeys, SharedCache
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
 from .runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
-from .settings import ManagementClientSettings
+from .settings import ManagementClientSettings, ValkeySettings
 
 
 class ManagementClientError(RuntimeError):
@@ -22,23 +21,24 @@ class ManagementClientError(RuntimeError):
 
 
 _TRACER = trace.get_tracer("mcp-bridge.management-client")
-_ACCOUNT_CACHE_TTL_SECONDS = 30.0
-_ACCOUNT_LIST_CACHE_TTL_SECONDS = 15.0
-_POLICY_CACHE_TTL_SECONDS = 30.0
 
 
 class ManagementClient:
-    def __init__(self, settings: ManagementClientSettings) -> None:
+    def __init__(
+        self,
+        settings: ManagementClientSettings,
+        *,
+        cache: CacheBackend | None = None,
+        cache_settings: ValkeySettings | None = None,
+    ) -> None:
         self.url = settings.url.rstrip("/")
         self.service_token = settings.service_token
         self.timeout_seconds = settings.timeout_seconds
         if not self.url:
             raise ValueError("MANAGEMENT_URL is required")
-        self._cache_lock = threading.Lock()
-        self._account_cache: dict[tuple[str, str], tuple[float, ResolvedAccount]] = {}
-        self._account_list_cache: dict[str, tuple[float, AccountList]] = {}
-        self._terminal_policy_cache: tuple[float, TerminalRuntimePolicy] | None = None
-        self._mcp_policy_cache: tuple[float, McpRuntimePolicy] | None = None
+        self.cache_settings = cache_settings or ValkeySettings()
+        self.cache = cache or SharedCache(self.cache_settings)
+        self.cache_keys = CacheKeys(self.cache)
 
     def _request(
         self,
@@ -90,25 +90,22 @@ class ManagementClient:
         *,
         provider: str | None = None,
     ) -> AccountList:
-        key = (provider or "").strip().casefold()
-        now = time.monotonic()
-        with self._cache_lock:
-            cached = self._account_list_cache.get(key)
-            if cached is not None and cached[0] > now:
-                trace.get_current_span().set_attribute(
-                    "mcp.management.account_list_cache_hit", True
-                )
-                return cached[1]
-        trace.get_current_span().set_attribute(
-            "mcp.management.account_list_cache_hit", False
-        )
+        provider_key = (provider or "").strip().casefold()
+        cache_key = self.cache_keys.account_list(provider_key)
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return AccountList.model_validate(cached)
+
         query: dict[str, str] = {}
         if provider:
             query["provider"] = provider
         data = self._request("GET", "/internal/accounts", query=query)
         result = AccountList.model_validate(data)
-        with self._cache_lock:
-            self._account_list_cache[key] = (now + _ACCOUNT_LIST_CACHE_TTL_SECONDS, result)
+        self.cache.set_json(
+            cache_key,
+            result.to_json(),
+            ttl_seconds=self.cache_settings.account_list_ttl_seconds,
+        )
         return result
 
     def resolve_account(
@@ -121,14 +118,11 @@ class ManagementClient:
         if not value:
             raise ValueError("account_id is required")
         provider_key = provider.strip().casefold()
-        cache_key = (provider_key, value.casefold())
-        now = time.monotonic()
-        with self._cache_lock:
-            cached = self._account_cache.get(cache_key)
-            if cached is not None and cached[0] > now:
-                trace.get_current_span().set_attribute("mcp.management.account_cache_hit", True)
-                return cached[1]
-        trace.get_current_span().set_attribute("mcp.management.account_cache_hit", False)
+        cache_key = self.cache_keys.account(provider_key, value)
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return ResolvedAccount.model_validate(cached)
+
         query = {"provider": provider}
         path = "/internal/accounts/" + urllib.parse.quote(value, safe="") + "/resolve"
         try:
@@ -142,12 +136,16 @@ class ManagementClient:
             raise ManagementClientError(
                 f"{provider} account selector not found: {value}{hint}"
             ) from exc
+
         account = ResolvedAccount.model_validate(data)
-        expires_at = now + _ACCOUNT_CACHE_TTL_SECONDS
-        keys = {value.casefold(), account.id.casefold(), account.alias.casefold()}
-        with self._cache_lock:
-            for selector in keys:
-                self._account_cache[(provider_key, selector)] = (expires_at, account)
+        payload = account.model_dump(mode="json")
+        selectors = {value.casefold(), account.id.casefold(), account.alias.casefold()}
+        for resolved_selector in selectors:
+            self.cache.set_json(
+                self.cache_keys.account(provider_key, resolved_selector),
+                payload,
+                ttl_seconds=self.cache_settings.account_ttl_seconds,
+            )
         return account
 
     def record_invocation(self, event: InvocationEvent) -> None:
@@ -159,35 +157,31 @@ class ManagementClient:
         )
 
     def terminal_runtime_policy(self) -> TerminalRuntimePolicy:
-        now = time.monotonic()
-        with self._cache_lock:
-            cached = self._terminal_policy_cache
-            if cached is not None and cached[0] > now:
-                trace.get_current_span().set_attribute(
-                    "mcp.management.terminal_policy_cache_hit", True
-                )
-                return cached[1]
-        trace.get_current_span().set_attribute(
-            "mcp.management.terminal_policy_cache_hit", False
-        )
+        cache_key = self.cache_keys.terminal_policy()
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return TerminalRuntimePolicy.model_validate(cached)
         data = self._request("GET", "/internal/runtime-settings/terminal")
         result = TerminalRuntimePolicy.model_validate(data)
-        with self._cache_lock:
-            self._terminal_policy_cache = (now + _POLICY_CACHE_TTL_SECONDS, result)
+        self.cache.set_json(
+            cache_key,
+            result.to_json(),
+            ttl_seconds=self.cache_settings.policy_ttl_seconds,
+        )
         return result
 
     def mcp_runtime_policy(self) -> McpRuntimePolicy:
-        now = time.monotonic()
-        with self._cache_lock:
-            cached = self._mcp_policy_cache
-            if cached is not None and cached[0] > now:
-                trace.get_current_span().set_attribute("mcp.management.mcp_policy_cache_hit", True)
-                return cached[1]
-        trace.get_current_span().set_attribute("mcp.management.mcp_policy_cache_hit", False)
+        cache_key = self.cache_keys.mcp_policy()
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return McpRuntimePolicy.model_validate(cached)
         data = self._request("GET", "/internal/runtime-settings/mcp")
         result = McpRuntimePolicy.model_validate(data)
-        with self._cache_lock:
-            self._mcp_policy_cache = (now + _POLICY_CACHE_TTL_SECONDS, result)
+        self.cache.set_json(
+            cache_key,
+            result.to_json(),
+            ttl_seconds=self.cache_settings.policy_ttl_seconds,
+        )
         return result
 
     def record_oauth_session(self, event: OAuthSessionEvent) -> None:

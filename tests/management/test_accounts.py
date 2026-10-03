@@ -6,7 +6,12 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import inspect, select
 
-from management.application.services import AccountService, InvocationAuditService
+from common.models import JsonValue
+from management.application.services import (
+    AccountService,
+    InvocationAuditService,
+    ManagementConfigService,
+)
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.telemetry import Invocation
 from management.infrastructure.crypto import FernetCredentialCipher
@@ -23,7 +28,30 @@ from management.infrastructure.database import (
 from management.infrastructure.repositories import (
     SqlAlchemyAccountRepository,
     SqlAlchemyInvocationRepository,
+    SqlAlchemyManagementConfigRepository,
 )
+
+
+class _MemoryCache:
+    def __init__(self) -> None:
+        self.values: dict[str, JsonValue] = {}
+
+    def key(self, *parts: str) -> str:
+        return ":".join(part.strip().casefold() for part in parts if part.strip())
+
+    def get_json(self, key: str) -> JsonValue | None:
+        return self.values.get(key)
+
+    def set_json(self, key: str, value: object, *, ttl_seconds: int) -> bool:
+        del ttl_seconds
+        assert isinstance(value, (dict, list, str, int, float, bool)) or value is None
+        self.values[key] = value
+        return True
+
+    def delete(self, *keys: str) -> bool:
+        for key in keys:
+            self.values.pop(key, None)
+        return True
 
 
 class _Verifier:
@@ -43,11 +71,12 @@ def _services(tmp_path: Path):
     cipher = FernetCredentialCipher(Fernet.generate_key().decode())
     account_repository = SqlAlchemyAccountRepository(sessions)
     invocation_repository = SqlAlchemyInvocationRepository(sessions)
+    config_service = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
     return (
         engine,
         sessions,
         AccountService(account_repository, cipher, _Verifier()),
-        InvocationAuditService(invocation_repository),
+        InvocationAuditService(invocation_repository, config_service),
     )
 
 
@@ -328,4 +357,34 @@ def test_schema_tolerates_removed_legacy_columns_and_preserves_accounts(
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("management_config")}
     assert "legacy_cleanup" in columns
+    engine.dispose()
+
+
+def test_account_credential_update_invalidates_shared_cache(tmp_path: Path) -> None:
+    database = tmp_path / "management-cache.sqlite3"
+    engine, sessions = create_database(f"sqlite:///{database}")
+    Base.metadata.create_all(engine)
+    cipher = FernetCredentialCipher(Fernet.generate_key().decode())
+    cache = _MemoryCache()
+    accounts = AccountService(
+        SqlAlchemyAccountRepository(sessions),
+        cipher,
+        _Verifier(),
+        cache=cache,
+    )
+    account = accounts.create(
+        Account(
+            alias="github-cache",
+            provider=Provider.GITHUB,
+            auth_type=AuthType.GITHUB_TOKEN,
+        ),
+        credential="old-token",
+    )
+
+    assert accounts.resolve(account.alias, provider=Provider.GITHUB).credential == "old-token"
+    assert any("accounts:resolved:github:github-cache" in key for key in cache.values)
+
+    accounts.set_credential(account.id, "new-token", provider=Provider.GITHUB)
+    assert not any("accounts:resolved:github:github-cache" in key for key in cache.values)
+    assert accounts.resolve(account.alias, provider=Provider.GITHUB).credential == "new-token"
     engine.dispose()

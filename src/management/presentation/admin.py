@@ -252,7 +252,10 @@ class _BaseAccountView(ModelView):
         data: dict[str, object],
         obj: AccountRecord,
     ) -> None:
-        del request, data
+        del data
+        request.state.account_cache_previous = self.accounts.get(
+            str(obj.id), provider=self.provider
+        )
         obj.updated_at = datetime.now(UTC)
         account = self._validated(obj)
         self._apply_normalized(obj, account)
@@ -260,6 +263,28 @@ class _BaseAccountView(ModelView):
         if secret:
             obj.encrypted_credential = self.cipher.encrypt(secret)
         obj._credential_input = ""
+
+    async def before_delete(self, request: Request, obj: AccountRecord) -> None:
+        request.state.account_cache_previous = self.accounts.get(
+            str(obj.id), provider=self.provider
+        )
+
+    async def after_create_committed(self, request: Request, obj: AccountRecord) -> None:
+        del request
+        self.accounts.invalidate(self._validated(obj))
+
+    async def after_edit_committed(self, request: Request, obj: AccountRecord) -> None:
+        previous = getattr(request.state, "account_cache_previous", None)
+        if isinstance(previous, Account):
+            self.accounts.invalidate(previous)
+        self.accounts.invalidate(self._validated(obj))
+
+    async def after_delete_committed(self, request: Request, obj: AccountRecord) -> None:
+        previous = getattr(request.state, "account_cache_previous", None)
+        if isinstance(previous, Account):
+            self.accounts.invalidate(previous)
+        else:
+            self.accounts.invalidate(self._validated(obj))
 
     @row_action(name="test_connection", text="Test connection", icon_class="fa fa-plug")
     async def test_connection(self, request: Request, pk: object) -> None:

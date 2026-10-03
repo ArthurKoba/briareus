@@ -14,7 +14,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "github:*",
     "gitlab:*",
     "files:*",
-    "curl:*",
+    "web:*",
     "analysis:*",
     "ghidra:*",
     "terminal:*",
@@ -108,6 +108,47 @@ class PrivateRuntimeSettings(ProcessSettings):
             allowed_hosts=self.allowed_hosts,
             allowed_origins=self.allowed_origins,
         )
+
+
+class ValkeySettings(ProcessSettings):
+    url: str = Field("redis://valkey:6379/0", validation_alias="VALKEY_URL")
+    namespace: str = Field("mcp-bridge:v1", validation_alias="VALKEY_NAMESPACE")
+    socket_connect_timeout_seconds: float = Field(
+        0.15,
+        ge=0.01,
+        le=5.0,
+        validation_alias="VALKEY_CONNECT_TIMEOUT_SECONDS",
+    )
+    socket_timeout_seconds: float = Field(
+        0.25,
+        ge=0.01,
+        le=5.0,
+        validation_alias="VALKEY_SOCKET_TIMEOUT_SECONDS",
+    )
+    failure_backoff_seconds: float = Field(
+        5.0,
+        ge=0.1,
+        le=60.0,
+        validation_alias="VALKEY_FAILURE_BACKOFF_SECONDS",
+    )
+    account_ttl_seconds: int = Field(
+        120, ge=1, le=3600, validation_alias="VALKEY_ACCOUNT_TTL_SECONDS"
+    )
+    account_list_ttl_seconds: int = Field(
+        30, ge=1, le=600, validation_alias="VALKEY_ACCOUNT_LIST_TTL_SECONDS"
+    )
+    policy_ttl_seconds: int = Field(30, ge=1, le=600, validation_alias="VALKEY_POLICY_TTL_SECONDS")
+    management_config_ttl_seconds: int = Field(
+        30,
+        ge=1,
+        le=600,
+        validation_alias="VALKEY_MANAGEMENT_CONFIG_TTL_SECONDS",
+    )
+
+    @field_validator("url", "namespace", mode="before")
+    @classmethod
+    def _strip_cache_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class BridgeSettings(ProcessSettings):

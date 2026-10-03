@@ -17,6 +17,7 @@ EXPECTED_SERVICES = {
     "analysis",
     "ghidra",
     "observability",
+    "valkey",
 }
 
 
@@ -35,6 +36,19 @@ def test_compose_keeps_runtime_services_restartable() -> None:
     for service in services.values():
         assert service.get("restart") == "unless-stopped"
 
+
+
+def test_valkey_is_private_ephemeral_and_resource_bounded() -> None:
+    valkey = _services()["valkey"]
+
+    assert valkey["image"] == "valkey/valkey:9.1.2-alpine"
+    assert "ports" not in valkey
+    assert "volumes" not in valkey
+    assert "--appendonly" in valkey["command"]
+    assert "--save" in valkey["command"]
+    assert valkey["mem_limit"] == "192m"
+    assert valkey["cpus"] == 0.5
+    assert valkey["pids_limit"] == 128
 
 def test_terminal_has_hard_resource_limits() -> None:
     terminal = _services()["terminal"]
@@ -172,6 +186,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "observability": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "valkey": set(),
     }
 
     for name, service in services.items():
@@ -281,6 +296,8 @@ def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
     }
 
     for name, service in services.items():
+        if name == "valkey":
+            continue
         assert required.issubset(service.get("environment", {})), name
 
 

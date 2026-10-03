@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from common.account_contracts import AccountPublic, ResolvedAccount
+from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
+from common.cache import CacheBackend, CacheKeys
 from common.models import JsonObject, json_object
 from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.settings import ValkeySettings
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -30,50 +32,105 @@ class AccountService:
         repository: AccountRepository,
         cipher: CredentialCipher,
         verifier: ConnectionVerifier,
+        *,
+        cache: CacheBackend | None = None,
+        cache_settings: ValkeySettings | None = None,
     ) -> None:
         self.repository = repository
         self.cipher = cipher
         self.verifier = verifier
+        self.cache = cache
+        self.cache_settings = cache_settings or ValkeySettings()
+        self.cache_keys = CacheKeys(cache) if cache is not None else None
+
+    def invalidate(self, account: Account) -> None:
+        if self.cache is None or self.cache_keys is None:
+            return
+        self.cache.delete(
+            *self.cache_keys.account_invalidation_keys(
+                account.provider.value,
+                account_id=account.id,
+                alias=account.alias,
+            )
+        )
 
     def list(self, *, provider: Provider | None = None) -> list[AccountPublic]:
-        return [
+        provider_key = provider.value if provider is not None else ""
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.account_list(provider_key))
+            if isinstance(cached, dict):
+                return AccountList.model_validate(cached).accounts
+
+        accounts = [
             AccountPublic.model_validate(account.public())
             for account in self.repository.list(provider=provider, enabled_only=False)
         ]
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.account_list(provider_key),
+                AccountList(accounts=accounts, count=len(accounts)).to_json(),
+                ttl_seconds=self.cache_settings.account_list_ttl_seconds,
+            )
+        return accounts
 
     def get(self, selector: str, *, provider: Provider) -> Account:
         return self.repository.get(selector, provider=provider)
 
     def resolve(self, selector: str, *, provider: Provider) -> ResolvedAccount:
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.account(provider.value, selector))
+            if isinstance(cached, dict):
+                return ResolvedAccount.model_validate(cached)
+
         account = self.repository.get(selector, provider=provider)
         credential = self.cipher.decrypt(self.repository.credential(account.id, provider=provider))
-        return ResolvedAccount.model_validate({**account.public(), "credential": credential})
+        resolved = ResolvedAccount.model_validate({**account.public(), "credential": credential})
+        if self.cache is not None and self.cache_keys is not None:
+            payload = resolved.model_dump(mode="json")
+            selectors = {selector.casefold(), account.id.casefold(), account.alias.casefold()}
+            for resolved_selector in selectors:
+                self.cache.set_json(
+                    self.cache_keys.account(provider.value, resolved_selector),
+                    payload,
+                    ttl_seconds=self.cache_settings.account_ttl_seconds,
+                )
+        return resolved
 
     def create(self, account: Account, *, credential: str) -> Account:
         secret = credential.strip()
         if not secret:
             raise ValueError("credential is required")
-        return self.repository.save(
+        saved = self.repository.save(
             account,
             encrypted_credential=self.cipher.encrypt(secret),
         )
+        self.invalidate(saved)
+        return saved
 
     def update(self, account: Account) -> Account:
+        previous = self.repository.get(account.id, provider=account.provider, enabled_only=False)
         account.updated_at = datetime.now(UTC)
-        return self.repository.save(account)
+        saved = self.repository.save(account)
+        self.invalidate(previous)
+        self.invalidate(saved)
+        return saved
 
     def set_credential(self, account_id: str, credential: str, *, provider: Provider) -> None:
         secret = credential.strip()
         if not secret:
             raise ValueError("credential is required")
+        account = self.repository.get(account_id, provider=provider, enabled_only=False)
         self.repository.set_credential(
             account_id,
             self.cipher.encrypt(secret),
             provider=provider,
         )
+        self.invalidate(account)
 
     def delete(self, account_id: str, *, provider: Provider) -> None:
+        account = self.repository.get(account_id, provider=provider, enabled_only=False)
         self.repository.delete(account_id, provider=provider)
+        self.invalidate(account)
 
     def verify(self, selector: str, *, provider: Provider) -> JsonObject:
         account = self.repository.get(selector, provider=provider)
@@ -85,11 +142,22 @@ class AccountService:
 
 
 class InvocationAuditService:
-    def __init__(self, repository: InvocationRepository) -> None:
+    def __init__(
+        self,
+        repository: InvocationRepository,
+        config: ManagementConfigService | None = None,
+    ) -> None:
         self.repository = repository
+        self.config = config
 
     def record(self, invocation: Invocation) -> None:
-        self.repository.append(invocation)
+        capture_payloads = True
+        if self.config is not None:
+            config = self.config.get()
+            if not config.logging_enabled:
+                return
+            capture_payloads = config.logging_capture_payloads
+        self.repository.append(invocation, capture_payloads=capture_payloads)
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
         return self.repository.recent(limit=limit)
@@ -185,31 +253,103 @@ class SnapshotService:
 
 
 class ManagementConfigService:
-    def __init__(self, repository: ManagementConfigRepository) -> None:
+    def __init__(
+        self,
+        repository: ManagementConfigRepository,
+        *,
+        cache: CacheBackend | None = None,
+        cache_settings: ValkeySettings | None = None,
+    ) -> None:
         self.repository = repository
+        self.cache = cache
+        self.cache_settings = cache_settings or ValkeySettings()
+        self.cache_keys = CacheKeys(cache) if cache is not None else None
 
     def get(self) -> ManagementConfig:
-        return self.repository.get()
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.management_config())
+            if isinstance(cached, dict):
+                return ManagementConfig.model_validate(cached)
+        result = self.repository.get()
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.management_config(),
+                result.model_dump(mode="json"),
+                ttl_seconds=self.cache_settings.management_config_ttl_seconds,
+            )
+        return result
 
     def update(self, config: ManagementConfig) -> ManagementConfig:
-        return self.repository.save(config)
+        result = self.repository.save(config)
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.management_config(),
+                result.model_dump(mode="json"),
+                ttl_seconds=self.cache_settings.management_config_ttl_seconds,
+            )
+        return result
 
 
 class RuntimeSettingsService:
-    def __init__(self, repository: RuntimeSettingsRepository) -> None:
+    def __init__(
+        self,
+        repository: RuntimeSettingsRepository,
+        *,
+        cache: CacheBackend | None = None,
+        cache_settings: ValkeySettings | None = None,
+    ) -> None:
         self.repository = repository
+        self.cache = cache
+        self.cache_settings = cache_settings or ValkeySettings()
+        self.cache_keys = CacheKeys(cache) if cache is not None else None
 
     def terminal_policy(self) -> TerminalRuntimePolicy:
-        return self.repository.get_terminal_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.terminal_policy())
+            if isinstance(cached, dict):
+                return TerminalRuntimePolicy.model_validate(cached)
+        result = self.repository.get_terminal_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.terminal_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
 
     def update_terminal_policy(
         self,
         policy: TerminalRuntimePolicy,
     ) -> TerminalRuntimePolicy:
-        return self.repository.save_terminal_policy(policy)
+        result = self.repository.save_terminal_policy(policy)
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.terminal_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
 
     def mcp_policy(self) -> McpRuntimePolicy:
-        return self.repository.get_mcp_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.mcp_policy())
+            if isinstance(cached, dict):
+                return McpRuntimePolicy.model_validate(cached)
+        result = self.repository.get_mcp_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.mcp_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
 
     def update_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy:
-        return self.repository.save_mcp_policy(policy)
+        result = self.repository.save_mcp_policy(policy)
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.mcp_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result

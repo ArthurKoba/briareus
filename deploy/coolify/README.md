@@ -11,6 +11,7 @@ Traefik -> gateway
              |
              +-- auth
              +-- management
+             +-- valkey (private ephemeral cache)
              +-- github
              +-- gitlab
              +-- files
@@ -111,6 +112,15 @@ Coolify may override these restart-required infrastructure limits with:
 - `TERMINAL_PIDS_LIMIT` (default `256`)
 
 Increase these only deliberately for a known workload; do not remove the containment boundary.
+
+## Shared Valkey cache
+
+The stack includes a private `valkey/valkey:9.1.2-alpine` service for hot account resolution
+and runtime/system settings. It has no public port and no persistent volume; RDB and AOF are
+disabled deliberately. Management/SQL remains authoritative. Provider runtimes fail open to
+Management if Valkey is unavailable, with a short local backoff to avoid turning a cache outage
+into repeated connection timeouts. Account and settings mutations invalidate or refresh their
+shared keys.
 
 ## Persistent storage
 

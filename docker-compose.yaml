@@ -42,6 +42,28 @@ x-file-service: &file-service
     - terminal-workspace:/workspace
 
 services:
+  valkey:
+    restart: unless-stopped
+    image: valkey/valkey:9.1.2-alpine
+    command:
+      - valkey-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 128
+
   management:
     <<: *runtime
     build:

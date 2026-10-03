@@ -327,12 +327,8 @@ class SqlAlchemyInvocationRepository:
             removed += overflow_result.rowcount or 0
         return int(removed)
 
-    def append(self, invocation: Invocation) -> None:
+    def append(self, invocation: Invocation, *, capture_payloads: bool = True) -> None:
         with self.sessions.begin() as session:
-            config = self._config(session)
-            if not config.logging_enabled:
-                return
-            payloads = config.logging_capture_payloads
             session.add(
                 InvocationRecord(
                     id=invocation.id,
@@ -344,13 +340,12 @@ class SqlAlchemyInvocationRepository:
                     status=invocation.status,
                     duration_ms=invocation.duration_ms,
                     error_type=invocation.error_type,
-                    arguments_json=invocation.arguments_json if payloads else "",
-                    result_json=invocation.result_json if payloads else "",
-                    error_message=invocation.error_message if payloads else "",
+                    arguments_json=invocation.arguments_json if capture_payloads else "",
+                    result_json=invocation.result_json if capture_payloads else "",
+                    error_message=invocation.error_message if capture_payloads else "",
                     occurred_at=invocation.occurred_at,
                 )
             )
-            self._cleanup_in_session(session, config)
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
         size = max(1, min(limit, 1000))

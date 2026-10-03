@@ -4,7 +4,30 @@ import pytest
 
 from common.account_contracts import AccountList, AccountPublic
 from common.management_client import ManagementClient, ManagementClientError
+from common.models import JsonValue
 from common.settings import ManagementClientSettings
+
+
+class _MemoryCache:
+    def __init__(self) -> None:
+        self.values: dict[str, JsonValue] = {}
+
+    def key(self, *parts: str) -> str:
+        return ":".join(part.strip().casefold() for part in parts if part.strip())
+
+    def get_json(self, key: str) -> JsonValue | None:
+        return self.values.get(key)
+
+    def set_json(self, key: str, value: object, *, ttl_seconds: int) -> bool:
+        del ttl_seconds
+        assert isinstance(value, (dict, list, str, int, float, bool)) or value is None
+        self.values[key] = value
+        return True
+
+    def delete(self, *keys: str) -> bool:
+        for key in keys:
+            self.values.pop(key, None)
+        return True
 
 
 class _Client(ManagementClient):
@@ -39,7 +62,8 @@ def test_stale_account_id_error_points_to_stable_alias() -> None:
         ManagementClientSettings(
             url="http://management:8000",
             service_token="test",
-        )
+        ),
+        cache=_MemoryCache(),
     )
 
     with pytest.raises(ManagementClientError, match="koba-ai-reviewer"):
@@ -52,7 +76,8 @@ class _CachingClient(ManagementClient):
             ManagementClientSettings(
                 url="http://management:8000",
                 service_token="test",
-            )
+            ),
+            cache=_MemoryCache(),
         )
         self.calls: list[str] = []
 
@@ -93,7 +118,7 @@ def test_management_client_caches_resolved_accounts_by_alias_and_id() -> None:
     second = client.resolve_account("koba-ai-agent", provider="github")
     by_id = client.resolve_account("account-id", provider="github")
 
-    assert first is second is by_id
+    assert first == second == by_id
     assert client.calls == ["/internal/accounts/koba-ai-agent/resolve"]
 
 
