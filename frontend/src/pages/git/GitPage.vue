@@ -1,0 +1,1 @@
+<script setup lang="ts">import { useI18n } from "vue-i18n";import AccountsPanel from "@/features/accounts/AccountsPanel.vue";const {t}=useI18n()</script><template><AccountsPanel :title="t('git.title')" :description="t('git.description')" :providers="['github','gitlab']" default-provider="github"/></template>

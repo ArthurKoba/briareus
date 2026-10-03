@@ -79,3 +79,8 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--backgro
 .dark .ant-modal-content, .dark .ant-modal-header { background:var(--card) !important; color:var(--foreground) !important; }
 .dark .ant-modal-title, .dark .ant-modal-close { color:var(--foreground) !important; }
 .dark .ant-select-selector, .dark .ant-input-number, .dark .ant-input-number-input { background:var(--background) !important; border-color:var(--border) !important; color:var(--foreground) !important; }
+
+.toast-enter-active,.toast-leave-active { transition: all .18s ease; }
+.toast-enter-from,.toast-leave-to { opacity:0; transform:translateY(-8px) scale(.98); }
+html[data-density="compact"] .data-table .ant-table-tbody > tr > td { padding-top:6px !important; padding-bottom:6px !important; }
+html[data-density="compact"] .data-table .ant-table-thead > tr > th { padding-top:7px !important; padding-bottom:7px !important; }

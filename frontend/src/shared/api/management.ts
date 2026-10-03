@@ -1,4 +1,7 @@
 import { runtimeConfig } from "@/shared/config/runtime"
+import { frontendTelemetry } from "@/shared/telemetry/client"
+import { notifications } from "@/shared/notifications/bus"
+import { i18n } from "@/shared/i18n"
 
 export interface SessionState { authenticated: boolean; username: string | null }
 export interface NavigationItem { id: string; label: string; enabled: boolean }
@@ -39,7 +42,7 @@ export interface OAuthRecord {
 }
 
 export interface FilesState {
-  listing: { path: string; entries: Array<Record<string, unknown>>; count: number; total: number; truncated: boolean }
+  listing: { path: string; entries: Array<Record<string, unknown>>; count: number; total: number; offset: number; limit: number; truncated: boolean }
   current_path: string; parent_path: string; stats: Record<string, unknown>; stats_meta: Record<string, unknown>
 }
 
@@ -70,14 +73,26 @@ const previewBootstrap: ManagementBootstrap = {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json")
-  const response = await fetch(path, { credentials: "same-origin", ...init, headers })
-  if (!response.ok) {
-    let detail = `Management API request failed: ${response.status}`
-    try { const body = await response.json() as { detail?: string }; if (body.detail) detail = body.detail } catch { /* no json */ }
-    throw new Error(detail)
+  const method=init.method??"GET"
+  const started=performance.now()
+  try {
+    const response = await fetch(path, { credentials: "same-origin", ...init, headers })
+    frontendTelemetry.api(path,method,response.status,performance.now()-started)
+    if (!response.ok) {
+      let detail = `Management API request failed: ${response.status}`
+      try { const body = await response.json() as { detail?: string }; if (body.detail) detail = body.detail } catch { /* no json */ }
+      notifications.error(String(i18n.global.t("notifications.apiError")), detail)
+      throw new Error(detail)
+    }
+    const contentType = response.headers.get("content-type") || ""
+    return (contentType.includes("application/json") ? await response.json() : await response.text()) as T
+  } catch (caught) {
+    if (!(caught instanceof Error && caught.message.startsWith("Management API request failed"))) {
+      frontendTelemetry.error("api.network_error",caught,{path,method,duration_ms:performance.now()-started})
+      notifications.error(String(i18n.global.t("notifications.apiError")),caught instanceof Error?caught.message:String(caught))
+    }
+    throw caught
   }
-  const contentType = response.headers.get("content-type") || ""
-  return (contentType.includes("application/json") ? await response.json() : await response.text()) as T
 }
 
 function jsonBody(value: unknown): BodyInit { return JSON.stringify(value) }
@@ -98,7 +113,7 @@ export const managementApi = {
   deleteCall: (id: string): Promise<unknown> => request(`/api/calls/${id}`, { method: "DELETE" }),
   callsStreamUrl: "/api/calls/stream",
   oauthSessions: (limit = 500): Promise<{ sessions: OAuthRecord[]; count: number }> => request(`/api/oauth-sessions?limit=${limit}`),
-  files: (path = ""): Promise<FilesState> => request(`/api/files?path=${encodeURIComponent(path)}`),
+  files: (path = "", offset = 0, limit = 200): Promise<FilesState> => request(`/api/files?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`),
   uploadFile: (path: string, file: File, overwrite = false): Promise<Record<string, unknown>> => { const body = new FormData(); body.set("path", path); body.set("overwrite", String(overwrite)); body.set("file", file); return request("/api/files/upload", { method: "POST", body }) },
   mkdir: (path: string, name: string): Promise<Record<string, unknown>> => { const body = new FormData(); body.set("path", path); body.set("name", name); return request("/api/files/mkdir", { method: "POST", body }) },
   deleteFile: (path: string, recursive = false): Promise<Record<string, unknown>> => request(`/api/files?path=${encodeURIComponent(path)}&recursive=${recursive}`, { method: "DELETE" }),
