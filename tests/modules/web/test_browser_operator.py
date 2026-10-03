@@ -112,10 +112,23 @@ async def test_page_policy_labels_and_redacts_locked_tabs(tmp_path: Path) -> Non
     page = FakePage()
     page_id = browser._register_page(cast(Any, page))
 
-    async def fake_started() -> Any:
-        return cast(Any, FakeContext(page))
+    class FakeProcess:
+        returncode = None
 
-    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    async def cdp_ok() -> bool:
+        return True
+
+    async def context_ok() -> bool:
+        return True
+
+    async def observed() -> dict[str, object]:
+        return {}
+
+    browser._browser_process = cast(Any, FakeProcess())
+    browser._context = cast(Any, FakeContext(page))
+    browser._cdp_reachable = cdp_ok  # type: ignore[method-assign]
+    browser._context_usable = context_ok  # type: ignore[method-assign]
+    browser._observed_runtime = observed  # type: ignore[method-assign]
     browser._page_labels[page_id] = "Banking"
     browser._page_agent_access[page_id] = False
 
