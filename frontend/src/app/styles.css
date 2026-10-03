@@ -59,3 +59,23 @@
 
 * { border-color: var(--border); }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--background); color: var(--foreground); }
+
+.field { width:100%; min-height:2.25rem; border:1px solid var(--input); border-radius:.375rem; background:var(--background); padding:.45rem .7rem; color:var(--foreground); outline:none; }
+.field:focus { box-shadow:0 0 0 2px color-mix(in oklab,var(--ring) 45%,transparent); }
+.btn-link { display:inline-flex; align-items:center; min-height:2rem; padding:0 .5rem; font-size:.75rem; font-weight:500; text-decoration:underline; text-underline-offset:3px; }
+.settings-card { border:1px solid var(--border); border-radius:.75rem; background:var(--card); padding:1.25rem; box-shadow:0 1px 2px rgb(0 0 0 / .04); }
+.settings-card>h2 { margin:0 0 .8rem; font-size:.9rem; font-weight:600; }
+.setting-row { display:flex; min-height:3.25rem; align-items:center; justify-content:space-between; gap:1rem; border-top:1px solid var(--border); padding:.75rem 0; font-size:.8rem; }
+.setting-row small { display:block; margin-top:.2rem; color:var(--muted-foreground); font-weight:400; }
+.browser-screen { display:flex; min-height:360px; align-items:center; justify-content:center; overflow:hidden; background:#090909; }
+.browser-screen img { display:block; max-height:75vh; max-width:100%; user-select:none; -webkit-user-drag:none; }
+.browser-screen img:focus { outline:2px solid var(--ring); outline-offset:-2px; }
+
+.data-table .ant-table, .data-table .ant-table-container, .data-table .ant-table-content { background:var(--card) !important; color:var(--foreground) !important; }
+.data-table .ant-table-thead > tr > th { background:var(--muted) !important; color:var(--muted-foreground) !important; border-color:var(--border) !important; font-size:.72rem; text-transform:uppercase; letter-spacing:.025em; }
+.data-table .ant-table-tbody > tr > td { border-color:var(--border) !important; color:var(--foreground) !important; font-size:.78rem; }
+.data-table .ant-table-tbody > tr.ant-table-row:hover > td { background:var(--accent) !important; }
+.data-table .ant-pagination { margin:12px 16px !important; }
+.dark .ant-modal-content, .dark .ant-modal-header { background:var(--card) !important; color:var(--foreground) !important; }
+.dark .ant-modal-title, .dark .ant-modal-close { color:var(--foreground) !important; }
+.dark .ant-select-selector, .dark .ant-input-number, .dark .ant-input-number-input { background:var(--background) !important; border-color:var(--border) !important; color:var(--foreground) !important; }
