@@ -10,6 +10,7 @@ import { eventBus } from "@/shared/events/bus"
 import { setLocale } from "@/shared/i18n"
 import { uiPreferences } from "@/shared/lib/preferences"
 import { notifications } from "@/shared/notifications/bus"
+import { IncompleteSettingsSnapshotError, settingsUpdatePayload } from "@/shared/settings/payload"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 import Button from "@/shared/ui/Button.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
@@ -82,13 +83,16 @@ async function load(): Promise<void> {
 }
 
 async function save(): Promise<void> {
+  if (!state.value || loading.value || saving.value) return
   saving.value = true
   error.value = ""
   try {
-    state.value = await managementApi.updateSettings({ ...form })
+    state.value = await managementApi.updateSettings(settingsUpdatePayload(state.value, { ...form }))
     notifications.success(String(t("notifications.saved")))
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Unable to save settings"
+    error.value = caught instanceof IncompleteSettingsSnapshotError
+      ? String(t("settings.reloadBeforeSave"))
+      : caught instanceof Error ? caught.message : "Unable to save settings"
   } finally {
     saving.value = false
   }
@@ -117,7 +121,7 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
       <Button variant="outline" size="sm" @click="load">
         <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
       </Button>
-      <Button size="sm" :disabled="saving" @click="save">
+      <Button size="sm" :disabled="saving || loading || !state" @click="save">
         <Save class="mr-2 size-4" />{{ t("common.save") }}
       </Button>
     </PageHeader>
