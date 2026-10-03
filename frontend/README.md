@@ -73,3 +73,9 @@ Runtime variables:
 `hybrid` uses the unified management WebSocket as the primary transport and retains the existing MCP Calls SSE stream only as a compatibility fallback during migration. Deployment may switch to `websocket` after the fallback is no longer required.
 
 The implementation roadmap and backend follow-ups are tracked in GitHub issue #233.
+
+### Production admin cutover
+
+The standalone management UI assumes it is served from the root of its own origin. Vite assets, `runtime-config.js`, and the browser-facing `/api/*` proxy contract are root-relative.
+
+Do not expose the current artifact by path-prefix proxying `/admin/*` directly to the frontend container. Keep the frontend on a dedicated production origin and use `/admin` on the MCP Bridge public origin only as an explicit redirect to that UI. Backend management APIs remain under `/admin/api/*`; the frontend container continues to proxy its own `/api/*` routes to those backend endpoints.
