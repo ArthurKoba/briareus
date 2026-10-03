@@ -41,7 +41,8 @@ type State = {
   developer_access_enabled?: boolean
   developer_access_effective?: boolean
   can_reopen_closed_tab?: boolean
-  capabilities?: string[]
+  capabilities?: Record<string, boolean> | string[]
+  viewport?: { width?: number; height?: number }
 }
 
 const { t } = useI18n()
@@ -51,6 +52,7 @@ const message = ref("")
 const addressDraft = ref("")
 const addressFocused = ref(false)
 const viewportPreset = ref("auto")
+const backendCapabilities = ref<Record<string, boolean>>({})
 const screen = ref<HTMLImageElement | null>(null)
 const devtools = ref<HTMLImageElement | null>(null)
 const dims = ref({ w: 1440, h: 900 })
@@ -67,7 +69,13 @@ const selectedId = computed(() => state.value.selected_page_id ?? "")
 const devId = computed(() => state.value.docked_devtools_page_id ?? "")
 const selectedPage = computed(() => pages.value.find((page) => page.page_id === selectedId.value) ?? null)
 const live = computed(() => status.value === "live")
-const canSetViewport = computed(() => state.value.capabilities?.includes("set_viewport") === true)
+function capabilityEnabled(name: string): boolean {
+  const capabilities = state.value.capabilities
+  if (Array.isArray(capabilities)) return capabilities.includes(name)
+  if (capabilities && typeof capabilities === "object") return capabilities[name] === true
+  return backendCapabilities.value[name] === true
+}
+const canSetViewport = computed(() => capabilityEnabled("set_viewport"))
 const viewportOptions = computed(() => [
   { label: t("browser.automatic"), value: "auto" },
   { label: "1280 × 720", value: "1280x720" },
@@ -92,18 +100,33 @@ async function connect(): Promise<void> {
   status.value = "connecting"
   message.value = String(t("browser.connecting"))
   try {
-    const { ticket } = await managementApi.browserTicket()
+    void managementApi.browserState().then((snapshot) => {
+      const capabilities = snapshot.capabilities
+      if (capabilities && typeof capabilities === "object" && !Array.isArray(capabilities)) {
+        backendCapabilities.value = capabilities as Record<string, boolean>
+      }
+    }).catch(() => undefined)
     const scheme = location.protocol === "https:" ? "wss:" : "ws:"
-    ws = new WebSocket(`${scheme}//${location.host}/browser/ws`)
+    ws = new WebSocket(`${scheme}//${location.host}/api/browser/operator/ws`)
     ws.onopen = () => {
-      frontendTelemetry.websocket("connected", "browser.operator")
-      ws?.send(JSON.stringify({ type: "auth", ticket }))
+      frontendTelemetry.websocket("connected", "browser.operator", "websocket")
     }
     ws.onclose = (event) => {
       ws = null
       status.value = "disconnected"
-      frontendTelemetry.websocket("disconnected", "browser.operator")
-      message.value = event.code === 4401 ? String(t("browser.authorizationExpired")) : String(t("browser.reconnecting"))
+      frontendTelemetry.websocket("disconnected", "browser.operator", "websocket")
+      if (event.code === 4401) {
+        message.value = String(t("browser.authorizationExpired"))
+        window.dispatchEvent(new CustomEvent("management:auth-expired"))
+        return
+      }
+      if (event.code === 4403) {
+        status.value = "error"
+        message.value = String(t("browser.connectionFailed"))
+        notifications.error(String(t("notifications.websocketError")), message.value)
+        return
+      }
+      message.value = String(t("browser.reconnecting"))
       clearTimeout(reconnect)
       reconnect = window.setTimeout(connect, 1000)
     }
@@ -116,10 +139,11 @@ async function connect(): Promise<void> {
     ws.onmessage = async (event) => {
       const payload = JSON.parse(event.data)
       if (payload.type === "state") {
-        state.value = payload
+        state.value = { ...payload, capabilities: payload.capabilities ?? backendCapabilities.value }
+        if (payload.viewport?.width && payload.viewport?.height) dims.value = { w: payload.viewport.width, h: payload.viewport.height }
         status.value = "live"
         message.value = ""
-        eventBus.publishMock("browser.activity", "state", {
+        eventBus.publishMock("browser.runtime", "state", {
           pages: Array.isArray(payload.pages) ? payload.pages.length : 0,
           selected_page_id: payload.selected_page_id ?? null,
         })
@@ -141,7 +165,7 @@ async function connect(): Promise<void> {
     }
   } catch (caught) {
     status.value = "error"
-    message.value = caught instanceof Error ? caught.message : String(t("browser.ticketFailed"))
+    message.value = caught instanceof Error ? caught.message : String(t("browser.connectionFailed"))
     frontendTelemetry.error("browser.connect", caught)
     notifications.error(String(t("notifications.websocketError")), message.value)
     clearTimeout(reconnect)
@@ -168,12 +192,19 @@ function developer(): void {
   if (allow && !confirm(String(t("browser.developerConfirm")))) return
   send({ type: "set_developer_access", allowed: allow })
 }
-function setViewport(value: string): void {
+async function setViewport(value: string): Promise<void> {
   viewportPreset.value = value
-  if (!canSetViewport.value || value === "auto") return
+  if (!canSetViewport.value || value === "auto" || !selectedId.value) return
   const [width, height] = value.split("x").map(Number)
-  send({ type: "set_viewport", width, height })
-  frontendTelemetry.event("browser.viewport_change", { width, height })
+  if (!width || !height) return
+  try {
+    await managementApi.setBrowserViewport(selectedId.value, width, height)
+    dims.value = { w: width, h: height }
+    send({ type: "refresh_state" })
+    frontendTelemetry.event("browser.viewport_change", { page_id: selectedId.value, width, height })
+  } catch (caught) {
+    frontendTelemetry.error("browser.viewport_change_failed", caught, { page_id: selectedId.value, width, height })
+  }
 }
 function cleanApp(): void {
   if (confirm(String(t("browser.cleanAppConfirm")))) send({ type: "clean_app" })

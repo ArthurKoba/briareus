@@ -47,6 +47,11 @@ function merge(item: InvocationRecord): void {
 }
 
 function handle(event: BusEvent): void {
+  if (event.type === "snapshot") {
+    const snapshot = event.data as { events?: InvocationRecord[] }
+    for (const item of (snapshot.events ?? []).slice().reverse()) merge(item)
+    return
+  }
   if (event.type !== "item") return
   const item = event.data as InvocationRecord
   if (followLive.value) merge(item)

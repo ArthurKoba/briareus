@@ -17,8 +17,31 @@ const error = ref("")
 let unsubscribe: undefined | (() => void)
 
 function accept(event: BusEvent): void {
-  if (event.type === "snapshot" || event.type === "metrics") {
-    data.value = event.data as DashboardState
+  if (!data.value || event.type !== "snapshot") return
+  const next = event.data as Partial<DashboardState> & { analysis?: unknown }
+  const analysis = next.analysis
+  let analysisSummary = data.value.analysis
+  if (analysis && typeof analysis === "object") {
+    const raw = analysis as Record<string, unknown>
+    if (typeof raw.projects === "number") analysisSummary = raw as unknown as DashboardState["analysis"]
+    else {
+      const projects = Array.isArray(raw.projects) ? raw.projects as Array<Record<string, unknown>> : []
+      const workers = Array.isArray(raw.workers) ? raw.workers as Array<Record<string, unknown>> : []
+      if (projects.length || workers.length) analysisSummary = {
+        projects: projects.length,
+        active_sessions: projects.filter((item) => item.session === "active").length,
+        workers: workers.length,
+        running_workers: workers.filter((item) => Boolean(item.running)).length,
+      }
+    }
+  }
+  data.value = {
+    ...data.value,
+    ...(next.accounts ? { accounts: next.accounts } : {}),
+    ...(next.calls ? { calls: next.calls } : {}),
+    ...(next.oauth ? { oauth: next.oauth } : {}),
+    ...(next.workspace ? { workspace: next.workspace } : {}),
+    analysis: analysisSummary,
   }
 }
 
@@ -28,7 +51,7 @@ async function load(): Promise<void> {
   try {
     const snapshot = await managementApi.dashboard()
     data.value = snapshot
-    eventBus.publishMock("dashboard.metrics", "snapshot", snapshot)
+    eventBus.publishMock("system.metrics", "snapshot", snapshot)
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to load dashboard"
   } finally {
@@ -37,8 +60,8 @@ async function load(): Promise<void> {
 }
 
 onMounted(async () => {
-  unsubscribe = eventBus.subscribe("dashboard.metrics", accept)
   await load()
+  unsubscribe = eventBus.subscribe("system.metrics", accept)
 })
 onBeforeUnmount(() => unsubscribe?.())
 </script>

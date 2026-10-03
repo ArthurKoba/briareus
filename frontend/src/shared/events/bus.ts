@@ -4,7 +4,7 @@ import { runtimeConfig } from "@/shared/config/runtime"
 import { tabWorkspace, topicRealtimeEnabled } from "@/shared/lib/tab-workspace"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 
-export type EventTopic = "mcp.calls" | "dashboard.metrics" | "browser.activity" | "system.notifications" | "runtime.state" | string
+export type EventTopic = "mcp.calls" | "system.metrics" | "system.notifications" | "browser.runtime" | "management.events" | string
 export interface BusEvent<T = unknown> { topic: EventTopic; type: string; occurredAt: string; data: T }
 type Handler = (event: BusEvent) => void
 
@@ -31,7 +31,7 @@ function dispatch(event: BusEvent, remote = false): void {
 function normalizeRemoteEvent(input: unknown): BusEvent | null {
   if (!input || typeof input !== "object") return null
   const payload = input as Record<string, unknown>
-  if (["subscribed", "unsubscribed", "pong", "hello"].includes(String(payload.type))) return null
+  if (["subscribed", "unsubscribed", "pong", "hello", "ready"].includes(String(payload.type))) return null
   if (typeof payload.topic !== "string" || typeof payload.type !== "string") return null
   const occurredAt = typeof payload.occurredAt === "string"
     ? payload.occurredAt

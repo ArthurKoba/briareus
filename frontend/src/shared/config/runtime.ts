@@ -8,6 +8,6 @@ declare global { interface Window { __MCP_MANAGEMENT_UI_CONFIG__?: Partial<Manag
 const raw=window.__MCP_MANAGEMENT_UI_CONFIG__
 export const runtimeConfig: ManagementUiRuntimeConfig={
   preview: raw?.preview ?? true,
-  telemetry:{ enabled:raw?.telemetry?.enabled ?? false, endpoint:raw?.telemetry?.endpoint ?? "/api/client-telemetry", sampleRate:raw?.telemetry?.sampleRate ?? 1 },
-  events:{ mode:raw?.events?.mode ?? "hybrid", url:raw?.events?.url ?? "/events/ws" },
+  telemetry:{ enabled:raw?.telemetry?.enabled ?? true, endpoint:raw?.telemetry?.endpoint ?? "/api/telemetry", sampleRate:raw?.telemetry?.sampleRate ?? 1 },
+  events:{ mode:raw?.events?.mode ?? "hybrid", url:raw?.events?.url ?? "/api/realtime" },
 }

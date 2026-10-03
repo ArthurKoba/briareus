@@ -133,7 +133,7 @@ async function flush(): Promise<void> {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: 1, events }),
+      body: JSON.stringify({ events }),
       keepalive: true,
     })
     if (!response.ok) {
@@ -169,7 +169,7 @@ function flushBeacon(): void {
   const events = pending.splice(0, MAX_BATCH)
   const accepted = navigator.sendBeacon(
     endpoint,
-    new Blob([JSON.stringify({ version: 1, events })], { type: "application/json" }),
+    new Blob([JSON.stringify({ events })], { type: "application/json" }),
   )
   if (!accepted) pending.unshift(...events)
   delivery.pending = pending.length
