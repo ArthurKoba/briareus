@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from common.account_contracts import AccountList, AccountPublic
+import pytest
+
+from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
 from common.settings import GitHubPolicySettings
 from modules.github.github_identity import GitHubPrettyIdentityClient
 from modules.github.tool_context import GitHubRuntimeContext
@@ -27,6 +29,9 @@ class RecordingPrettyClient(GitHubPrettyIdentityClient):
         del repository
         return 77
 
+    def _any_installation_token(self) -> str:
+        return "installation-token"
+
     def _request(
         self,
         method: str,
@@ -35,8 +40,8 @@ class RecordingPrettyClient(GitHubPrettyIdentityClient):
         token: str | None = None,
         payload: object | None = None,
         allowed_errors: set[int] | None = None,
+        auth_mode: str = "",
     ) -> tuple[int, object]:
-        del token
         if method == "GET" and url.endswith("/app"):
             return 200, {
                 "slug": self.slug,
@@ -44,6 +49,8 @@ class RecordingPrettyClient(GitHubPrettyIdentityClient):
                 "permissions": {"contents": "write", "pull_requests": "write"},
             }
         if method == "GET" and "/users/" in url:
+            assert token == "installation-token"
+            assert auth_mode == "installation"
             return 200, {"id": self.bot_id, "login": f"{self.slug}[bot]", "type": "Bot"}
 
         self.requests.append({"method": method, "url": url, "payload": payload})
@@ -87,9 +94,7 @@ def test_app_identity_separates_display_name_from_actor_login() -> None:
     assert identity["display_name"] == "Koba AI Agent"
     assert identity["name"] == "Koba AI Agent"
     assert identity["login"] == "koba-ai-agent[bot]"
-    assert identity["email"] == (
-        "330168119+koba-ai-agent[bot]@users.noreply.github.com"
-    )
+    assert identity["email"] == ("330168119+koba-ai-agent[bot]@users.noreply.github.com")
     assert identity["type"] == "Bot"
 
 
@@ -207,22 +212,28 @@ def test_account_capabilities_report_github_app_permission_ceiling() -> None:
 
 
 class _ListOnlyManagement:
+    account = AccountPublic(
+        id="account-1",
+        alias="github-user",
+        provider="github",
+        auth_type="github_token",
+        base_url="https://api.github.com",
+        external_id=None,
+        verify_tls=True,
+        ca_cert_pem=None,
+        enabled=True,
+        created_at="2026-09-24T00:00:00+00:00",
+        updated_at="2026-09-24T00:00:00+00:00",
+    )
+
     def list_accounts(self, *, provider: str | None = None) -> AccountList:
         assert provider == "github"
-        account = AccountPublic(
-            id="account-1",
-            alias="github-user",
-            provider="github",
-            auth_type="github_token",
-            base_url="https://api.github.com",
-            external_id=None,
-            verify_tls=True,
-            ca_cert_pem=None,
-            enabled=True,
-            created_at="2026-09-24T00:00:00+00:00",
-            updated_at="2026-09-24T00:00:00+00:00",
-        )
-        return AccountList(accounts=[account], count=1)
+        return AccountList(accounts=[self.account], count=1)
+
+    def resolve_account(self, selector: str, *, provider: str) -> ResolvedAccount:
+        assert provider == "github"
+        assert selector in {self.account.alias, self.account.id}
+        return ResolvedAccount(**self.account.model_dump(), credential="reader-token")
 
 
 def test_github_account_list_exposes_potential_capabilities() -> None:
@@ -237,13 +248,15 @@ def test_github_account_list_exposes_potential_capabilities() -> None:
     assert "user_token_scoped_access" in listed["potential_capabilities"]
 
 
-def test_public_github_selector_does_not_resolve_management_account() -> None:
+def test_public_github_selector_uses_unique_authenticated_reader() -> None:
     context = GitHubRuntimeContext(_ListOnlyManagement(), GitHubPolicySettings())
 
     client = context.client("public")
 
     assert client.public_only is True
     assert client.auth_type == "public"
+    assert client.token == "reader-token"
+    assert client.public_reader_account == "github-user"
 
 
 def test_public_github_capabilities_are_read_only() -> None:
@@ -254,3 +267,85 @@ def test_public_github_capabilities_are_read_only() -> None:
 
     assert result["auth_type"] == "public"
     assert result["provider_permissions"] == {"contents": "read"}
+
+
+class _NoReaderManagement:
+    def list_accounts(self, *, provider: str | None = None) -> AccountList:
+        assert provider == "github"
+        return AccountList(accounts=[], count=0)
+
+
+def test_public_github_requires_authenticated_reader_by_default() -> None:
+    context = GitHubRuntimeContext(_NoReaderManagement(), GitHubPolicySettings())
+
+    with pytest.raises(Exception, match="GITHUB_PUBLIC_READER_ACCOUNT"):
+        context.client("public")
+
+
+def test_public_github_can_explicitly_allow_anonymous_fallback() -> None:
+    context = GitHubRuntimeContext(
+        _NoReaderManagement(),
+        GitHubPolicySettings(public_allow_anonymous_fallback=True),
+    )
+
+    client = context.client("public")
+
+    assert client.public_only is True
+    assert client.token == ""
+
+
+class _MultipleReaderManagement:
+    def __init__(self) -> None:
+        self.accounts = [
+            AccountPublic(
+                id="account-other",
+                alias="secondary-reader",
+                provider="github",
+                auth_type="github_token",
+                base_url="https://api.github.com",
+                external_id=None,
+                verify_tls=True,
+                ca_cert_pem=None,
+                enabled=True,
+                created_at="2026-09-24T00:00:00+00:00",
+                updated_at="2026-09-24T00:00:00+00:00",
+            ),
+            AccountPublic(
+                id="account-authenticated",
+                alias="authenticated",
+                provider="github",
+                auth_type="github_token",
+                base_url="https://api.github.com",
+                external_id=None,
+                verify_tls=True,
+                ca_cert_pem=None,
+                enabled=True,
+                created_at="2026-09-24T00:00:00+00:00",
+                updated_at="2026-09-24T00:00:00+00:00",
+            ),
+        ]
+
+    def list_accounts(self, *, provider: str | None = None) -> AccountList:
+        assert provider == "github"
+        return AccountList(accounts=self.accounts, count=len(self.accounts))
+
+    def resolve_account(self, selector: str, *, provider: str) -> ResolvedAccount:
+        assert provider == "github"
+        account = next(item for item in self.accounts if selector in {item.id, item.alias})
+        return ResolvedAccount(
+            **account.model_dump(),
+            credential=f"token-for-{account.alias}",
+        )
+
+
+def test_public_reader_prefers_authenticated_alias_when_multiple_tokens_exist() -> None:
+    context = GitHubRuntimeContext(
+        _MultipleReaderManagement(),
+        GitHubPolicySettings(),
+    )
+
+    client = context.client("public")
+
+    assert client.public_only is True
+    assert client.public_reader_account == "authenticated"
+    assert client.token == "token-for-authenticated"

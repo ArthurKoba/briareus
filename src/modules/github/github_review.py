@@ -34,6 +34,7 @@ class GitHubReviewClient(GitHubRepositoryClientBase):
             "https://api.github.com/graphql",
             token=token,
             payload={"query": query, "variables": variables},
+            auth_mode="user_token" if self.token else "installation",
         )
         if not isinstance(result, dict):
             raise GitHubAgentError("unexpected GraphQL response")

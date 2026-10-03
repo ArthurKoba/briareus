@@ -33,6 +33,8 @@ class _GitHubHistoryHost(Protocol):
 
     def _installation_id(self, repository: str) -> int: ...
 
+    def _any_installation_token(self) -> str: ...
+
     def _request(
         self,
         method: str,
@@ -41,6 +43,7 @@ class _GitHubHistoryHost(Protocol):
         token: str | None = None,
         payload: object | None = None,
         allowed_errors: set[int] | None = None,
+        auth_mode: str = "",
     ) -> tuple[int, JsonContainer]: ...
 
     def _repo_request(
@@ -70,6 +73,7 @@ class GitHubHistoryMixin:
             "GET",
             f"{_GITHUB_API}/app",
             token=self._history_host()._app_jwt(),
+            auth_mode="github_app_jwt",
         )
         if not isinstance(app, dict):
             raise GitHubAgentError("unexpected GitHub App response")
@@ -81,6 +85,8 @@ class GitHubHistoryMixin:
         _, bot = self._history_host()._request(
             "GET",
             f"{_GITHUB_API}/users/{urllib.parse.quote(login, safe='')}",
+            token=self._history_host()._any_installation_token(),
+            auth_mode="installation",
         )
         if not isinstance(bot, dict):
             raise GitHubAgentError("unable to resolve GitHub App bot identity")
@@ -104,6 +110,7 @@ class GitHubHistoryMixin:
             "POST",
             f"{_GITHUB_API}/app/installations/{installation_id}/access_tokens",
             token=self._history_host()._app_jwt(),
+            auth_mode="github_app_jwt",
         )
         if not isinstance(token_payload, dict):
             raise GitHubAgentError("unexpected installation token response")

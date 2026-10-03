@@ -83,16 +83,12 @@ class RecordingHistoryClient(GitHubActionsClient):
                 "tree": {"sha": "t3"},
                 "author": {
                     "name": "koba-ai-agent[bot]",
-                    "email": (
-                        "330168119+koba-ai-agent[bot]@users.noreply.github.com"
-                    ),
+                    "email": ("330168119+koba-ai-agent[bot]@users.noreply.github.com"),
                     "date": "2026-09-17T12:00:00Z",
                 },
                 "committer": {
                     "name": "koba-ai-agent[bot]",
-                    "email": (
-                        "330168119+koba-ai-agent[bot]@users.noreply.github.com"
-                    ),
+                    "email": ("330168119+koba-ai-agent[bot]@users.noreply.github.com"),
                     "date": "2026-09-17T12:00:00Z",
                 },
                 "verification": {
@@ -132,6 +128,9 @@ class RecordingHistoryClient(GitHubActionsClient):
         del repository
         return 77
 
+    def _any_installation_token(self) -> str:
+        return "installation-token"
+
     def _request(
         self,
         method: str,
@@ -140,8 +139,9 @@ class RecordingHistoryClient(GitHubActionsClient):
         token: str | None = None,
         payload: object | None = None,
         allowed_errors: set[int] | None = None,
+        auth_mode: str = "",
     ) -> tuple[int, object]:
-        del token, payload, allowed_errors
+        del token, payload, allowed_errors, auth_mode
         if method == "GET" and url.endswith("/app"):
             return 200, {"slug": "koba-ai-agent"}
         if method == "GET" and "/users/koba-ai-agent%5Bbot%5D" in url:
@@ -166,6 +166,7 @@ class RecordingHistoryClient(GitHubActionsClient):
         *,
         payload: object | None = None,
         allowed_errors: set[int] | None = None,
+        auth_mode: str = "",
     ) -> tuple[int, object]:
         del repository, allowed_errors
         if method == "GET" and path.endswith("/branches?per_page=100"):
@@ -199,10 +200,7 @@ class RecordingHistoryClient(GitHubActionsClient):
                 "sha": sha,
                 "message": payload["message"],
                 "tree": {"sha": payload["tree"]},
-                "parents": [
-                    {"sha": parent}
-                    for parent in payload.get("parents", [])
-                ],
+                "parents": [{"sha": parent} for parent in payload.get("parents", [])],
                 "author": dict(payload["author"]),
                 "committer": dict(payload["committer"]),
             }

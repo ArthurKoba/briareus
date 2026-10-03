@@ -24,6 +24,7 @@ async def test_github_runtime_surface_is_isolated() -> None:
     assert "github_accounts" in names
     assert "github_account_capabilities" in names
     assert "github_agent_status" in names
+    assert "github_agent_rate_limits" in names
     assert "github_agent_create_pull_request" in names
     assert "github_agent_workflow_runs" in names
     assert "file_status" not in names
