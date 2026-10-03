@@ -219,5 +219,6 @@ admin = build_admin(
     runtime_settings,
     files,
     reverse,
+    snapshot_refresher,
 )
 admin.mount_to(app)
