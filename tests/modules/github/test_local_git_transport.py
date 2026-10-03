@@ -115,6 +115,26 @@ def test_authorize_local_git_configures_ordinary_git_credentials(tmp_path: Path)
     assert allowed.returncode == 0
 
 
+def test_authorize_local_git_does_not_write_credential_when_hook_is_foreign(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    repo = root / "projects" / "bridge"
+    hook = repo / ".git" / "hooks" / "pre-push"
+    hook.write_text("#!/bin/sh\nexit 0\n")
+    client = LocalGitClient(
+        app_id="123",
+        private_key="unused",
+        account_id="writer",
+        workspace_root=root,
+    )
+
+    with pytest.raises(GitHubAgentError, match="refusing to overwrite"):
+        client.authorize_local_git("ArthurKoba/mcp-bridge", "projects/bridge")
+
+    assert not (repo / ".git" / "koba-credentials").exists()
+
+
 def test_push_local_git_uses_configured_ordinary_git_transport(tmp_path: Path, monkeypatch) -> None:
     root = _repo(tmp_path)
     client = LocalGitClient(

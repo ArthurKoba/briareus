@@ -238,16 +238,9 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 f"workspace remote {remote!r} does not match repository {repository!r}: {current}"
             )
 
-        token = self.token or self._installation_token(repository)
         signature = self._git_signature()
         git_dir = target / ".git"
         credential_file = git_dir / "koba-credentials"
-        credential_file.write_text(
-            f"https://x-access-token:{token}@github.com/{repository}.git\n",
-            encoding="utf-8",
-        )
-        credential_file.chmod(0o600)
-
         hook = git_dir / "hooks" / "pre-push"
         hook.parent.mkdir(parents=True, exist_ok=True)
         marker = "# koba-managed-local-git-guard"
@@ -257,6 +250,13 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 raise GitHubAgentError(
                     "existing pre-push hook is not managed by Koba; refusing to overwrite it"
                 )
+
+        token = self.token or self._installation_token(repository)
+        credential_file.write_text(
+            f"https://x-access-token:{token}@github.com/{repository}.git\n",
+            encoding="utf-8",
+        )
+        credential_file.chmod(0o600)
         reserved = " ".join(sorted(self.protected_branches))
         hook.write_text(
             "#!/bin/sh\n"
