@@ -121,23 +121,15 @@ aligned with the configured window size. The profile remains persistent in the `
 volume and the Browser Operator / DevTools surfaces continue to attach to the same Chromium
 process over loopback CDP.
 
-The image owns coherent Russian/Moscow desktop defaults: `TZ=Europe/Moscow`,
-`LANG=LC_ALL=ru_RU.UTF-8`, `DISPLAY=:99`, `BROWSER_HEADLESS=false`,
-`BROWSER_LOCALE=ru-RU`, `BROWSER_ACCEPT_LANGUAGE=ru-RU,ru,en-US,en`, 24-bit color, and Xvfb
-enabled. These remain normal BrowserSettings/process inputs rather than Compose bootstrap
-environment, preserving the repository boundary that runtime defaults belong to source/image
-configuration. `BROWSER_TIMEZONE` and `BROWSER_DISPLAY` take precedence over generic `TZ` and
-`DISPLAY`; empty `TZ` is normalized back to `Europe/Moscow`. Chromium is launched with explicit
-`TZ`, `DISPLAY`, `LANG`, and `LC_ALL` values derived from `BrowserSettings`, so accidental empty
-container variables cannot silently revert the browser to UTC. A future deployment-level override
-should wire only the specific setting that needs to change instead of duplicating the full browser
-configuration in Compose.
+Browser desktop identity is source-owned by `BrowserDesktopProfile`: headful 1440x900,
+`ru-RU`, `ru-RU,ru,en-US,en`, `ru_RU.UTF-8`, 24-bit color and Xvfb on `:99`.
+Those values are not deployment environment inputs, so they can later move behind Management
+runtime settings without requiring container configuration changes.
 
-Coolify may materialize an optional application variable as an empty string. For the browser
-desktop environment, the container entrypoint treats blank `TZ`, `LANG`, `LC_ALL`, and `DISPLAY`
-as absent and restores the image defaults before starting the runtime. Explicit non-empty values
-are preserved. This prevents a blank `TZ` from turning Chromium's JavaScript timezone into
-`Etc/Unknown`.
+Timezone is the one deployment-owned browser input. Compose passes only `TZ` into the Web
+runtime using `${TZ:-UTC}`: an explicit IANA timezone such as `Europe/Moscow` is preserved,
+while an unset or blank value falls back to `UTC`. Chromium receives the resolved timezone
+together with the internal display and locale values in its process command.
 
 Do not spoof a foreign browser identity by overriding the user agent; use a real headful
 Chromium runtime and consistent locale/display/timezone inputs instead.
