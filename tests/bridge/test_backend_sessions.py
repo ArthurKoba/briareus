@@ -59,3 +59,32 @@ async def test_proxy_client_pool_preserves_parallelism_with_separate_sessions() 
         )
         assert [result.data for result in results] == ["ok", "ok"]
         assert pool.connect_count == 2
+
+
+@pytest.mark.asyncio
+async def test_proxy_client_pool_caches_tool_catalog_for_short_ttl() -> None:
+    backend = FastMCP("catalog-backend")
+
+    @backend.tool
+    async def echo(value: str) -> str:
+        return value
+
+    async def timeout() -> float:
+        return 2.0
+
+    pool = ProxyClientPool(
+        backend,
+        name="catalog",
+        timeout_provider=timeout,
+        size=1,
+        catalog_ttl_seconds=10,
+    )
+    leased = await pool.acquire()
+    async with leased as client:
+        first = await client.list_tools()
+        second = await client.list_tools()
+
+    assert [tool.name for tool in first] == ["echo"]
+    assert [tool.name for tool in second] == ["echo"]
+    assert pool.catalog_refresh_count == 1
+    await pool.close()
