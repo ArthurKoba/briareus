@@ -7,7 +7,12 @@ from pathlib import Path
 def resolve_chromium_gpu_args(dri_root: Path = Path("/dev/dri")) -> tuple[str, ...]:
     """Prefer a real DRM render node; use SwiftShader only when none is available."""
     if dri_root.is_dir() and any(dri_root.glob("renderD*")):
-        return ()
+        return (
+            "--use-gl=angle",
+            "--use-angle=vulkan",
+            "--enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
+            "--ignore-gpu-blocklist",
+        )
     return (
         "--use-gl=angle",
         "--use-angle=swiftshader",

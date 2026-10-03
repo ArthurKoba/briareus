@@ -183,7 +183,12 @@ def test_browser_gpu_args_prefer_render_node_and_fall_back_to_swiftshader(tmp_pa
 
     (dri / "renderD128").touch()
 
-    assert resolve_chromium_gpu_args(dri) == ()
+    assert resolve_chromium_gpu_args(dri) == (
+        "--use-gl=angle",
+        "--use-angle=vulkan",
+        "--enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
+        "--ignore-gpu-blocklist",
+    )
 
 
 def test_browser_timezone_blank_env_falls_back_to_utc(
