@@ -6,8 +6,9 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
+from starlette.background import BackgroundTask
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import PlainTextResponse, Response, StreamingResponse
 
 _TRACER = trace.get_tracer("mcp-bridge.reverse-proxy")
 
@@ -118,12 +119,25 @@ class ReverseProxy:
             },
         ) as span:
             try:
-                response = await self._client.request(
-                    request.method,
-                    target,
-                    content=await request.body(),
-                    headers=self._request_headers(request),
+                request_headers = self._request_headers(request)
+                wants_stream = request.headers.get("accept", "").casefold().startswith(
+                    "text/event-stream"
                 )
+                if wants_stream:
+                    backend_request = self._client.build_request(
+                        request.method,
+                        target,
+                        content=await request.body(),
+                        headers=request_headers,
+                    )
+                    response = await self._client.send(backend_request, stream=True)
+                else:
+                    response = await self._client.request(
+                        request.method,
+                        target,
+                        content=await request.body(),
+                        headers=request_headers,
+                    )
             except httpx.RequestError as exc:
                 span.record_exception(exc)
                 return PlainTextResponse(
@@ -132,9 +146,19 @@ class ReverseProxy:
                 )
             span.set_attribute("http.response.status_code", response.status_code)
 
+        headers = self._response_headers(response.headers)
+        if wants_stream:
+            return StreamingResponse(
+                response.aiter_raw(),
+                status_code=response.status_code,
+                headers=headers,
+                media_type=None,
+                background=BackgroundTask(response.aclose),
+            )
+
         return Response(
             content=response.content,
             status_code=response.status_code,
-            headers=self._response_headers(response.headers),
+            headers=headers,
             media_type=None,
         )
