@@ -19,14 +19,15 @@ No backend container is required to build or start the frontend.
 
 ### Preview
 
-Set `MANAGEMENT_UI_PREVIEW=true` (the default). The UI renders using local preview state and makes no management API requests. This is the normal mode while developing the visual application independently.
+Set `MANAGEMENT_UI_PREVIEW=true`. The UI renders using local preview state and makes no management API requests. Use this only when the backend is intentionally unavailable.
 
 ### Connected
 
-Set:
+Connected mode is the default. Set:
 
-- `MANAGEMENT_UI_PREVIEW=false`;
 - `MANAGEMENT_BACKEND_ORIGIN=https://<management-backend-origin>`.
+
+`MANAGEMENT_UI_PREVIEW=false` is already the default.
 
 The nginx runtime proxies browser requests from `/api/*` to the backend `/admin/api/*`. The SPA itself is unchanged, so switching backend endpoints does not require rebuilding the image.
 
