@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
 from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
+from common.audit_payloads import redact_payload
 from common.cache import CacheBackend, CacheKeys
 from common.models import JsonObject, json_object
 from common.runtime_policy_contracts import (
@@ -176,13 +177,18 @@ class InvocationAuditService:
             capture_payloads = config.logging_capture_payloads
         self.repository.append_many(invocations, capture_payloads=capture_payloads)
         if self.publisher is not None:
+            events: list[object] = []
+            for item in invocations:
+                event = item.model_dump(mode="json")
+                if not capture_payloads:
+                    event["arguments_json"] = ""
+                    event["result_json"] = ""
+                    event["error_message"] = ""
+                events.append(redact_payload(event))
             self.publisher(
                 "mcp.calls",
                 "batch",
-                {
-                    "events": [item.model_dump(mode="json") for item in invocations],
-                    "count": len(invocations),
-                },
+                {"events": events, "count": len(events)},
             )
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:

@@ -511,3 +511,65 @@ def test_legacy_starlette_admin_remains_mounted() -> None:
     source = Path("src/management/runtime.py").read_text()
     assert "build_admin(" in source
     assert "admin.mount_to(app)" in source
+
+
+def test_admin_api_unhandled_error_is_json_500(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, https_only=False)
+    install_admin_api_error_handlers(app)
+
+    @app.get("/admin/api/fail")
+    async def fail():
+        raise RuntimeError("secret internal detail")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/admin/api/fail")
+        assert response.status_code == 500
+        assert response.json() == {
+            "error": {
+                "version": 1,
+                "code": "internal_error",
+                "message": "internal server error",
+                "status": 500,
+            }
+        }
+
+
+def test_realtime_call_publish_respects_capture_policy_and_redacts(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    engine, sessions = create_database(settings.database_url)
+    Base.metadata.create_all(engine)
+    with sessions.begin() as session:
+        session.add(ManagementConfigRecord(id=1, logging_capture_payloads=False))
+    config = ManagementConfigService(SqlAlchemyManagementConfigRepository(sessions))
+    published: list[tuple[str, str, object]] = []
+    audit = InvocationAuditService(
+        SqlAlchemyInvocationRepository(sessions),
+        config,
+        publisher=lambda topic, kind, data: published.append((topic, kind, data)),
+    )
+    from management.domain.telemetry import Invocation
+
+    audit.record(
+        Invocation(
+            module="github",
+            tool="example",
+            status="error",
+            duration_ms=1.0,
+            arguments_json='{"authorization":"Bearer super-secret"}',
+            result_json='{"token":"hidden"}',
+            error_message="Bearer error-secret",
+        )
+    )
+
+    assert len(published) == 1
+    topic, kind, data = published[0]
+    assert topic == "mcp.calls"
+    assert kind == "batch"
+    rendered = repr(data)
+    assert "super-secret" not in rendered
+    assert "hidden" not in rendered
+    assert "error-secret" not in rendered
+    assert "arguments_json': ''" in rendered
+    engine.dispose()

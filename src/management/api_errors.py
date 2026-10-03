@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Request
+from collections.abc import Awaitable, Callable
+
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from starlette.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import JSONResponse, Response
 
 
 def api_error(status_code: int, message: object) -> JSONResponse:
@@ -15,6 +18,7 @@ def api_error(status_code: int, message: object) -> JSONResponse:
         422: "validation_error",
         502: "provider_unavailable",
         503: "service_unavailable",
+        500: "internal_error",
         504: "timeout",
     }.get(status_code, "http_error")
     return JSONResponse(
@@ -31,8 +35,8 @@ def api_error(status_code: int, message: object) -> JSONResponse:
 
 
 def install_admin_api_error_handlers(app: FastAPI) -> None:
-    @app.exception_handler(HTTPException)
-    async def admin_http_error(request: Request, exc: HTTPException) -> JSONResponse:
+    @app.exception_handler(StarletteHTTPException)
+    async def admin_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         if request.url.path.startswith("/admin/api/"):
             return api_error(exc.status_code, exc.detail)
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
@@ -42,3 +46,14 @@ def install_admin_api_error_handlers(app: FastAPI) -> None:
         if request.url.path.startswith("/admin/api/"):
             return api_error(422, exc.errors())
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+    @app.middleware("http")
+    async def admin_internal_error_boundary(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        try:
+            return await call_next(request)
+        except Exception:
+            if request.url.path.startswith("/admin/api/"):
+                return api_error(500, "internal server error")
+            raise
