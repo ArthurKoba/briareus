@@ -129,8 +129,8 @@ def test_browser_headful_identity_configuration(
 ) -> None:
     from modules.files.workspace_store import WorkspaceFileStore
 
-    monkeypatch.setenv("TZ", "Europe/Moscow")
     browser = BrowserManager(
+
         workspace=WorkspaceFileStore(tmp_path / "workspace"),
         profile_dir=tmp_path / "profile",
         executable_path="/usr/bin/chromium",
@@ -145,14 +145,14 @@ def test_browser_headful_identity_configuration(
         display=":99",
         color_depth=24,
         xvfb_enabled=True,
+        timezone="Europe/Moscow",
     )
 
     command = browser._browser_command()
-    env = browser._browser_environment(":99")
 
     assert "--headless=new" not in command
     assert "--lang=ru-RU" in command
     assert "--accept-lang=ru-RU,ru,en-US,en" in command
     assert "--window-size=1440,900" in command
-    assert env["DISPLAY"] == ":99"
-    assert env["TZ"] == "Europe/Moscow"
+    assert browser.display == ":99"
+    assert browser.timezone == "Europe/Moscow"

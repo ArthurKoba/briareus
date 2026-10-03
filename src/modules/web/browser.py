@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import shutil
 import tempfile
 import uuid
@@ -44,7 +43,7 @@ class BrowserManager:
         display: str = ":99",
         color_depth: int = 24,
         xvfb_enabled: bool = True,
-        timezone: str = "",
+        timezone: str = "Europe/Moscow",
     ) -> None:
         self.workspace = workspace
         self.profile_dir = profile_dir.resolve(strict=False)
@@ -212,18 +211,11 @@ class BrowserManager:
         command.append("about:blank")
         return command
 
-    def _browser_environment(self, display: str) -> dict[str, str]:
-        env = dict(os.environ)
-        if display:
-            env["DISPLAY"] = display
-        if self.timezone:
-            env["TZ"] = self.timezone
-        return env
 
     async def _ensure_display_locked(self) -> str:
         if self.headless:
             return ""
-        display = self.display or os.environ.get("DISPLAY", "").strip()
+        display = self.display
         if not display:
             raise BrowserError("headful Chromium requires BROWSER_DISPLAY or DISPLAY")
         if not self.xvfb_enabled:
@@ -270,7 +262,6 @@ class BrowserManager:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-                env=self._browser_environment(display),
             )
             await self._wait_for_debugging_endpoint(process)
             browser = await playwright.chromium.connect_over_cdp(
@@ -448,9 +439,9 @@ class BrowserManager:
             "browser": "chromium",
             "locale": self.locale,
             "accept_language": self.accept_language,
-            "display": "" if self.headless else (self.display or os.environ.get("DISPLAY", "")),
+            "display": "" if self.headless else self.display,
             "xvfb_enabled": self.xvfb_enabled,
-            "timezone": self.timezone or os.environ.get("TZ", ""),
+            "timezone": self.timezone,
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "page_count": len(pages),
