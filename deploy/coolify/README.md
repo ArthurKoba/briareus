@@ -113,6 +113,35 @@ Coolify may override these restart-required infrastructure limits with:
 
 Increase these only deliberately for a known workload; do not remove the containment boundary.
 
+## Persistent browser identity
+
+The `web` service runs persistent Chromium headful by default on an internal Xvfb display.
+This avoids the explicit `HeadlessChrome` user agent and keeps browser-visible screen metrics
+aligned with the configured window size. The profile remains persistent in the `web-browser`
+volume and the Browser Operator / DevTools surfaces continue to attach to the same Chromium
+process over loopback CDP.
+
+Defaults are Russian/Moscow-oriented but are deployment-overridable:
+
+```text
+TZ=Europe/Moscow
+BROWSER_HEADLESS=false
+BROWSER_LOCALE=ru-RU
+BROWSER_ACCEPT_LANGUAGE=ru-RU,ru,en-US,en
+BROWSER_POSIX_LOCALE=ru_RU.UTF-8
+BROWSER_DISPLAY=:99
+BROWSER_COLOR_DEPTH=24
+BROWSER_XVFB_ENABLED=true
+BROWSER_TIMEZONE=
+```
+
+`TZ` is the container timezone and therefore the normal browser timezone. Leave
+`BROWSER_TIMEZONE` empty to inherit it. Set `BROWSER_TIMEZONE` only when Chromium must use a
+different timezone from the rest of the `web` container. `BROWSER_LOCALE` controls Chromium's
+language/JavaScript language exposure, while `BROWSER_POSIX_LOCALE` controls the process locale.
+Do not spoof a foreign browser identity by overriding the user agent; use a real headful
+Chromium runtime and consistent locale/display/timezone inputs instead.
+
 ## Shared Valkey cache
 
 The stack includes a private `valkey/valkey:9.1.2-alpine` service for hot account resolution

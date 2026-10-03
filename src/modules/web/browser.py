@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import uuid
@@ -38,6 +39,12 @@ class BrowserManager:
         viewport_height: int,
         max_snapshot_text_chars: int,
         max_snapshot_elements: int,
+        locale: str = "ru-RU",
+        accept_language: str = "ru-RU,ru,en-US,en",
+        display: str = ":99",
+        color_depth: int = 24,
+        xvfb_enabled: bool = True,
+        timezone: str = "",
     ) -> None:
         self.workspace = workspace
         self.profile_dir = profile_dir.resolve(strict=False)
@@ -46,11 +53,18 @@ class BrowserManager:
         self.timeout_ms = timeout_ms
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
+        self.locale = locale.strip()
+        self.accept_language = accept_language.strip()
+        self.display = display.strip()
+        self.color_depth = color_depth
+        self.xvfb_enabled = xvfb_enabled
+        self.timezone = timezone.strip()
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._browser_process: asyncio.subprocess.Process | None = None
+        self._display_process: asyncio.subprocess.Process | None = None
         self._context: BrowserContext | None = None
         self._pages: dict[str, Page] = {}
         self._page_ids: dict[int, str] = {}
@@ -180,6 +194,62 @@ class BrowserManager:
             process.kill()
             await process.wait()
 
+    def _browser_command(self) -> list[str]:
+        command = [
+            self.executable_path,
+            "--no-sandbox",
+            f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}",
+            f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}",
+            f"--user-data-dir={self.profile_dir}",
+            f"--window-size={self.viewport_width},{self.viewport_height}",
+        ]
+        if self.locale:
+            command.append(f"--lang={self.locale}")
+        if self.accept_language:
+            command.append(f"--accept-lang={self.accept_language}")
+        if self.headless:
+            command.append("--headless=new")
+        command.append("about:blank")
+        return command
+
+    def _browser_environment(self, display: str) -> dict[str, str]:
+        env = dict(os.environ)
+        if display:
+            env["DISPLAY"] = display
+        if self.timezone:
+            env["TZ"] = self.timezone
+        return env
+
+    async def _ensure_display_locked(self) -> str:
+        if self.headless:
+            return ""
+        display = self.display or os.environ.get("DISPLAY", "").strip()
+        if not display:
+            raise BrowserError("headful Chromium requires BROWSER_DISPLAY or DISPLAY")
+        if not self.xvfb_enabled:
+            return display
+        process = self._display_process
+        if process is not None and process.returncode is None:
+            return display
+        process = await asyncio.create_subprocess_exec(
+            "Xvfb",
+            display,
+            "-screen",
+            "0",
+            f"{self.viewport_width}x{self.viewport_height}x{self.color_depth}",
+            "-nolisten",
+            "tcp",
+            "-noreset",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.sleep(0.15)
+        if process.returncode is not None:
+            raise BrowserError(f"Xvfb exited during startup: {process.returncode}")
+        self._display_process = process
+        return display
+
     async def _start_locked(self) -> None:
         if self._context is not None:
             return
@@ -189,18 +259,9 @@ class BrowserManager:
             (self.profile_dir / lock_name).unlink(missing_ok=True)
         from playwright.async_api import async_playwright
 
+        display = await self._ensure_display_locked()
         playwright = await async_playwright().start()
-        command = [
-            self.executable_path,
-            "--no-sandbox",
-            f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}",
-            f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}",
-            f"--user-data-dir={self.profile_dir}",
-            f"--window-size={self.viewport_width},{self.viewport_height}",
-        ]
-        if self.headless:
-            command.append("--headless=new")
-        command.append("about:blank")
+        command = self._browser_command()
         process: asyncio.subprocess.Process | None = None
         browser: Browser | None = None
         try:
@@ -209,6 +270,7 @@ class BrowserManager:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                env=self._browser_environment(display),
             )
             await self._wait_for_debugging_endpoint(process)
             browser = await playwright.chromium.connect_over_cdp(
@@ -384,6 +446,11 @@ class BrowserManager:
             "developer_backend": "chrome-devtools-mcp",
             "headless": self.headless,
             "browser": "chromium",
+            "locale": self.locale,
+            "accept_language": self.accept_language,
+            "display": "" if self.headless else (self.display or os.environ.get("DISPLAY", "")),
+            "xvfb_enabled": self.xvfb_enabled,
+            "timezone": self.timezone or os.environ.get("TZ", ""),
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "page_count": len(pages),

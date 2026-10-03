@@ -95,7 +95,11 @@ FROM runtime-base AS web
 COPY --from=chrome-devtools-mcp /usr/local/bin/node /usr/local/bin/node
 COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp /opt/chrome-devtools-mcp
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        chromium fonts-liberation fonts-noto-color-emoji locales tzdata xvfb \
+    && sed -i 's/^# *\\(ru_RU.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen \
+    && sed -i 's/^# *\\(en_US.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/* \
     && uv sync --frozen --no-dev --group web --no-install-project
 COPY src/modules/__init__.py ./src/modules/__init__.py

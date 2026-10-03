@@ -118,3 +118,41 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     assert 'asyncio.create_subprocess_exec(' in source
     assert 'launch_persistent_context(' not in source
     assert 'command.append("--headless=new")' in source
+    assert 'command.append(f"--lang={self.locale}")' in source
+    assert 'command.append(f"--accept-lang={self.accept_language}")' in source
+    assert '"Xvfb"' in source
+
+
+def test_browser_headful_identity_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    monkeypatch.setenv("TZ", "Europe/Moscow")
+    browser = BrowserManager(
+        workspace=WorkspaceFileStore(tmp_path / "workspace"),
+        profile_dir=tmp_path / "profile",
+        executable_path="/usr/bin/chromium",
+        headless=False,
+        timeout_ms=30_000,
+        viewport_width=1440,
+        viewport_height=900,
+        max_snapshot_text_chars=30_000,
+        max_snapshot_elements=250,
+        locale="ru-RU",
+        accept_language="ru-RU,ru,en-US,en",
+        display=":99",
+        color_depth=24,
+        xvfb_enabled=True,
+    )
+
+    command = browser._browser_command()
+    env = browser._browser_environment(":99")
+
+    assert "--headless=new" not in command
+    assert "--lang=ru-RU" in command
+    assert "--accept-lang=ru-RU,ru,en-US,en" in command
+    assert "--window-size=1440,900" in command
+    assert env["DISPLAY"] == ":99"
+    assert env["TZ"] == "Europe/Moscow"
