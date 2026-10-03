@@ -8,7 +8,13 @@ from fastapi import APIRouter
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from common.settings import ManagementSettings
-from management.application.services import InvocationAuditService, SnapshotService
+from management.application.services import (
+    AccountService,
+    InvocationAuditService,
+    OAuthSessionService,
+    SnapshotService,
+)
+from management.dashboard_state import build_dashboard_state
 from management.infrastructure.web import WebAdminClient
 from management.realtime import REALTIME_TOPICS, RealtimeBus, RealtimeEnvelope
 
@@ -18,7 +24,9 @@ _SESSION_KEY = "management_admin"
 def build_realtime_router(
     settings: ManagementSettings,
     bus: RealtimeBus,
+    accounts: AccountService,
     audit: InvocationAuditService,
+    oauth_sessions: OAuthSessionService,
     snapshots: SnapshotService,
     web: WebAdminClient,
 ) -> APIRouter:
@@ -37,14 +45,7 @@ def build_realtime_router(
             except Exception as exc:
                 return {"available": False, "error": str(exc)}
         if topic == "system.metrics":
-            calls = await asyncio.to_thread(audit.summary)
-            workspace = await asyncio.to_thread(snapshots.get, "workspace:stats")
-            analysis = await asyncio.to_thread(snapshots.get, "reverse:overview")
-            return {
-                "calls": calls,
-                "workspace": workspace.payload if workspace is not None else {},
-                "analysis": analysis.payload if analysis is not None else {},
-            }
+            return await build_dashboard_state(accounts, audit, oauth_sessions, snapshots)
         cached = bus.snapshot(topic)
         if isinstance(cached, dict):
             return cached.get("data")

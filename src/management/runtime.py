@@ -30,6 +30,7 @@ from management.browser_operator_auth import (
     BrowserOperatorAuthError,
     verify_browser_operator_ticket,
 )
+from management.dashboard_state import build_dashboard_state
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
     create_database,
@@ -112,18 +113,10 @@ web_admin = WebAdminClient()
 async def _realtime_state_loop() -> None:
     while True:
         try:
-            workspace = await asyncio.to_thread(snapshots.get, "workspace:stats")
-            analysis = await asyncio.to_thread(snapshots.get, "reverse:overview")
-            calls = await asyncio.to_thread(audit.summary)
-            await realtime.publish(
-                "system.metrics",
-                "snapshot",
-                {
-                    "calls": calls,
-                    "workspace": workspace.payload if workspace is not None else {},
-                    "analysis": analysis.payload if analysis is not None else {},
-                },
+            dashboard_state = await build_dashboard_state(
+                accounts, audit, oauth_sessions, snapshots
             )
+            await realtime.publish("system.metrics", "snapshot", dashboard_state)
             try:
                 browser_state = await web_admin.status()
             except Exception as exc:
@@ -238,7 +231,9 @@ app.include_router(
         ),
     )
 )
-app.include_router(build_realtime_router(settings, realtime, audit, snapshots, web_admin))
+app.include_router(
+    build_realtime_router(settings, realtime, accounts, audit, oauth_sessions, snapshots, web_admin)
+)
 app.include_router(build_browser_operator_api_router(settings))
 
 

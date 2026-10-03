@@ -81,6 +81,8 @@ async def test_operator_sessions_share_control_with_agent(
     first_state = await browser.operator_state(str(first["owner_token"]))
     second_state = await browser.operator_state(str(second["owner_token"]))
     assert first_state["control"] == "shared"
+    assert first_state["capabilities"] == {"set_viewport": True}
+    assert first_state["viewport"] == {"width": 1440, "height": 900}
     assert first_state["operator_count"] == 2
     assert second_state["operator_count"] == 2
 
@@ -664,4 +666,3 @@ def test_browser_status_contract_exposes_developer_mode_fields(tmp_path: Path) -
     browser = _browser(tmp_path)
     assert browser.developer_access_enabled is False
     assert browser.developer_access_effective is False
-

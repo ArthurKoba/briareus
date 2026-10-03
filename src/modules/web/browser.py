@@ -1062,6 +1062,7 @@ class BrowserManager:
             "developer_backend": "chrome-devtools-mcp",
             "docked_devtools_page_id": self._operator_devtools_pages.get(owner_token, ""),
             "can_reopen_closed_tab": bool(self._closed_pages),
+            "capabilities": {"set_viewport": True},
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
             "screen": {"width": self.screen_width, "height": self.screen_height},
         }

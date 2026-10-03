@@ -38,7 +38,7 @@ from management.infrastructure.repositories import (
     SqlAlchemySnapshotRepository,
 )
 from management.presentation.web_api import WebApiServices, build_admin_api_router
-from management.realtime import RealtimeBus
+from management.realtime import REALTIME_TOPICS, RealtimeBus, RealtimeEnvelope
 from management.realtime_api import build_realtime_router
 from management.telemetry_ingest import FrontendTelemetryProxy, TelemetryUpstream
 
@@ -315,7 +315,14 @@ def test_provider_failure_does_not_destroy_management_session(tmp_path: Path) ->
         _login(client)
         failed = client.get("/admin/api/analysis/workers")
         assert failed.status_code == 502
-        assert failed.json()["error"]["code"] == "provider_unavailable"
+        assert failed.json() == {
+            "error": {
+                "version": 1,
+                "code": "provider_unavailable",
+                "message": "backend unavailable",
+                "status": 502,
+            }
+        }
         session = client.get("/admin/api/session")
         assert session.status_code == 200
         assert session.json()["authenticated"] is True
@@ -360,6 +367,11 @@ def test_frontend_telemetry_requires_session_and_redacts_payload(tmp_path: Path)
         accepted = client.post("/admin/api/telemetry", json=payload)
         assert accepted.status_code == 200
         assert accepted.json()["accepted"] == 1
+        extra = client.post(
+            "/admin/api/telemetry", json={"events": [{"type": "api"}], "version": 1}
+        )
+        assert extra.status_code == 422
+        assert extra.json()["error"]["code"] == "validation_error"
         queued = telemetry.queue.get_nowait()
         rendered = repr(queued)
         assert "super-secret" not in rendered
@@ -434,7 +446,7 @@ async def test_realtime_valkey_fanout_crosses_bus_instances(monkeypatch) -> None
     await bus_b.close()
 
 
-def test_realtime_websocket_uses_management_session(tmp_path: Path, monkeypatch) -> None:
+def test_realtime_websocket_contract_and_dashboard_snapshot(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path)
     _engine, services, _reverse, web, _telemetry = _build_services(tmp_path, settings)
     cache = MemoryCache()
@@ -444,7 +456,28 @@ def test_realtime_websocket_uses_management_session(tmp_path: Path, monkeypatch)
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, https_only=False)
     app.include_router(build_admin_api_router(settings, services))
     app.include_router(
-        build_realtime_router(settings, bus, services.audit, services.snapshots, web)
+        build_realtime_router(
+            settings,
+            bus,
+            services.accounts,
+            services.audit,
+            services.oauth_sessions,
+            services.snapshots,
+            web,
+        )
+    )
+
+    assert (
+        frozenset(
+            {
+                "mcp.calls",
+                "system.metrics",
+                "system.notifications",
+                "browser.runtime",
+                "management.events",
+            }
+        )
+        == REALTIME_TOPICS
     )
 
     with TestClient(app) as client:
@@ -456,22 +489,55 @@ def test_realtime_websocket_uses_management_session(tmp_path: Path, monkeypatch)
         assert unauthorized.value.code == 4401
 
         _login(client)
+        dashboard = client.get("/admin/api/dashboard")
+        assert dashboard.status_code == 200
         with client.websocket_connect("/admin/api/realtime") as websocket:
             ready = websocket.receive_json()
-            assert ready["type"] == "ready"
-            websocket.send_json({"type": "subscribe", "topics": ["system.notifications"]})
-            subscribed = websocket.receive_json()
-            assert subscribed == {
+            assert ready == {
+                "version": 1,
+                "type": "ready",
+                "topics": sorted(REALTIME_TOPICS),
+            }
+
+            websocket.send_json({"type": "subscribe", "topics": ["mcp.calls"]})
+            assert websocket.receive_json() == {
                 "version": 1,
                 "type": "subscribed",
-                "topics": ["system.notifications"],
+                "topics": ["mcp.calls"],
             }
-            websocket.send_json({"type": "unsubscribe", "topic": "system.notifications"})
-            unsubscribed = websocket.receive_json()
-            assert unsubscribed == {"version": 1, "type": "unsubscribed", "topics": []}
+            calls_snapshot = websocket.receive_json()
+            assert calls_snapshot["version"] == 1
+            assert calls_snapshot["topic"] == "mcp.calls"
+            assert calls_snapshot["type"] == "snapshot"
+            assert calls_snapshot["data"] == {"events": [], "count": 0}
+
+            websocket.send_json({"type": "subscribe", "topics": ["system.metrics"]})
+            subscribed = websocket.receive_json()
+            assert subscribed["topics"] == ["mcp.calls", "system.metrics"]
+            metrics_snapshot = websocket.receive_json()
+            assert metrics_snapshot["topic"] == "system.metrics"
+            assert metrics_snapshot["type"] == "snapshot"
+            assert metrics_snapshot["data"] == dashboard.json()
+
+            websocket.send_json({"type": "unsubscribe", "topics": ["mcp.calls", "system.metrics"]})
+            assert websocket.receive_json() == {
+                "version": 1,
+                "type": "unsubscribed",
+                "topics": [],
+            }
+
+    delta = RealtimeEnvelope(
+        topic="mcp.calls",
+        type="batch",
+        data={"events": [{"id": "call-1"}], "count": 1},
+    ).model_dump(mode="json")
+    assert delta["version"] == 1
+    assert delta["topic"] == "mcp.calls"
+    assert delta["type"] == "batch"
+    assert delta["data"] == {"events": [{"id": "call-1"}], "count": 1}
 
 
-def test_browser_operator_api_websocket_uses_management_session(tmp_path: Path) -> None:
+def test_browser_operator_api_websocket_is_primary_session_surface(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     _engine, services, _reverse, _web, _telemetry = _build_services(tmp_path, settings)
     relayed: list[dict[str, object]] = []
@@ -479,7 +545,17 @@ def test_browser_operator_api_websocket_uses_management_session(tmp_path: Path) 
     async def fake_relay(websocket, target_url, **kwargs):
         relayed.append({"target_url": target_url, **kwargs})
         await websocket.accept()
-        await websocket.send_json({"type": "relay-ready"})
+        await websocket.send_json(
+            {
+                "type": "state",
+                "capabilities": {"set_viewport": True},
+                "viewport": {"width": 1440, "height": 900},
+            }
+        )
+        await websocket.send_json({"type": "frame", "page_id": "page-1", "data": "frame"})
+        message = await websocket.receive_json()
+        relayed.append({"input": message})
+        await websocket.send_json({"type": "input-ack"})
         await websocket.close()
 
     app = FastAPI()
@@ -496,14 +572,44 @@ def test_browser_operator_api_websocket_uses_management_session(tmp_path: Path) 
         assert unauthorized.value.code == 4401
 
         _login(client)
-        with client.websocket_connect("/admin/api/browser/operator/ws") as websocket:
-            assert websocket.receive_json() == {"type": "relay-ready"}
+        with (
+            pytest.raises(WebSocketDisconnect) as forbidden,
+            client.websocket_connect(
+                "/admin/api/browser/operator/ws",
+                headers={"origin": "https://evil.invalid"},
+            ),
+        ):
+            pass
+        assert forbidden.value.code == 4403
 
-    assert relayed == [
+        for _ in range(2):
+            with client.websocket_connect("/admin/api/browser/operator/ws") as websocket:
+                state = websocket.receive_json()
+                assert state["type"] == "state"
+                assert state["capabilities"] == {"set_viewport": True}
+                assert state["viewport"] == {"width": 1440, "height": 900}
+                assert websocket.receive_json() == {
+                    "type": "frame",
+                    "page_id": "page-1",
+                    "data": "frame",
+                }
+                websocket.send_json({"type": "mouse", "event": "move", "x": 1, "y": 2})
+                assert websocket.receive_json() == {"type": "input-ack"}
+
+    relay_calls = [item for item in relayed if "target_url" in item]
+    assert relay_calls == [
         {
             "target_url": "ws://web:8000/operator/ws",
             "headers": {"Authorization": "Bearer service-token"},
-        }
+        },
+        {
+            "target_url": "ws://web:8000/operator/ws",
+            "headers": {"Authorization": "Bearer service-token"},
+        },
+    ]
+    assert [item["input"] for item in relayed if "input" in item] == [
+        {"type": "mouse", "event": "move", "x": 1, "y": 2},
+        {"type": "mouse", "event": "move", "x": 1, "y": 2},
     ]
 
 
