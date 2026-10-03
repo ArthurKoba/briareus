@@ -1,23 +1,28 @@
 import { reactive, readonly } from "vue"
 
 import { runtimeConfig } from "@/shared/config/runtime"
-import { tabWorkspace, topicRealtimeEnabled } from "@/shared/lib/tab-workspace"
+import { pageActivity } from "@/shared/lib/page-activity"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 
 export type EventTopic = "mcp.calls" | "system.metrics" | "system.notifications" | "browser.runtime" | "management.events" | string
 export interface BusEvent<T = unknown> { topic: EventTopic; type: string; occurredAt: string; data: T }
 type Handler = (event: BusEvent) => void
+type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "mock" | "disabled" | "error"
 
 const handlers = new Map<EventTopic, Set<Handler>>()
 const state = reactive({
-  status: "idle" as "idle" | "connecting" | "connected" | "reconnecting" | "mock" | "disabled",
+  status: "idle" as ConnectionStatus,
   transport: "none" as "none" | "websocket" | "sse" | "mock",
   subscriptions: 0,
   lastEventAt: "",
   lastRemoteEventAt: "",
-  enabled: tabWorkspace.realtimeEnabled,
+  enabled: true,
+  sessionActive: false,
+  active: pageActivity.isActive(),
+  retryAttempt: 0,
 })
 let socket: WebSocket | null = null
+let socketGeneration = 0
 let reconnectTimer = 0
 let reconnectAttempt = 0
 const sse = new Map<string, EventSource>()
@@ -41,8 +46,8 @@ function normalizeRemoteEvent(input: unknown): BusEvent | null {
   return { topic: payload.topic, type: payload.type, occurredAt, data: payload.data }
 }
 
-function enabledFor(topic: EventTopic): boolean {
-  return state.enabled && topicRealtimeEnabled(topic)
+function canConnect(): boolean {
+  return state.enabled && state.sessionActive && handlers.size > 0
 }
 
 function closeSse(topic: EventTopic): void {
@@ -58,16 +63,16 @@ function closeAllSse(): void {
 }
 
 function wireSseCompat(topic: EventTopic): void {
-  if (!enabledFor(topic) || topic !== "mcp.calls" || sse.has(topic) || state.transport === "websocket") return
+  if (!canConnect() || !state.active || topic !== "mcp.calls" || sse.has(topic) || state.transport === "websocket") return
   const source = new EventSource("/api/calls/stream")
   source.onopen = () => {
-    if (state.transport === "websocket") return closeSse(topic)
+    if (!canConnect() || !state.active || state.transport === "websocket") return closeSse(topic)
     state.status = "connected"
     state.transport = "sse"
     frontendTelemetry.websocket("connected", topic, "sse")
   }
   source.onerror = () => {
-    if (!state.enabled || state.transport === "websocket") return
+    if (!canConnect() || !state.active || state.transport === "websocket") return
     state.status = "reconnecting"
     frontendTelemetry.websocket("reconnecting", topic, "sse")
   }
@@ -81,12 +86,16 @@ function wireSseCompat(topic: EventTopic): void {
   sse.set(topic, source)
 }
 
-function closeTransports(): void {
+function closeTransports(resetAttempt = true): void {
   clearTimeout(reconnectTimer)
+  reconnectTimer = 0
   closeAllSse()
-  socket?.close()
+  const current = socket
   socket = null
-  reconnectAttempt = 0
+  socketGeneration += 1
+  current?.close()
+  if (resetAttempt) reconnectAttempt = 0
+  state.retryAttempt = reconnectAttempt
   state.transport = "none"
 }
 
@@ -95,35 +104,47 @@ function sendSubscription(type: "subscribe" | "unsubscribe", topic: EventTopic):
 }
 
 function activateCompatFallback(): void {
-  if (runtimeConfig.events.mode !== "hybrid" || state.transport === "websocket") return
+  if (!canConnect() || !state.active || runtimeConfig.events.mode !== "hybrid" || state.transport === "websocket") return
   for (const topic of handlers.keys()) wireSseCompat(topic)
-  if (!sse.size && state.enabled) state.status = handlers.size ? "reconnecting" : "idle"
+  if (!sse.size) state.status = "reconnecting"
 }
 
 function scheduleReconnect(): void {
-  if (!state.enabled || !handlers.size || runtimeConfig.events.mode === "mock") return
+  if (!canConnect() || !state.active || runtimeConfig.events.mode === "mock") return
   clearTimeout(reconnectTimer)
   const delay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempt++, 5))
-  reconnectTimer = window.setTimeout(connectWebSocket, delay)
+  state.retryAttempt = reconnectAttempt
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = 0
+    connectWebSocket()
+  }, delay)
 }
 
 function connectWebSocket(): void {
-  if (!state.enabled || runtimeConfig.events.mode === "mock" || socket) return
+  if (!canConnect() || !state.active || runtimeConfig.events.mode === "mock" || socket) return
   state.status = reconnectAttempt ? "reconnecting" : "connecting"
   const scheme = location.protocol === "https:" ? "wss:" : "ws:"
   const url = runtimeConfig.events.url.startsWith("/")
     ? `${scheme}//${location.host}${runtimeConfig.events.url}`
     : runtimeConfig.events.url
-  socket = new WebSocket(url)
-  socket.onopen = () => {
+  const generation = ++socketGeneration
+  const current = new WebSocket(url)
+  socket = current
+  const isCurrent = () => socket === current && generation === socketGeneration
+
+  current.onopen = () => {
+    if (!isCurrent()) return
+    if (!canConnect() || !state.active) return closeTransports()
     closeAllSse()
     state.status = "connected"
     state.transport = "websocket"
     reconnectAttempt = 0
+    state.retryAttempt = 0
     frontendTelemetry.websocket("connected", undefined, "websocket")
-    for (const topic of handlers.keys()) if (enabledFor(topic)) sendSubscription("subscribe", topic)
+    for (const topic of handlers.keys()) sendSubscription("subscribe", topic)
   }
-  socket.onmessage = (event) => {
+  current.onmessage = (event) => {
+    if (!isCurrent()) return
     try {
       const normalized = normalizeRemoteEvent(JSON.parse(event.data))
       if (normalized) dispatch(normalized, true)
@@ -131,16 +152,23 @@ function connectWebSocket(): void {
       frontendTelemetry.error("realtime.decode", caught)
     }
   }
-  socket.onclose = (event) => {
+  current.onclose = (event) => {
+    if (!isCurrent()) return
     socket = null
     if (state.transport === "websocket") state.transport = "none"
-    if (event.code === 4401 || event.code === 4403) {
+    if (event.code === 4401) {
+      state.sessionActive = false
       state.status = "disabled"
       frontendTelemetry.websocket("authorization_expired", undefined, "websocket")
       window.dispatchEvent(new CustomEvent("management:auth-expired"))
       return
     }
-    if (!state.enabled || !handlers.size) {
+    if (event.code === 4403) {
+      state.status = "error"
+      frontendTelemetry.websocket("forbidden", undefined, "websocket")
+      return
+    }
+    if (!canConnect()) {
       state.status = state.enabled ? "idle" : "disabled"
       return
     }
@@ -149,7 +177,9 @@ function connectWebSocket(): void {
     activateCompatFallback()
     scheduleReconnect()
   }
-  socket.onerror = () => frontendTelemetry.websocket("error", undefined, "websocket")
+  current.onerror = () => {
+    if (isCurrent()) frontendTelemetry.websocket("error", undefined, "websocket")
+  }
 }
 
 function connectTopics(): void {
@@ -157,9 +187,17 @@ function connectTopics(): void {
     state.status = "disabled"
     return
   }
+  if (!state.sessionActive || !handlers.size) {
+    state.status = "idle"
+    return
+  }
   if (runtimeConfig.events.mode === "mock") {
     state.status = "mock"
     state.transport = "mock"
+    return
+  }
+  if (!state.active) {
+    state.status = "reconnecting"
     return
   }
   connectWebSocket()
@@ -175,7 +213,7 @@ function subscribe(topic: EventTopic, handler: Handler): () => void {
   set.add(handler)
   state.subscriptions = [...handlers.values()].reduce((count, listeners) => count + listeners.size, 0)
 
-  if (firstForTopic && enabledFor(topic) && socket?.readyState === WebSocket.OPEN) sendSubscription("subscribe", topic)
+  if (firstForTopic && canConnect() && socket?.readyState === WebSocket.OPEN) sendSubscription("subscribe", topic)
   connectTopics()
 
   return () => {
@@ -189,8 +227,7 @@ function subscribe(topic: EventTopic, handler: Handler): () => void {
     state.subscriptions = [...handlers.values()].reduce((count, listeners) => count + listeners.size, 0)
     if (!handlers.size) {
       closeTransports()
-      state.status = state.enabled ? (runtimeConfig.events.mode === "mock" ? "mock" : "idle") : "disabled"
-      state.transport = runtimeConfig.events.mode === "mock" && state.enabled ? "mock" : "none"
+      state.status = state.enabled ? "idle" : "disabled"
     }
   }
 }
@@ -198,7 +235,6 @@ function subscribe(topic: EventTopic, handler: Handler): () => void {
 function setEnabled(enabled: boolean): void {
   if (state.enabled === enabled) return
   state.enabled = enabled
-  tabWorkspace.realtimeEnabled = enabled
   if (!enabled) {
     closeTransports()
     state.status = "disabled"
@@ -209,8 +245,36 @@ function setEnabled(enabled: boolean): void {
   connectTopics()
 }
 
+function setSessionActive(active: boolean): void {
+  if (state.sessionActive === active) {
+    if (active) connectTopics()
+    return
+  }
+  state.sessionActive = active
+  if (!active) {
+    closeTransports()
+    state.status = state.enabled ? "idle" : "disabled"
+    return
+  }
+  connectTopics()
+}
+
+pageActivity.subscribe((active) => {
+  state.active = active
+  if (!active) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = 0
+    return
+  }
+  if (canConnect() && !socket && runtimeConfig.events.mode !== "mock") {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = 0
+    connectWebSocket()
+  }
+})
+
 function publishMock(topic: EventTopic, type: string, data: unknown): void {
   dispatch({ topic, type, occurredAt: new Date().toISOString(), data })
 }
 
-export const eventBus = { state: readonly(state), subscribe, publishMock, setEnabled }
+export const eventBus = { state: readonly(state), subscribe, publishMock, setEnabled, setSessionActive }

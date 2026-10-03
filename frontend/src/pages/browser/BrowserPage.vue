@@ -23,6 +23,7 @@ import { useI18n } from "vue-i18n"
 
 import { managementApi } from "@/shared/api/management"
 import { eventBus } from "@/shared/events/bus"
+import { pageActivity } from "@/shared/lib/page-activity"
 import { notifications } from "@/shared/notifications/bus"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 
@@ -57,7 +58,10 @@ const devtools = ref<HTMLImageElement | null>(null)
 const dims = ref({ w: 1440, h: 900 })
 const devDims = ref({ w: 1440, h: 900 })
 let ws: WebSocket | null = null
+let wsGeneration = 0
 let reconnect = 0
+let activityUnsubscribe: undefined | (() => void)
+let disconnectNotified = false
 let refresh = 0
 let lastMove = 0
 let devLastMove = 0
@@ -94,17 +98,40 @@ function syncAddress(): void {
   lastSelected = page.page_id
 }
 
+function notifyConnectionFailure(description = message.value): void {
+  if (!pageActivity.isActive() || disconnectNotified) return
+  disconnectNotified = true
+  notifications.error(String(t("notifications.websocketError")), description)
+}
+
+function scheduleBrowserReconnect(delay: number): void {
+  clearTimeout(reconnect)
+  reconnect = 0
+  if (!pageActivity.isActive()) return
+  reconnect = window.setTimeout(() => {
+    reconnect = 0
+    void connect()
+  }, delay)
+}
+
 async function connect(): Promise<void> {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
   status.value = "connecting"
   message.value = String(t("browser.connecting"))
   try {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:"
-    ws = new WebSocket(`${scheme}//${location.host}/api/browser/operator/ws`)
-    ws.onopen = () => {
+    const generation = ++wsGeneration
+    const current = new WebSocket(`${scheme}//${location.host}/api/browser/operator/ws`)
+    ws = current
+    const isCurrent = () => ws === current && generation === wsGeneration
+
+    current.onopen = () => {
+      if (!isCurrent()) return
+      disconnectNotified = false
       frontendTelemetry.websocket("connected", "browser.operator", "websocket")
     }
-    ws.onclose = (event) => {
+    current.onclose = (event) => {
+      if (!isCurrent()) return
       ws = null
       status.value = "disconnected"
       frontendTelemetry.websocket("disconnected", "browser.operator", "websocket")
@@ -116,26 +143,29 @@ async function connect(): Promise<void> {
       if (event.code === 4403) {
         status.value = "error"
         message.value = String(t("browser.connectionFailed"))
-        notifications.error(String(t("notifications.websocketError")), message.value)
+        notifyConnectionFailure()
         return
       }
       message.value = String(t("browser.reconnecting"))
-      clearTimeout(reconnect)
-      reconnect = window.setTimeout(connect, 1000)
+      notifyConnectionFailure(message.value)
+      scheduleBrowserReconnect(1000)
     }
-    ws.onerror = () => {
+    current.onerror = () => {
+      if (!isCurrent()) return
       status.value = "error"
       message.value = String(t("browser.connectionFailed"))
       frontendTelemetry.websocket("error", "browser.operator")
-      notifications.error(String(t("notifications.websocketError")), message.value)
+      // onclose owns the user notification so error+close cannot double-notify.
     }
-    ws.onmessage = async (event) => {
+    current.onmessage = async (event) => {
+      if (!isCurrent()) return
       const payload = JSON.parse(event.data)
       if (payload.type === "state") {
         state.value = payload
         if (payload.viewport?.width && payload.viewport?.height) dims.value = { w: payload.viewport.width, h: payload.viewport.height }
         status.value = "live"
         message.value = ""
+        disconnectNotified = false
         eventBus.publishMock("browser.runtime", "state", {
           pages: Array.isArray(payload.pages) ? payload.pages.length : 0,
           selected_page_id: payload.selected_page_id ?? null,
@@ -153,6 +183,7 @@ async function connect(): Promise<void> {
       } else if (payload.type === "error") {
         status.value = "error"
         message.value = payload.message ?? String(t("browser.connectionFailed"))
+        // Protocol/command errors are explicit operation results, not background transport noise.
         notifications.error(String(t("notifications.websocketError")), message.value)
       }
     }
@@ -160,9 +191,8 @@ async function connect(): Promise<void> {
     status.value = "error"
     message.value = caught instanceof Error ? caught.message : String(t("browser.connectionFailed"))
     frontendTelemetry.error("browser.connect", caught)
-    notifications.error(String(t("notifications.websocketError")), message.value)
-    clearTimeout(reconnect)
-    reconnect = window.setTimeout(connect, 3000)
+    notifyConnectionFailure()
+    scheduleBrowserReconnect(3000)
   }
 }
 
@@ -238,13 +268,25 @@ function now(): number { return window.performance.now() }
 function mouseButton(event: MouseEvent): string { return event.button === 2 ? "right" : event.button === 1 ? "middle" : "left" }
 
 onMounted(() => {
+  activityUnsubscribe = pageActivity.subscribe((active) => {
+    if (!active || ws) return
+    clearTimeout(reconnect)
+    reconnect = 0
+    void connect()
+  })
   void connect()
-  refresh = window.setInterval(() => send({ type: "refresh_state" }), 1500)
+  refresh = window.setInterval(() => {
+    if (pageActivity.isActive()) send({ type: "refresh_state" })
+  }, 1500)
 })
 onBeforeUnmount(() => {
+  activityUnsubscribe?.()
   clearInterval(refresh)
   clearTimeout(reconnect)
-  ws?.close()
+  const current = ws
+  ws = null
+  wsGeneration += 1
+  current?.close()
 })
 </script>
 
