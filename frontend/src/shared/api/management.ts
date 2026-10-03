@@ -134,6 +134,6 @@ export const managementApi = {
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
   browserTicket: (): Promise<{ ticket: string }> => request("/api/browser/ticket"),
   settings: (): Promise<SettingsState> => request("/api/settings"),
-  updateSettings: (payload: Record<string, unknown>): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
+  updateSettings: (payload: object): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
   cleanupLogs: (): Promise<{ removed: number }> => request("/api/settings/cleanup-logs", { method: "POST", body: "{}" }),
 }
