@@ -232,3 +232,75 @@ async def test_reverse_proxy_reuses_one_http_client_across_requests(
     await proxy.close()
 
     assert state == {"clients": 1, "requests": 2, "closed": 1}
+
+
+@pytest.mark.asyncio
+async def test_reverse_proxy_streams_event_source_without_buffering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = {"sent_stream": False, "closed": 0}
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def build_request(
+            self,
+            method: str,
+            url: str,
+            **kwargs: object,
+        ) -> httpx.Request:
+            return httpx.Request(method, url, headers=kwargs.get("headers"))
+
+        async def send(
+            self,
+            request: httpx.Request,
+            *,
+            stream: bool = False,
+        ) -> httpx.Response:
+            state["sent_stream"] = stream
+
+            async def body():
+                yield b"data: {\"status\":\"ok\"}\\n\\n"
+
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                stream=httpx.ByteStream(b"data: {\"status\":\"ok\"}\\n\\n"),
+                request=request,
+            )
+
+        async def aclose(self) -> None:
+            state["closed"] += 1
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    proxy = ReverseProxy("http://management:8000", backend_name="management")
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "https",
+            "path": "/admin/api/calls/stream",
+            "raw_path": b"/admin/api/calls/stream",
+            "query_string": b"",
+            "headers": [
+                (b"host", b"mcp.koba-nexus.ru"),
+                (b"accept", b"text/event-stream"),
+            ],
+            "client": ("127.0.0.1", 1234),
+            "server": ("mcp.koba-nexus.ru", 443),
+            "http_version": "1.1",
+        },
+        receive=receive,
+    )
+
+    response = await proxy.handle(request)
+
+    assert isinstance(response, StreamingResponse)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert state["sent_stream"] is True
