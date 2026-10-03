@@ -37,7 +37,6 @@ def test_compose_keeps_runtime_services_restartable() -> None:
         assert service.get("restart") == "unless-stopped"
 
 
-
 def test_valkey_is_private_ephemeral_and_resource_bounded() -> None:
     valkey = _services()["valkey"]
 
@@ -60,6 +59,7 @@ def test_runtime_healthcheck_does_not_spawn_python_interpreters() -> None:
     assert "socket.create_connection" not in runtime_prefix
     assert 'CMD ["nc", "-z", "-w", "1", "127.0.0.1", "8000"]' in dockerfile
     assert "netcat-openbsd" in dockerfile
+
 
 def test_terminal_has_hard_resource_limits() -> None:
     terminal = _services()["terminal"]
@@ -144,8 +144,11 @@ def test_persistent_mounts_use_absolute_container_paths() -> None:
     assert "volumes" not in services["ghidra"]
 
 
-def test_compose_exposes_only_external_bootstrap_environment() -> None:
+def test_compose_declares_machine_cache_routing_and_bootstrap_environment() -> None:
     services = _services()
+    machine = {"TZ", "LANG", "LC_ALL"}
+    cache = {"VALKEY_URL"}
+    management_client = {"MANAGEMENT_URL", "MANAGEMENT_SERVICE_TOKEN"}
     observability = {
         "OTEL_SERVICE_NAME",
         "OTEL_SERVICE_VERSION",
@@ -161,58 +164,8 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "OTEL_METRIC_EXPORT_INTERVAL",
         "OTEL_LOG_LEVEL",
     }
-    expected = {
-        "management": observability
-        | {
-            "MANAGEMENT_ENCRYPTION_KEY",
-            "MANAGEMENT_SERVICE_TOKEN",
-            "MANAGEMENT_ADMIN_USERNAME",
-            "MANAGEMENT_ADMIN_PASSWORD",
-            "MANAGEMENT_SESSION_SECRET",
-        },
-        "auth": observability
-        | {
-            "MANAGEMENT_SERVICE_TOKEN",
-            "MCP_PUBLIC_BASE_URL",
-            "GITHUB_OAUTH_CLIENT_ID",
-            "GITHUB_OAUTH_CLIENT_SECRET",
-            "GITHUB_OAUTH_JWT_SIGNING_KEY",
-            "GITHUB_OAUTH_ALLOWED_USERS",
-        },
-        "gateway": observability
-        | {
-            "MANAGEMENT_SERVICE_TOKEN",
-            "OAUTH_ENABLED",
-            "MCP_PUBLIC_BASE_URL",
-            "GITHUB_OAUTH_JWT_SIGNING_KEY",
-            "GITHUB_OAUTH_ALLOWED_USERS",
-            "MCP_ALLOWED_HOSTS",
-            "MCP_ALLOWED_ORIGINS",
-        },
-        "github": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "web": observability | {"MANAGEMENT_SERVICE_TOKEN", "TZ"},
-        "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "observability": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "valkey": set(),
-    }
-
-    for name, service in services.items():
-        assert set(service.get("environment", {})) == expected[name]
-
-
-def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
-    forbidden = {
-        "ASGI_APP",
-        "ASGI_FORWARDED_ALLOW_IPS",
-        "MANAGEMENT_URL",
-        "MANAGEMENT_TIMEOUT_SECONDS",
-        "MANAGEMENT_DATABASE_PATH",
-        "MANAGEMENT_SESSION_HTTPS_ONLY",
-        "AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS",
+    common = machine | cache | management_client | observability
+    gateway_routing = {
         "GITHUB_URL",
         "GITLAB_URL",
         "FILES_URL",
@@ -221,12 +174,65 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "GHIDRA_URL",
         "TERMINAL_URL",
         "OBSERVABILITY_URL",
+    }
+    expected = {
+        "management": machine
+        | cache
+        | observability
+        | {
+            "MANAGEMENT_ENCRYPTION_KEY",
+            "MANAGEMENT_SERVICE_TOKEN",
+            "MANAGEMENT_ADMIN_USERNAME",
+            "MANAGEMENT_ADMIN_PASSWORD",
+            "MANAGEMENT_SESSION_SECRET",
+        },
+        "auth": common
+        | {
+            "MCP_PUBLIC_BASE_URL",
+            "GITHUB_OAUTH_CLIENT_ID",
+            "GITHUB_OAUTH_CLIENT_SECRET",
+            "GITHUB_OAUTH_JWT_SIGNING_KEY",
+            "GITHUB_OAUTH_ALLOWED_USERS",
+        },
+        "gateway": common
+        | gateway_routing
+        | {
+            "SERVICE_URL_GATEWAY_8000",
+            "OAUTH_ENABLED",
+            "MCP_PUBLIC_BASE_URL",
+            "GITHUB_OAUTH_JWT_SIGNING_KEY",
+            "GITHUB_OAUTH_ALLOWED_USERS",
+            "MCP_ALLOWED_HOSTS",
+            "MCP_ALLOWED_ORIGINS",
+        },
+        "github": common,
+        "gitlab": common,
+        "files": common,
+        "web": cache | management_client | observability | {"TZ"},
+        "terminal": common | {"TERMINAL_LANG"},
+        "analysis": common | {"GHIDRA_URL"},
+        "ghidra": common | {"GHIDRA_MCP_URL"},
+        "observability": common,
+        "valkey": machine,
+    }
+
+    for name, service in services.items():
+        assert set(service.get("environment", {})) == expected[name]
+
+
+def test_compose_keeps_image_only_defaults_out_of_deployment_environment() -> None:
+    forbidden = {
+        "ASGI_APP",
+        "ASGI_FORWARDED_ALLOW_IPS",
+        "MANAGEMENT_TIMEOUT_SECONDS",
+        "MANAGEMENT_DATABASE_PATH",
+        "MANAGEMENT_SESSION_HTTPS_ONLY",
+        "AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS",
         "SIGNOZ_URL",
         "SIGNOZ_API_KEY",
         "COOLIFY_URL",
         "COOLIFY_API_TOKEN",
         "TERMINAL_FILES_URL",
-        "GHIDRA_MCP_URL",
         "GITHUB_AGENT_PROTECTED_BRANCHES",
         "GITHUB_AGENT_REQUIRED_CHECKS",
         "GITHUB_AGENT_REQUIRED_REVIEWERS",
@@ -238,18 +244,8 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "BROWSER_PROFILE_PATH",
         "BROWSER_EXECUTABLE_PATH",
         "BROWSER_HEADLESS",
-        "BROWSER_LOCALE",
-        "BROWSER_ACCEPT_LANGUAGE",
-        "BROWSER_DISPLAY",
-        "DISPLAY",
-        "BROWSER_COLOR_DEPTH",
-        "BROWSER_XVFB_ENABLED",
-        "BROWSER_POSIX_LOCALE",
-        "BROWSER_TIMEZONE",
         "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
         "BROWSER_TIMEOUT_MS",
-        "BROWSER_VIEWPORT_WIDTH",
-        "BROWSER_VIEWPORT_HEIGHT",
         "BROWSER_MAX_SNAPSHOT_TEXT_CHARS",
         "BROWSER_MAX_SNAPSHOT_ELEMENTS",
         "ANALYSIS_SCHEMA_CACHE_TTL_SECONDS",
@@ -257,7 +253,6 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "TERMINAL_HOME",
         "TERMINAL_SHELL",
         "TERMINAL_PATH",
-        "TERMINAL_LANG",
         "TERMINAL_TERM",
         "TERMINAL_MAX_EXEC_OUTPUT_BYTES",
         "TERMINAL_MAX_JOB_READ_BYTES",
@@ -268,26 +263,49 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         assert forbidden.isdisjoint(service.get("environment", {})), name
 
 
-def test_compose_requires_all_external_bootstrap_values() -> None:
+def test_compose_marks_only_external_oauth_inputs_as_required() -> None:
     serialized = COMPOSE_FILE.read_text()
     required = {
-        "MANAGEMENT_ENCRYPTION_KEY",
-        "MANAGEMENT_SERVICE_TOKEN",
-        "MANAGEMENT_ADMIN_USERNAME",
-        "MANAGEMENT_ADMIN_PASSWORD",
-        "MANAGEMENT_SESSION_SECRET",
         "GITHUB_OAUTH_CLIENT_ID",
         "GITHUB_OAUTH_CLIENT_SECRET",
-        "GITHUB_OAUTH_JWT_SIGNING_KEY",
         "GITHUB_OAUTH_ALLOWED_USERS",
-        "MCP_PUBLIC_BASE_URL",
-        "MCP_ALLOWED_HOSTS",
-        "MCP_ALLOWED_ORIGINS",
+    }
+    generated = {
+        "SERVICE_REALBASE64_32_MANAGEMENT_ENCRYPTION_KEY",
+        "SERVICE_REALBASE64_64_MANAGEMENT_SERVICE_TOKEN",
+        "SERVICE_PASSWORD_64_MANAGEMENT_ADMIN",
+        "SERVICE_REALBASE64_64_MANAGEMENT_SESSION_SECRET",
+        "SERVICE_REALBASE64_64_GITHUB_OAUTH_JWT_SIGNING_KEY",
+        "SERVICE_URL_GATEWAY_8000",
+        "SERVICE_FQDN_GATEWAY_8000",
     }
 
-    assert "${SERVICE_" not in serialized
     for name in required:
         assert f"${{{name}:?}}" in serialized
+    for name in generated:
+        assert name in serialized
+
+    assert "${MANAGEMENT_ENCRYPTION_KEY:?}" not in serialized
+    assert "${MANAGEMENT_SERVICE_TOKEN:?}" not in serialized
+    assert "${MANAGEMENT_ADMIN_PASSWORD:?}" not in serialized
+    assert "${MANAGEMENT_SESSION_SECRET:?}" not in serialized
+    assert "${GITHUB_OAUTH_JWT_SIGNING_KEY:?}" not in serialized
+    assert "${MCP_PUBLIC_BASE_URL:?}" not in serialized
+    assert "${MCP_ALLOWED_HOSTS:?}" not in serialized
+    assert "${MCP_ALLOWED_ORIGINS:?}" not in serialized
+    assert "SERVICE_URL_GATEWAY_8000: /" in serialized
+
+
+def test_compose_exposes_machine_and_internal_routing_overrides() -> None:
+    serialized = COMPOSE_FILE.read_text()
+
+    assert "TZ: ${TZ:-UTC}" in serialized
+    assert "LANG: ${LANG:-C.UTF-8}" in serialized
+    assert "LC_ALL: ${LC_ALL:-C.UTF-8}" in serialized
+    assert "VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}" in serialized
+    assert "MANAGEMENT_URL: ${MANAGEMENT_URL:-http://management:8000}" in serialized
+    assert "GITHUB_URL: ${GITHUB_URL:-http://github:8000/mcp}" in serialized
+    assert "GHIDRA_MCP_URL: ${GHIDRA_MCP_URL:-http://bridge:8081/mcp}" in serialized
 
 
 def test_compose_keeps_oauth_enablement_optional() -> None:
@@ -348,8 +366,7 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
     assert "BROWSER_EXECUTABLE_PATH=/usr/bin/chromium" in web_stage
     assert "COPY --from=chrome-devtools-mcp /usr/local/bin/node /usr/local/bin/node" in web_stage
     assert (
-        "COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp "
-        "/opt/chrome-devtools-mcp"
+        "COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp /opt/chrome-devtools-mcp"
     ) in web_stage
     assert "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH=/opt/chrome-devtools-mcp" in web_stage
     assert "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1" in web_stage

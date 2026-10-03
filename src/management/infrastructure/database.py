@@ -217,6 +217,15 @@ class McpRuntimeSettingsRecord(Base):
     call_timeout_seconds: Mapped[int] = mapped_column(Integer, default=5)
 
 
+class GitHubRuntimeSettingsRecord(Base):
+    __tablename__ = "github_runtime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    local_first_guidance: Mapped[bool] = mapped_column(Boolean, default=True)
+    local_git_transport_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)

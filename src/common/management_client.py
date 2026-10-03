@@ -17,7 +17,7 @@ from .cache import CacheBackend, CacheKeys, SharedCache
 from .http_transport import HttpTransportError, PooledHttpTransport
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
-from .runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from .runtime_policy_contracts import GitHubRuntimePolicy, McpRuntimePolicy, TerminalRuntimePolicy
 from .settings import ManagementClientSettings, ValkeySettings
 
 
@@ -111,9 +111,7 @@ class ManagementClient:
             raise ManagementClientError(f"management transport error: {exc}") from exc
         if response.status >= 400:
             detail = response.body[:2048].decode("utf-8", "replace")
-            raise ManagementClientError(
-                f"management HTTP {response.status}: {detail}"
-            )
+            raise ManagementClientError(f"management HTTP {response.status}: {detail}")
         if not expect_body or not response.body:
             return {}
         return json_object(
@@ -220,6 +218,20 @@ class ManagementClient:
             return McpRuntimePolicy.model_validate(cached)
         data = self._request("GET", "/internal/runtime-settings/mcp")
         result = McpRuntimePolicy.model_validate(data)
+        self.cache.set_json(
+            cache_key,
+            result.to_json(),
+            ttl_seconds=self.cache_settings.policy_ttl_seconds,
+        )
+        return result
+
+    def github_runtime_policy(self) -> GitHubRuntimePolicy:
+        cache_key = self.cache_keys.github_policy()
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return GitHubRuntimePolicy.model_validate(cached)
+        data = self._request("GET", "/internal/runtime-settings/github")
+        result = GitHubRuntimePolicy.model_validate(data)
         self.cache.set_json(
             cache_key,
             result.to_json(),

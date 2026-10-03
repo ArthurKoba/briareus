@@ -13,7 +13,11 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
-from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -24,6 +28,7 @@ from .database import (
     CachedSnapshotRecord,
     CoolifyAccountRecord,
     GitHubAccountRecord,
+    GitHubRuntimeSettingsRecord,
     GitLabAccountRecord,
     InvocationRecord,
     ManagementConfigRecord,
@@ -845,4 +850,30 @@ class SqlAlchemyRuntimeSettingsRepository:
                 record = McpRuntimeSettingsRecord(id=1)
                 session.add(record)
             record.call_timeout_seconds = policy.call_timeout_seconds
+        return policy
+
+    @_db_span("runtime.github.get")
+    def get_github_policy(self) -> GitHubRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(GitHubRuntimeSettingsRecord, 1)
+            if record is None:
+                record = GitHubRuntimeSettingsRecord(id=1)
+                session.add(record)
+                session.flush()
+            return GitHubRuntimePolicy(
+                local_first_guidance=record.local_first_guidance,
+                local_git_transport_enabled=record.local_git_transport_enabled,
+                remote_source_mutations_enabled=record.remote_source_mutations_enabled,
+            )
+
+    @_db_span("runtime.github.save")
+    def save_github_policy(self, policy: GitHubRuntimePolicy) -> GitHubRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(GitHubRuntimeSettingsRecord, 1)
+            if record is None:
+                record = GitHubRuntimeSettingsRecord(id=1)
+                session.add(record)
+            record.local_first_guidance = policy.local_first_guidance
+            record.local_git_transport_enabled = policy.local_git_transport_enabled
+            record.remote_source_mutations_enabled = policy.remote_source_mutations_enabled
         return policy

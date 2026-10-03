@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import subprocess
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from common.account_contracts import ResolvedAccount
 from common.models import (
@@ -13,6 +16,7 @@ from common.models import (
     json_str,
     json_value,
 )
+from common.repository_checkout import RepositoryCheckoutError, push_repository
 from common.settings import GitHubPolicySettings
 
 from .github_actions import GitHubActionsClient
@@ -163,6 +167,170 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             "email": str(identity["email"]),
         }
 
+    def _local_git_path(self, destination: str) -> Path:
+        root = self.workspace_root.resolve(strict=False)
+        raw = destination.strip().replace("\\", "/").lstrip("/")
+        if not raw:
+            raise GitHubAgentError("workspace destination is required")
+        target = (root / raw).resolve(strict=False)
+        if target == root or not target.is_relative_to(root):
+            raise GitHubAgentError("workspace destination escapes workspace root")
+        if not (target / ".git").exists():
+            raise GitHubAgentError(f"workspace is not a Git checkout: {destination}")
+        return target
+
+    @staticmethod
+    def _git_output(target: Path, *args: str, env: dict[str, str] | None = None) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(target), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()[-2048:]
+            raise GitHubAgentError(
+                f"git command failed with exit code {result.returncode}: {detail}"
+            )
+        return (result.stdout or result.stderr).strip()
+
+    def _git_optional_output(self, target: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(target), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 1 and not (result.stderr or result.stdout).strip():
+            return ""
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()[-2048:]
+            raise GitHubAgentError(
+                f"git command failed with exit code {result.returncode}: {detail}"
+            )
+        return (result.stdout or result.stderr).strip()
+
+    @staticmethod
+    def _expected_remote(repository: str) -> str:
+        return f"https://github.com/{repository}.git"
+
+    def authorize_local_git(
+        self, repository: str, destination: str, *, remote: str = "origin"
+    ) -> JsonObject:
+        repository = self._assert_allowed(repository)
+        if self.public_only:
+            raise GitHubAgentError(
+                "local Git write authorization requires an authenticated GitHub account"
+            )
+        target = self._local_git_path(destination)
+        remote = remote.strip() or "origin"
+        expected = self._expected_remote(repository)
+        current = self._git_output(target, "remote", "get-url", remote)
+        normalized = current.removesuffix(".git")
+        accepted = {
+            f"https://github.com/{repository}",
+            f"ssh://git@github.com/{repository}",
+            f"git@github.com:{repository}",
+        }
+        if normalized not in accepted:
+            raise GitHubAgentError(
+                f"workspace remote {remote!r} does not match repository {repository!r}: {current}"
+            )
+        signature = self._git_signature()
+        self._git_output(target, "config", "--local", "user.name", signature["name"])
+        self._git_output(target, "config", "--local", "user.email", signature["email"])
+        self._git_output(target, "config", "--local", f"remote.{remote}.url", expected)
+        self._git_output(target, "config", "--local", "koba.github.repository", repository)
+        self._git_output(target, "config", "--local", "koba.github.accountId", self.account_id)
+        self._git_output(target, "config", "--local", "koba.github.transportAuthorized", "true")
+        branch = self._git_output(target, "branch", "--show-current")
+        return {
+            "authorized": True,
+            "repository": repository,
+            "workspace": target.relative_to(self.workspace_root.resolve(strict=False)).as_posix(),
+            "remote": remote,
+            "remote_url": expected,
+            "branch": branch,
+            "account_id": self.account_id,
+            "credential_storage": "none",
+            "push_mode": "github_mcp_git_transport",
+            "warning": (
+                "Experimental local Git transport. Existing GitHub mutation tools remain "
+                "available until this path is fully accepted."
+            ),
+        }
+
+    def push_local_git(
+        self,
+        repository: str,
+        destination: str,
+        *,
+        branch: str = "",
+        remote: str = "origin",
+        set_upstream: bool = True,
+    ) -> JsonObject:
+        repository = self._assert_allowed(repository)
+        if self.public_only:
+            raise GitHubAgentError("local Git push requires an authenticated GitHub account")
+        target = self._local_git_path(destination)
+        remote = remote.strip() or "origin"
+        marker_repo = self._git_optional_output(
+            target, "config", "--local", "--get", "koba.github.repository"
+        )
+        marker_account = self._git_optional_output(
+            target, "config", "--local", "--get", "koba.github.accountId"
+        )
+        marker_enabled = self._git_optional_output(
+            target, "config", "--local", "--get", "koba.github.transportAuthorized"
+        )
+        if (
+            marker_repo != repository
+            or marker_account != self.account_id
+            or marker_enabled.casefold() != "true"
+        ):
+            raise GitHubAgentError(
+                "workspace is not authorized for this GitHub account/repository; "
+                "call github_authorize_local_git first"
+            )
+        current_branch = self._git_output(target, "branch", "--show-current")
+        push_branch = (branch.strip() or current_branch).strip()
+        if not push_branch:
+            raise GitHubAgentError("cannot push a detached HEAD; specify a local branch")
+        self._assert_branch_mutation_allowed(repository, push_branch)
+        token = self.token or self._installation_token(repository)
+        encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
+        try:
+            pushed = push_repository(
+                target,
+                remote=remote,
+                branch=push_branch,
+                auth_scope="https://github.com/",
+                auth_header=f"Authorization: Basic {encoded}",
+                set_upstream=set_upstream,
+            )
+        except RepositoryCheckoutError as exc:
+            raise GitHubAgentError(str(exc)) from exc
+        head = str(pushed["head"])
+        output = str(pushed["git_output"])
+        return {
+            "pushed": True,
+            "repository": repository,
+            "workspace": target.relative_to(self.workspace_root.resolve(strict=False)).as_posix(),
+            "remote": remote,
+            "branch": push_branch,
+            "head": head,
+            "account_id": self.account_id,
+            "credential_storage": "none",
+            "git_output": output[-2048:],
+            "warning": (
+                "Experimental local Git transport. Existing GitHub mutation tools remain "
+                "available until this path is fully accepted."
+            ),
+        }
+
     @staticmethod
     def _copy_payload(payload: object | None) -> JsonObject | None:
         if payload is None:
@@ -271,9 +439,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 "slug": json_str(payload.get("slug")),
                 "name": json_str(payload.get("name")),
             },
-            "provider_permissions": {
-                key: json_str(value) for key, value in permissions.items()
-            },
+            "provider_permissions": {key: json_str(value) for key, value in permissions.items()},
             "provider_permissions_known": True,
             "note": (
                 "GitHub App permissions are the application ceiling; installation/repository "

@@ -12,3 +12,9 @@ class TerminalRuntimePolicy(StrictModel):
 
 class McpRuntimePolicy(StrictModel):
     call_timeout_seconds: int = Field(5, ge=1, le=300)
+
+
+class GitHubRuntimePolicy(StrictModel):
+    local_first_guidance: bool = True
+    local_git_transport_enabled: bool = False
+    remote_source_mutations_enabled: bool = True

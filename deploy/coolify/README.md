@@ -60,40 +60,72 @@ Auth owns GitHub OAuth and token issuance. Auth and gateway share the FastMCP JW
 key and allowed GitHub user list so gateway can verify bearer tokens locally. GitHub
 client ID/secret remain auth-only.
 
-All bootstrap credentials are explicit required environment variables on the Coolify
-application. Docker Compose declares each one with `${VAR:?}`, so deployment stops
-immediately if a required value is missing or empty:
+Coolify is now the bootstrap authority for values it can safely generate. The Git-backed
+Compose definition uses Coolify `SERVICE_*` generators for internal random values and uses
+`${VAR:?}` only for externally-issued values that Coolify cannot invent. Generated values are
+stored by Coolify and reused by every service that references the same variable name.
+
+Fresh resources therefore need only these external OAuth inputs before first deployment:
 
 ```text
-MANAGEMENT_ENCRYPTION_KEY=...
-MANAGEMENT_SERVICE_TOKEN=...
-MANAGEMENT_ADMIN_USERNAME=...
-MANAGEMENT_ADMIN_PASSWORD=...
-MANAGEMENT_SESSION_SECRET=...
 GITHUB_OAUTH_CLIENT_ID=...
 GITHUB_OAUTH_CLIENT_SECRET=...
-GITHUB_OAUTH_JWT_SIGNING_KEY=...
 GITHUB_OAUTH_ALLOWED_USERS=...
-MCP_PUBLIC_BASE_URL=https://mcp.example.com
-MCP_ALLOWED_HOSTS=mcp.example.com
-MCP_ALLOWED_ORIGINS=https://mcp.example.com
 ```
 
-Coolify `SERVICE_*` magic generators are intentionally not used for this Git-backed
-Docker Compose application because they can be materialized as empty application
-variables instead of generated values. Internal secrets should be generated once when
-provisioning the Coolify resource and then kept stable.
+The following values are generated automatically unless explicitly overridden:
 
-`MANAGEMENT_ENCRYPTION_KEY` must be a valid Fernet key (URL-safe base64 encoding of
-32 random bytes). If an existing Management database with encrypted provider credentials
-is migrated, preserve its original encryption key; changing it makes those stored
-credentials unreadable.
+```text
+MANAGEMENT_ENCRYPTION_KEY       <- SERVICE_REALBASE64_32_MANAGEMENT_ENCRYPTION_KEY
+MANAGEMENT_SERVICE_TOKEN        <- SERVICE_REALBASE64_64_MANAGEMENT_SERVICE_TOKEN
+MANAGEMENT_ADMIN_USERNAME       <- admin (overrideable)
+MANAGEMENT_ADMIN_PASSWORD       <- SERVICE_PASSWORD_64_MANAGEMENT_ADMIN
+MANAGEMENT_SESSION_SECRET       <- SERVICE_REALBASE64_64_MANAGEMENT_SESSION_SECRET
+GITHUB_OAUTH_JWT_SIGNING_KEY    <- SERVICE_REALBASE64_64_GITHUB_OAUTH_JWT_SIGNING_KEY
+MCP_PUBLIC_BASE_URL             <- SERVICE_URL_GATEWAY_8000
+MCP_ALLOWED_HOSTS               <- SERVICE_FQDN_GATEWAY_8000
+MCP_ALLOWED_ORIGINS             <- SERVICE_URL_GATEWAY_8000
+```
 
-Runtime wiring and tuning are source-owned defaults, not Coolify environment settings.
-This includes service-to-service URLs, ASGI app selection, cache TTLs, file limits,
-policy defaults and database/file paths. Public OAuth/HTTP identity is deployment-owned:
-`MCP_PUBLIC_BASE_URL`, `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` are required.
-`OAUTH_ENABLED` remains an optional feature flag and defaults to `true` in Compose.
+`SERVICE_REALBASE64_32_*` is suitable for the Management Fernet key because it encodes exactly
+32 random bytes. Generated secrets are a **new-resource bootstrap** feature, not a migration
+mechanism. When attaching an existing Management volume/database, always set the original
+`MANAGEMENT_ENCRYPTION_KEY` explicitly before deployment; replacing it makes previously encrypted
+provider credentials unreadable. The same stability rule applies to the JWT signing key and
+session secret when continuity of issued tokens/sessions matters.
+
+The `gateway` service explicitly declares `SERVICE_URL_GATEWAY_8000: /`, so a fresh Coolify
+resource with a wildcard domain can create routing to gateway port 8000 automatically. A custom
+public hostname may override `MCP_PUBLIC_BASE_URL`, `MCP_ALLOWED_HOSTS` and
+`MCP_ALLOWED_ORIGINS`; otherwise Coolify's gateway URL/FQDN generator supplies them.
+
+Machine/runtime compatibility inputs are also explicit Compose variables with portable defaults:
+
+```text
+TZ=UTC
+LANG=C.UTF-8
+LC_ALL=C.UTF-8
+VALKEY_URL=redis://valkey:6379/0
+MANAGEMENT_URL=http://management:8000
+GITHUB_URL=http://github:8000/mcp
+GITLAB_URL=http://gitlab:8000/mcp
+FILES_URL=http://files:8000/mcp
+WEB_URL=http://web:8000/mcp
+ANALYSIS_URL=http://analysis:8000/mcp
+GHIDRA_URL=http://ghidra:8000/mcp
+TERMINAL_URL=http://terminal:8000/mcp
+OBSERVABILITY_URL=http://observability:8000/mcp
+GHIDRA_MCP_URL=http://bridge:8081/mcp
+```
+
+These defaults still use Compose DNS inside one resource, but exposing them as deployment inputs
+lets Dev or a split-machine topology redirect individual private MCPs without rebuilding images.
+`TZ` should be set deliberately per deployment when server-side/browser local-time presentation
+matters; persistent data and protocol timestamps remain UTC-aware. Browser locale/display/viewport
+identity is source-owned for now and is intentionally not duplicated as deployment environment.
+
+Runtime tuning that is not topology/machine-specific remains source-owned. This includes ASGI app
+selection, cache TTLs, file limits, provider policy defaults and database/file paths.
 
 `AUTH_SERVICE_TOKEN`, `AUTH_URL` and `AUTH_TIMEOUT_SECONDS` are not used.
 
@@ -274,6 +306,14 @@ best-effort and does not block tool responses.
 
 ## Managed SigNoz and Coolify connections
 
+The read-only Observability MCP may inspect Coolify application metadata, safe server/resource
+identity/status, and environment-variable **names/flags** for architecture diagnostics. Server IP,
+SSH user/port, proxy configuration, Sentinel settings, Coolify `value`/`real_value`, comments, API
+tokens, raw Compose bodies and nested configuration objects that may contain credentials are never
+returned. For Git-backed Docker Compose applications, agents receive repository/branch/compose
+location metadata and should read the source Compose file through the corresponding Git provider
+MCP instead of asking Coolify for a rendered Compose body.
+
 SigNoz and Coolify instance credentials are **not** Coolify deployment environment variables
 for `mcp-bridge`. Do not add `SIGNOZ_URL`, `SIGNOZ_API_KEY`, `COOLIFY_URL`, or
 `COOLIFY_API_TOKEN` to this Compose application. Multiple instances are configured at runtime
@@ -285,3 +325,22 @@ OpenTelemetry bootstrap environment. It resolves the explicitly requested SigNoz
 account through Management. Coolify accounts should use a token with ordinary `Read` permission;
 the unified adapter does not expose sensitive log/environment/secret endpoints or any
 mutation/deployment action.
+## GitHub agent local-first policy
+
+GitHub REST/Git Data mutation is retained as a fallback, but substantial source work should use
+the persistent Terminal workspace and ordinary local Git so GitHub API quota is not consumed by
+every intermediate file/commit operation. The GitHub MCP publishes this guidance directly in
+source-mutation tool descriptions and results.
+
+These controls live in Management application settings rather than deployment environment:
+
+- local-first guidance: enabled by default;
+- experimental local Git transport: disabled by default until live acceptance;
+- legacy remote source/history mutations: enabled by default as a fallback.
+
+Disabling remote source/history mutations blocks direct API source changes (`put_file`, atomic Git
+Data commits, branch/tag rewrites, etc.) while keeping PR, issue, review and GitHub Actions
+control-plane tools available. `github_checkout_repository mode=git` remains the preferred entry
+point. The local Git transport authorizes a workspace/repository/account binding without writing
+credentials to the workspace; the GitHub runtime supplies a short-lived credential only for the
+push operation.
