@@ -79,6 +79,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(path, { credentials: "same-origin", ...init, headers })
     frontendTelemetry.api(path,method,response.status,performance.now()-started)
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) window.dispatchEvent(new CustomEvent("management:auth-expired"))
       let detail = `Management API request failed: ${response.status}`
       try { const body = await response.json() as { detail?: string }; if (body.detail) detail = body.detail } catch { /* no json */ }
       notifications.error(`${response.status} · ${String(i18n.global.t("notifications.apiError"))}`, `${method} ${new URL(path, location.origin).pathname} — ${detail}`, `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`)

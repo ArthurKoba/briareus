@@ -13,6 +13,7 @@ const state = reactive({
   status: "idle" as "idle" | "connecting" | "connected" | "reconnecting" | "mock" | "disabled",
   subscriptions: 0,
   lastEventAt: "",
+  lastRemoteEventAt: "",
   enabled: tabWorkspace.realtimeEnabled,
 })
 let socket: WebSocket | null = null
@@ -20,8 +21,9 @@ let reconnectTimer = 0
 let reconnectAttempt = 0
 const sse = new Map<string, EventSource>()
 
-function dispatch(event: BusEvent): void {
+function dispatch(event: BusEvent, remote = false): void {
   state.lastEventAt = event.occurredAt
+  if (remote) state.lastRemoteEventAt = event.occurredAt
   for (const handler of handlers.get(event.topic) ?? []) handler(event)
 }
 
@@ -46,7 +48,7 @@ function wireSseCompat(topic: EventTopic): void {
     type: "item",
     occurredAt: new Date().toISOString(),
     data: JSON.parse(event.data),
-  })
+  }, true)
   sse.set(topic, source)
 }
 
@@ -83,7 +85,7 @@ function connectWebSocket(): void {
   }
   socket.onmessage = (event) => {
     try {
-      dispatch(JSON.parse(event.data) as BusEvent)
+      dispatch(JSON.parse(event.data) as BusEvent, true)
     } catch (caught) {
       frontendTelemetry.error("realtime.decode", caught)
     }
