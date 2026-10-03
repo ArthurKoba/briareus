@@ -26,8 +26,9 @@ const columns = [
 const errorCount = computed(() => rows.value.filter(item => item.status === "error").length)
 async function load() { loading.value = true; error.value = ""; try { rows.value = (await managementApi.calls()).events } catch (e) { error.value = e instanceof Error ? e.message : "Unable to load calls" } finally { loading.value = false } }
 function connect() { source?.close(); source = new EventSource(managementApi.callsStreamUrl); source.onopen = () => streamLive.value = true; source.onerror = () => streamLive.value = false; source.onmessage = event => { const item = JSON.parse(event.data) as InvocationRecord; const existing = rows.value.findIndex(row => row.id === item.id); if (existing >= 0) rows.value.splice(existing, 1, item); else rows.value.unshift(item); rows.value = rows.value.slice(0, 500) } }
+function inspect(item: any) { selected.value = item as InvocationRecord }
 async function clearAll() { if (!window.confirm("Delete all MCP call logs?")) return; await managementApi.clearCalls(); rows.value = [] }
-async function remove(item: InvocationRecord) { await managementApi.deleteCall(item.id); rows.value = rows.value.filter(row => row.id !== item.id) }
+async function remove(item: any) { await managementApi.deleteCall(item.id); rows.value = rows.value.filter(row => row.id !== item.id) }
 onMounted(async () => { await load(); connect() })
 onBeforeUnmount(() => source?.close())
 </script>
@@ -45,7 +46,7 @@ onBeforeUnmount(() => source?.close())
         <template v-if="column.key === 'occurred_at'">{{ formatDate(record.occurred_at) }}</template>
         <template v-else-if="column.key === 'status'"><Tag :color="record.status === 'success' ? 'green' : 'red'">{{ record.status }}</Tag></template>
         <template v-else-if="column.key === 'duration_ms'">{{ Number(record.duration_ms).toFixed(1) }} ms</template>
-        <template v-else-if="column.key === 'actions'"><div class="flex gap-1"><Button variant="ghost" size="sm" @click="selected = record">Inspect</Button><Button variant="ghost" size="sm" @click="remove(record)">Delete</Button></div></template>
+        <template v-else-if="column.key === 'actions'"><div class="flex gap-1"><Button variant="ghost" size="sm" @click="inspect(record)">Inspect</Button><Button variant="ghost" size="sm" @click="remove(record)">Delete</Button></div></template>
       </template>
     </DataTable>
     <Modal :open="Boolean(selected)" title="MCP Call" :footer="null" width="860px" @cancel="selected = null">

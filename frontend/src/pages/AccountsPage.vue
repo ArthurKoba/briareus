@@ -37,11 +37,11 @@ function defaults(provider: AccountRecord["provider"]): void {
   if (provider === "gitlab" && !form.base_url) form.base_url = "https://gitlab.com"
 }
 function newAccount() { editing.value = null; Object.assign(form, { alias: "", provider: "github", auth_type: "github_token", base_url: "", external_id: "", verify_tls: true, ca_cert_pem: "", enabled: true, credential: "" }); modalOpen.value = true }
-function editAccount(record: AccountRecord) { editing.value = record; Object.assign(form, { alias: record.alias, provider: record.provider, auth_type: record.auth_type, base_url: record.base_url || "", external_id: record.external_id || "", verify_tls: record.verify_tls, ca_cert_pem: record.ca_cert_pem || "", enabled: record.enabled, credential: "" }); modalOpen.value = true }
+function editAccount(record: any) { editing.value = record; Object.assign(form, { alias: record.alias, provider: record.provider, auth_type: record.auth_type, base_url: record.base_url || "", external_id: record.external_id || "", verify_tls: record.verify_tls, ca_cert_pem: record.ca_cert_pem || "", enabled: record.enabled, credential: "" }); modalOpen.value = true }
 async function load() { loading.value = true; error.value = ""; try { rows.value = (await managementApi.accounts()).accounts } catch (e) { error.value = e instanceof Error ? e.message : "Unable to load accounts" } finally { loading.value = false } }
 async function save() { saving.value = true; error.value = ""; try { if (editing.value) await managementApi.updateAccount(editing.value, { ...form }); else await managementApi.createAccount({ ...form }); modalOpen.value = false; await load() } catch (e) { error.value = e instanceof Error ? e.message : "Unable to save account" } finally { saving.value = false } }
-async function verify(record: AccountRecord) { verifyResult.value = "Checking…"; try { const result = await managementApi.verifyAccount(record); verifyResult.value = `${record.alias}: ${JSON.stringify(result)}` } catch (e) { verifyResult.value = `${record.alias}: ${e instanceof Error ? e.message : 'verification failed'}` } }
-async function remove(record: AccountRecord) { if (!window.confirm(`Delete ${record.alias}?`)) return; await managementApi.deleteAccount(record); await load() }
+async function verify(record: any) { verifyResult.value = "Checking…"; try { const result = await managementApi.verifyAccount(record); verifyResult.value = `${record.alias}: ${JSON.stringify(result)}` } catch (e) { verifyResult.value = `${record.alias}: ${e instanceof Error ? e.message : 'verification failed'}` } }
+async function remove(record: any) { if (!window.confirm(`Delete ${record.alias}?`)) return; await managementApi.deleteAccount(record); await load() }
 onMounted(load)
 </script>
 <template>
