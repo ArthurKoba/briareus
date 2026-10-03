@@ -8,7 +8,7 @@ from mcp.types import ToolAnnotations
 
 from common.settings import BrowserSettings
 from modules.web.browser import BrowserError, BrowserManager
-from modules.web.browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE
+from modules.web.browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE, resolve_chromium_gpu_args
 from modules.web.browser_tools import register_browser_tools
 
 
@@ -151,7 +151,6 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         xvfb_enabled=profile.xvfb_enabled,
         timezone="Europe/Moscow",
         posix_locale=profile.posix_locale,
-        chromium_args=profile.chromium_args,
     )
 
     command = browser._browser_command()
@@ -161,8 +160,6 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert "--lang=ru-RU" in command
     assert "--accept-lang=ru-RU,ru,en-US,en" in command
     assert "--window-size=1440,900" in command
-    assert "--use-gl=angle" in command
-    assert "--use-angle=swiftshader" in command
     assert process_command[:5] == [
         "/usr/bin/env",
         "DISPLAY=:99",
@@ -173,6 +170,20 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert browser.display == ":99"
     assert browser.timezone == "Europe/Moscow"
     assert browser.posix_locale == "ru_RU.UTF-8"
+
+
+def test_browser_gpu_args_prefer_render_node_and_fall_back_to_swiftshader(tmp_path: Path) -> None:
+    dri = tmp_path / "dri"
+    dri.mkdir()
+
+    assert resolve_chromium_gpu_args(dri) == (
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+    )
+
+    (dri / "renderD128").touch()
+
+    assert resolve_chromium_gpu_args(dri) == ()
 
 
 def test_browser_timezone_blank_env_falls_back_to_utc(

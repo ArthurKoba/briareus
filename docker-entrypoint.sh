@@ -30,9 +30,18 @@ if [ -n "${TERMINAL_HOME_DIR}" ]; then
   chown 1000:1000 "${TERMINAL_HOME_DIR}"
 fi
 
+GPU_RENDER_GID=""
 if [ -n "${BROWSER_PROFILE_PATH}" ]; then
   mkdir -p "${BROWSER_PROFILE_PATH}"
   chown 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")" "${BROWSER_PROFILE_PATH}"
+
+  if [ -e /dev/dri/renderD128 ]; then
+    GPU_RENDER_GID="$(stat -c '%g' /dev/dri/renderD128 2>/dev/null || true)"
+  fi
+fi
+
+if [ -n "${GPU_RENDER_GID}" ] && [ "${GPU_RENDER_GID}" != "0" ] && [ "${GPU_RENDER_GID}" != "1000" ]; then
+  exec setpriv --reuid=1000 --regid=1000 --groups "${GPU_RENDER_GID}" --no-new-privs "$@"
 fi
 
 exec gosu 1000:1000 "$@"
