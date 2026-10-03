@@ -83,18 +83,6 @@ services:
       - management:/management
       - terminal-workspace:/workspace
 
-  management-ui:
-    restart: unless-stopped
-    build:
-      <<: *build
-      target: management-ui
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
-      interval: 2s
-      timeout: 1s
-      start_period: 1s
-      retries: 10
-
   auth:
     <<: *runtime
     build:

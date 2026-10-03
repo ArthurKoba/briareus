@@ -3,8 +3,8 @@
 <div class="d-flex justify-content-between align-items-center">
   <h1>Reverse Project</h1>
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/admin/legacy/">Admin</a></li>
-    <li class="breadcrumb-item"><a href="/admin/legacy/reverse">Reverse</a></li>
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/reverse">Reverse</a></li>
     <li class="breadcrumb-item active">{{ session.get("name", project_id) }}</li>
   </ol>
 </div>
@@ -35,21 +35,21 @@
       </div>
       <div class="mt-3 d-flex flex-wrap gap-2">
         {% if session.get("session") == "active" %}
-        <form method="post" action="/admin/legacy/reverse/release/{{ project_id }}">
+        <form method="post" action="/admin/reverse/release/{{ project_id }}">
           {{ csrf_input(request) }}
           <button class="btn btn-warning" type="submit">Release session</button>
         </form>
         {% else %}
-        <form method="post" action="/admin/legacy/reverse/open/{{ project_id }}">
+        <form method="post" action="/admin/reverse/open/{{ project_id }}">
           {{ csrf_input(request) }}
           <button class="btn btn-primary" type="submit">Open session</button>
         </form>
         {% endif %}
-        <form method="post" action="/admin/legacy/reverse/delete/{{ project_id }}">
+        <form method="post" action="/admin/reverse/delete/{{ project_id }}">
           {{ csrf_input(request) }}
           <button class="btn btn-danger" type="submit" onclick="return confirm('Permanently delete this project?')">Delete project</button>
         </form>
-        <a class="btn" href="/admin/legacy/reverse">Back to projects</a>
+        <a class="btn" href="/admin/reverse">Back to projects</a>
       </div>
     </div>
   </div>
@@ -122,8 +122,8 @@
             <td>{{ program.get("language", "—") }}</td>
             <td>{% if program.get("is_current") %}<span class="badge bg-green-lt">current</span>{% else %}—{% endif %}</td>
             <td class="text-nowrap">
-              <a class="btn btn-sm" href="/admin/legacy/reverse/project/{{ project_id }}?program={{ pname | urlencode }}&coverage=quick">Quick</a>
-              <a class="btn btn-sm btn-outline-primary" href="/admin/legacy/reverse/project/{{ project_id }}?program={{ pname | urlencode }}&coverage=full">Full</a>
+              <a class="btn btn-sm" href="/admin/reverse/project/{{ project_id }}?program={{ pname | urlencode }}&coverage=quick">Quick</a>
+              <a class="btn btn-sm btn-outline-primary" href="/admin/reverse/project/{{ project_id }}?program={{ pname | urlencode }}&coverage=full">Full</a>
             </td>
           </tr>
           {% else %}
@@ -141,7 +141,7 @@
     <div class="card-header d-flex justify-content-between align-items-center">
       <h3 class="card-title">Project files — {{ folder }}</h3>
       {% if parent_folder %}
-      <a class="btn" href="/admin/legacy/reverse/project/{{ project_id }}?folder={{ parent_folder | urlencode }}">Up</a>
+      <a class="btn" href="/admin/reverse/project/{{ project_id }}?folder={{ parent_folder | urlencode }}">Up</a>
       {% endif %}
     </div>
     <div class="table-responsive">
@@ -150,7 +150,7 @@
         <tbody>
         {% for item in folder_links %}
           <tr>
-            <td><a href="/admin/legacy/reverse/project/{{ project_id }}?folder={{ item['path'] | urlencode }}">{{ item["name"] }}/</a></td>
+            <td><a href="/admin/reverse/project/{{ project_id }}?folder={{ item['path'] | urlencode }}">{{ item["name"] }}/</a></td>
             <td>folder</td><td>—</td><td>—</td>
           </tr>
         {% endfor %}

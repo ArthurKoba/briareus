@@ -411,15 +411,9 @@ async def _admin_browser_websocket(websocket: WebSocket) -> None:
 
 
 _admin_proxy = ReverseProxy(_management_settings.url, backend_name="management")
-_management_ui_proxy = ReverseProxy(_settings.management_ui_url, backend_name="management-ui")
 app.router.routes.append(WebSocketRoute("/admin/browser/ws", _admin_browser_websocket))
-app.add_route("/admin/api", _admin_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/api/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/legacy", _admin_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/legacy/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin", _management_ui_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/{path:path}", _management_ui_proxy.handle, methods=_PROXY_METHODS)
-
+app.add_route("/admin", _admin_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/admin/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)
 app.mount("/github", _github_http_app)
 app.mount("/gitlab", _gitlab_http_app)
 app.mount("/files", _files_http_app)

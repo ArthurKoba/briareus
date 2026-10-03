@@ -9,7 +9,6 @@ EXPECTED_SERVICES = {
     "auth",
     "gateway",
     "management",
-    "management-ui",
     "github",
     "gitlab",
     "files",
@@ -163,7 +162,6 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "OTEL_LOG_LEVEL",
     }
     expected = {
-        "management-ui": set(),
         "management": observability
         | {
             "MANAGEMENT_ENCRYPTION_KEY",
@@ -309,7 +307,7 @@ def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
     }
 
     for name, service in services.items():
-        if name in {"valkey", "management-ui"}:
+        if name == "valkey":
             continue
         assert required.issubset(service.get("environment", {})), name
 

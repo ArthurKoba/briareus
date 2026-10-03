@@ -1,0 +1,17 @@
+services:
+  management-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      MANAGEMENT_UI_PREVIEW: ${MANAGEMENT_UI_PREVIEW:-true}
+      MANAGEMENT_BACKEND_ORIGIN: ${MANAGEMENT_BACKEND_ORIGIN:-http://127.0.0.1:9}
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 2s
+      timeout: 1s
+      start_period: 1s
+      retries: 10
