@@ -31,24 +31,6 @@ if [ -n "${TERMINAL_HOME_DIR}" ]; then
 fi
 
 if [ -n "${BROWSER_PROFILE_PATH}" ]; then
-  # Coolify can materialize optional application variables as empty strings,
-  # which overrides Dockerfile ENV defaults. Repair only the browser desktop
-  # environment here before Chromium/Python starts, while preserving any
-  # explicit non-empty deployment override.
-  if [ -z "${TZ:-}" ]; then
-    TZ=Europe/Moscow
-  fi
-  if [ -z "${LANG:-}" ]; then
-    LANG=ru_RU.UTF-8
-  fi
-  if [ -z "${LC_ALL:-}" ]; then
-    LC_ALL="${LANG}"
-  fi
-  if [ -z "${DISPLAY:-}" ]; then
-    DISPLAY=:99
-  fi
-  export TZ LANG LC_ALL DISPLAY
-
   mkdir -p "${BROWSER_PROFILE_PATH}"
   chown 1000:1000 "$(dirname "${BROWSER_PROFILE_PATH}")" "${BROWSER_PROFILE_PATH}"
 fi

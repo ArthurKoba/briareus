@@ -6,7 +6,9 @@ import pytest
 from fastmcp import Client, FastMCP
 from mcp.types import ToolAnnotations
 
+from common.settings import BrowserSettings
 from modules.web.browser import BrowserError, BrowserManager
+from modules.web.browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE
 from modules.web.browser_tools import register_browser_tools
 
 
@@ -127,23 +129,24 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
 def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     from modules.files.workspace_store import WorkspaceFileStore
 
+    profile = DEFAULT_BROWSER_DESKTOP_PROFILE
     browser = BrowserManager(
         workspace=WorkspaceFileStore(tmp_path / "workspace"),
         profile_dir=tmp_path / "profile",
         executable_path="/usr/bin/chromium",
-        headless=False,
+        headless=profile.headless,
         timeout_ms=30_000,
-        viewport_width=1440,
-        viewport_height=900,
+        viewport_width=profile.viewport_width,
+        viewport_height=profile.viewport_height,
         max_snapshot_text_chars=30_000,
         max_snapshot_elements=250,
-        locale="ru-RU",
-        accept_language="ru-RU,ru,en-US,en",
-        display=":99",
-        color_depth=24,
-        xvfb_enabled=True,
+        locale=profile.locale,
+        accept_language=profile.accept_language,
+        display=profile.display,
+        color_depth=profile.color_depth,
+        xvfb_enabled=profile.xvfb_enabled,
         timezone="Europe/Moscow",
-        posix_locale="ru_RU.UTF-8",
+        posix_locale=profile.posix_locale,
     )
 
     command = browser._browser_command()
@@ -165,28 +168,17 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert browser.posix_locale == "ru_RU.UTF-8"
 
 
-def test_browser_timezone_blank_env_falls_back_to_moscow(
+def test_browser_timezone_blank_env_falls_back_to_utc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from common.settings import BrowserSettings
-
     monkeypatch.setenv("TZ", "")
-    monkeypatch.delenv("BROWSER_TIMEZONE", raising=False)
+    settings = BrowserSettings()
+
+    assert settings.timezone == "UTC"
+
+
+def test_browser_timezone_uses_deployment_tz(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TZ", "Europe/Moscow")
     settings = BrowserSettings()
 
     assert settings.timezone == "Europe/Moscow"
-
-
-def test_browser_specific_environment_aliases_take_priority(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from common.settings import BrowserSettings
-
-    monkeypatch.setenv("TZ", "UTC")
-    monkeypatch.setenv("DISPLAY", ":1")
-    monkeypatch.setenv("BROWSER_TIMEZONE", "Europe/Moscow")
-    monkeypatch.setenv("BROWSER_DISPLAY", ":99")
-    settings = BrowserSettings()
-
-    assert settings.timezone == "Europe/Moscow"
-    assert settings.display == ":99"

@@ -43,7 +43,7 @@ class BrowserManager:
         display: str = ":99",
         color_depth: int = 24,
         xvfb_enabled: bool = True,
-        timezone: str = "Europe/Moscow",
+        timezone: str = "UTC",
         posix_locale: str = "ru_RU.UTF-8",
     ) -> None:
         self.workspace = workspace
@@ -58,7 +58,7 @@ class BrowserManager:
         self.display = display.strip()
         self.color_depth = color_depth
         self.xvfb_enabled = xvfb_enabled
-        self.timezone = timezone.strip() or "Europe/Moscow"
+        self.timezone = timezone.strip() or "UTC"
         self.posix_locale = posix_locale.strip()
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
@@ -246,7 +246,7 @@ class BrowserManager:
             return ""
         display = self.display
         if not display:
-            raise BrowserError("headful Chromium requires BROWSER_DISPLAY or DISPLAY")
+            raise BrowserError("headful Chromium requires a configured display")
         if not self.xvfb_enabled:
             return display
         process = self._display_process

@@ -192,7 +192,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "github": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "web": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "web": observability | {"MANAGEMENT_SERVICE_TOKEN", "TZ"},
         "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
@@ -238,6 +238,14 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "BROWSER_PROFILE_PATH",
         "BROWSER_EXECUTABLE_PATH",
         "BROWSER_HEADLESS",
+        "BROWSER_LOCALE",
+        "BROWSER_ACCEPT_LANGUAGE",
+        "BROWSER_DISPLAY",
+        "DISPLAY",
+        "BROWSER_COLOR_DEPTH",
+        "BROWSER_XVFB_ENABLED",
+        "BROWSER_POSIX_LOCALE",
+        "BROWSER_TIMEZONE",
         "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
         "BROWSER_TIMEOUT_MS",
         "BROWSER_VIEWPORT_WIDTH",
@@ -353,16 +361,20 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
     assert "BREAKPAD_DUMP_LOCATION=/browser/crash" in web_stage
 
 
-def test_entrypoint_repairs_blank_browser_desktop_environment() -> None:
+def test_web_timezone_is_optional_with_utc_fallback() -> None:
+    serialized = COMPOSE_FILE.read_text()
+
+    assert "TZ: ${TZ:-UTC}" in serialized
+    assert "${TZ:?}" not in serialized
+
+
+def test_entrypoint_does_not_rewrite_browser_desktop_identity() -> None:
     entrypoint = Path("docker-entrypoint.sh").read_text()
 
-    assert 'if [ -z "${TZ:-}" ]; then' in entrypoint
-    assert 'TZ=Europe/Moscow' in entrypoint
-    assert 'if [ -z "${LANG:-}" ]; then' in entrypoint
-    assert 'LANG=ru_RU.UTF-8' in entrypoint
-    assert 'if [ -z "${DISPLAY:-}" ]; then' in entrypoint
-    assert 'DISPLAY=:99' in entrypoint
-    assert 'export TZ LANG LC_ALL DISPLAY' in entrypoint
+    assert "TZ=Europe/Moscow" not in entrypoint
+    assert "LANG=ru_RU.UTF-8" not in entrypoint
+    assert "DISPLAY=:99" not in entrypoint
+    assert "export TZ LANG LC_ALL DISPLAY" not in entrypoint
 
 
 def test_entrypoint_owns_browser_profile_volume_before_dropping_privileges() -> None:
