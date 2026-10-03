@@ -210,6 +210,32 @@ class ReverseAdminClient:
             context="reverse worker control",
         )
 
+    async def clear_worker_queue(self, worker_index: int) -> JsonObject:
+        return json_object(
+            await self._call(
+                "clear_worker_queue",
+                {"worker_index": worker_index},
+            ),
+            context="reverse worker queue clear",
+        )
+
+    async def recover_worker(
+        self,
+        worker_index: int,
+        *,
+        timeout_seconds: float = 4.0,
+    ) -> JsonObject:
+        return json_object(
+            await self._call(
+                "recover_worker",
+                {
+                    "worker_index": worker_index,
+                    "timeout_seconds": timeout_seconds,
+                },
+            ),
+            context="reverse worker recovery",
+        )
+
     async def coverage(
         self,
         project_id: str,

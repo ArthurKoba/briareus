@@ -82,12 +82,24 @@
               {% if enabled %}
               <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/disable" style="display:inline">
                 {{ csrf_input(request) }}
-                <button class="btn btn-warning" type="submit" onclick="return confirm('Disable worker #{{ worker['worker_index'] }} and release its idle session?')">Disable</button>
+                <button class="btn btn-warning" type="submit" onclick="return confirm('Disable routing to worker #{{ worker['worker_index'] }}? Busy workers must be recovered separately.')">Disable routing</button>
               </form>
               {% else %}
               <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/enable" style="display:inline">
                 {{ csrf_input(request) }}
-                <button class="btn btn-primary" type="submit">Enable</button>
+                <button class="btn btn-primary" type="submit">Enable routing</button>
+              </form>
+              {% endif %}
+              {% if (worker["queued"] or 0) > 0 %}
+              <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/clear-queue" style="display:inline">
+                {{ csrf_input(request) }}
+                <button class="btn btn-outline-warning" type="submit" onclick="return confirm('Cancel all queued requests waiting for worker #{{ worker['worker_index'] }}? The current operation will continue.')">Clear queue</button>
+              </form>
+              {% endif %}
+              {% if worker["running"] or (worker["queued"] or 0) > 0 or not worker["healthy"] %}
+              <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/recover" style="display:inline">
+                {{ csrf_input(request) }}
+                <button class="btn btn-danger" type="submit" onclick="return confirm('Recover worker #{{ worker['worker_index'] }}? This cancels its active and queued requests and restarts only this Ghidra JVM.')">Recover</button>
               </form>
               {% endif %}
             </td>
