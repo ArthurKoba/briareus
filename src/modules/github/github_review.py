@@ -34,6 +34,7 @@ class GitHubReviewClient(GitHubRepositoryClientBase):
             "https://api.github.com/graphql",
             token=token,
             payload={"query": query, "variables": variables},
+            auth_mode="user_token" if self.token else "installation",
         )
         if not isinstance(result, dict):
             raise GitHubAgentError("unexpected GraphQL response")
@@ -140,12 +141,9 @@ class GitHubReviewClient(GitHubRepositoryClientBase):
                     for comment in comments
                 ]
             except ValidationError as exc:
-                raise GitHubAgentError(
-                    "each review comment requires path and body"
-                ) from exc
+                raise GitHubAgentError("each review comment requires path and body") from exc
             payload["comments"] = [
-                comment.model_dump(exclude_none=True)
-                for comment in normalized_comments
+                comment.model_dump(exclude_none=True) for comment in normalized_comments
             ]
         _, result = self._repo_request(
             repository,

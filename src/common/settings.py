@@ -14,7 +14,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "github:*",
     "gitlab:*",
     "files:*",
-    "web:*",
+    "curl:*",
     "analysis:*",
     "ghidra:*",
     "terminal:*",
@@ -110,52 +110,11 @@ class PrivateRuntimeSettings(ProcessSettings):
         )
 
 
-class ValkeySettings(ProcessSettings):
-    url: str = Field("redis://valkey:6379/0", validation_alias="VALKEY_URL")
-    namespace: str = Field("mcp-bridge:v1", validation_alias="VALKEY_NAMESPACE")
-    socket_connect_timeout_seconds: float = Field(
-        0.15,
-        ge=0.01,
-        le=5.0,
-        validation_alias="VALKEY_CONNECT_TIMEOUT_SECONDS",
-    )
-    socket_timeout_seconds: float = Field(
-        0.25,
-        ge=0.01,
-        le=5.0,
-        validation_alias="VALKEY_SOCKET_TIMEOUT_SECONDS",
-    )
-    failure_backoff_seconds: float = Field(
-        5.0,
-        ge=0.1,
-        le=60.0,
-        validation_alias="VALKEY_FAILURE_BACKOFF_SECONDS",
-    )
-    account_ttl_seconds: int = Field(
-        120, ge=1, le=3600, validation_alias="VALKEY_ACCOUNT_TTL_SECONDS"
-    )
-    account_list_ttl_seconds: int = Field(
-        30, ge=1, le=600, validation_alias="VALKEY_ACCOUNT_LIST_TTL_SECONDS"
-    )
-    policy_ttl_seconds: int = Field(30, ge=1, le=600, validation_alias="VALKEY_POLICY_TTL_SECONDS")
-    management_config_ttl_seconds: int = Field(
-        30,
-        ge=1,
-        le=600,
-        validation_alias="VALKEY_MANAGEMENT_CONFIG_TTL_SECONDS",
-    )
-
-    @field_validator("url", "namespace", mode="before")
-    @classmethod
-    def _strip_cache_strings(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-
 class BridgeSettings(ProcessSettings):
     github_url: str = Field("http://github:8000/mcp", validation_alias="GITHUB_URL")
     gitlab_url: str = Field("http://gitlab:8000/mcp", validation_alias="GITLAB_URL")
     files_url: str = Field("http://files:8000/mcp", validation_alias="FILES_URL")
-    web_url: str = Field("http://web:8000/mcp", validation_alias="WEB_URL")
+    curl_url: str = Field("http://curl:8000/mcp", validation_alias="CURL_URL")
     analysis_url: str = Field(
         "http://analysis:8000/mcp",
         validation_alias="ANALYSIS_URL",
@@ -190,7 +149,7 @@ class BridgeSettings(ProcessSettings):
         "github_url",
         "gitlab_url",
         "files_url",
-        "web_url",
+        "curl_url",
         "analysis_url",
         "ghidra_url",
         "terminal_url",
@@ -214,7 +173,7 @@ class BridgeSettings(ProcessSettings):
             "github": self.github_url or "http://github:8000/mcp",
             "gitlab": self.gitlab_url or "http://gitlab:8000/mcp",
             "files": self.files_url or "http://files:8000/mcp",
-            "web": self.web_url or "http://web:8000/mcp",
+            "web": self.curl_url or "http://curl:8000/mcp",
             "analysis": self.analysis_url or "http://analysis:8000/mcp",
             "ghidra": self.ghidra_url or "http://ghidra:8000/mcp",
             "terminal": self.terminal_url or "http://terminal:8000/mcp",
@@ -512,6 +471,14 @@ class GhidraSettings(ProcessSettings):
 
 
 class GitHubPolicySettings(ProcessSettings):
+    public_reader_account: str = Field(
+        "",
+        validation_alias="GITHUB_PUBLIC_READER_ACCOUNT",
+    )
+    public_allow_anonymous_fallback: bool = Field(
+        False,
+        validation_alias="GITHUB_PUBLIC_ALLOW_ANONYMOUS_FALLBACK",
+    )
     protected_branches: Annotated[frozenset[str], NoDecode] = Field(
         frozenset({"main", "master"}),
         validation_alias="GITHUB_AGENT_PROTECTED_BRANCHES",
@@ -524,6 +491,11 @@ class GitHubPolicySettings(ProcessSettings):
         (),
         validation_alias="GITHUB_AGENT_REQUIRED_REVIEWERS",
     )
+
+    @field_validator("public_reader_account", mode="before")
+    @classmethod
+    def _strip_public_reader_account(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("protected_branches", mode="before")
     @classmethod
@@ -639,12 +611,10 @@ class BrowserSettings(ProcessSettings):
         "/usr/bin/chromium",
         validation_alias="BROWSER_EXECUTABLE_PATH",
     )
-    timezone: str = Field("UTC", validation_alias="TZ")
-    devtools_mcp_script_path: Path = Field(
-        Path("/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
-        validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
-    )
+    headless: bool = Field(True, validation_alias="BROWSER_HEADLESS")
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
+    viewport_width: int = Field(1440, ge=320, le=3840, validation_alias="BROWSER_VIEWPORT_WIDTH")
+    viewport_height: int = Field(900, ge=240, le=2160, validation_alias="BROWSER_VIEWPORT_HEIGHT")
     max_snapshot_text_chars: int = Field(
         30_000,
         ge=1_000,
@@ -658,19 +628,12 @@ class BrowserSettings(ProcessSettings):
         validation_alias="BROWSER_MAX_SNAPSHOT_ELEMENTS",
     )
 
-    @field_validator("profile_dir", "devtools_mcp_script_path")
+    @field_validator("profile_dir")
     @classmethod
     def _absolute_profile_dir(cls, value: Path) -> Path:
         if not value.is_absolute():
-            raise ValueError("browser paths must be absolute")
+            raise ValueError("BROWSER_PROFILE_PATH must be absolute")
         return value.resolve(strict=False)
-
-    @field_validator("timezone", mode="before")
-    @classmethod
-    def _normalize_browser_timezone(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip() or "UTC"
-        return value
 
     @field_validator("executable_path", mode="before")
     @classmethod

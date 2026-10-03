@@ -64,20 +64,27 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
     def _app_identity(self) -> JsonObject:
         if self.public_only:
             return {
-                "source": "public_anonymous",
+                "source": "public_authenticated_reader" if self.token else "public_anonymous",
                 "display_name": "public",
                 "login": "public",
                 "id": 0,
                 "type": "Public",
                 "name": "public",
                 "email": "",
+                "reader_account": self.public_reader_account,
+                "transport_authenticated": bool(self.token),
             }
         cached = getattr(self, "_app_identity_cache", None)
         if isinstance(cached, dict):
             return dict(cached)
 
         if self.token:
-            _, app = self._request("GET", f"{_GITHUB_API}/user", token=self.token)
+            _, app = self._request(
+                "GET",
+                f"{_GITHUB_API}/user",
+                token=self.token,
+                auth_mode="user_token",
+            )
             if not isinstance(app, dict):
                 raise GitHubAgentError("unexpected GitHub user response")
             login = json_str(app.get("login")).strip()
@@ -104,6 +111,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             "GET",
             f"{_GITHUB_API}/app",
             token=self._app_jwt(),
+            auth_mode="github_app_jwt",
         )
         if not isinstance(app, dict):
             raise GitHubAgentError("unexpected GitHub App response")
@@ -119,6 +127,8 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
         _, bot = self._request(
             "GET",
             f"{_GITHUB_API}/users/{urllib.parse.quote(login, safe='')}",
+            token=self._any_installation_token(),
+            auth_mode="installation",
         )
         if not isinstance(bot, dict):
             raise GitHubAgentError("unable to resolve GitHub App bot identity")
@@ -213,10 +223,21 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 "identity": {"login": "public", "type": "Public"},
                 "provider_permissions": {"contents": "read"},
                 "provider_permissions_known": True,
-                "note": "Anonymous public GitHub access; read-only.",
+                "transport_auth": "authenticated_reader" if self.token else "anonymous",
+                "reader_account": self.public_reader_account,
+                "note": (
+                    "Authenticated public GitHub access; read-only."
+                    if self.token
+                    else "Anonymous public GitHub access; read-only."
+                ),
             }
         if self.token:
-            _, user = self._request("GET", f"{_GITHUB_API}/user", token=self.token)
+            _, user = self._request(
+                "GET",
+                f"{_GITHUB_API}/user",
+                token=self.token,
+                auth_mode="user_token",
+            )
             payload = json_object(user, context="GitHub user response")
             return {
                 "account_id": self.account_id,
@@ -234,7 +255,12 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 ),
             }
 
-        _, app = self._request("GET", f"{_GITHUB_API}/app", token=self._app_jwt())
+        _, app = self._request(
+            "GET",
+            f"{_GITHUB_API}/app",
+            token=self._app_jwt(),
+            auth_mode="github_app_jwt",
+        )
         payload = json_object(app, context="GitHub App response")
         permissions = json_member_object(payload, "permissions")
         return {
@@ -245,9 +271,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
                 "slug": json_str(payload.get("slug")),
                 "name": json_str(payload.get("name")),
             },
-            "provider_permissions": {
-                key: json_str(value) for key, value in permissions.items()
-            },
+            "provider_permissions": {key: json_str(value) for key, value in permissions.items()},
             "provider_permissions_known": True,
             "note": (
                 "GitHub App permissions are the application ceiling; installation/repository "

@@ -33,6 +33,8 @@ class _GitHubHistoryHost(Protocol):
 
     def _installation_id(self, repository: str) -> int: ...
 
+    def _any_installation_token(self) -> str: ...
+
     def _request(
         self,
         method: str,
@@ -41,6 +43,7 @@ class _GitHubHistoryHost(Protocol):
         token: str | None = None,
         payload: object | None = None,
         allowed_errors: set[int] | None = None,
+        auth_mode: str = "",
     ) -> tuple[int, JsonContainer]: ...
 
     def _repo_request(
@@ -51,6 +54,7 @@ class _GitHubHistoryHost(Protocol):
         *,
         payload: object | None = None,
         allowed_errors: set[int] | None = None,
+        auth_mode: str = "",
     ) -> tuple[int, JsonContainer]: ...
 
     def _assert_branch_mutation_allowed(self, repository: str, branch: str) -> str: ...
@@ -64,12 +68,12 @@ class GitHubHistoryMixin:
     def _history_host(self) -> _GitHubHistoryHost:
         return cast(_GitHubHistoryHost, self)
 
-
     def _agent_app_identity(self) -> JsonObject:
         _, app = self._history_host()._request(
             "GET",
             f"{_GITHUB_API}/app",
             token=self._history_host()._app_jwt(),
+            auth_mode="github_app_jwt",
         )
         if not isinstance(app, dict):
             raise GitHubAgentError("unexpected GitHub App response")
@@ -81,6 +85,8 @@ class GitHubHistoryMixin:
         _, bot = self._history_host()._request(
             "GET",
             f"{_GITHUB_API}/users/{urllib.parse.quote(login, safe='')}",
+            token=self._history_host()._any_installation_token(),
+            auth_mode="installation",
         )
         if not isinstance(bot, dict):
             raise GitHubAgentError("unable to resolve GitHub App bot identity")
@@ -104,6 +110,7 @@ class GitHubHistoryMixin:
             "POST",
             f"{_GITHUB_API}/app/installations/{installation_id}/access_tokens",
             token=self._history_host()._app_jwt(),
+            auth_mode="github_app_jwt",
         )
         if not isinstance(token_payload, dict):
             raise GitHubAgentError("unexpected installation token response")
@@ -250,9 +257,7 @@ class GitHubHistoryMixin:
         )
         if not isinstance(ref, dict):
             raise GitHubAgentError("unable to resolve branch head")
-        old_head = json_str(
-            json_member_object(ref, "object", required=True).get("sha")
-        )
+        old_head = json_str(json_member_object(ref, "object", required=True).get("sha"))
         if old_head != expected_head_sha:
             raise GitHubAgentError(
                 f"branch head changed: expected {expected_head_sha}, found {old_head}"
@@ -350,9 +355,7 @@ class GitHubHistoryMixin:
             if json_str(created.get("message")) != message:
                 raise GitHubAgentError(f"rewritten commit message mismatch for {old_sha}")
             if not self._identity_matches(created, git_name, git_email):
-                raise GitHubAgentError(
-                    f"rewritten commit identity mismatch for {old_sha}"
-                )
+                raise GitHubAgentError(f"rewritten commit identity mismatch for {old_sha}")
 
             mapping[old_sha] = new_sha
             plan.append(
