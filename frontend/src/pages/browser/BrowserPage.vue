@@ -14,7 +14,7 @@ type State = { selected_page_id?:string; docked_devtools_page_id?:string; pages?
 const {t}=useI18n()
 const state=ref<State>({}), status=ref("connecting"), message=ref(String(t("browser.connecting"))), url=ref("")
 const viewportPreset=ref("auto")
-const viewportOptions=[{label:"Auto",value:"auto"},{label:"1280 × 720",value:"1280x720"},{label:"1440 × 900",value:"1440x900"},{label:"1920 × 1080",value:"1920x1080"},{label:"2560 × 1440",value:"2560x1440"}]
+const viewportOptions=computed(()=>[{label:t("browser.automatic"),value:"auto"},{label:"1280 × 720",value:"1280x720"},{label:"1440 × 900",value:"1440x900"},{label:"1920 × 1080",value:"1920x1080"},{label:"2560 × 1440",value:"2560x1440"}])
 const canSetViewport=computed(()=>state.value.capabilities?.includes("set_viewport")===true)
 const screen=ref<HTMLImageElement|null>(null), devtools=ref<HTMLImageElement|null>(null)
 const dims=ref({w:1440,h:900}), devDims=ref({w:1440,h:900})
@@ -32,7 +32,7 @@ async function connect(){
     ws.onopen=()=>{frontendTelemetry.websocket("connected","browser.operator");ws?.send(JSON.stringify({type:"auth",ticket}))}
     ws.onclose=e=>{ws=null;status.value="disconnected";frontendTelemetry.websocket("disconnected","browser.operator");message.value=e.code===4401?String(t("browser.authorizationExpired")):String(t("browser.reconnecting"));clearTimeout(reconnect);reconnect=window.setTimeout(connect,1000)}
     ws.onerror=()=>{status.value="error";message.value=String(t("browser.connectionFailed"));frontendTelemetry.websocket("error","browser.operator");notifications.error(String(t("notifications.websocketError")),message.value)}
-    ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="state"){state.value=m;status.value="live";message.value=String(t("browser.shared"));eventBus.publishMock("browser.activity","state",{pages:Array.isArray(m.pages)?m.pages.length:0,selected_page_id:m.selected_page_id??null});syncUrl()}else if(m.type==="frame"){const target=m.page_id===selectedId.value?screen.value:m.page_id===devId.value?devtools.value:null;if(target)target.src=`data:image/jpeg;base64,${m.data}`;const d=m.page_id===selectedId.value?dims:devDims;if(m.metadata){d.value={w:m.metadata.deviceWidth??d.value.w,h:m.metadata.deviceHeight??d.value.h}}}else if(m.type==="error"){status.value="error";message.value=m.message??"Browser operator error"}}
+    ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="state"){state.value=m;status.value="live";message.value=String(t("browser.shared"));eventBus.publishMock("browser.activity","state",{pages:Array.isArray(m.pages)?m.pages.length:0,selected_page_id:m.selected_page_id??null});syncUrl()}else if(m.type==="frame"){const target=m.page_id===selectedId.value?screen.value:m.page_id===devId.value?devtools.value:null;if(target)target.src=`data:image/jpeg;base64,${m.data}`;const d=m.page_id===selectedId.value?dims:devDims;if(m.metadata){d.value={w:m.metadata.deviceWidth??d.value.w,h:m.metadata.deviceHeight??d.value.h}}}else if(m.type==="error"){status.value="error";message.value=m.message??String(t("browser.connectionFailed"))}}
   }catch(e){status.value="error";message.value=e instanceof Error?e.message:String(t("browser.ticketFailed"));frontendTelemetry.error("browser.connect",e);notifications.error(String(t("notifications.websocketError")),message.value);clearTimeout(reconnect);reconnect=window.setTimeout(connect,3000)}
 }
 function pointer(img:HTMLImageElement|null,page:string,d:{w:number;h:number},e:MouseEvent,type:string,button="none",click_count=0){if(!img?.src||!page)return;const r=img.getBoundingClientRect();send({type:"mouse",page_id:page,event:type,x:(e.clientX-r.left)*d.w/r.width,y:(e.clientY-r.top)*d.h/r.height,button,click_count})}
@@ -62,18 +62,18 @@ onBeforeUnmount(()=>{clearInterval(refresh);clearTimeout(reconnect);ws?.close()}
         <Button variant="outline" size="sm" :disabled="!live" @click="send({type:'new_page',url:'chrome://extensions/'})">{{t('browser.extensions')}}</Button>
         <Button variant="outline" size="sm" :disabled="!live" @click="send({type:'open_docked_devtools',panel:'elements'})">{{t('browser.devtools')}}</Button>
         <Button variant="outline" size="sm" :disabled="!live" @click="send({type:'open_devtools',panel:'elements'})">{{t('browser.devtoolsTab')}}</Button>
-        <Button variant="outline" size="sm" :disabled="!live" @click="send({type:'set_agent_access',allowed:state.agent_access_enabled===false})">Agents: {{ state.agent_access_enabled === false ? 'Blocked' : 'On' }}</Button>
-        <Button variant="outline" size="sm" :disabled="!live" @click="developer">Developer: {{ state.developer_access_effective ? 'On' : state.developer_access_enabled ? 'Armed' : 'Off' }}</Button>
+        <Button variant="outline" size="sm" :disabled="!live" @click="send({type:'set_agent_access',allowed:state.agent_access_enabled===false})">{{t('browser.agents')}}: {{ state.agent_access_enabled === false ? t('browser.blocked') : t('browser.on') }}</Button>
+        <Button variant="outline" size="sm" :disabled="!live" @click="developer">{{t('browser.developer')}}: {{ state.developer_access_effective ? t('browser.on') : state.developer_access_enabled ? t('browser.armed') : t('browser.off') }}</Button>
         <div class="ml-auto flex items-center gap-2"><span class="text-xs text-muted-foreground">{{t('browser.viewport')}}</span><Select :value="viewportPreset" :options="viewportOptions" class="w-36" size="small" :disabled="!live||!canSetViewport" @change="setViewport(String($event))"/><span v-if="!canSetViewport" class="hidden text-[10px] text-muted-foreground xl:inline">{{t('browser.viewportHint')}}</span></div>
       </div>
       <form class="flex gap-2 border-b border-border p-3" @submit.prevent="send({type:'navigate',url})">
-        <input v-model="url" class="field flex-1 font-mono text-xs" placeholder="https://example.com or chrome://extensions" />
+        <input v-model="url" class="field flex-1 font-mono text-xs" :placeholder="t('browser.addressPlaceholder')" />
         <Button size="sm" type="submit" :disabled="!live">{{t('browser.go')}}</Button>
       </form>
       <div class="flex gap-2 overflow-x-auto border-b border-border p-2">
         <div v-for="page in pages" :key="page.page_id" class="min-w-60 max-w-72 cursor-pointer rounded-lg border p-2" :class="page.page_id === selectedId ? 'border-primary bg-accent' : 'border-border'" @click="send({type:'select_page',page_id:page.page_id})">
-          <div class="flex gap-2"><input class="min-w-0 flex-1 bg-transparent text-xs font-semibold outline-none" :value="page.label || ''" :placeholder="page.title || 'Tab label'" @click.stop @change="setLabel(page,$event)" /><button class="rounded border px-1.5 text-[10px]" @click.stop="send({type:'set_page_agent_access',page_id:page.page_id,allowed:page.page_agent_access===false})">{{ page.page_agent_access === false ? t('browser.locked') : t('browser.agent') }}</button></div>
-          <div class="mt-1 truncate text-xs">{{ page.title || '(untitled)' }}</div><div class="truncate text-[10px] text-muted-foreground">{{ page.url }}</div>
+          <div class="flex gap-2"><input class="min-w-0 flex-1 bg-transparent text-xs font-semibold outline-none" :value="page.label || ''" :placeholder="page.title || t('browser.tabLabel')" @click.stop @change="setLabel(page,$event)" /><button class="rounded border px-1.5 text-[10px]" @click.stop="send({type:'set_page_agent_access',page_id:page.page_id,allowed:page.page_agent_access===false})">{{ page.page_agent_access === false ? t('browser.locked') : t('browser.agent') }}</button></div>
+          <div class="mt-1 truncate text-xs">{{ page.title || t('browser.untitled') }}</div><div class="truncate text-[10px] text-muted-foreground">{{ page.url }}</div>
         </div>
         <div v-if="!pages.length" class="p-3 text-xs text-muted-foreground">{{t('browser.noTabs')}}</div>
       </div>
