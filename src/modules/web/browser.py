@@ -459,10 +459,7 @@ class BrowserManager:
         self._extension_registry.remove(extension_id)
 
     def dev_extensions(self) -> list[JsonValue]:
-        return [
-            {"id": item.id, "path": item.path}
-            for item in self._extension_registry.items()
-        ]
+        return [{"id": item.id, "path": item.path} for item in self._extension_registry.items()]
 
     def _register_page(self, page: Page) -> str:
         key = id(page)
@@ -664,6 +661,7 @@ class BrowserManager:
             "developer_backend_connected": self._developer_backend_connected,
             "headless": self.headless,
             "browser": "chromium",
+            "capabilities": {"set_viewport": True},
             "locale": self.locale,
             "accept_language": self.accept_language,
             "display": "" if self.headless else self.display,
@@ -909,6 +907,34 @@ class BrowserManager:
         self._forget_page(page_id)
         return {"page_id": page_id, "closed": True}
 
+    async def set_viewport(self, page_id: str, width: int, height: int) -> JsonObject:
+        self._require_agent_access(page_id)
+        if not 320 <= width <= 7680 or not 240 <= height <= 4320:
+            raise BrowserError("browser viewport must be between 320x240 and 7680x4320")
+        page = await self._page(page_id)
+        if page.is_closed():
+            raise BrowserError(f"browser page is closed: {page_id}")
+        try:
+            await page.set_viewport_size({"width": width, "height": height})
+            measured = await page.evaluate(
+                "() => ({width: window.innerWidth, height: window.innerHeight})"
+            )
+        except Exception as exc:
+            raise BrowserError(f"browser viewport update failed: {exc}") from exc
+        actual_width = width
+        actual_height = height
+        if isinstance(measured, dict):
+            raw_width = measured.get("width")
+            raw_height = measured.get("height")
+            if isinstance(raw_width, (int, float)):
+                actual_width = int(raw_width)
+            if isinstance(raw_height, (int, float)):
+                actual_height = int(raw_height)
+        result = await self._summary(page_id, page)
+        result["viewport"] = {"width": actual_width, "height": actual_height}
+        result["requested_viewport"] = {"width": width, "height": height}
+        return result
+
     async def set_page_label(self, page_id: str, label: str) -> JsonObject:
         self._require_agent_access(page_id)
         page = await self._page(page_id)
@@ -949,9 +975,7 @@ class BrowserManager:
                 self._page_agent_access[page_id] = False
         return await self._summary(page_id, page)
 
-    async def operator_set_agent_access(
-        self, owner_token: str, allowed: bool
-    ) -> JsonObject:
+    async def operator_set_agent_access(self, owner_token: str, allowed: bool) -> JsonObject:
         self._require_operator(owner_token)
         async with self._policy_lock:
             self._agent_access_enabled = allowed
@@ -962,9 +986,7 @@ class BrowserManager:
             "developer_access_effective": self.developer_access_effective,
         }
 
-    async def operator_set_developer_access(
-        self, owner_token: str, allowed: bool
-    ) -> JsonObject:
+    async def operator_set_developer_access(self, owner_token: str, allowed: bool) -> JsonObject:
         self._require_operator(owner_token)
         async with self._policy_lock:
             self._developer_access_enabled = allowed
@@ -1075,7 +1097,6 @@ class BrowserManager:
         result["http_status"] = response.status if response is not None else None
         return result
 
-
     async def _operator_devtools_url(
         self,
         owner_token: str,
@@ -1094,11 +1115,7 @@ class BrowserManager:
         finally:
             await session.detach()
         target_info = info.get("targetInfo") if isinstance(info, dict) else None
-        target_id = (
-            str(target_info.get("targetId") or "")
-            if isinstance(target_info, dict)
-            else ""
-        )
+        target_id = str(target_info.get("targetId") or "") if isinstance(target_info, dict) else ""
         if not target_id:
             raise BrowserError("selected browser tab has no DevTools target")
         supported_panels = {
@@ -1212,11 +1229,7 @@ class BrowserManager:
         deleted_cookies = 0
         try:
             cookie_payload = await session.send("Network.getCookies", {"urls": [page.url]})
-            cookies = (
-                cookie_payload.get("cookies", [])
-                if isinstance(cookie_payload, dict)
-                else []
-            )
+            cookies = cookie_payload.get("cookies", []) if isinstance(cookie_payload, dict) else []
             if isinstance(cookies, list):
                 for cookie in cookies:
                     if not isinstance(cookie, dict):
@@ -1283,9 +1296,7 @@ class BrowserManager:
                 page_items = [await self._summary(page_id, page)]
             first_page = page_items[0] if page_items else None
             selected_page_id = (
-                str(first_page.get("page_id") or "")
-                if isinstance(first_page, dict)
-                else ""
+                str(first_page.get("page_id") or "") if isinstance(first_page, dict) else ""
             )
             async with self._operator_lock:
                 for token in list(self._operator_pages):

@@ -67,6 +67,14 @@ def _client(tmp_path: Path) -> TestClient:
             set_idle_timeout=AsyncMock(return_value={"idle_timeout_seconds": 900.0}),
         ),
         terminal=Mock(),
+        web=Mock(
+            status=AsyncMock(
+                return_value={"running": True, "capabilities": {"set_viewport": True}}
+            ),
+            set_viewport=AsyncMock(
+                return_value={"page_id": "page-1", "viewport": {"width": 1280, "height": 720}}
+            ),
+        ),
         snapshot_refresher=Mock(),
     )
     app = FastAPI()

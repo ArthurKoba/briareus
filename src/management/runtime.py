@@ -16,6 +16,7 @@ from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
 from common.settings import FileSettings, ManagementSettings, ValkeySettings
 from common.websocket_proxy import relay_websocket
+from management.api_errors import install_admin_api_error_handlers
 from management.application.services import (
     AccountService,
     InvocationAuditService,
@@ -24,6 +25,7 @@ from management.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
+from management.browser_api import build_browser_operator_api_router
 from management.browser_operator_auth import (
     BrowserOperatorAuthError,
     verify_browser_operator_ticket,
@@ -46,9 +48,13 @@ from management.infrastructure.repositories import (
 from management.infrastructure.reverse import ReverseAdminClient
 from management.infrastructure.snapshot_worker import SnapshotRefresher
 from management.infrastructure.terminal import TerminalAdminClient
+from management.infrastructure.web import WebAdminClient
 from management.presentation.admin import build_admin
 from management.presentation.api import ApiServices, build_internal_router
 from management.presentation.web_api import WebApiServices, build_admin_api_router
+from management.realtime import RealtimeBus
+from management.realtime_api import build_realtime_router
+from management.telemetry_ingest import FrontendTelemetryProxy, TelemetryUpstream
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,13 @@ if ensure_zero_state_schema(engine):
 
 cache_settings = ValkeySettings()
 shared_cache = SharedCache(cache_settings)
+realtime = RealtimeBus(shared_cache, cache_settings)
+telemetry = FrontendTelemetryProxy(
+    TelemetryUpstream(
+        url=settings.frontend_telemetry_upstream_url,
+        bearer_token=settings.frontend_telemetry_bearer_token,
+    )
+)
 cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
@@ -86,11 +99,39 @@ accounts = AccountService(
     cache=shared_cache,
     cache_settings=cache_settings,
 )
-audit = InvocationAuditService(invocation_repository, config_service)
+audit = InvocationAuditService(
+    invocation_repository, config_service, publisher=realtime.publish_sync
+)
 files = FileAdminStore(FileSettings())
 reverse = ReverseAdminClient()
 snapshot_refresher = SnapshotRefresher(snapshots, files, reverse)
 terminal = TerminalAdminClient()
+web_admin = WebAdminClient()
+
+
+async def _realtime_state_loop() -> None:
+    while True:
+        try:
+            workspace = await asyncio.to_thread(snapshots.get, "workspace:stats")
+            analysis = await asyncio.to_thread(snapshots.get, "reverse:overview")
+            calls = await asyncio.to_thread(audit.summary)
+            await realtime.publish(
+                "system.metrics",
+                "snapshot",
+                {
+                    "calls": calls,
+                    "workspace": workspace.payload if workspace is not None else {},
+                    "analysis": analysis.payload if analysis is not None else {},
+                },
+            )
+            try:
+                browser_state = await web_admin.status()
+            except Exception as exc:
+                browser_state = {"available": False, "error": str(exc)}
+            await realtime.publish("browser.runtime", "state", browser_state)
+        except Exception:
+            logger.exception("management realtime state refresh failed")
+        await asyncio.sleep(10)
 
 
 async def _maintenance_loop() -> None:
@@ -119,8 +160,11 @@ async def _maintenance_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    realtime.start()
+    telemetry.start()
     await snapshot_refresher.ensure_base_snapshots()
     tasks = [
+        asyncio.create_task(_realtime_state_loop(), name="management-realtime-state"),
         asyncio.create_task(_maintenance_loop(), name="management-maintenance"),
         asyncio.create_task(
             snapshot_refresher.workspace_loop(),
@@ -141,6 +185,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await telemetry.close()
+        await realtime.close()
 
 
 app = FastAPI(
@@ -157,6 +203,10 @@ app = FastAPI(
         )
     ],
 )
+
+
+install_admin_api_error_handlers(app)
+
 app.include_router(
     build_internal_router(
         ApiServices(
@@ -181,10 +231,15 @@ app.include_router(
             files=files,
             reverse=reverse,
             terminal=terminal,
+            web=web_admin,
             snapshot_refresher=snapshot_refresher,
+            realtime=realtime,
+            telemetry=telemetry,
         ),
     )
 )
+app.include_router(build_realtime_router(settings, realtime, audit, snapshots, web_admin))
+app.include_router(build_browser_operator_api_router(settings))
 
 
 @app.get("/health")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
 from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
@@ -156,9 +156,11 @@ class InvocationAuditService:
         self,
         repository: InvocationRepository,
         config: ManagementConfigService | None = None,
+        publisher: Callable[[str, str, object], object] | None = None,
     ) -> None:
         self.repository = repository
         self.config = config
+        self.publisher = publisher
 
     def record(self, invocation: Invocation) -> None:
         self.record_many([invocation])
@@ -173,6 +175,15 @@ class InvocationAuditService:
                 return
             capture_payloads = config.logging_capture_payloads
         self.repository.append_many(invocations, capture_payloads=capture_payloads)
+        if self.publisher is not None:
+            self.publisher(
+                "mcp.calls",
+                "batch",
+                {
+                    "events": [item.model_dump(mode="json") for item in invocations],
+                    "count": len(invocations),
+                },
+            )
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
         return self.repository.recent(limit=limit)

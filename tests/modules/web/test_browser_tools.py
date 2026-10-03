@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastmcp import Client, FastMCP
@@ -27,6 +28,9 @@ class FakeBrowser:
 
     async def open(self, url, page_id=""):
         return {"page_id": page_id or "page-1", "url": url, "title": "Example"}
+
+    async def set_viewport(self, page_id, width, height):
+        return {"page_id": page_id, "viewport": {"width": width, "height": height}}
 
     async def set_page_label(self, page_id, label):
         return {"page_id": page_id, "label": label}
@@ -89,6 +93,7 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
         "browser_restart",
         "browser_pages",
         "browser_open",
+        "browser_set_viewport",
         "browser_set_page_label",
         "browser_snapshot",
         "browser_click",
@@ -105,6 +110,63 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_browser_set_viewport_returns_measured_state_and_handles_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    profile = DEFAULT_BROWSER_DESKTOP_PROFILE
+    browser = BrowserManager(
+        workspace=WorkspaceFileStore(tmp_path / "workspace"),
+        profile_dir=tmp_path / "profile",
+        executable_path="/usr/bin/chromium",
+        headless=profile.headless,
+        timeout_ms=30_000,
+        viewport_width=profile.viewport_width,
+        viewport_height=profile.viewport_height,
+        screen_width=profile.screen_width,
+        screen_height=profile.screen_height,
+        max_snapshot_text_chars=30_000,
+        max_snapshot_elements=250,
+        locale=profile.locale,
+        accept_language=profile.accept_language,
+        display=profile.display,
+        color_depth=profile.color_depth,
+        xvfb_enabled=profile.xvfb_enabled,
+        timezone="UTC",
+        posix_locale=profile.posix_locale,
+        chromium_args=profile.chromium_args,
+    )
+    page = Mock(
+        url="https://example.com",
+        is_closed=Mock(return_value=False),
+        set_viewport_size=AsyncMock(),
+        evaluate=AsyncMock(return_value={"width": 1278, "height": 718}),
+        title=AsyncMock(return_value="Example"),
+    )
+    monkeypatch.setattr(browser, "_require_agent_access", lambda _page_id: None)
+    monkeypatch.setattr(browser, "_page", AsyncMock(return_value=page))
+
+    result = await browser.set_viewport("page-1", 1280, 720)
+
+    page.set_viewport_size.assert_awaited_once_with({"width": 1280, "height": 720})
+    assert result["requested_viewport"] == {"width": 1280, "height": 720}
+    assert result["viewport"] == {"width": 1278, "height": 718}
+
+    with pytest.raises(BrowserError, match="between 320x240"):
+        await browser.set_viewport("page-1", 100, 100)
+
+    page.is_closed.return_value = True
+    with pytest.raises(BrowserError, match="closed"):
+        await browser.set_viewport("page-1", 1280, 720)
+
+    page.is_closed.return_value = False
+    page.set_viewport_size.side_effect = RuntimeError("unsupported")
+    with pytest.raises(BrowserError, match="viewport update failed"):
+        await browser.set_viewport("page-1", 1280, 720)
+
+
 def test_browser_rejects_non_http_urls() -> None:
     with pytest.raises(BrowserError, match="absolute http"):
         BrowserManager._url("file:///etc/passwd")
@@ -117,12 +179,12 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     source = Path("src/modules/web/browser.py").read_text()
     assert '"--no-sandbox"' in source
     assert '_REMOTE_DEBUGGING_HOST = "127.0.0.1"' in source
-    assert '_REMOTE_DEBUGGING_PORT = 9222' in source
+    assert "_REMOTE_DEBUGGING_PORT = 9222" in source
     assert 'f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}"' in source
     assert 'f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}"' in source
-    assert 'playwright.chromium.connect_over_cdp(' in source
-    assert 'asyncio.create_subprocess_exec(' in source
-    assert 'launch_persistent_context(' not in source
+    assert "playwright.chromium.connect_over_cdp(" in source
+    assert "asyncio.create_subprocess_exec(" in source
+    assert "launch_persistent_context(" not in source
     assert 'command.append("--headless=new")' in source
     assert 'command.append(f"--lang={self.locale}")' in source
     assert 'command.append(f"--accept-lang={self.accept_language}")' in source
