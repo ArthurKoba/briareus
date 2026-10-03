@@ -73,6 +73,7 @@ from management.infrastructure.reverse import ReverseAdminClient
 from management.infrastructure.snapshot_worker import (
     REVERSE_OVERVIEW_KEY,
     WORKSPACE_STATS_KEY,
+    SnapshotRefresher,
     coverage_refresh_seconds,
     coverage_snapshot_key,
     snapshot_meta,
@@ -625,10 +626,12 @@ class ReverseView(CustomView):
         self,
         reverse: ReverseAdminClient,
         snapshots: SnapshotService,
+        snapshot_refresher: SnapshotRefresher,
     ) -> None:
         super().__init__()
         self.reverse = reverse
         self.snapshots = snapshots
+        self.snapshot_refresher = snapshot_refresher
 
     @route("")
     async def index(self, request: Request) -> Response:
@@ -743,6 +746,11 @@ class ReverseView(CustomView):
                     )
                     coverage = cached_coverage.payload if cached_coverage.payload else None
                     coverage_meta = snapshot_meta(cached_coverage)
+                    if (
+                        cached_coverage.stale()
+                        or cached_coverage.status in {"pending", "error"}
+                    ):
+                        self.snapshot_refresher.notify_coverage_requested()
             except Exception as exc:
                 error = str(exc)
 
@@ -1458,6 +1466,7 @@ def build_admin(
     runtime_settings: RuntimeSettingsService,
     files: FileAdminStore,
     reverse: ReverseAdminClient,
+    snapshot_refresher: SnapshotRefresher,
 ) -> Admin:
     terminal = TerminalAdminClient()
     admin = Admin(
@@ -1491,7 +1500,7 @@ def build_admin(
     )
     admin.add_view(SigNozAccountView(cipher, accounts))
     admin.add_view(CoolifyAccountView(cipher, accounts))
-    admin.add_view(ReverseView(reverse, snapshots))
+    admin.add_view(ReverseView(reverse, snapshots, snapshot_refresher))
     admin.add_view(TerminalView(terminal))
     admin.add_view(BrowserView(settings))
     admin.add_view(OAuthSessionView(OAuthSessionRecord, oauth_sessions))

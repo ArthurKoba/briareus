@@ -635,6 +635,7 @@ class SqlAlchemySnapshotRepository:
             created_at=record.created_at,
         )
 
+    @_db_span("snapshots.ensure")
     def ensure(
         self,
         key: str,
@@ -662,11 +663,13 @@ class SqlAlchemySnapshotRepository:
             session.flush()
             return self._domain(record)
 
+    @_db_span("snapshots.get")
     def get(self, key: str) -> CachedSnapshot | None:
         with self.sessions() as session:
             record = session.get(CachedSnapshotRecord, key)
             return self._domain(record) if record is not None else None
 
+    @_db_span("snapshots.list_category")
     def list_category(self, category: str, *, limit: int = 1000) -> Sequence[CachedSnapshot]:
         size = max(1, min(limit, 5000))
         with self.sessions() as session:
@@ -678,6 +681,7 @@ class SqlAlchemySnapshotRepository:
             ).all()
             return [self._domain(row) for row in rows]
 
+    @_db_span("snapshots.mark_attempt")
     def mark_attempt(self, key: str, *, status: str = "refreshing") -> None:
         with self.sessions.begin() as session:
             record = session.get(CachedSnapshotRecord, key)
@@ -686,6 +690,7 @@ class SqlAlchemySnapshotRepository:
             record.attempted_at = datetime.now(UTC)
             record.status = status
 
+    @_db_span("snapshots.store_success")
     def store_success(self, key: str, payload: dict[str, object]) -> CachedSnapshot:
         now = datetime.now(UTC)
         with self.sessions.begin() as session:
@@ -701,6 +706,7 @@ class SqlAlchemySnapshotRepository:
             session.flush()
             return self._domain(record)
 
+    @_db_span("snapshots.store_error")
     def store_error(self, key: str, exc: Exception) -> CachedSnapshot:
         now = datetime.now(UTC)
         with self.sessions.begin() as session:

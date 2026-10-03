@@ -37,6 +37,7 @@ from management.infrastructure.repositories import (
     SqlAlchemySnapshotRepository,
 )
 from management.infrastructure.reverse import ReverseAdminClient
+from management.infrastructure.snapshot_worker import SnapshotRefresher
 from management.presentation.admin import (
     SettingsView,
     _display_invocation_tool,
@@ -76,6 +77,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
     snapshots = SnapshotService(SqlAlchemySnapshotRepository(sessions))
     files = FileAdminStore(FileSettings(workspace_root=tmp_path / "workspace"))
     reverse = ReverseAdminClient()
+    snapshot_refresher = SnapshotRefresher(snapshots, files, reverse)
 
     admin = build_admin(
         engine,
@@ -89,6 +91,7 @@ def test_starlette_admin_has_provider_logging_and_file_sections(tmp_path: Path) 
         runtime_settings,
         files,
         reverse,
+        snapshot_refresher,
     )
 
     assert admin.base_url == "/admin"

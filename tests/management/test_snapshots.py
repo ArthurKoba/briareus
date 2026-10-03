@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -119,3 +120,88 @@ async def test_coverage_subscription_runs_in_background_and_is_cached(tmp_path: 
     assert cached.status == "ready"
     assert cached.payload["evaluated_functions"] == 10
     engine.dispose()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_coverage_refresh_skips_fresh_snapshot_and_processes_later_due_snapshot(
+    tmp_path: Path,
+) -> None:
+    snapshots, engine = _service(tmp_path)
+    fresh_key = coverage_snapshot_key("project-fresh", "fresh.bin", full=False)
+    due_key = coverage_snapshot_key("project-due", "due.bin", full=False)
+    snapshots.ensure(
+        fresh_key,
+        category="reverse_coverage",
+        parameters={"project_id": "project-fresh", "program": "fresh.bin", "full": False},
+        refresh_after_seconds=600,
+    )
+    snapshots.store_success(fresh_key, {"project_id": "project-fresh"})
+    snapshots.ensure(
+        due_key,
+        category="reverse_coverage",
+        parameters={"project_id": "project-due", "program": "due.bin", "full": False},
+        refresh_after_seconds=600,
+    )
+
+    class FakeFiles:
+        def stats(self) -> JsonObject:
+            return {}
+
+    class FakeReverse:
+        async def coverage(self, project_id: str, program: str, *, full: bool) -> JsonObject:
+            assert project_id == "project-due"
+            assert program == "due.bin"
+            assert full is False
+            return {"project_id": project_id, "evaluated_functions": 7}
+
+    refresher = SnapshotRefresher(
+        snapshots,
+        FakeFiles(),  # type: ignore[arg-type]
+        FakeReverse(),  # type: ignore[arg-type]
+    )
+
+    assert await refresher._refresh_coverage_once() is True
+    cached = snapshots.get(due_key)
+    assert cached is not None
+    assert cached.status == "ready"
+    assert cached.payload["evaluated_functions"] == 7
+    engine.dispose()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_coverage_loop_wakes_immediately_when_new_snapshot_is_requested(
+    tmp_path: Path,
+) -> None:
+    snapshots, engine = _service(tmp_path)
+    refreshed = asyncio.Event()
+
+    class FakeFiles:
+        def stats(self) -> JsonObject:
+            return {}
+
+    class FakeReverse:
+        async def coverage(self, project_id: str, program: str, *, full: bool) -> JsonObject:
+            refreshed.set()
+            return {"project_id": project_id, "program": program, "full": full}
+
+    refresher = SnapshotRefresher(
+        snapshots,
+        FakeFiles(),  # type: ignore[arg-type]
+        FakeReverse(),  # type: ignore[arg-type]
+    )
+    task = asyncio.create_task(refresher.coverage_loop())
+    try:
+        await asyncio.sleep(0)
+        key = coverage_snapshot_key("project-wakeup", "wake.bin", full=False)
+        snapshots.ensure(
+            key,
+            category="reverse_coverage",
+            parameters={"project_id": "project-wakeup", "program": "wake.bin", "full": False},
+            refresh_after_seconds=600,
+        )
+        refresher.notify_coverage_requested()
+        await asyncio.wait_for(refreshed.wait(), timeout=1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        engine.dispose()  # type: ignore[attr-defined]

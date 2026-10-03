@@ -29,6 +29,7 @@ class SnapshotRefresher:
         self.snapshots = snapshots
         self.files = files
         self.reverse = reverse
+        self._coverage_wakeup = asyncio.Event()
 
     async def ensure_base_snapshots(self) -> None:
         await asyncio.to_thread(
@@ -80,15 +81,15 @@ class SnapshotRefresher:
             logger.exception("reverse overview snapshot refresh failed")
             await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
 
-    async def _refresh_coverage_once(self) -> None:
+    async def _refresh_coverage_once(self) -> bool:
         due = await asyncio.to_thread(
             self.snapshots.due,
             "reverse_coverage",
             retry_after_seconds=60,
-            limit=1,
+            limit=100,
         )
         if not due:
-            return
+            return False
         snapshot = due[0]
         project_id = snapshot.parameters.get("project_id")
         program = snapshot.parameters.get("program")
@@ -96,11 +97,11 @@ class SnapshotRefresher:
         if not isinstance(project_id, str) or not project_id:
             exc = ValueError("cached coverage project_id is missing")
             await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
-            return
+            return True
         if not isinstance(program, str) or not program:
             exc = ValueError("cached coverage program is missing")
             await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
-            return
+            return True
         full_mode = bool(full)
         await asyncio.to_thread(self.snapshots.mark_attempt, snapshot.key)
         try:
@@ -118,21 +119,31 @@ class SnapshotRefresher:
                 full_mode,
             )
             await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
+        return True
+
+    def notify_coverage_requested(self) -> None:
+        self._coverage_wakeup.set()
 
     async def workspace_loop(self) -> None:
         while True:
             await self._refresh_workspace_once()
-            await asyncio.sleep(15)
+            await asyncio.sleep(60)
 
     async def reverse_loop(self) -> None:
         while True:
             await self._refresh_reverse_once()
-            await asyncio.sleep(10)
+            await asyncio.sleep(REVERSE_OVERVIEW_REFRESH_SECONDS)
 
     async def coverage_loop(self) -> None:
         while True:
-            await self._refresh_coverage_once()
-            await asyncio.sleep(5)
+            while await self._refresh_coverage_once():
+                pass
+            try:
+                await asyncio.wait_for(self._coverage_wakeup.wait(), timeout=60)
+            except TimeoutError:
+                pass
+            finally:
+                self._coverage_wakeup.clear()
 
 
 def coverage_snapshot_key(project_id: str, program: str, *, full: bool) -> str:
