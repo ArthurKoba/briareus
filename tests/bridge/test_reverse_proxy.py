@@ -4,6 +4,7 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
+from starlette.responses import StreamingResponse
 from starlette.routing import Route
 
 from bridge.reverse_proxy import ReverseProxy
