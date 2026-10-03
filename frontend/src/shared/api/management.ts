@@ -1,4 +1,5 @@
 import { runtimeConfig } from "@/shared/config/runtime"
+import { ManagementApiError } from "@/shared/api/error"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 import { notifications } from "@/shared/notifications/bus"
 import { i18n } from "@/shared/i18n"
@@ -81,32 +82,49 @@ const previewBootstrap: ManagementBootstrap = {
 async function request<T>(path: string, init: RequestInit = {}, options: { notifyErrors?: boolean } = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json")
-  const method=init.method??"GET"
-  const started=performance.now()
+  const method = init.method ?? "GET"
+  const started = performance.now()
+  let response: Response
   try {
-    const response = await fetch(path, { credentials: "same-origin", ...init, headers })
-    frontendTelemetry.api(path,method,response.status,performance.now()-started)
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) window.dispatchEvent(new CustomEvent("management:auth-expired"))
-      let detail = `Management API request failed: ${response.status}`
-      try {
-        const body = await response.json() as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
-        const message = body.error?.message ?? body.detail
-        if (typeof message === "string" && message) detail = message
-        else if (message !== undefined) detail = JSON.stringify(message)
-      } catch { /* no json */ }
-      if (options.notifyErrors !== false) notifications.error(`${response.status} · ${String(i18n.global.t("notifications.apiError"))}`, `${method} ${new URL(path, location.origin).pathname} — ${detail}`, `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`)
-      throw new Error(detail)
-    }
-    const contentType = response.headers.get("content-type") || ""
-    return (contentType.includes("application/json") ? await response.json() : await response.text()) as T
+    response = await fetch(path, { credentials: "same-origin", ...init, headers })
   } catch (caught) {
-    if (!(caught instanceof Error && caught.message.startsWith("Management API request failed"))) {
-      frontendTelemetry.error("api.network_error",caught,{path,method,duration_ms:performance.now()-started})
-      if (options.notifyErrors !== false) notifications.error(String(i18n.global.t("notifications.apiError")), `${method} ${new URL(path, location.origin).pathname} — ${caught instanceof Error?caught.message:String(caught)}`, `api:network:${method}:${new URL(path, location.origin).pathname}`)
+    if (caught instanceof DOMException && caught.name === "AbortError") {
+      throw new ManagementApiError("Request cancelled", "aborted", null, "", "", { cause: caught })
     }
-    throw caught
+    frontendTelemetry.error("api.network_error", caught, { path, method, duration_ms: performance.now() - started })
+    const message = caught instanceof Error ? caught.message : String(caught)
+    const error = new ManagementApiError(message, "network", null, "", "", { cause: caught })
+    if (options.notifyErrors !== false) notifications.error(
+      String(i18n.global.t("notifications.apiError")),
+      `${method} ${new URL(path, location.origin).pathname} — ${message}`,
+      `api:network:${method}:${new URL(path, location.origin).pathname}`,
+    )
+    throw error
   }
+
+  frontendTelemetry.api(path, method, response.status, performance.now() - started)
+  if (!response.ok) {
+    let detail = `Management API request failed: ${response.status}`
+    let code = ""
+    try {
+      const body = await response.json() as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
+      const message = body.error?.message ?? body.detail
+      if (typeof message === "string" && message) detail = message
+      else if (message !== undefined) detail = JSON.stringify(message)
+      if (typeof body.error?.code === "string") code = body.error.code
+    } catch { /* non-JSON upstream error */ }
+    const requestId = response.headers.get("x-request-id") ?? response.headers.get("x-correlation-id") ?? ""
+    const error = new ManagementApiError(detail, "http", response.status, code, requestId)
+    if (response.status === 401) window.dispatchEvent(new CustomEvent("management:auth-expired"))
+    if (options.notifyErrors !== false) notifications.error(
+      `${response.status} · ${String(i18n.global.t("notifications.apiError"))}`,
+      `${method} ${new URL(path, location.origin).pathname} — ${detail}${requestId ? ` · ${requestId}` : ""}`,
+      `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`,
+    )
+    throw error
+  }
+  const contentType = response.headers.get("content-type") || ""
+  return (contentType.includes("application/json") ? await response.json() : await response.text()) as T
 }
 
 function jsonBody(value: unknown): BodyInit { return JSON.stringify(value) }
