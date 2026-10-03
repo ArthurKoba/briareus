@@ -1,0 +1,21 @@
+services:
+  management-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      MANAGEMENT_UI_PREVIEW: ${MANAGEMENT_UI_PREVIEW:-false}
+      MANAGEMENT_UI_TELEMETRY_ENABLED: ${MANAGEMENT_UI_TELEMETRY_ENABLED:-true}
+      MANAGEMENT_UI_TELEMETRY_ENDPOINT: ${MANAGEMENT_UI_TELEMETRY_ENDPOINT:-/api/telemetry}
+      MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE: ${MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE:-1}
+      MANAGEMENT_UI_EVENTS_MODE: ${MANAGEMENT_UI_EVENTS_MODE:-hybrid}
+      MANAGEMENT_UI_EVENTS_URL: ${MANAGEMENT_UI_EVENTS_URL:-/api/realtime}
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 2s
+      timeout: 1s
+      start_period: 1s
+      retries: 10
