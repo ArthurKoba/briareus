@@ -104,7 +104,11 @@ dependencies exist only where a runtime cannot perform its primary job without a
 service: GitHub and GitLab require Management for account resolution, while Analysis
 requires Ghidra. Gateway is deliberately not health-gated on provider availability, so
 one broken provider does not prevent the remaining MCP surfaces from starting and being
-used to repair the system.
+used to repair the system. Backend MCP connections are lazy and reused: each public proxy
+keeps a small pool of persistent sessions instead of repeating MCP discovery/initialization
+for every tool call, while the root bridge keeps one persistent session per backend and caches
+backend tool catalogs for 30 seconds. `bridge_tools(..., refresh=true)` bypasses that catalog
+cache when an immediate schema refresh is required.
 
 The multi-stage Dockerfile keeps rebuilds fast by installing locked dependencies before
 copying runtime-specific source trees, so unchanged stages reuse the local Docker cache.

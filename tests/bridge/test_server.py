@@ -103,17 +103,14 @@ def test_auth_proxy_targets_compose_auth_service() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gateway_proxy_uses_managed_mcp_timeout(monkeypatch) -> None:
+async def test_gateway_timeout_uses_managed_mcp_policy(monkeypatch) -> None:
     monkeypatch.setattr(
         bridge_server._management,
         "mcp_runtime_policy",
         lambda: McpRuntimePolicy(call_timeout_seconds=7),
     )
 
-    proxy = bridge_server._proxy("test", "http://backend.example.test/mcp")
-    client = await proxy.client_factory()
-
-    assert client._session_kwargs["read_timeout_seconds"] == 7.0
+    assert await bridge_server._backend_timeout_seconds() == 7.0
 
 
 @pytest.mark.asyncio

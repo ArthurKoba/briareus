@@ -10,7 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import RemoteAuthProvider
-from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
+from fastmcp.server.providers.proxy import FastMCPProxy
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.routing import BaseRoute, WebSocketRoute
@@ -40,6 +40,7 @@ from common.websocket_proxy import relay_websocket
 from . import __version__
 from .auth_client import LocalAuthTokenVerifier
 from .backend_router import BackendDescriptor, BackendRouter
+from .backend_sessions import ProxyClientPool
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 from .reverse_proxy import ReverseProxy
 
@@ -72,13 +73,16 @@ async def _backend_timeout_seconds() -> float:
 
 
 def _proxy_target(name: str, target: str | FastMCP[Any]) -> FastMCP:
-    async def client_factory() -> ProxyClient[Any]:
-        timeout = await _backend_timeout_seconds()
-        return ProxyClient(target, timeout=timeout, mode="auto")
-
+    pool = ProxyClientPool(
+        target,
+        name=name,
+        timeout_provider=_backend_timeout_seconds,
+        size=2,
+    )
     return FastMCPProxy(
-        client_factory=client_factory,
+        client_factory=pool.acquire,
         name=f"{name}-backend",
+        lifespan=pool.lifespan,
     )
 
 
@@ -268,9 +272,9 @@ async def bridge_backends() -> JsonObject:
 
 
 @mcp.tool(title="Bridge backend tools", annotations=READ_EXTERNAL)
-async def bridge_tools(backend: str) -> JsonObject:
+async def bridge_tools(backend: str, refresh: bool = False) -> JsonObject:
     """Fetch one backend tool catalog and signatures without publishing it at root."""
-    return await _backend_router.tools(backend)
+    return await _backend_router.tools(backend, refresh=refresh)
 
 
 @mcp.tool(title="Bridge forward call", annotations=DESTRUCTIVE_EXTERNAL)
@@ -367,7 +371,10 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
     async with AsyncExitStack() as stack:
         for lifespan in _MCP_LIFESPANS:
             await stack.enter_async_context(lifespan(app))
-        yield
+        try:
+            yield
+        finally:
+            await _backend_router.close()
 
 
 app = Starlette(lifespan=_gateway_lifespan)
