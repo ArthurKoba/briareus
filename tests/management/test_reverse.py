@@ -263,3 +263,34 @@ def test_reverse_client_uses_long_private_mcp_timeout() -> None:
     client = ReverseAdminClient("http://example.test/mcp")
 
     assert client.timeout_seconds == 180.0
+
+
+@pytest.mark.asyncio
+async def test_reverse_worker_recovery_controls_use_private_backend_tools() -> None:
+    client = FakeReverseAdminClient(
+        {
+            "clear_worker_queue": {
+                "worker_index": 0,
+                "cancelled_total": 3,
+                "cancelled_queued": 3,
+                "cancelled_running": 0,
+            },
+            "recover_worker": {
+                "worker_index": 0,
+                "recovered": True,
+                "cancelled_total": 4,
+                "cancelled_queued": 3,
+                "cancelled_running": 1,
+            },
+        }
+    )
+
+    cleared = await client.clear_worker_queue(0)
+    recovered = await client.recover_worker(0, timeout_seconds=12)
+
+    assert cleared["cancelled_queued"] == 3
+    assert recovered["recovered"] is True
+    assert client.calls == [
+        ("clear_worker_queue", {"worker_index": 0}),
+        ("recover_worker", {"worker_index": 0, "timeout_seconds": 12}),
+    ]

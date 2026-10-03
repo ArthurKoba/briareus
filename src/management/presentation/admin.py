@@ -854,23 +854,37 @@ class ReverseView(CustomView):
             return RedirectResponse("/admin/reverse", status_code=303)
 
         action = request.path_params["action"].casefold()
-        if action not in {"enable", "disable"}:
+        if action not in {"enable", "disable", "clear-queue", "recover"}:
             flash(request, "Invalid worker action", "error")
             return RedirectResponse("/admin/reverse", status_code=303)
 
         try:
-            await self.reverse.set_worker_enabled(
-                worker_index,
-                enabled=action == "enable",
-            )
+            if action in {"enable", "disable"}:
+                await self.reverse.set_worker_enabled(
+                    worker_index,
+                    enabled=action == "enable",
+                )
+                message = (
+                    f"Worker #{worker_index} routing enabled"
+                    if action == "enable"
+                    else f"Worker #{worker_index} routing disabled"
+                )
+            elif action == "clear-queue":
+                result = await self.reverse.clear_worker_queue(worker_index)
+                cancelled_raw = result.get("cancelled_queued")
+                cancelled = cancelled_raw if isinstance(cancelled_raw, int) else 0
+                message = f"Worker #{worker_index} queue cleared ({cancelled} cancelled)"
+            else:
+                result = await self.reverse.recover_worker(worker_index)
+                cancelled_raw = result.get("cancelled_total")
+                cancelled = cancelled_raw if isinstance(cancelled_raw, int) else 0
+                message = (
+                    f"Worker #{worker_index} recovered ({cancelled} requests cancelled)"
+                )
         except Exception as exc:
             flash(request, f"Worker control failed: {exc}", "error")
         else:
-            flash(
-                request,
-                f"Worker #{worker_index} {action}d",
-                "success",
-            )
+            flash(request, message, "success")
         return RedirectResponse("/admin/reverse", status_code=303)
 
 
