@@ -644,6 +644,7 @@ class BrowserSettings(ProcessSettings):
         validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
     )
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
+    timezone: str = Field("Europe/Moscow", validation_alias="TZ")
     max_snapshot_text_chars: int = Field(
         30_000,
         ge=1_000,

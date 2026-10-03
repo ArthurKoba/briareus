@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from os import getenv
-
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket
 
@@ -48,7 +46,7 @@ _browser = BrowserManager(
     display=_browser_profile.display,
     color_depth=_browser_profile.color_depth,
     xvfb_enabled=_browser_profile.xvfb_enabled,
-    timezone=getenv("TZ", ""),
+    timezone=_browser_settings.timezone,
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
 )

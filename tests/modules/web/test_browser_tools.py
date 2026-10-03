@@ -148,13 +148,16 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     )
 
     command = browser._browser_command()
-    environment = browser._browser_environment(browser.display)
+    process_command = browser._browser_process_command(browser.display)
 
     assert "--headless=new" not in command
     assert "--lang=ru-RU" in command
     assert "--accept-lang=ru-RU,ru,en-US,en" in command
     assert "--window-size=1440,900" in command
-    assert environment["DISPLAY"] == ":99"
-    assert environment["LANG"] == "ru_RU.UTF-8"
-    assert environment["LC_ALL"] == "ru_RU.UTF-8"
+    assert process_command[:4] == [
+        "/usr/bin/env",
+        "DISPLAY=:99",
+        "LANG=ru_RU.UTF-8",
+        "LC_ALL=ru_RU.UTF-8",
+    ]
     assert browser.timezone == "Europe/Moscow"

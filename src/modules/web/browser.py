@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import shutil
 import tempfile
 import uuid
@@ -244,14 +243,18 @@ class BrowserManager:
         self._display_process = process
         return display
 
-    def _browser_environment(self, display: str) -> dict[str, str]:
-        environment = os.environ.copy()
+    def _browser_process_command(self, display: str) -> list[str]:
+        environment = ["/usr/bin/env"]
         if display:
-            environment["DISPLAY"] = display
+            environment.append(f"DISPLAY={display}")
         if self.posix_locale:
-            environment["LANG"] = self.posix_locale
-            environment["LC_ALL"] = self.posix_locale
-        return environment
+            environment.extend(
+                [
+                    f"LANG={self.posix_locale}",
+                    f"LC_ALL={self.posix_locale}",
+                ]
+            )
+        return [*environment, *self._browser_command()]
 
     async def _start_locked(self) -> None:
         if self._context is not None:
@@ -264,8 +267,7 @@ class BrowserManager:
 
         display = await self._ensure_display_locked()
         playwright = await async_playwright().start()
-        command = self._browser_command()
-        environment = self._browser_environment(display)
+        command = self._browser_process_command(display)
         process: asyncio.subprocess.Process | None = None
         browser: Browser | None = None
         try:
@@ -274,7 +276,6 @@ class BrowserManager:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-                env=environment,
             )
             await self._wait_for_debugging_endpoint(process)
             browser = await playwright.chromium.connect_over_cdp(

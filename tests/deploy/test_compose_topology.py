@@ -192,7 +192,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "github": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "web": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "web": observability | {"MANAGEMENT_SERVICE_TOKEN", "TZ"},
         "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
