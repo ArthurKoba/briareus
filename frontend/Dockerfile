@@ -11,7 +11,7 @@ RUN bun run build
 
 FROM nginx:1.28-alpine
 
-ENV MANAGEMENT_UI_PREVIEW=true \
+ENV MANAGEMENT_UI_PREVIEW=false \
     MANAGEMENT_BACKEND_ORIGIN=http://127.0.0.1:9
 
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
