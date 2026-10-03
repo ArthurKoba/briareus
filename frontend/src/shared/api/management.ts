@@ -140,7 +140,6 @@ export const managementApi = {
   clearAnalysisWorkerQueue: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/clear-queue`, { method: "POST", body: "{}" }),
   recoverAnalysisWorker: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/recover`, { method: "POST", body: "{}" }),
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
-  browserState: (): Promise<Record<string, unknown>> => request("/api/browser/state"),
   setBrowserViewport: (pageId: string, width: number, height: number): Promise<Record<string, unknown>> => request("/api/browser/viewport", { method: "PUT", body: jsonBody({ page_id: pageId, width, height }) }),
   settings: (): Promise<SettingsState> => request("/api/settings"),
   updateSettings: (payload: object): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),

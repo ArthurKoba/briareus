@@ -52,7 +52,6 @@ const message = ref("")
 const addressDraft = ref("")
 const addressFocused = ref(false)
 const viewportPreset = ref("auto")
-const backendCapabilities = ref<Record<string, boolean>>({})
 const screen = ref<HTMLImageElement | null>(null)
 const devtools = ref<HTMLImageElement | null>(null)
 const dims = ref({ w: 1440, h: 900 })
@@ -73,7 +72,7 @@ function capabilityEnabled(name: string): boolean {
   const capabilities = state.value.capabilities
   if (Array.isArray(capabilities)) return capabilities.includes(name)
   if (capabilities && typeof capabilities === "object") return capabilities[name] === true
-  return backendCapabilities.value[name] === true
+  return false
 }
 const canSetViewport = computed(() => capabilityEnabled("set_viewport"))
 const viewportOptions = computed(() => [
@@ -100,12 +99,6 @@ async function connect(): Promise<void> {
   status.value = "connecting"
   message.value = String(t("browser.connecting"))
   try {
-    void managementApi.browserState().then((snapshot) => {
-      const capabilities = snapshot.capabilities
-      if (capabilities && typeof capabilities === "object" && !Array.isArray(capabilities)) {
-        backendCapabilities.value = capabilities as Record<string, boolean>
-      }
-    }).catch(() => undefined)
     const scheme = location.protocol === "https:" ? "wss:" : "ws:"
     ws = new WebSocket(`${scheme}//${location.host}/api/browser/operator/ws`)
     ws.onopen = () => {
@@ -139,7 +132,7 @@ async function connect(): Promise<void> {
     ws.onmessage = async (event) => {
       const payload = JSON.parse(event.data)
       if (payload.type === "state") {
-        state.value = { ...payload, capabilities: payload.capabilities ?? backendCapabilities.value }
+        state.value = payload
         if (payload.viewport?.width && payload.viewport?.height) dims.value = { w: payload.viewport.width, h: payload.viewport.height }
         status.value = "live"
         message.value = ""
