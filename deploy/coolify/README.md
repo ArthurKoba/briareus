@@ -166,6 +166,21 @@ together with the internal display and locale values in its process command.
 Do not spoof a foreign browser identity by overriding the user agent; use a real headful
 Chromium runtime and consistent locale/display/timezone inputs instead.
 
+The Web runtime exposes a non-destructive `browser_restart` tool. It restarts only persistent
+Chromium and reconnects CDP/Playwright while preserving `/browser/profile`, cookies, storage and
+the internal dev-extension registry. `browser_status` reports process, CDP and context health
+separately and includes the browser-observed locale/timezone/WebGL identity for diagnostics.
+
+Unpacked development extensions installed through the upstream `install_extension` tool are
+recorded by ID and workspace path under `/browser`. On the next Chromium start their paths are
+passed through `--load-extension`, so the normal development loop can use local workspace builds
+without GitHub releases. A destructive browser clean clears this registry together with the
+credential-bearing profile.
+
+On GPU-less Linux the internal desktop profile selects ANGLE with SwiftShader explicitly. This is
+intended to make ordinary WebGL/WebGL2 available under Xvfb without pretending that a hardware GPU
+exists.
+
 ## Shared Valkey cache
 
 The stack includes a private `valkey/valkey:9.1.2-alpine` service for hot account resolution
@@ -345,3 +360,4 @@ point. The local Git transport authorizes a workspace/repository/account binding
 credential into the checkout's `.git` private credential store, configures the ordinary Git
 credential helper, and installs a reserved-branch pre-push guard. Agents can then use normal
 `git fetch` / `git push` from Terminal. Re-authorize the workspace when the credential expires.
+
