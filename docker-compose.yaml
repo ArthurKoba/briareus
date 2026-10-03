@@ -155,6 +155,7 @@ services:
       target: web
     environment:
       <<: [*management-client, *observability]
+      TZ: ${TZ:-Europe/Moscow}
     volumes:
       - terminal-workspace:/workspace
       - web-browser:/browser

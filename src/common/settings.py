@@ -639,23 +639,11 @@ class BrowserSettings(ProcessSettings):
         "/usr/bin/chromium",
         validation_alias="BROWSER_EXECUTABLE_PATH",
     )
-    headless: bool = Field(False, validation_alias="BROWSER_HEADLESS")
-    locale: str = Field("ru-RU", validation_alias="BROWSER_LOCALE")
-    accept_language: str = Field(
-        "ru-RU,ru,en-US,en",
-        validation_alias="BROWSER_ACCEPT_LANGUAGE",
-    )
-    display: str = Field(":99", validation_alias="DISPLAY")
-    color_depth: int = Field(24, ge=16, le=32, validation_alias="BROWSER_COLOR_DEPTH")
-    xvfb_enabled: bool = Field(True, validation_alias="BROWSER_XVFB_ENABLED")
-    timezone: str = Field("Europe/Moscow", validation_alias="TZ")
     devtools_mcp_script_path: Path = Field(
         Path("/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
         validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
     )
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
-    viewport_width: int = Field(1440, ge=320, le=3840, validation_alias="BROWSER_VIEWPORT_WIDTH")
-    viewport_height: int = Field(900, ge=240, le=2160, validation_alias="BROWSER_VIEWPORT_HEIGHT")
     max_snapshot_text_chars: int = Field(
         30_000,
         ge=1_000,
