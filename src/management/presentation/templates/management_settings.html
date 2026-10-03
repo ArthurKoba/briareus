@@ -3,13 +3,13 @@
 <div class="d-flex justify-content-between align-items-center">
   <h1>Settings</h1>
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/legacy/">Admin</a></li>
     <li class="breadcrumb-item active">Settings</li>
   </ol>
 </div>
 {% endblock %}
 {% block content %}
-<form method="post" action="/admin/settings">
+<form method="post" action="/admin/legacy/settings">
   {{ csrf_input(request) }}
   <div class="row row-deck row-cards">
     <div class="col-12 col-xl-6">
@@ -106,7 +106,7 @@
     </div>
   </div>
 </form>
-<form method="post" action="/admin/settings/cleanup-logs" class="mt-3">
+<form method="post" action="/admin/legacy/settings/cleanup-logs" class="mt-3">
   {{ csrf_input(request) }}
   <button class="btn" type="submit">Apply log retention now</button>
 </form>

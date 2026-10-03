@@ -64,6 +64,10 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
         "/analysis",
         "/admin",
         "/admin/{path:path}",
+        "/admin/api",
+        "/admin/api/{path:path}",
+        "/admin/legacy",
+        "/admin/legacy/{path:path}",
     } <= paths
     assert "/ghidra" not in paths
     assert "/curl" not in paths

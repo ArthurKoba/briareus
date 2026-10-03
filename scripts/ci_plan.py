@@ -93,6 +93,7 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
         if not value:
             continue
         paths.append(value[2:] if value.startswith("./") else value)
+    frontend = any(_matches(path, "frontend/") for path in paths)
     full = force_full or not paths or any(
         _matches(path, trigger) for path in paths for trigger in FULL_TRIGGERS
     )
@@ -123,6 +124,7 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
             "pytest_paths": ["tests"],
             "mypy_paths": ["src"],
             "ruff_paths": ["src", "tests", "scripts"],
+            "frontend": True,
         }
 
     pytest_paths: list[str] = []
@@ -139,6 +141,7 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
         "pytest_paths": _unique(pytest_paths),
         "mypy_paths": _unique(mypy_paths),
         "ruff_paths": _unique(changed_python),
+        "frontend": frontend,
     }
 
 

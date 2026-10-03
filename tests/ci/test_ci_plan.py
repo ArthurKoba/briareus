@@ -16,6 +16,7 @@ def test_browser_change_is_targeted() -> None:
     assert result["areas"] == ["web"]
     assert result["pytest_paths"] == ["tests/modules/web"]
     assert result["mypy_paths"] == ["src/modules/web"]
+    assert result["frontend"] is False
 
 
 def test_terminal_change_is_targeted() -> None:
@@ -66,3 +67,17 @@ def test_docs_only_change_has_no_runtime_validation() -> None:
 def test_unknown_source_change_escalates_to_full() -> None:
     result = plan(["src/new_service/runtime.py"])
     assert result["full"] is True
+
+
+def test_frontend_change_selects_frontend_build_only() -> None:
+    result = plan(["frontend/src/app/App.vue"])
+    assert result["full"] is False
+    assert result["areas"] == ["non-code"]
+    assert result["pytest_paths"] == []
+    assert result["frontend"] is True
+
+
+def test_full_gate_includes_frontend_build() -> None:
+    result = plan(["Dockerfile"])
+    assert result["full"] is True
+    assert result["frontend"] is True
