@@ -356,6 +356,7 @@ These controls live in Management application settings rather than deployment en
 Disabling remote source/history mutations blocks direct API source changes (`put_file`, atomic Git
 Data commits, branch/tag rewrites, etc.) while keeping PR, issue, review and GitHub Actions
 control-plane tools available. `github_checkout_repository mode=git` remains the preferred entry
-point. The local Git transport authorizes a workspace/repository/account binding without writing
-credentials to the workspace; the GitHub runtime supplies a short-lived credential only for the
-push operation.
+point. The local Git transport authorizes a workspace/repository/account binding, writes a short-lived
+credential into the checkout's `.git` private credential store, configures the ordinary Git
+credential helper, and installs a reserved-branch pre-push guard. Agents can then use normal
+`git fetch` / `git push` from Terminal. Re-authorize the workspace when the credential expires.

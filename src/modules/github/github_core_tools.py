@@ -114,8 +114,9 @@ def register_github_core_tools(
     ) -> JsonObject:
         """Authorize an existing local Git checkout for secure Git transport.
 
-        This is additive/experimental: it stores only non-secret account/repository markers and
-        Git author identity in the checkout. Credentials remain inside the GitHub runtime.
+        This is additive/experimental. It configures the checkout's ordinary Git credential
+        helper using a short-lived selected-account credential and installs a reserved-branch
+        pre-push guard. Re-authorize when the credential expires.
         """
         if not runtime_policy().local_git_transport_enabled:
             raise RuntimeError(
@@ -136,8 +137,8 @@ def register_github_core_tools(
     ) -> JsonObject:
         """Push a validated local Git HEAD through GitHub App/user Git transport.
 
-        The short-lived credential is injected only into the child git process and is not
-        written into the workspace, remote URL, MCP result, or Git config.
+        Convenience wrapper over the checkout's ordinary Git credential helper. Agents may also
+        use normal git fetch/push directly from Terminal after github_authorize_local_git.
         """
         if not runtime_policy().local_git_transport_enabled:
             raise RuntimeError(

@@ -51,7 +51,7 @@ def _repo(tmp_path: Path) -> Path:
     return root
 
 
-def test_authorize_local_git_stores_only_non_secret_markers(tmp_path: Path) -> None:
+def test_authorize_local_git_configures_ordinary_git_credentials(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     client = LocalGitClient(
         app_id="123",
@@ -64,15 +64,78 @@ def test_authorize_local_git_stores_only_non_secret_markers(tmp_path: Path) -> N
 
     repo = root / "projects" / "bridge"
     config = (repo / ".git" / "config").read_text()
+    credential_file = repo / ".git" / "koba-credentials"
+    hook = repo / ".git" / "hooks" / "pre-push"
     assert result["authorized"] is True
-    assert result["credential_storage"] == "none"
+    assert result["credential_storage"] == "git_credential_store"
+    assert result["push_mode"] == "ordinary_git"
+    assert credential_file.stat().st_mode & 0o777 == 0o600
+    assert hook.stat().st_mode & 0o777 == 0o700
     assert "secret-installation-token" not in config
     assert "secret-installation-token" not in str(result)
+    assert "[credential]" in config
+    assert "helper = store --file=" in config
+    assert "koba-credentials" in config
     assert "https://github.com/ArthurKoba/mcp-bridge.git" in config
     assert "writer" in config
 
+    filled = subprocess.run(
+        ["git", "-C", str(repo), "credential", "fill"],
+        input=("protocol=https\nhost=github.com\npath=ArthurKoba/mcp-bridge.git\n\n"),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "username=x-access-token" in filled.stdout
+    assert "password=secret-installation-token" in filled.stdout
 
-def test_push_local_git_injects_secret_only_into_git_process(tmp_path: Path, monkeypatch) -> None:
+    denied = subprocess.run(
+        [str(hook), "origin", "https://github.com/ArthurKoba/mcp-bridge.git"],
+        input=(
+            "refs/heads/feat/test aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+            "refs/heads/main bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert denied.returncode == 1
+    assert "reserved branch denied: main" in denied.stderr
+
+    allowed = subprocess.run(
+        [str(hook), "origin", "https://github.com/ArthurKoba/mcp-bridge.git"],
+        input=(
+            "refs/heads/feat/test aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+            "refs/heads/feat/test bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert allowed.returncode == 0
+
+
+def test_authorize_local_git_does_not_write_credential_when_hook_is_foreign(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    repo = root / "projects" / "bridge"
+    hook = repo / ".git" / "hooks" / "pre-push"
+    hook.write_text("#!/bin/sh\nexit 0\n")
+    client = LocalGitClient(
+        app_id="123",
+        private_key="unused",
+        account_id="writer",
+        workspace_root=root,
+    )
+
+    with pytest.raises(GitHubAgentError, match="refusing to overwrite"):
+        client.authorize_local_git("ArthurKoba/mcp-bridge", "projects/bridge")
+
+    assert not (repo / ".git" / "koba-credentials").exists()
+
+
+def test_push_local_git_uses_configured_ordinary_git_transport(tmp_path: Path, monkeypatch) -> None:
     root = _repo(tmp_path)
     client = LocalGitClient(
         app_id="123",
@@ -82,26 +145,29 @@ def test_push_local_git_injects_secret_only_into_git_process(tmp_path: Path, mon
     )
     client.authorize_local_git("ArthurKoba/mcp-bridge", "projects/bridge")
 
+    original = client._git_output
     captured: dict[str, object] = {}
 
-    def fake_push_repository(target: Path, **kwargs):
-        captured["target"] = target
-        captured.update(kwargs)
-        return {
-            "head": "a" * 40,
-            "git_output": "To https://github.com/ArthurKoba/mcp-bridge.git",
-        }
+    def fake_git_output(target: Path, *args: str, env=None) -> str:
+        if args and args[0] == "push":
+            captured["args"] = args
+            captured["env"] = env
+            return "To https://github.com/ArthurKoba/mcp-bridge.git"
+        if args == ("rev-parse", "HEAD"):
+            return "a" * 40
+        return original(target, *args, env=env)
 
-    monkeypatch.setattr(
-        "modules.github.github_identity.push_repository",
-        fake_push_repository,
-    )
+    monkeypatch.setattr(client, "_git_output", fake_git_output)
     result = client.push_local_git("ArthurKoba/mcp-bridge", "projects/bridge", branch="feat/test")
 
-    assert "secret-installation-token" not in str(result)
-    assert captured["auth_scope"] == "https://github.com/"
-    assert "secret-installation-token" not in str(captured["auth_header"])
-    assert str(captured["auth_header"]).startswith("Authorization: Basic ")
+    assert captured["env"] is None
+    assert captured["args"] == (
+        "push",
+        "--porcelain",
+        "--set-upstream",
+        "origin",
+        "HEAD:refs/heads/feat/test",
+    )
     assert result["pushed"] is True
     assert result["branch"] == "feat/test"
 
