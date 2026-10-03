@@ -134,3 +134,13 @@ def test_application_deployments_accepts_coolify_envelope_and_sanitizes(monkeypa
         "count": 1,
     }
     assert "very-secret" not in repr(result)
+
+
+def test_coolify_client_uses_pooled_transport_and_preserves_base_path() -> None:
+    account = _account().model_copy(update={"base_url": "https://coolify.example.test/root"})
+    client = CoolifyClient(account)
+
+    assert client._target("/applications", {"page": "2"}) == (
+        "/root/api/v1/applications?page=2"
+    )
+    assert client._transport.connection_count == 0

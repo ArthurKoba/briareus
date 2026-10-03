@@ -1,17 +1,12 @@
 from __future__ import annotations
 
+import http.client
 import ssl
-import urllib.error
 import urllib.parse
-import urllib.request
-
-from opentelemetry import trace
-from opentelemetry.trace import SpanKind
 
 from common.account_contracts import ResolvedAccount
+from common.http_transport import HttpTransportError, PooledHttpTransport
 from common.models import JsonObject, JsonValue, json_loads, json_object, json_object_list
-
-_TRACER = trace.get_tracer("mcp-bridge.provider.coolify")
 
 
 class CoolifyClientError(RuntimeError):
@@ -75,6 +70,20 @@ class CoolifyClient:
         self.account = account
         self.base_url = account.base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        parsed = urllib.parse.urlsplit(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise CoolifyClientError("Coolify base_url must be absolute HTTP(S)")
+        self._scheme = parsed.scheme
+        self._hostname = parsed.hostname
+        self._port = parsed.port
+        self._base_path = parsed.path.rstrip("/")
+        self._transport = PooledHttpTransport(
+            self._new_connection,
+            max_connections=4,
+            acquire_timeout=self.timeout_seconds,
+            span_name="provider.coolify.http",
+            provider="coolify",
+        )
 
     def _context(self) -> ssl.SSLContext | None:
         parsed = urllib.parse.urlsplit(self.base_url)
@@ -86,43 +95,45 @@ class CoolifyClient:
             return ssl.create_default_context(cadata=self.account.ca_cert_pem.replace("\\n", "\n"))
         return ssl.create_default_context()
 
-    def _get(self, path: str, *, query: dict[str, str] | None = None) -> JsonValue:
-        target = self.base_url + "/api/v1" + path
+    def _new_connection(self) -> http.client.HTTPConnection:
+        if self._scheme == "https":
+            return http.client.HTTPSConnection(
+                self._hostname,
+                self._port,
+                timeout=self.timeout_seconds,
+                context=self._context(),
+            )
+        return http.client.HTTPConnection(
+            self._hostname,
+            self._port,
+            timeout=self.timeout_seconds,
+        )
+
+    def _target(self, path: str, query: dict[str, str] | None = None) -> str:
+        if not path.startswith("/"):
+            raise CoolifyClientError("Coolify path must start with /")
+        target = self._base_path + "/api/v1" + path
         if query:
             target += "?" + urllib.parse.urlencode(query)
-        request = urllib.request.Request(
-            target,
-            method="GET",
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self.account.credential}",
-                "User-Agent": "mcp-bridge-coolify",
-            },
-        )
-        with _TRACER.start_as_current_span(
-            "provider.coolify.http",
-            kind=SpanKind.CLIENT,
-            attributes={
-                "mcp.provider": "coolify",
-                "http.request.method": "GET",
-            },
-        ) as span:
-            try:
-                with urllib.request.urlopen(
-                    request,
-                    timeout=self.timeout_seconds,
-                    context=self._context(),
-                ) as response:
-                    raw = response.read()
-                    span.set_attribute("http.response.status_code", response.status)
-                    span.set_attribute("http.response.body.size", len(raw))
-            except urllib.error.HTTPError as exc:
-                span.set_attribute("http.response.status_code", exc.code)
-                # Never echo arbitrary upstream bodies: Coolify error envelopes can contain secrets.
-                raise CoolifyClientError(f"Coolify HTTP {exc.code}") from exc
-            except urllib.error.URLError as exc:
-                raise CoolifyClientError(f"Coolify transport error: {exc.reason}") from exc
-        return json_loads(raw, context="Coolify response")
+        return target
+
+    def _get(self, path: str, *, query: dict[str, str] | None = None) -> JsonValue:
+        try:
+            response = self._transport.request(
+                "GET",
+                self._target(path, query),
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {self.account.credential}",
+                    "User-Agent": "mcp-bridge-coolify",
+                },
+                reconnect_retries=1,
+            )
+        except HttpTransportError as exc:
+            raise CoolifyClientError(f"Coolify transport error: {exc}") from exc
+        if response.status >= 400:
+            raise CoolifyClientError(f"Coolify HTTP {response.status}")
+        return json_loads(response.body, context="Coolify response")
 
     def current_team(self) -> JsonObject:
         raw = json_object(self._get("/teams/current"), context="Coolify current team")
