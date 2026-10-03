@@ -269,10 +269,23 @@ async def test_operator_opens_devtools_frontend_for_selected_tab(tmp_path: Path)
     page_id = browser._register_page(cast(Any, page))
     browser._operator_pages["owner"] = page_id
 
-    async def fake_started() -> Any:
-        return cast(Any, context)
+    class FakeProcess:
+        returncode = None
 
-    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    async def cdp_ok() -> bool:
+        return True
+
+    async def context_ok() -> bool:
+        return True
+
+    async def observed() -> dict[str, object]:
+        return {}
+
+    browser._browser_process = cast(Any, FakeProcess())
+    browser._context = cast(Any, context)
+    browser._cdp_reachable = cdp_ok  # type: ignore[method-assign]
+    browser._context_usable = context_ok  # type: ignore[method-assign]
+    browser._observed_runtime = observed  # type: ignore[method-assign]
     result = await browser.operator_open_devtools("owner", page_id)
 
     assert result["opened_devtools"] is True
@@ -481,10 +494,23 @@ async def test_docked_devtools_is_hidden_from_normal_tabs_and_released(tmp_path:
     site_id = browser._register_page(cast(Any, site))
     browser._operator_pages["owner"] = site_id
 
-    async def fake_started() -> Any:
-        return cast(Any, context)
+    class FakeProcess:
+        returncode = None
 
-    browser._ensure_started = fake_started  # type: ignore[method-assign]
+    async def cdp_ok() -> bool:
+        return True
+
+    async def context_ok() -> bool:
+        return True
+
+    async def observed() -> dict[str, object]:
+        return {}
+
+    browser._browser_process = cast(Any, FakeProcess())
+    browser._context = cast(Any, context)
+    browser._cdp_reachable = cdp_ok  # type: ignore[method-assign]
+    browser._context_usable = context_ok  # type: ignore[method-assign]
+    browser._observed_runtime = observed  # type: ignore[method-assign]
     result = await browser.operator_open_docked_devtools("owner", site_id)
     devtools_id = str(result["page_id"])
 
@@ -638,3 +664,4 @@ def test_browser_status_contract_exposes_developer_mode_fields(tmp_path: Path) -
     browser = _browser(tmp_path)
     assert browser.developer_access_enabled is False
     assert browser.developer_access_effective is False
+
