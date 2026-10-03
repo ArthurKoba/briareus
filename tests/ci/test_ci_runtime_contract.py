@@ -29,4 +29,6 @@ def test_compose_healthcheck_is_fast_but_tolerant() -> None:
     assert "timeout: 1s" in compose
     assert "start_period: 2s" in compose
     assert "retries: 10" in compose
-    assert "socket.create_connection(('127.0.0.1', 8000), 0.5)" in compose
+    assert "- nc" in compose
+    assert "- -z" in compose
+    assert "/app/.venv/bin/python" not in compose.split("x-management-client:", 1)[0]

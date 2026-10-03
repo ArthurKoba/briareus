@@ -7,9 +7,12 @@ x-runtime: &runtime
   healthcheck:
     test:
       - CMD
-      - /app/.venv/bin/python
-      - -c
-      - "import socket; s=socket.create_connection(('127.0.0.1', 8000), 0.5); s.close()"
+      - nc
+      - -z
+      - -w
+      - "1"
+      - 127.0.0.1
+      - "8000"
     interval: 2s
     timeout: 1s
     start_period: 2s

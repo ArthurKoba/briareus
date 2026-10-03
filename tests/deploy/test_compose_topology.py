@@ -50,6 +50,17 @@ def test_valkey_is_private_ephemeral_and_resource_bounded() -> None:
     assert valkey["cpus"] == 0.5
     assert valkey["pids_limit"] == 128
 
+
+def test_runtime_healthcheck_does_not_spawn_python_interpreters() -> None:
+    compose = COMPOSE_FILE.read_text()
+    runtime_prefix = compose.split("x-management-client:", 1)[0]
+    dockerfile = Path("Dockerfile").read_text()
+
+    assert "nc" in runtime_prefix
+    assert "socket.create_connection" not in runtime_prefix
+    assert 'CMD ["nc", "-z", "-w", "1", "127.0.0.1", "8000"]' in dockerfile
+    assert "netcat-openbsd" in dockerfile
+
 def test_terminal_has_hard_resource_limits() -> None:
     terminal = _services()["terminal"]
 
