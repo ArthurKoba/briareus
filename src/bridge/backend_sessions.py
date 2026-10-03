@@ -5,8 +5,9 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal
 
+import mcp.types as mt
 from fastmcp import FastMCP
 from fastmcp.client.client import CallToolResult
 from fastmcp.server.providers.proxy import ProxyClient
@@ -25,13 +26,17 @@ class _ReusableProxyClient(ProxyClient[Any]):
         *,
         release: Callable[[_ReusableProxyClient], None],
         name: str,
+        catalog_ttl_seconds: float,
     ) -> None:
         super().__init__(target, timeout=300, mode="auto", name=name, cache=True)
         self._release = release
         self._persistent_hold = False
         self._lease_active = False
         self._configured_timeout = 300.0
+        self._catalog_ttl_seconds = max(0.0, float(catalog_ttl_seconds))
+        self._tool_catalog_cache: tuple[float, list[mt.Tool]] | None = None
         self.connect_count = 0
+        self.catalog_refresh_count = 0
 
     async def prepare(self, timeout_seconds: float) -> None:
         timeout_seconds = max(1.0, float(timeout_seconds))
@@ -40,12 +45,45 @@ class _ReusableProxyClient(ProxyClient[Any]):
         if self._persistent_hold and dead:
             await super()._disconnect(force=True)
             self._persistent_hold = False
+            self._tool_catalog_cache = None
         if timeout_seconds != self._configured_timeout:
             if self._persistent_hold:
                 await super()._disconnect(force=True)
                 self._persistent_hold = False
             self._session_kwargs["read_timeout_seconds"] = timeout_seconds
             self._configured_timeout = timeout_seconds
+
+    async def list_tools(
+        self,
+        max_pages: int = 250,
+        *,
+        cache_mode: Literal["use", "refresh", "bypass"] = "use",
+    ) -> list[mt.Tool]:
+        now = time.monotonic()
+        cached = self._tool_catalog_cache
+        if (
+            cache_mode == "use"
+            and self._catalog_ttl_seconds > 0
+            and cached is not None
+            and cached[0] > now
+        ):
+            trace.get_current_span().set_attribute(
+                "mcp.backend.proxy_catalog_cache_hit", True
+            )
+            return list(cached[1])
+        trace.get_current_span().set_attribute(
+            "mcp.backend.proxy_catalog_cache_hit", False
+        )
+        tools = list(
+            await super().list_tools(max_pages=max_pages, cache_mode=cache_mode)
+        )
+        self.catalog_refresh_count += 1
+        if self._catalog_ttl_seconds > 0 and cache_mode != "bypass":
+            self._tool_catalog_cache = (
+                now + self._catalog_ttl_seconds,
+                tools,
+            )
+        return list(tools)
 
     def lease(self) -> None:
         if self._lease_active:
@@ -91,6 +129,7 @@ class _ReusableProxyClient(ProxyClient[Any]):
         if self._persistent_hold:
             await super()._disconnect(force=True)
             self._persistent_hold = False
+        self._tool_catalog_cache = None
 
 
 class ProxyClientPool:
@@ -103,6 +142,7 @@ class ProxyClientPool:
         name: str,
         timeout_provider: TimeoutProvider,
         size: int = 2,
+        catalog_ttl_seconds: float = 10.0,
     ) -> None:
         if size < 1:
             raise ValueError("proxy client pool size must be >= 1")
@@ -114,6 +154,7 @@ class ProxyClientPool:
                 target,
                 release=self._release,
                 name=f"{name}-backend-{index + 1}",
+                catalog_ttl_seconds=catalog_ttl_seconds,
             )
             for index in range(size)
         )
@@ -124,6 +165,10 @@ class ProxyClientPool:
     @property
     def connect_count(self) -> int:
         return sum(client.connect_count for client in self._clients)
+
+    @property
+    def catalog_refresh_count(self) -> int:
+        return sum(client.catalog_refresh_count for client in self._clients)
 
     async def acquire(self) -> ProxyClient[Any]:
         if self._closed:
