@@ -23,13 +23,14 @@ Set `MANAGEMENT_UI_PREVIEW=true`. The UI renders using local preview state and m
 
 ### Connected
 
-Connected mode is the default. Set:
+Connected mode is the default. `MANAGEMENT_UI_PREVIEW=false` is already the default.
 
-- `MANAGEMENT_BACKEND_ORIGIN=https://<management-backend-origin>`.
+The frontend container is a static SPA only. It does not know the management backend origin and does not proxy API traffic. The public MCP gateway owns routing:
 
-`MANAGEMENT_UI_PREVIEW=false` is already the default.
-
-The nginx runtime proxies browser requests from `/api/*` to the backend `/admin/api/*`. The SPA itself is unchanged, so switching backend endpoints does not require rebuilding the image.
+- `/admin/*` -> frontend container, stripping the `/admin` prefix before forwarding;
+- `/api/*` -> management backend;
+- `/api/realtime` -> management realtime WebSocket;
+- `/api/browser/operator/ws` -> Browser Operator WebSocket.
 
 ## Architecture boundaries
 
@@ -74,8 +75,14 @@ Runtime variables:
 
 The implementation roadmap and backend follow-ups are tracked in GitHub issue #233.
 
-### Production admin cutover
+### Production admin routing
 
-The standalone management UI assumes it is served from the root of its own origin. Vite assets, `runtime-config.js`, and the browser-facing `/api/*` proxy contract are root-relative.
+The management UI is built for the public base `/admin/`. Browser-visible assets and runtime configuration use that prefix, while management API and WebSocket calls remain root-level `/api/*`.
 
-Do not expose the current artifact by path-prefix proxying `/admin/*` directly to the frontend container. Keep the frontend on a dedicated production origin and use `/admin` on the MCP Bridge public origin only as an explicit redirect to that UI. Backend management APIs remain under `/admin/api/*`; the frontend container continues to proxy its own `/api/*` routes to those backend endpoints.
+The public gateway owns the split:
+
+- `/admin/` and `/admin/*` -> frontend container with `/admin` stripped upstream;
+- `/api/*` -> management backend;
+- MCP surfaces remain independent.
+
+The frontend nginx serves only static SPA files and `/health`; it must not proxy management API or WebSocket traffic.

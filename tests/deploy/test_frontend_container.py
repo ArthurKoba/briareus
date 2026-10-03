@@ -48,3 +48,25 @@ def test_frontend_has_no_legacy_admin_runtime_dependency() -> None:
     assert "/admin/browser/ws" not in source
     assert "/admin/browser/ticket" not in source
     assert "/admin/browser/ws" not in nginx
+
+
+def test_frontend_public_routing_contract() -> None:
+    vite = (FRONTEND / "vite.config.ts").read_text()
+    index = (FRONTEND / "index.html").read_text()
+    nginx = (FRONTEND / "nginx.conf.template").read_text()
+    dockerfile = (FRONTEND / "Dockerfile").read_text()
+    compose = (FRONTEND / "docker-compose.yaml").read_text()
+    entrypoint = (FRONTEND / "docker-entrypoint.d/50-management-ui-runtime-config.sh").read_text()
+    api = (FRONTEND / "src/shared/api/management.ts").read_text()
+    events = (FRONTEND / "src/shared/events/bus.ts").read_text()
+    browser = (FRONTEND / "src/pages/browser/BrowserPage.vue").read_text()
+
+    assert 'base: "/admin/"' in vite
+    assert '%BASE_URL%runtime-config.js' in index
+    assert "proxy_pass" not in nginx
+    assert "MANAGEMENT_BACKEND_ORIGIN" not in dockerfile
+    assert "MANAGEMENT_BACKEND_ORIGIN" not in compose
+    assert "MANAGEMENT_BACKEND_ORIGIN" not in entrypoint
+    assert 'request("/api/session")' in api
+    assert 'new EventSource("/api/calls/stream")' in events
+    assert '/api/browser/operator/ws' in browser
