@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
@@ -116,6 +120,10 @@ class RuntimeSettingsRepository(Protocol):
     def get_mcp_policy(self) -> McpRuntimePolicy: ...
 
     def save_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy: ...
+
+    def get_github_policy(self) -> GitHubRuntimePolicy: ...
+
+    def save_github_policy(self, policy: GitHubRuntimePolicy) -> GitHubRuntimePolicy: ...
 
 
 class CredentialCipher(Protocol):

@@ -162,6 +162,18 @@ def observability_current_team(account_id: str) -> JsonObject:
     return _context.coolify(account_id).current_team()
 
 
+@mcp.tool(title="List infrastructure servers", annotations=READ_EXTERNAL)
+def observability_list_servers(account_id: str) -> JsonValue:
+    """List safe server metadata from a selected Coolify source."""
+    return _context.coolify(account_id).servers()
+
+
+@mcp.tool(title="List server resources", annotations=READ_EXTERNAL)
+def observability_server_resources(account_id: str, server_uuid: str) -> JsonValue:
+    """List safe resource identity/status metadata for one Coolify server."""
+    return _context.coolify(account_id).server_resources(server_uuid)
+
+
 @mcp.tool(title="List infrastructure applications", annotations=READ_EXTERNAL)
 def observability_list_applications(account_id: str) -> JsonValue:
     """List applications from a selected Coolify source."""
@@ -172,6 +184,22 @@ def observability_list_applications(account_id: str) -> JsonValue:
 def observability_get_application(account_id: str, uuid: str) -> JsonObject:
     """Read one application from a selected Coolify source."""
     return _context.coolify(account_id).application(uuid)
+
+
+@mcp.tool(title="Infrastructure application storages", annotations=READ_EXTERNAL)
+def observability_application_storages(
+    account_id: str, application_uuid: str
+) -> JsonObject:
+    """List safe Coolify storage topology without file contents or host filesystem paths."""
+    return _context.coolify(account_id).application_storages(application_uuid)
+
+
+@mcp.tool(title="Infrastructure application variables", annotations=READ_EXTERNAL)
+def observability_application_variables(
+    account_id: str, application_uuid: str
+) -> JsonObject:
+    """List safe Coolify application variable metadata; values are never returned."""
+    return _context.coolify(account_id).application_variables(application_uuid)
 
 
 @mcp.tool(title="List infrastructure deployments", annotations=READ_EXTERNAL)

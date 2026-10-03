@@ -70,9 +70,7 @@ def checkout_repository(
     target = _destination(root, destination)
     if target.exists():
         if not overwrite:
-            raise RepositoryCheckoutError(
-                f"destination already exists: {destination}"
-            )
+            raise RepositoryCheckoutError(f"destination already exists: {destination}")
         if target.is_dir():
             shutil.rmtree(target)
         else:
@@ -80,15 +78,11 @@ def checkout_repository(
     target.parent.mkdir(parents=True, exist_ok=True)
 
     def attempt(header: str) -> None:
-        temporary = target.parent / (
-            f".{target.name}.checkout-{uuid.uuid4().hex}"
-        )
+        temporary = target.parent / (f".{target.name}.checkout-{uuid.uuid4().hex}")
         env = os.environ.copy()
         if header:
             if not auth_scope:
-                raise RepositoryCheckoutError(
-                    "auth_scope is required when auth_header is set"
-                )
+                raise RepositoryCheckoutError("auth_scope is required when auth_header is set")
             env.update(
                 {
                     "GIT_CONFIG_COUNT": "1",
@@ -131,4 +125,63 @@ def checkout_repository(
         "ref": ref,
         "git_metadata": normalized_mode == "git",
         "auth_mode": auth_mode,
+    }
+
+
+def push_repository(
+    target: Path,
+    *,
+    remote: str,
+    branch: str,
+    auth_scope: str,
+    auth_header: str,
+    set_upstream: bool = True,
+    timeout_seconds: int = 120,
+) -> JsonObject:
+    if not auth_scope or not auth_header:
+        raise RepositoryCheckoutError("authenticated Git push requires auth scope and header")
+    env = os.environ.copy()
+    env.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"http.{auth_scope}.extraheader",
+            "GIT_CONFIG_VALUE_0": auth_header,
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    command = ["git", "-C", str(target), "push", "--porcelain"]
+    if set_upstream:
+        command.append("--set-upstream")
+    command += [remote, f"HEAD:refs/heads/{branch}"]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RepositoryCheckoutError("git push timed out") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()[-2048:]
+        raise RepositoryCheckoutError(
+            f"git push failed with exit code {result.returncode}: {detail}"
+        )
+    head_result = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if head_result.returncode != 0:
+        detail = (head_result.stderr or head_result.stdout).strip()[-2048:]
+        raise RepositoryCheckoutError(
+            f"git rev-parse failed with exit code {head_result.returncode}: {detail}"
+        )
+    return {
+        "head": head_result.stdout.strip(),
+        "git_output": (result.stdout or result.stderr).strip()[-2048:],
     }

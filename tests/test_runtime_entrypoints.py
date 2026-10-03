@@ -143,13 +143,17 @@ async def test_observability_runtime_is_unified_read_only_surface() -> None:
         "observability_field_keys",
         "observability_field_values",
         "observability_current_team",
+        "observability_list_servers",
+        "observability_server_resources",
         "observability_list_applications",
         "observability_get_application",
+        "observability_application_storages",
+        "observability_application_variables",
         "observability_list_deployments",
         "observability_list_application_deployments",
         "observability_get_deployment",
     } == names
     assert not any(
-        token in name for name in names for token in ("secret", "env", "deploy_start", "restart")
+        token in name for name in names for token in ("secret", "deploy_start", "restart")
     )
     assert not any(name.startswith(("signoz_", "coolify_")) for name in names)

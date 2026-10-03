@@ -103,6 +103,12 @@ class _CachingClient(ManagementClient):
             return {"accounts": [], "count": 0}
         if path == "/internal/runtime-settings/mcp":
             return {"call_timeout_seconds": 7}
+        if path == "/internal/runtime-settings/github":
+            return {
+                "local_first_guidance": True,
+                "local_git_transport_enabled": False,
+                "remote_source_mutations_enabled": True,
+            }
         if path == "/internal/runtime-settings/terminal":
             return {
                 "max_exec_timeout_seconds": 100,
@@ -133,11 +139,14 @@ def test_management_client_caches_account_lists_and_runtime_policies() -> None:
     assert client.mcp_runtime_policy().call_timeout_seconds == 7
     assert client.terminal_runtime_policy().max_exec_timeout_seconds == 100
     assert client.terminal_runtime_policy().max_exec_timeout_seconds == 100
+    assert client.github_runtime_policy().local_git_transport_enabled is False
+    assert client.github_runtime_policy().local_git_transport_enabled is False
 
     assert client.calls == [
         "/internal/accounts",
         "/internal/runtime-settings/mcp",
         "/internal/runtime-settings/terminal",
+        "/internal/runtime-settings/github",
     ]
 
 

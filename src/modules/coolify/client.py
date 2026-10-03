@@ -26,6 +26,19 @@ _APPLICATION_FIELDS = (
     "build_pack",
     "dockerfile_location",
     "docker_compose_location",
+    "base_directory",
+    "environment_id",
+    "destination_id",
+    "source_id",
+    "compose_parsing_version",
+    "is_raw_compose_deployment_enabled",
+    "include_source_commit_in_build",
+    "inject_build_args_to_dockerfile",
+    "disable_build_cache",
+    "is_git_shallow_clone_enabled",
+    "is_git_submodules_enabled",
+    "is_git_lfs_enabled",
+    "watch_paths",
     "ports_exposes",
     "fqdn",
     "restart_count",
@@ -59,6 +72,51 @@ _DEPLOYMENT_FIELDS = (
 )
 
 _TEAM_FIELDS = ("id", "name", "description", "personal_team", "created_at", "updated_at")
+
+_SERVER_FIELDS = (
+    "uuid",
+    "name",
+    "description",
+    "proxy_type",
+    "server_role",
+    "unreachable_count",
+    "created_at",
+    "updated_at",
+)
+
+_SERVER_RESOURCE_FIELDS = (
+    "uuid",
+    "name",
+    "type",
+    "status",
+    "created_at",
+    "updated_at",
+)
+
+_STORAGE_FIELDS = (
+    "uuid",
+    "name",
+    "mount_path",
+    "is_directory",
+    "created_at",
+    "updated_at",
+)
+
+
+_ENVIRONMENT_METADATA_FIELDS = (
+    "uuid",
+    "key",
+    "is_preview",
+    "is_runtime",
+    "is_buildtime",
+    "is_shared",
+    "is_shown_once",
+    "is_literal",
+    "is_multiline",
+    "version",
+    "created_at",
+    "updated_at",
+)
 
 
 def _project(payload: JsonObject, fields: tuple[str, ...]) -> JsonObject:
@@ -139,6 +197,17 @@ class CoolifyClient:
         raw = json_object(self._get("/teams/current"), context="Coolify current team")
         return _project(raw, _TEAM_FIELDS)
 
+    def servers(self) -> JsonValue:
+        rows = json_object_list(self._get("/servers"), context="Coolify servers")
+        return [_project(row, _SERVER_FIELDS) for row in rows]
+
+    def server_resources(self, uuid: str) -> JsonValue:
+        rows = json_object_list(
+            self._get("/servers/" + urllib.parse.quote(uuid, safe="") + "/resources"),
+            context="Coolify server resources",
+        )
+        return [_project(row, _SERVER_RESOURCE_FIELDS) for row in rows]
+
     def applications(self) -> JsonValue:
         rows = json_object_list(self._get("/applications"), context="Coolify applications")
         return [_project(row, _APPLICATION_FIELDS) for row in rows]
@@ -149,6 +218,56 @@ class CoolifyClient:
             context="Coolify application",
         )
         return _project(raw, _APPLICATION_FIELDS)
+
+    def application_storages(self, uuid: str) -> JsonObject:
+        """Return safe persistent/file storage metadata without file contents or host paths."""
+        envelope = json_object(
+            self._get("/applications/" + urllib.parse.quote(uuid, safe="") + "/storages"),
+            context="Coolify application storages",
+        )
+        persistent_rows = json_object_list(
+            envelope.get("persistent_storages"),
+            context="Coolify application storages.persistent_storages",
+        )
+        file_rows = json_object_list(
+            envelope.get("file_storages"),
+            context="Coolify application storages.file_storages",
+        )
+        persistent: list[JsonValue] = [
+            {**_project(row, _STORAGE_FIELDS), "type": "persistent"}
+            for row in persistent_rows
+        ]
+        files: list[JsonValue] = [
+            {**_project(row, _STORAGE_FIELDS), "type": "file"} for row in file_rows
+        ]
+        return {
+            "application_uuid": uuid,
+            "persistent_storages": persistent,
+            "file_storages": files,
+            "count": len(persistent) + len(files),
+            "contents_exposed": False,
+            "host_paths_exposed": False,
+        }
+
+    def application_variables(self, uuid: str) -> JsonObject:
+        """Return environment-variable metadata without exposing any values."""
+        rows = json_object_list(
+            self._get(
+                "/applications/" + urllib.parse.quote(uuid, safe="") + "/envs"
+            ),
+            context="Coolify application environment variables",
+        )
+        variables: list[JsonObject] = [
+            _project(row, _ENVIRONMENT_METADATA_FIELDS) for row in rows
+        ]
+        variables.sort(key=lambda item: str(item.get("key") or "").casefold())
+        variables_json: list[JsonValue] = list(variables)
+        return {
+            "application_uuid": uuid,
+            "variables": variables_json,
+            "count": len(variables),
+            "values_exposed": False,
+        }
 
     def deployments(self) -> JsonValue:
         rows = json_object_list(self._get("/deployments"), context="Coolify deployments")

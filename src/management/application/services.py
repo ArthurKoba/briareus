@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
 from common.cache import CacheBackend, CacheKeys
 from common.models import JsonObject, json_object
-from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from common.settings import ValkeySettings
 from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
@@ -366,6 +370,30 @@ class RuntimeSettingsService:
         if self.cache is not None and self.cache_keys is not None:
             self.cache.set_json(
                 self.cache_keys.mcp_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
+
+    def github_policy(self) -> GitHubRuntimePolicy:
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.github_policy())
+            if isinstance(cached, dict):
+                return GitHubRuntimePolicy.model_validate(cached)
+        result = self.repository.get_github_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.github_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
+
+    def update_github_policy(self, policy: GitHubRuntimePolicy) -> GitHubRuntimePolicy:
+        result = self.repository.save_github_policy(policy)
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.github_policy(),
                 result.to_json(),
                 ttl_seconds=self.cache_settings.policy_ttl_seconds,
             )

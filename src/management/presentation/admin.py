@@ -46,7 +46,11 @@ from starlette_admin.fields import BaseField
 from common.mcp_surfaces import MCP_SURFACE_PATHS
 from common.models import JsonObject, JsonValue, json_int, json_str
 from common.public_tool_names import public_tool_name
-from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
@@ -746,10 +750,7 @@ class ReverseView(CustomView):
                     )
                     coverage = cached_coverage.payload if cached_coverage.payload else None
                     coverage_meta = snapshot_meta(cached_coverage)
-                    if (
-                        cached_coverage.stale()
-                        or cached_coverage.status in {"pending", "error"}
-                    ):
+                    if cached_coverage.stale() or cached_coverage.status in {"pending", "error"}:
                         self.snapshot_refresher.notify_coverage_requested()
             except Exception as exc:
                 error = str(exc)
@@ -878,9 +879,7 @@ class ReverseView(CustomView):
                 result = await self.reverse.recover_worker(worker_index)
                 cancelled_raw = result.get("cancelled_total")
                 cancelled = cancelled_raw if isinstance(cancelled_raw, int) else 0
-                message = (
-                    f"Worker #{worker_index} recovered ({cancelled} requests cancelled)"
-                )
+                message = f"Worker #{worker_index} recovered ({cancelled} requests cancelled)"
         except Exception as exc:
             flash(request, f"Worker control failed: {exc}", "error")
         else:
@@ -1096,6 +1095,13 @@ class SettingsView(CustomView):
                 mcp_policy = McpRuntimePolicy(
                     call_timeout_seconds=int(str(form.get("mcp_call_timeout_seconds", "5")))
                 )
+                github_policy = GitHubRuntimePolicy(
+                    local_first_guidance="github_local_first_guidance" in form,
+                    local_git_transport_enabled="github_local_git_transport_enabled" in form,
+                    remote_source_mutations_enabled=(
+                        "github_remote_source_mutations_enabled" in form
+                    ),
+                )
                 await self.reverse.set_idle_timeout(reverse_idle_timeout)
                 await asyncio.to_thread(self.config.update, config)
                 await asyncio.to_thread(
@@ -1106,6 +1112,10 @@ class SettingsView(CustomView):
                     self.runtime_settings.update_mcp_policy,
                     mcp_policy,
                 )
+                await asyncio.to_thread(
+                    self.runtime_settings.update_github_policy,
+                    github_policy,
+                )
             except (TypeError, ValueError, RuntimeError) as exc:
                 flash(request, f"Invalid settings: {exc}", "error")
             else:
@@ -1115,6 +1125,7 @@ class SettingsView(CustomView):
         config = await asyncio.to_thread(self.config.get)
         terminal_policy = await asyncio.to_thread(self.runtime_settings.terminal_policy)
         mcp_policy = await asyncio.to_thread(self.runtime_settings.mcp_policy)
+        github_policy = await asyncio.to_thread(self.runtime_settings.github_policy)
         try:
             reverse_settings = await self.reverse.session_settings()
             reverse_error = ""
@@ -1134,6 +1145,7 @@ class SettingsView(CustomView):
                 "config": config,
                 "terminal_policy": terminal_policy,
                 "mcp_policy": mcp_policy,
+                "github_policy": github_policy,
                 "reverse_settings": reverse_settings,
                 "reverse_error": reverse_error,
             },

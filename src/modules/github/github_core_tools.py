@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from common.models import JsonObject
+from common.runtime_policy_contracts import GitHubRuntimePolicy
 
 from .github_identity import GitHubPrettyIdentityClient
 
@@ -16,6 +17,7 @@ def register_github_core_tools(
     read_annotations: ToolAnnotations,
     write_annotations: ToolAnnotations,
     destructive_annotations: ToolAnnotations,
+    runtime_policy: Callable[[], GitHubRuntimePolicy],
 ) -> None:
     @mcp.tool(title="GitHub agent list repositories", annotations=read_annotations)
     def github_agent_list_repositories(account_id: str) -> JsonObject:
@@ -96,6 +98,52 @@ def register_github_core_tools(
             mode=mode,
             ref=ref,
             overwrite=overwrite,
+        )
+
+    @mcp.tool(title="Authorize local Git workspace", annotations=write_annotations)
+    def github_authorize_local_git(
+        account_id: str,
+        repository: str,
+        destination: str,
+        remote: str = "origin",
+    ) -> JsonObject:
+        """Authorize an existing local Git checkout for secure Git transport.
+
+        This is additive/experimental: it stores only non-secret account/repository markers and
+        Git author identity in the checkout. Credentials remain inside the GitHub runtime.
+        """
+        if not runtime_policy().local_git_transport_enabled:
+            raise RuntimeError(
+                "local Git transport is disabled in application settings; enable it after review"
+            )
+        return client_factory(account_id).authorize_local_git(
+            repository, destination, remote=remote
+        )
+
+    @mcp.tool(title="Push local Git workspace", annotations=write_annotations)
+    def github_push_local_git(
+        account_id: str,
+        repository: str,
+        destination: str,
+        branch: str = "",
+        remote: str = "origin",
+        set_upstream: bool = True,
+    ) -> JsonObject:
+        """Push a validated local Git HEAD through GitHub App/user Git transport.
+
+        The short-lived credential is injected only into the child git process and is not
+        written into the workspace, remote URL, MCP result, or Git config.
+        """
+        if not runtime_policy().local_git_transport_enabled:
+            raise RuntimeError(
+                "local Git transport is disabled in application settings; enable it after review"
+            )
+        return client_factory(account_id).push_local_git(
+            repository,
+            destination,
+            branch=branch,
+            remote=remote,
+            set_upstream=set_upstream,
         )
 
     @mcp.tool(title="GitHub agent compare refs", annotations=read_annotations)

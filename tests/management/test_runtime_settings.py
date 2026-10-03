@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from common.models import JsonValue
-from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from management.application.services import RuntimeSettingsService
 from management.infrastructure.database import (
     Base,
@@ -48,6 +52,12 @@ def test_runtime_settings_defaults_are_long_terminal_and_short_mcp(tmp_path: Pat
         max_job_runtime_seconds=43_200,
     )
     assert mcp == McpRuntimePolicy(call_timeout_seconds=5)
+    github = repository.get_github_policy()
+    assert github == GitHubRuntimePolicy(
+        local_first_guidance=True,
+        local_git_transport_enabled=False,
+        remote_source_mutations_enabled=True,
+    )
     engine.dispose()
 
 
@@ -95,6 +105,15 @@ def test_runtime_settings_service_uses_and_refreshes_shared_cache(tmp_path: Path
 
     service.update_mcp_policy(McpRuntimePolicy(call_timeout_seconds=17))
     assert service.mcp_policy().call_timeout_seconds == 17
+
+    service.update_github_policy(
+        GitHubRuntimePolicy(
+            local_first_guidance=False,
+            local_git_transport_enabled=True,
+            remote_source_mutations_enabled=True,
+        )
+    )
+    assert service.github_policy().local_git_transport_enabled is True
 
     service.update_terminal_policy(
         TerminalRuntimePolicy(max_exec_timeout_seconds=123, max_job_runtime_seconds=456)

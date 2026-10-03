@@ -641,7 +641,9 @@ class BrowserSettings(ProcessSettings):
     )
     timezone: str = Field("UTC", validation_alias="TZ")
     devtools_mcp_script_path: Path = Field(
-        Path("/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
+        Path(
+            "/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+        ),
         validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
     )
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")

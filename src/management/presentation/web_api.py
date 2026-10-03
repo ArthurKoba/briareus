@@ -15,7 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import FileResponse, StreamingResponse
 
 from common.models import JsonObject, JsonValue, json_object
-from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
+from common.runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from common.settings import ManagementSettings
 from management.application.services import (
     AccountService,
@@ -97,6 +101,9 @@ class SettingsPayload(BaseModel):
     terminal_max_exec_timeout_seconds: int = Field(21_600, ge=1, le=86_400)
     terminal_max_job_runtime_seconds: int = Field(43_200, ge=1, le=604_800)
     mcp_call_timeout_seconds: int = Field(5, ge=1, le=300)
+    github_local_first_guidance: bool = True
+    github_local_git_transport_enabled: bool = False
+    github_remote_source_mutations_enabled: bool = True
     reverse_idle_timeout_seconds: float = Field(900.0, ge=0, le=86_400)
 
 
@@ -614,10 +621,11 @@ def build_admin_api_router(
     async def settings_get(request: Request) -> JsonObject:
         require_user(request)
         api = available()
-        config, terminal_policy, mcp_policy = await asyncio.gather(
+        config, terminal_policy, mcp_policy, github_policy = await asyncio.gather(
             asyncio.to_thread(api.config.get),
             asyncio.to_thread(api.runtime_settings.terminal_policy),
             asyncio.to_thread(api.runtime_settings.mcp_policy),
+            asyncio.to_thread(api.runtime_settings.github_policy),
         )
         try:
             reverse_settings = await api.reverse.session_settings()
@@ -633,6 +641,7 @@ def build_admin_api_router(
             "management": config.model_dump(mode="json"),
             "terminal": terminal_policy.model_dump(mode="json"),
             "mcp": mcp_policy.model_dump(mode="json"),
+            "github": github_policy.model_dump(mode="json"),
             "analysis": reverse_settings,
             "analysis_error": reverse_error,
         }
@@ -652,14 +661,20 @@ def build_admin_api_router(
             max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
         )
         mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
+        github_policy = GitHubRuntimePolicy(
+            local_first_guidance=payload.github_local_first_guidance,
+            local_git_transport_enabled=payload.github_local_git_transport_enabled,
+            remote_source_mutations_enabled=payload.github_remote_source_mutations_enabled,
+        )
         try:
             reverse_settings = await api.reverse.set_idle_timeout(
                 payload.reverse_idle_timeout_seconds
             )
-            saved_management, saved_terminal, saved_mcp = await asyncio.gather(
+            saved_management, saved_terminal, saved_mcp, saved_github = await asyncio.gather(
                 asyncio.to_thread(api.config.update, management),
                 asyncio.to_thread(api.runtime_settings.update_terminal_policy, terminal_policy),
                 asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
+                asyncio.to_thread(api.runtime_settings.update_github_policy, github_policy),
             )
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -667,6 +682,7 @@ def build_admin_api_router(
             "management": saved_management.model_dump(mode="json"),
             "terminal": saved_terminal.model_dump(mode="json"),
             "mcp": saved_mcp.model_dump(mode="json"),
+            "github": saved_github.model_dump(mode="json"),
             "analysis": reverse_settings,
         }
 

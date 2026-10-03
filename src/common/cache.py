@@ -23,6 +23,7 @@ class CacheBackend(Protocol):
 
     def delete(self, *keys: str) -> bool: ...
 
+
 logger = logging.getLogger(__name__)
 _TRACER = trace.get_tracer("mcp-bridge.valkey-cache")
 
@@ -166,6 +167,9 @@ class CacheKeys:
 
     def mcp_policy(self) -> str:
         return self.cache.key("system", "runtime", "mcp")
+
+    def github_policy(self) -> str:
+        return self.cache.key("system", "runtime", "github")
 
     def management_config(self) -> str:
         return self.cache.key("system", "management", "config")
