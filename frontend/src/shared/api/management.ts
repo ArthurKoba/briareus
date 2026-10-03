@@ -60,7 +60,7 @@ export interface SettingsState {
 }
 
 const previewBootstrap: ManagementBootstrap = {
-  product: "MCP Management", environment: "frontend-preview", legacy_admin_path: "#",
+  product: "MCP Bridge", environment: "frontend-preview", legacy_admin_path: "#",
   navigation: [
     { id: "overview", label: "Overview", enabled: true }, { id: "accounts", label: "Accounts", enabled: true },
     { id: "calls", label: "MCP Calls", enabled: true }, { id: "files", label: "Files", enabled: true },
@@ -81,7 +81,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!response.ok) {
       let detail = `Management API request failed: ${response.status}`
       try { const body = await response.json() as { detail?: string }; if (body.detail) detail = body.detail } catch { /* no json */ }
-      notifications.error(String(i18n.global.t("notifications.apiError")), detail)
+      notifications.error(`${response.status} · ${String(i18n.global.t("notifications.apiError"))}`, `${method} ${new URL(path, location.origin).pathname} — ${detail}`, `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`)
       throw new Error(detail)
     }
     const contentType = response.headers.get("content-type") || ""
@@ -89,7 +89,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch (caught) {
     if (!(caught instanceof Error && caught.message.startsWith("Management API request failed"))) {
       frontendTelemetry.error("api.network_error",caught,{path,method,duration_ms:performance.now()-started})
-      notifications.error(String(i18n.global.t("notifications.apiError")),caught instanceof Error?caught.message:String(caught))
+      notifications.error(String(i18n.global.t("notifications.apiError")), `${method} ${new URL(path, location.origin).pathname} — ${caught instanceof Error?caught.message:String(caught)}`, `api:network:${method}:${new URL(path, location.origin).pathname}`)
     }
     throw caught
   }
