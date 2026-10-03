@@ -29,13 +29,15 @@ const props = withDefaults(defineProps<{
   pagination?: false | Record<string, unknown>
   virtual?: boolean
   scrollY?: number
+  clickable?: boolean
 }>(), {
   loading: false,
   virtual: false,
   scrollY: 560,
+  clickable: false,
 })
 
-const emit = defineEmits<{ endReached: [] }>()
+const emit = defineEmits<{ endReached: []; rowClick: [record: any] }>()
 const scrollElement = ref<HTMLElement | null>(null)
 
 const features = tableFeatures({
@@ -103,6 +105,13 @@ function onScroll(event: Event): void {
   const target = event.target as HTMLElement
   if (target.scrollHeight - target.scrollTop - target.clientHeight < 320) emit("endReached")
 }
+
+function onRowClick(event: MouseEvent, record: any): void {
+  if (!props.clickable) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest("button,a,input,select,textarea,[role='switch'],[data-row-action]")) return
+  emit("rowClick", record)
+}
 </script>
 
 <template>
@@ -152,6 +161,8 @@ function onScroll(event: Event): void {
             v-for="virtualRow in virtualRows"
             :key="String(virtualRow.key)"
             class="ts-table-row absolute left-0 grid w-full border-b border-border/40 text-[12px] hover:bg-accent/45"
+            :class="clickable && 'cursor-pointer'"
+            @click="onRowClick($event, rowRecord(virtualRow.index))"
             :style="{
               gridTemplateColumns: columnTemplate,
               height: `${virtualRow.size}px`,
@@ -186,6 +197,8 @@ function onScroll(event: Event): void {
           v-for="(row, rowIndex) in rows"
           :key="originalKey(row.original, rowIndex)"
           class="ts-table-row grid border-b border-border/40 text-[12px] last:border-b-0 hover:bg-accent/45"
+          :class="clickable && 'cursor-pointer'"
+          @click="onRowClick($event, row.original)"
           :style="{ gridTemplateColumns: columnTemplate, minHeight: `${rowHeight}px` }"
         >
           <div

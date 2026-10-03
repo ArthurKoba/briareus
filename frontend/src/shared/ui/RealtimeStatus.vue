@@ -14,7 +14,7 @@ const statusLabel = computed(() => live.value
   : connecting.value
     ? t("realtime.connecting")
     : eventBus.state.enabled
-      ? t("common.disconnected")
+      ? t("realtime.idle")
       : t("realtime.off"))
 </script>
 
@@ -43,7 +43,7 @@ const statusLabel = computed(() => live.value
 
       <div class="mt-3 grid gap-2 rounded-lg bg-muted/50 p-2.5 text-xs">
         <div class="flex justify-between gap-4"><span class="text-muted-foreground">{{ t("realtime.subscriptions") }}</span><span class="font-mono">{{ eventBus.state.subscriptions }}</span></div>
-        <div class="flex justify-between gap-4"><span class="text-muted-foreground">{{ t("realtime.lastEvent") }}</span><span class="text-right">{{ eventBus.state.lastEventAt ? formatDate(eventBus.state.lastEventAt) : "—" }}</span></div>
+        <div class="flex justify-between gap-4"><span class="text-muted-foreground">{{ t("realtime.lastEvent") }}</span><span class="text-right">{{ eventBus.state.enabled && eventBus.state.lastRemoteEventAt ? formatDate(eventBus.state.lastRemoteEventAt) : "—" }}</span></div>
       </div>
 
       <label class="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5">
