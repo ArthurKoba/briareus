@@ -192,7 +192,7 @@ def test_compose_exposes_only_external_bootstrap_environment() -> None:
         "github": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "gitlab": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "files": observability | {"MANAGEMENT_SERVICE_TOKEN"},
-        "web": observability | {"MANAGEMENT_SERVICE_TOKEN"},
+        "web": observability | {"MANAGEMENT_SERVICE_TOKEN", "TZ"},
         "terminal": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "analysis": observability | {"MANAGEMENT_SERVICE_TOKEN"},
         "ghidra": observability | {"MANAGEMENT_SERVICE_TOKEN"},
@@ -238,6 +238,11 @@ def test_compose_does_not_redeclare_image_or_code_defaults() -> None:
         "BROWSER_PROFILE_PATH",
         "BROWSER_EXECUTABLE_PATH",
         "BROWSER_HEADLESS",
+        "BROWSER_LOCALE",
+        "BROWSER_ACCEPT_LANGUAGE",
+        "DISPLAY",
+        "BROWSER_COLOR_DEPTH",
+        "BROWSER_XVFB_ENABLED",
         "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
         "BROWSER_TIMEOUT_MS",
         "BROWSER_VIEWPORT_WIDTH",
@@ -286,6 +291,12 @@ def test_compose_keeps_oauth_enablement_optional() -> None:
     serialized = COMPOSE_FILE.read_text()
     assert "${OAUTH_ENABLED:-true}" in serialized
     assert "${OAUTH_ENABLED:?}" not in serialized
+
+
+def test_web_timezone_is_optional_with_utc_fallback() -> None:
+    serialized = COMPOSE_FILE.read_text()
+    assert "TZ: ${TZ:-UTC}" in serialized
+    assert "${TZ:?}" not in serialized
 
 
 def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
