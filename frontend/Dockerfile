@@ -12,7 +12,12 @@ RUN bun run build
 FROM nginx:1.28-alpine
 
 ENV MANAGEMENT_UI_PREVIEW=false \
-    MANAGEMENT_BACKEND_ORIGIN=http://127.0.0.1:9
+    MANAGEMENT_BACKEND_ORIGIN=http://127.0.0.1:9 \
+    MANAGEMENT_UI_TELEMETRY_ENABLED=false \
+    MANAGEMENT_UI_TELEMETRY_ENDPOINT=/api/client-telemetry \
+    MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE=1 \
+    MANAGEMENT_UI_EVENTS_MODE=hybrid \
+    MANAGEMENT_UI_EVENTS_URL=/events/ws
 
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY runtime-config.template.js /usr/share/nginx/html/runtime-config.template.js

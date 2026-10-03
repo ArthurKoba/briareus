@@ -42,3 +42,34 @@ The nginx runtime proxies browser requests from `/api/*` to the backend `/admin/
 - `shared/lib/` - framework-independent helpers and browser-local UI preferences.
 
 Only visual preferences belong in localStorage. Operational state, credentials and authorization remain backend-owned.
+
+## Interactive platform contracts
+
+The frontend is organized by domain slices under `src/pages/<domain>/` and reusable feature code under `src/features/`. Cross-cutting browser infrastructure lives under `src/shared/`.
+
+Current frontend infrastructure includes:
+
+- `shared/i18n/` — RU/EN locale catalogs and persisted language preference;
+- `shared/notifications/` — application-wide toast/notification bus;
+- `shared/telemetry/` — sanitized browser telemetry facade and local diagnostic buffer;
+- `shared/events/` — one topic subscription manager with mock, compatibility and future WebSocket transports;
+- `shared/settings/` — typed helpers for preserving full backend settings while domain pages edit only owned values;
+- `shared/ui/DataTable.vue` — Ant Design Vue dense table wrapper with virtual scrolling and an end-of-scroll signal.
+
+### Frontend telemetry contract
+
+The browser must never receive an OTLP/Bearer secret. When telemetry is enabled it sends sanitized events to the same-origin endpoint configured by `MANAGEMENT_UI_TELEMETRY_ENDPOINT` (default `/api/client-telemetry`) using the existing authenticated browser session.
+
+The future gateway/backend contract is responsible for authenticating the management session and forwarding accepted telemetry to the infrastructure telemetry endpoint using server-owned authorization. Passwords, cookies, authorization headers, account credentials, request bodies and other sensitive payload fields are filtered by the frontend telemetry facade and must also be rejected/redacted server-side.
+
+Runtime variables:
+
+- `MANAGEMENT_UI_TELEMETRY_ENABLED=false`;
+- `MANAGEMENT_UI_TELEMETRY_ENDPOINT=/api/client-telemetry`;
+- `MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE=1`;
+- `MANAGEMENT_UI_EVENTS_MODE=hybrid` (`mock`, `hybrid`, or `websocket`);
+- `MANAGEMENT_UI_EVENTS_URL=/events/ws`.
+
+`hybrid` keeps the existing MCP Calls SSE transport behind the shared event-bus API while other future topics remain mockable. Once the unified backend WebSocket is implemented, deployment can switch to `websocket` without rewriting pages.
+
+The implementation roadmap and backend follow-ups are tracked in GitHub issue #233.
