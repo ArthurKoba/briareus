@@ -75,7 +75,6 @@ def test_compose_declares_only_primary_runtime_dependencies() -> None:
     services = _services()
 
     expected = {
-        "gateway": {"management-ui": {"condition": "service_healthy", "required": True}},
         "github": {"management": {"condition": "service_healthy", "required": True}},
         "gitlab": {"management": {"condition": "service_healthy", "required": True}},
         "observability": {"management": {"condition": "service_healthy", "required": True}},
@@ -90,9 +89,7 @@ def test_compose_declares_only_primary_runtime_dependencies() -> None:
 
 
 def test_gateway_is_not_health_gated_on_provider_availability() -> None:
-    assert _services()["gateway"]["depends_on"] == {
-        "management-ui": {"condition": "service_healthy", "required": True}
-    }
+    assert "depends_on" not in _services()["gateway"]
 
 
 def test_compose_does_not_publish_host_ports() -> None:

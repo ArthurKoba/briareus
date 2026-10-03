@@ -37,10 +37,6 @@ def test_root_compose_runs_frontend_as_isolated_service() -> None:
     service = root_compose["services"]["management-ui"]
     assert service["build"] == {"context": "./frontend", "dockerfile": "Dockerfile"}
     assert service["expose"] == ["8080"]
-    assert root_compose["services"]["gateway"]["depends_on"]["management-ui"] == {
-        "condition": "service_healthy",
-        "required": True,
-    }
     assert "AS management-ui" not in root_dockerfile
     assert "frontend" in root_dockerignore
 

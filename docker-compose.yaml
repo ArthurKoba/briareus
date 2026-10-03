@@ -137,10 +137,6 @@ services:
 
   gateway:
     <<: *runtime
-    depends_on:
-      management-ui:
-        condition: service_healthy
-        required: true
     build:
       <<: *build
       target: gateway
