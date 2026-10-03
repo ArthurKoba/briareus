@@ -3,7 +3,7 @@
 <div class="d-flex justify-content-between align-items-center">
   <h1>Reverse</h1>
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/admin/legacy/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
     <li class="breadcrumb-item active">Reverse</li>
   </ol>
 </div>
@@ -37,7 +37,7 @@
   <div class="card mb-3">
     <div class="card-header"><h3 class="card-title">Create project</h3></div>
     <div class="card-body">
-      <form method="post" action="/admin/legacy/reverse/create" class="row g-2 align-items-end">
+      <form method="post" action="/admin/reverse/create" class="row g-2 align-items-end">
         {{ csrf_input(request) }}
         <div class="col-12 col-md-4">
           <label class="form-label">Project name</label>
@@ -80,12 +80,12 @@
             <td>{% if worker["healthy"] %}<span class="badge bg-green-lt">healthy</span>{% else %}<span class="badge bg-red-lt">error</span>{% endif %}</td>
             <td class="text-nowrap">
               {% if enabled %}
-              <form method="post" action="/admin/legacy/reverse/worker/{{ worker['worker_index'] }}/disable" style="display:inline">
+              <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/disable" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-warning" type="submit" onclick="return confirm('Disable worker #{{ worker['worker_index'] }} and release its idle session?')">Disable</button>
               </form>
               {% else %}
-              <form method="post" action="/admin/legacy/reverse/worker/{{ worker['worker_index'] }}/enable" style="display:inline">
+              <form method="post" action="/admin/reverse/worker/{{ worker['worker_index'] }}/enable" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-primary" type="submit">Enable</button>
               </form>
@@ -104,9 +104,9 @@
     <div class="card-body py-2">
       <div class="d-flex flex-wrap gap-2 align-items-center">
         <span class="text-secondary">Project groups:</span>
-        <a class="btn btn-sm {% if not group_filter %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/admin/legacy/reverse">All</a>
+        <a class="btn btn-sm {% if not group_filter %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/admin/reverse">All</a>
         {% for group in groups %}
-          <a class="btn btn-sm {% if group_filter == group %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/admin/legacy/reverse?group={{ group | urlencode }}">{{ group }}</a>
+          <a class="btn btn-sm {% if group_filter == group %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/admin/reverse?group={{ group | urlencode }}">{{ group }}</a>
         {% endfor %}
       </div>
     </div>
@@ -127,7 +127,7 @@
         <tbody>
         {% for project in items %}
           <tr>
-            <td><a href="/admin/legacy/reverse/project/{{ project['project_id'] }}">{{ project["name"] }}</a></td>
+            <td><a href="/admin/reverse/project/{{ project['project_id'] }}">{{ project["name"] }}</a></td>
             <td>
               {% if project["session"] == "active" %}<span class="badge bg-blue-lt">active</span>
               {% else %}<span class="badge bg-secondary-lt">available</span>{% endif %}
@@ -137,19 +137,19 @@
             <td class="text-nowrap">{% if project["last_used_at"] %}<time class="js-local-datetime" datetime="{{ project['last_used_at'] }}">{{ project["last_used_at"] }}</time>{% else %}—{% endif %}</td>
             <td><code class="text-break">{{ project["path"] }}</code></td>
             <td class="text-nowrap">
-              <a class="btn" href="/admin/legacy/reverse/project/{{ project['project_id'] }}">Inspect</a>
+              <a class="btn" href="/admin/reverse/project/{{ project['project_id'] }}">Inspect</a>
               {% if project["session"] == "active" %}
-              <form method="post" action="/admin/legacy/reverse/release/{{ project['project_id'] }}" style="display:inline">
+              <form method="post" action="/admin/reverse/release/{{ project['project_id'] }}" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-warning" type="submit">Release</button>
               </form>
               {% else %}
-              <form method="post" action="/admin/legacy/reverse/open/{{ project['project_id'] }}" style="display:inline">
+              <form method="post" action="/admin/reverse/open/{{ project['project_id'] }}" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-primary" type="submit">Open</button>
               </form>
               {% endif %}
-              <form method="post" action="/admin/legacy/reverse/delete/{{ project['project_id'] }}" style="display:inline">
+              <form method="post" action="/admin/reverse/delete/{{ project['project_id'] }}" style="display:inline">
                 {{ csrf_input(request) }}
                 <button class="btn btn-danger" type="submit" onclick="return confirm('Permanently delete project {{ project['name'] }}?')">Delete</button>
               </form>

@@ -144,7 +144,7 @@ def test_browser_operator_template_refreshes_shared_state() -> None:
     assert "type:'reopen_closed_page'" in source
     assert "type:'clean_app'" in source
     assert "type:'clean_browser'" in source
-    assert "/admin/legacy/browser/ticket" in source
+    assert "/admin/browser/ticket" in source
     assert "refreshOperatorTicket" in source
     assert "urlDirty" in source
     assert "document.activeElement!==urlInput" in source

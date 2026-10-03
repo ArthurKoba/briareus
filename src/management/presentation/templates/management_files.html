@@ -3,7 +3,7 @@
 <div class="d-flex justify-content-between align-items-center">
   <h1>Files</h1>
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/admin/legacy/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
     <li class="breadcrumb-item active">Files</li>
   </ol>
 </div>
@@ -48,13 +48,13 @@
 <div class="card mb-3"><div class="card-body">
   <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
     {% if current_path %}
-      <a class="btn" href="/admin/legacy/files?{{ {'path': parent_path} | urlencode }}">Up</a>
+      <a class="btn" href="/admin/files?{{ {'path': parent_path} | urlencode }}">Up</a>
     {% endif %}
     <code>/workspace{% if current_path %}/{{ current_path }}{% endif %}</code>
   </div>
   <div class="row g-2">
     <div class="col-12 col-lg-7">
-      <form method="post" action="/admin/legacy/files/upload" enctype="multipart/form-data" class="input-group">
+      <form method="post" action="/admin/files/upload" enctype="multipart/form-data" class="input-group">
         {{ csrf_input(request) }}
         <input type="hidden" name="path" value="{{ current_path }}">
         <input class="form-control" type="file" name="file" required>
@@ -63,7 +63,7 @@
       </form>
     </div>
     <div class="col-12 col-lg-5">
-      <form method="post" action="/admin/legacy/files/mkdir" class="input-group">
+      <form method="post" action="/admin/files/mkdir" class="input-group">
         {{ csrf_input(request) }}
         <input type="hidden" name="path" value="{{ current_path }}">
         <input class="form-control" name="name" placeholder="Directory name" required>
@@ -81,7 +81,7 @@
 <tr>
   <td>
     {% if item.get("type") == "directory" %}
-      <a href="/admin/legacy/files?{{ {'path': item.get('path', '')} | urlencode }}">{{ item.get("name") }}</a>
+      <a href="/admin/files?{{ {'path': item.get('path', '')} | urlencode }}">{{ item.get("name") }}</a>
     {% else %}
       {{ item.get("name") }}
     {% endif %}
@@ -91,9 +91,9 @@
   <td>{{ item.get("modified_at_ns", "") }}</td>
   <td class="text-nowrap">
     {% if item.get("type") == "file" %}
-      <a class="btn btn-sm" href="/admin/legacy/files/download?{{ {'path': item.get('path', '')} | urlencode }}">Download</a>
+      <a class="btn btn-sm" href="/admin/files/download?{{ {'path': item.get('path', '')} | urlencode }}">Download</a>
     {% endif %}
-    <form method="post" action="/admin/legacy/files/delete" style="display:inline">
+    <form method="post" action="/admin/files/delete" style="display:inline">
       {{ csrf_input(request) }}
       <input type="hidden" name="current_path" value="{{ current_path }}">
       <input type="hidden" name="path" value="{{ item.get('path') }}">

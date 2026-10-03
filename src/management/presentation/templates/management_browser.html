@@ -6,7 +6,7 @@
     <div class="text-secondary">Shared live control of the persistent Chromium profile</div>
   </div>
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/admin/legacy/">Admin</a></li>
+    <li class="breadcrumb-item"><a href="/admin/">Admin</a></li>
     <li class="breadcrumb-item active">Browser</li>
   </ol>
 </div>
@@ -202,7 +202,7 @@
     if(next.viewport){ frameWidth=next.viewport.width||frameWidth; frameHeight=next.viewport.height||frameHeight; }
   }
   async function refreshOperatorTicket() {
-    const response=await fetch('/admin/legacy/browser/ticket',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+    const response=await fetch('/admin/browser/ticket',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
     if(!response.ok)throw new Error(`ticket refresh failed: ${response.status}`);
     const payload=await response.json();
     if(!payload.ticket)throw new Error('ticket refresh returned no ticket');
