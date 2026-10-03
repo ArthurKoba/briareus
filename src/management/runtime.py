@@ -47,6 +47,7 @@ from management.infrastructure.reverse import ReverseAdminClient
 from management.infrastructure.snapshot_worker import SnapshotRefresher
 from management.presentation.admin import build_admin
 from management.presentation.api import ApiServices, build_internal_router
+from management.presentation.web_api import build_admin_api_router
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,7 @@ app.include_router(
         )
     )
 )
+app.include_router(build_admin_api_router(settings))
 
 
 @app.get("/health")
