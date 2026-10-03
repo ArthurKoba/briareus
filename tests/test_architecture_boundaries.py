@@ -58,17 +58,14 @@ def test_provider_packages_do_not_import_each_other_or_management_implementation
     }
     for provider, root in provider_roots.items():
         forbidden = {
-            f"modules.{other}"
-            for other in provider_roots
-            if other not in {provider, "files"}
+            f"modules.{other}" for other in provider_roots if other not in {provider, "files"}
         }
         for path in _python_files(root):
             for imported in _imports(path):
                 if imported.startswith("management."):
                     violations.append(f"{path.relative_to(_SRC)} -> {imported}")
                 if any(
-                    imported == prefix or imported.startswith(prefix + ".")
-                    for prefix in forbidden
+                    imported == prefix or imported.startswith(prefix + ".") for prefix in forbidden
                 ):
                     violations.append(f"{path.relative_to(_SRC)} -> {imported}")
     assert violations == []
@@ -84,24 +81,19 @@ def test_management_layers_depend_inward() -> None:
         "management.presentation",
         "fastapi",
         "sqlalchemy",
-        "starlette_admin",
     )
     forbidden_application = (
         "management.infrastructure",
         "management.presentation",
         "fastapi",
         "sqlalchemy",
-        "starlette_admin",
     )
     for root, forbidden in ((domain, forbidden_domain), (application, forbidden_application)):
         for path in _python_files(root):
             violations.extend(
                 f"{path.relative_to(_SRC)} -> {imported}"
                 for imported in _imports(path)
-                if any(
-                    imported == item or imported.startswith(item + ".")
-                    for item in forbidden
-                )
+                if any(imported == item or imported.startswith(item + ".") for item in forbidden)
             )
     assert violations == []
 

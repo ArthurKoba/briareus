@@ -1,6 +1,6 @@
 # MCP management
 
-The private `management` runtime owns provider accounts, encrypted credentials, MCP invocation history, Files administration and the Starlette Admin console. Provider runtimes never open the management database directly.
+The private `management` runtime owns provider accounts, encrypted credentials, MCP invocation history, Files administration, authenticated sessions, typed frontend APIs and realtime transport. Provider runtimes never open the management database directly.
 
 ## Storage
 
@@ -38,27 +38,29 @@ These capability tools are informational. Provider authorization remains authori
 
 Private runtimes authenticate with `MANAGEMENT_SERVICE_TOKEN`. The internal API lists public account metadata, resolves one credential for an explicit provider/account selector, and accepts invocation events. It does not expose account mutation to MCP runtimes.
 
-## Admin
+## Management frontend API
 
-The gateway exposes the private Starlette Admin surface at `/admin` on the main MCP origin. The console contains:
+The management service is an API/realtime/session backend only. Its internal routes remain
+under `/admin/api/*`. The public Gateway exposes those routes under `/api/*` and reserves
+`/admin/*` for the standalone Vue frontend on the same public origin. The backend does not
+render or serve an HTML management UI.
 
-- separate GitHub Accounts and GitLab Accounts sections;
-- write-only credential replacement and connection tests;
-- MCP invocation history including captured arguments/results/errors;
-- Settings for logging enable/disable, payload capture, retention/max-record limits and maintenance cadence;
-- a Files section that browses the shared workspace and supports upload, download, directory creation and deletion.
+Public frontend surfaces include session login/logout/bootstrap, dashboard/accounts/calls/files/
+terminal/analysis/oauth/settings APIs and telemetry under `/api/*`, plus `/api/realtime` and
+`/api/browser/operator/ws`. Gateway strips the `/admin` prefix when proxying UI requests to
+`http://management-ui:8080`, so `/admin/assets/x.js` becomes frontend `/assets/x.js`.
 
 ## Invocation logging
 
 Tool-call logging is best-effort and never makes a successful MCP call depend on management availability. Payload capture is bounded and can be disabled independently. Sensitive structured fields such as authorization headers, cookies, tokens, passwords, secrets, private keys and API keys are redacted before an event is sent to management.
 
-Retention is enforced both while appending events and by the periodic management maintenance task. Logs can also be cleared or retention can be applied immediately from Admin.
+Retention is enforced both while appending events and by the periodic management maintenance task. Logs can also be cleared or retention can be applied immediately through the management API.
 
 ## Files administration
 
-Management mounts the same `/workspace` volume used by Files, Curl and Terminal. Admin is
-a direct file-manager view of that shared filesystem rather than a second storage/index
-implementation.
+Management mounts the same `/workspace` volume used by Files, Curl and Terminal. The typed
+management files API operates directly on that shared filesystem rather than a second
+storage/index implementation.
 
 ## Coolify bootstrap
 
@@ -74,4 +76,4 @@ MANAGEMENT_SESSION_SECRET=<random session secret>
 MANAGEMENT_SESSION_HTTPS_ONLY=true
 ```
 
-Gateway OAuth remains deployment configuration (`GITHUB_OAUTH_*`). Provider accounts are created through `/admin`.
+Gateway OAuth remains deployment configuration (`GITHUB_OAUTH_*`). Provider accounts are created through the management API used by the standalone frontend.

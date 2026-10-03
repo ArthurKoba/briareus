@@ -40,7 +40,8 @@ public domain. Auth and all provider runtimes remain private on the Compose netw
 /analysis/mcp
 /terminal/mcp
 /observability/mcp
-/admin
+/admin/*        -> standalone management frontend
+/api/*          -> management API/realtime
 ```
 
 Native Ghidra is not a public MCP surface. Analysis is the external structured-analysis
@@ -135,7 +136,7 @@ This prevents clean deployments from resolving a different dependency graph.
 ## Files
 
 Files is the path-based file manager for the shared persistent `/workspace` filesystem.
-Terminal, Files, Web/curl and Management Admin see the same working files immediately.
+Terminal, Files, Web/curl and the Management API see the same working files immediately.
 There is no separate content-addressed file store and no `file_id` storage contract.
 
 ## Analysis
@@ -147,13 +148,13 @@ is not part of the external ChatGPT contract.
 ## Management
 
 Management owns provider accounts, encrypted credentials, invocation telemetry, settings,
-Files administration and the Admin UI. GitHub, GitLab, SigNoz and Coolify can each have
+Files administration and the management API/realtime backend. GitHub, GitLab, SigNoz and Coolify can each have
 multiple named accounts. SigNoz API keys and Coolify API tokens are encrypted in Management;
 they are not deployment environment variables. Provider runtimes resolve the explicitly
 selected `account_id`/alias through the private management API rather than opening the
 management database directly. Expensive
 workspace statistics and Reverse overview/coverage calculations are refreshed by background
-workers into persistent snapshots; Admin pages render the latest cached value with freshness
+workers into persistent snapshots; the standalone frontend consumes the latest cached value with freshness
 metadata instead of performing long scans or analyses in the HTTP request path.
 
 ## License
@@ -166,7 +167,7 @@ MIT
 Terminal is a dedicated non-root Linux development runtime exposed at `/terminal/mcp`.
 It provides persistent workspaces, bounded shell execution, durable long-running jobs,
 interactive PTY input/output and cursor-based incremental logs. Terminal, Files, Curl and
-Management Admin share the same mutable `/workspace` volume, so working files are
+Management API file operations share the same mutable `/workspace` volume, so working files are
 immediately available by path without import/export copies. System toolchain packages are
 installed in the image; normal runtime commands execute as the unprivileged service user.
 Terminal command/stdin/output payloads are bounded or omitted in Management MCP-call history.
@@ -181,23 +182,12 @@ click and fill without serializing full page HTML into model context. Browser pa
 and filled values are omitted from Management audit payloads; tool/status metadata remains
 observable.
 
-Management `/admin/browser` is the operator surface for the same persistent Chromium
-profile. It provides compact shared tabs, per-tab and browser-wide agent access controls,
-page-ID copy, Chromium extension management through `chrome://extensions`, docked DevTools
-beside the selected application, and an optional separate DevTools tab. Docked DevTools runs
-as an internal Chromium target hidden from the normal browser-tab/agent catalog, while both
-site and DevTools screencasts remain independently interactive. Chromium is launched as the
-persistent process with a remote-debugging endpoint bound only to `127.0.0.1` inside the Web
-container, and Playwright attaches to that same process through CDP. This gives the bundled
-DevTools frontend a real target transport without publishing a debugging port by Compose. The
-operator can also reopen the last closed application tab with `Reopen` or Ctrl+Shift+T. The
-Browser Operator page is served with `no-store` headers so
-old operator UI versions are not resurrected after deployments. `Clean App`
-clears cookies and origin-scoped site data only for the selected HTTP(S) application, while
-`Clean browser` is deliberately destructive: it stops Chromium, erases the persistent
-profile plus browser cache/config/crash state, starts one clean `about:blank` tab, and leaves
-agent access disabled. Browser-operator WebSocket reconnects mint a fresh short-lived Admin
-ticket instead of reusing an expired page-load ticket.
+The standalone management frontend uses the session-authenticated
+`/api/browser/operator/ws` public Gateway surface for the same persistent Chromium profile. It shares
+tabs, input, agent/developer access controls, DevTools, reopen/cleanup operations and browser
+state with the Web runtime. Viewport changes use public `PUT /api/browser/viewport`. The legacy
+HTML Browser Operator and ticket-authenticated `/admin/browser/ws` surface have been removed.
+
 
 The Web surface also mounts Google's official `chrome-devtools-mcp` server (pinned to
 `1.10.1`) under the `devtools_` namespace instead of reimplementing Chrome debugging RPCs.

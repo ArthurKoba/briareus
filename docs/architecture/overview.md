@@ -32,10 +32,10 @@ flowchart TB
 
 - `auth_service` — OAuth authorization server, DCR, GitHub login, resource audiences
   and private token verification.
-- `bridge` — public edge, MCP routing, protected-resource metadata, auth/admin reverse
+- `bridge` — public edge, MCP routing, protected-resource metadata, auth/management reverse
   proxies.
 - `common` — provider-neutral runtime contracts and typed settings.
-- `management` — provider account registry, encrypted credentials, Admin and telemetry.
+- `management` — provider account registry, encrypted credentials, session/API/realtime control plane and telemetry.
 - `modules.github` — GitHub repository/review/actions capabilities.
 - `modules.gitlab` — GitLab project/repository/CI capabilities.
 - `modules.files` — path-based shared workspace file management.

@@ -41,7 +41,7 @@ def test_admin_api_session_login_bootstrap_and_logout() -> None:
         assert bootstrap.status_code == 200
         body = bootstrap.json()
         assert body["product"] == "MCP Management"
-        assert body["legacy_admin_path"] == "/admin/"
+        assert "legacy_admin_path" not in body
         assert {item["id"] for item in body["navigation"]} >= {"browser", "files", "settings"}
 
         logout = client.post("/admin/api/logout", json={})

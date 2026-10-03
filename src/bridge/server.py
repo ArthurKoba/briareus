@@ -13,6 +13,8 @@ from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.providers.proxy import FastMCPProxy
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket
 
@@ -48,6 +50,7 @@ _STARTED_AT = datetime.now(UTC).isoformat()
 _observability = build_observability("gateway")
 announce_runtime_started(_observability, "gateway")
 _AUTH_BACKEND_URL = "http://auth:8000"
+_MANAGEMENT_UI_URL = "http://management-ui:8080"
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _AUTH_PROXY_PATHS = (
     "/.well-known/oauth-authorization-server",
@@ -291,7 +294,7 @@ async def bridge_call(
 def bridge_capabilities() -> JsonObject:
     return BridgeCapabilities(
         backends=sorted(_BACKENDS),
-        public_surfaces=[*MCP_SURFACE_PATHS.values(), "/admin"],
+        public_surfaces=[*MCP_SURFACE_PATHS.values(), "/admin", "/api"],
         features=[
             "mcp",
             "streamable-http",
@@ -416,29 +419,42 @@ async def _management_websocket(websocket: WebSocket, path: str) -> None:
     )
 
 
-async def _admin_browser_websocket(websocket: WebSocket) -> None:
-    await _management_websocket(websocket, "/admin/browser/ws")
-
-
-async def _admin_realtime_websocket(websocket: WebSocket) -> None:
+async def _api_realtime_websocket(websocket: WebSocket) -> None:
     await _management_websocket(websocket, "/admin/api/realtime")
 
 
-async def _admin_browser_operator_websocket(websocket: WebSocket) -> None:
+async def _api_browser_operator_websocket(websocket: WebSocket) -> None:
     await _management_websocket(websocket, "/admin/api/browser/operator/ws")
 
 
-_admin_proxy = ReverseProxy(_management_settings.url, backend_name="management")
-_REVERSE_PROXIES.append(_admin_proxy)
+async def _removed_admin_api(_request: Request) -> PlainTextResponse:
+    return PlainTextResponse("Not Found", status_code=404)
+
+
+_management_api_proxy = ReverseProxy(
+    _management_settings.url,
+    backend_name="management",
+    public_prefix="/api",
+    upstream_prefix="/admin/api",
+)
+_management_ui_proxy = ReverseProxy(
+    _MANAGEMENT_UI_URL,
+    backend_name="management-ui",
+    public_prefix="/admin",
+)
+_REVERSE_PROXIES.extend([_management_api_proxy, _management_ui_proxy])
 app.router.routes.extend(
     [
-        WebSocketRoute("/admin/browser/ws", _admin_browser_websocket),
-        WebSocketRoute("/admin/api/realtime", _admin_realtime_websocket),
-        WebSocketRoute("/admin/api/browser/operator/ws", _admin_browser_operator_websocket),
+        WebSocketRoute("/api/realtime", _api_realtime_websocket),
+        WebSocketRoute("/api/browser/operator/ws", _api_browser_operator_websocket),
     ]
 )
-app.add_route("/admin", _admin_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/api", _management_api_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/api/{path:path}", _management_api_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/admin/api", _removed_admin_api, methods=_PROXY_METHODS)
+app.add_route("/admin/api/{path:path}", _removed_admin_api, methods=_PROXY_METHODS)
+app.add_route("/admin", _management_ui_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/admin/{path:path}", _management_ui_proxy.handle, methods=_PROXY_METHODS)
 
 app.mount("/github", _github_http_app)
 app.mount("/gitlab", _gitlab_http_app)

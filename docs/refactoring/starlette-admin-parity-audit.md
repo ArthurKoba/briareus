@@ -1,6 +1,6 @@
 # Starlette Admin parity audit
 
-Status: migration-ready backend parity; legacy Starlette Admin remains mounted until frontend acceptance.
+Status: parity completed and legacy Starlette Admin removed after frontend acceptance.
 
 This audit compares the legacy `src/management/presentation/admin.py` surface with the typed management API and authenticated realtime/browser surfaces. The target is functional parity, not removal of legacy routes in this change.
 
@@ -26,7 +26,7 @@ This audit compares the legacy `src/management/presentation/admin.py` surface wi
 | Terminal workspace | delete | `DELETE /admin/api/terminal/workspaces/{workspace_id}` | covered |
 | Files | list/stats | `GET /admin/api/files` | covered |
 | Files | upload/mkdir/download/delete | `/admin/api/files/upload`, `/mkdir`, `/download`, `DELETE /admin/api/files` | covered |
-| Browser | state/ticket | `GET /admin/api/browser/state`, `GET /admin/api/browser/ticket` | covered |
+| Browser | state | `GET /admin/api/browser/state` | covered |
 | Browser | operator controls (tabs, navigation, input, access policy, DevTools, clean/reopen) | session-authenticated `WS /admin/api/browser/operator/ws`, relaying the existing operator protocol | covered |
 | Browser | viewport/resolution | `PUT /admin/api/browser/viewport`; Web MCP capability/tool `browser_set_viewport` | covered |
 | Settings | read/save | `GET/PUT /admin/api/settings` | covered |
@@ -42,4 +42,4 @@ Additional migration surfaces not present in legacy Admin:
 
 ## Parity conclusion
 
-No known Starlette Admin-only mutation/action remains. Legacy templates, routes and `/admin/browser/ws` are intentionally retained as fallback until frontend acceptance. Removing `starlette-admin` and the legacy presentation layer is a separate cutover step.
+No Starlette Admin-only mutation/action remained at cutover. The `starlette-admin` dependency, legacy templates/static/plugin code, browser ticket endpoint, and legacy `/admin/browser/ws` surface were removed after frontend acceptance. The backend `/admin` path intentionally has no HTML UI and returns 404; the standalone frontend is deployed separately.

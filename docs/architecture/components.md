@@ -5,7 +5,7 @@
 | `auth_service` | `auth` | central OAuth/DCR, GitHub login, exact resource audiences, token state |
 | `bridge` | `gateway` | public edge, MCP routing, protected-resource metadata, reverse proxying |
 | `common` | — | shared typed runtime/config contracts |
-| `management` | `management` | provider accounts, encrypted credentials, Admin UI and telemetry |
+| `management` | `management` | provider accounts, encrypted credentials, session/API/realtime backend and telemetry |
 | `modules.github` | `github` | GitHub repository, review, history and Actions capabilities |
 | `modules.gitlab` | `gitlab` | GitLab projects, repositories, merge requests, issues and CI |
 | `modules.files` | `files` | immutable storage, metadata, uploads, collections and lifecycle |

@@ -93,10 +93,7 @@ async def test_reverse_proxy_rewrites_backend_origin_inside_next_param(
             return httpx.Response(
                 303,
                 headers={
-                    "location": (
-                        "/admin/login?"
-                        "next=http%3A%2F%2Fmanagement%3A8000%2Fadmin%2F"
-                    )
+                    "location": ("/admin/login?next=http%3A%2F%2Fmanagement%3A8000%2Fadmin%2F")
                 },
                 request=request,
             )
@@ -262,12 +259,12 @@ async def test_reverse_proxy_streams_event_source_without_buffering(
             state["sent_stream"] = stream
 
             async def body():
-                yield b"data: {\"status\":\"ok\"}\\n\\n"
+                yield b'data: {"status":"ok"}\\n\\n'
 
             return httpx.Response(
                 200,
                 headers={"content-type": "text/event-stream"},
-                stream=httpx.ByteStream(b"data: {\"status\":\"ok\"}\\n\\n"),
+                stream=httpx.ByteStream(b'data: {"status":"ok"}\\n\\n'),
                 request=request,
             )
 
@@ -305,3 +302,119 @@ async def test_reverse_proxy_streams_event_source_without_buffering(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert state["sent_stream"] is True
+
+
+def test_reverse_proxy_prefix_mapping_contract() -> None:
+    api = ReverseProxy(
+        "http://management:8000",
+        backend_name="management",
+        public_prefix="/api",
+        upstream_prefix="/admin/api",
+    )
+    frontend = ReverseProxy(
+        "http://management-ui:8080",
+        backend_name="management-ui",
+        public_prefix="/admin",
+    )
+
+    assert api._upstream_path("/api") == "/admin/api"
+    assert api._upstream_path("/api/session") == "/admin/api/session"
+    assert frontend._upstream_path("/admin") == "/"
+    assert frontend._upstream_path("/admin/") == "/"
+    assert frontend._upstream_path("/admin/assets/test.js") == "/assets/test.js"
+    with pytest.raises(ValueError):
+        api._upstream_path("/admin/api/session")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("public_path", "base_url", "public_prefix", "upstream_prefix", "expected_url"),
+    [
+        (
+            "/api/session",
+            "http://management:8000",
+            "/api",
+            "/admin/api",
+            "http://management:8000/admin/api/session",
+        ),
+        (
+            "/api/dashboard",
+            "http://management:8000",
+            "/api",
+            "/admin/api",
+            "http://management:8000/admin/api/dashboard",
+        ),
+        (
+            "/admin/",
+            "http://management-ui:8080",
+            "/admin",
+            "",
+            "http://management-ui:8080/",
+        ),
+        (
+            "/admin/assets/test.js",
+            "http://management-ui:8080",
+            "/admin",
+            "",
+            "http://management-ui:8080/assets/test.js",
+        ),
+        (
+            "/admin/runtime-config.js",
+            "http://management-ui:8080",
+            "/admin",
+            "",
+            "http://management-ui:8080/runtime-config.js",
+        ),
+    ],
+)
+async def test_reverse_proxy_builds_expected_upstream_url(
+    monkeypatch: pytest.MonkeyPatch,
+    public_path: str,
+    base_url: str,
+    public_prefix: str,
+    upstream_prefix: str,
+    expected_url: str,
+) -> None:
+    captured: list[str] = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def request(self, method: str, url: str, **_kwargs: object) -> httpx.Response:
+            captured.append(url)
+            return httpx.Response(200, request=httpx.Request(method, url))
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    proxy = ReverseProxy(
+        base_url,
+        backend_name="test",
+        public_prefix=public_prefix,
+        upstream_prefix=upstream_prefix,
+    )
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "https",
+            "path": public_path,
+            "raw_path": public_path.encode(),
+            "query_string": b"",
+            "headers": [(b"host", b"mcp.koba-nexus.ru")],
+            "client": ("127.0.0.1", 1234),
+            "server": ("mcp.koba-nexus.ru", 443),
+            "http_version": "1.1",
+        },
+        receive=receive,
+    )
+
+    response = await proxy.handle(request)
+    assert response.status_code == 200
+    assert captured == [expected_url]

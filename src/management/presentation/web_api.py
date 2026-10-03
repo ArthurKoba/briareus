@@ -29,7 +29,6 @@ from management.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
-from management.browser_operator_auth import issue_browser_operator_ticket
 from management.dashboard_state import build_dashboard_state
 from management.domain.accounts import Account, AuthType, Provider
 from management.domain.configuration import ManagementConfig
@@ -238,7 +237,6 @@ def build_admin_api_router(
         return {
             "product": "MCP Management",
             "environment": "runtime",
-            "legacy_admin_path": "/admin/",
             "navigation": [
                 {"id": "overview", "label": "Overview", "enabled": True},
                 {"id": "accounts", "label": "Accounts", "enabled": True},
@@ -721,15 +719,6 @@ def build_admin_api_router(
                 else 502
             )
             raise HTTPException(status_code=code, detail=message) from exc
-
-    @router.get("/browser/ticket")
-    async def browser_ticket(request: Request) -> JsonObject:
-        require_user(request)
-        return {
-            "ticket": issue_browser_operator_ticket(
-                settings.session_secret, settings.admin_username
-            )
-        }
 
     @router.post("/telemetry")
     async def frontend_telemetry(payload: FrontendTelemetryBatch, request: Request) -> JsonObject:

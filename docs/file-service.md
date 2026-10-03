@@ -2,8 +2,8 @@
 
 MCP Bridge uses one shared persistent working filesystem at `/workspace`.
 
-Terminal, Files, Curl and Management Admin mount the same Docker volume. A file uploaded
-through Files, downloaded by Curl, created by Terminal, or uploaded in Admin is therefore
+Terminal, Files, Curl and the Management API mount the same Docker volume. A file uploaded
+through Files, downloaded by Curl, created by Terminal, or uploaded through the Management API is therefore
 the same file at the same path. There is no content-addressed object store, SQLite file
 index, collection/reference layer, or `file_id` storage contract.
 
