@@ -771,12 +771,37 @@ def build_admin_api_router(
             max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
         )
         mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
-        github_policy = GitHubRuntimePolicy(
-            local_first_guidance=payload.github_local_first_guidance,
-            local_git_transport_enabled=payload.github_local_git_transport_enabled,
-            remote_source_mutations_enabled=payload.github_remote_source_mutations_enabled,
-        )
+        github_fields = {
+            "github_local_first_guidance",
+            "github_local_git_transport_enabled",
+            "github_remote_source_mutations_enabled",
+        }
         try:
+            if github_fields.issubset(payload.model_fields_set):
+                github_policy = GitHubRuntimePolicy(
+                    local_first_guidance=payload.github_local_first_guidance,
+                    local_git_transport_enabled=payload.github_local_git_transport_enabled,
+                    remote_source_mutations_enabled=payload.github_remote_source_mutations_enabled,
+                )
+            else:
+                current_github = await asyncio.to_thread(api.runtime_settings.github_policy)
+                github_policy = GitHubRuntimePolicy(
+                    local_first_guidance=(
+                        payload.github_local_first_guidance
+                        if "github_local_first_guidance" in payload.model_fields_set
+                        else current_github.local_first_guidance
+                    ),
+                    local_git_transport_enabled=(
+                        payload.github_local_git_transport_enabled
+                        if "github_local_git_transport_enabled" in payload.model_fields_set
+                        else current_github.local_git_transport_enabled
+                    ),
+                    remote_source_mutations_enabled=(
+                        payload.github_remote_source_mutations_enabled
+                        if "github_remote_source_mutations_enabled" in payload.model_fields_set
+                        else current_github.remote_source_mutations_enabled
+                    ),
+                )
             reverse_settings = await api.reverse.set_idle_timeout(
                 payload.reverse_idle_timeout_seconds
             )

@@ -146,10 +146,84 @@ def test_settings_round_trip(tmp_path: Path) -> None:
             "mcp_call_timeout_seconds": 15,
             "reverse_idle_timeout_seconds": 600,
         }
+        explicit_policy = client.put(
+            "/admin/api/settings",
+            json={
+                **payload,
+                "github_local_first_guidance": False,
+                "github_local_git_transport_enabled": True,
+                "github_remote_source_mutations_enabled": False,
+            },
+        )
+        assert explicit_policy.status_code == 200
+        assert explicit_policy.json()["github"] == {
+            "local_first_guidance": False,
+            "local_git_transport_enabled": True,
+            "remote_source_mutations_enabled": False,
+        }
+
         saved = client.put("/admin/api/settings", json=payload)
         assert saved.status_code == 200
         assert saved.json()["management"]["logging_retention_days"] == 14
         assert saved.json()["mcp"]["call_timeout_seconds"] == 15
+        assert saved.json()["github"] == explicit_policy.json()["github"]
+
+        explicit_defaults = client.put(
+            "/admin/api/settings",
+            json={
+                **payload,
+                "github_local_first_guidance": True,
+                "github_local_git_transport_enabled": False,
+                "github_remote_source_mutations_enabled": True,
+            },
+        )
+        assert explicit_defaults.status_code == 200
+        assert explicit_defaults.json()["github"] == {
+            "local_first_guidance": True,
+            "local_git_transport_enabled": False,
+            "remote_source_mutations_enabled": True,
+        }
+
+
+def test_settings_omitted_github_policy_read_failure_is_controlled(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def unavailable(_self) -> object:
+        raise RuntimeError("github policy unavailable")
+
+    monkeypatch.setattr(RuntimeSettingsService, "github_policy", unavailable)
+    payload = {
+        "logging_enabled": True,
+        "logging_capture_payloads": False,
+        "logging_retention_days": 14,
+        "logging_max_records": 2000,
+        "maintenance_interval_minutes": 30,
+        "terminal_max_exec_timeout_seconds": 3600,
+        "terminal_max_job_runtime_seconds": 7200,
+        "mcp_call_timeout_seconds": 15,
+        "reverse_idle_timeout_seconds": 600,
+    }
+    with _client(tmp_path) as client:
+        _login(client)
+        omitted = client.put("/admin/api/settings", json=payload)
+        assert omitted.status_code == 400
+        assert omitted.json()["detail"] == "github policy unavailable"
+
+        explicit = client.put(
+            "/admin/api/settings",
+            json={
+                **payload,
+                "github_local_first_guidance": False,
+                "github_local_git_transport_enabled": True,
+                "github_remote_source_mutations_enabled": False,
+            },
+        )
+        assert explicit.status_code == 200
+        assert explicit.json()["github"] == {
+            "local_first_guidance": False,
+            "local_git_transport_enabled": True,
+            "remote_source_mutations_enabled": False,
+        }
 
 
 def test_mutations_require_session(tmp_path: Path) -> None:
