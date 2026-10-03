@@ -6,7 +6,6 @@ import {
   sortFn_alphanumeric,
   tableFeatures,
   useTable,
-  type ColumnDef,
 } from "@tanstack/vue-table"
 import { useVirtualizer } from "@tanstack/vue-virtual"
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-vue-next"
@@ -45,7 +44,7 @@ const features = tableFeatures({
   sortFns: { alphanumeric: sortFn_alphanumeric },
 })
 
-const tableColumns = computed<ColumnDef<any, any>[]>(() =>
+const tableColumns = computed(() =>
   props.columns.map((column, index) => ({
     id: column.key ?? column.dataIndex ?? `column-${index}`,
     accessorKey: column.dataIndex,
@@ -57,7 +56,7 @@ const tableColumns = computed<ColumnDef<any, any>[]>(() =>
 )
 
 const data = computed<any[]>(() => props.dataSource as any[])
-const table = useTable({ features, columns: tableColumns, data })
+const table = useTable({ features, columns: tableColumns, data } as any) as any
 const rows = computed<any[]>(() => table.getRowModel().rows as any[])
 const rowHeight = computed(() => uiPreferences.density.value === "compact" ? 32 : 40)
 const columnTemplate = computed(() => props.columns.map((column) => {
