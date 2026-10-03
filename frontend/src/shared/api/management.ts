@@ -5,7 +5,7 @@ import { i18n } from "@/shared/i18n"
 
 export interface SessionState { authenticated: boolean; username: string | null }
 export interface NavigationItem { id: string; label: string; enabled: boolean }
-export interface ManagementBootstrap { product: string; environment: string; legacy_admin_path: string; navigation: NavigationItem[] }
+export interface ManagementBootstrap { product: string; environment: string; navigation: NavigationItem[] }
 
 export interface DashboardState {
   accounts: { total: number; enabled: number; by_provider: Record<string, number> }
@@ -60,7 +60,7 @@ export interface SettingsState {
 }
 
 const previewBootstrap: ManagementBootstrap = {
-  product: "MCP Bridge", environment: "frontend-preview", legacy_admin_path: "#",
+  product: "MCP Bridge", environment: "frontend-preview",
   navigation: [
     { id: "overview", label: "Overview", enabled: true }, { id: "accounts", label: "Accounts", enabled: true },
     { id: "calls", label: "MCP Calls", enabled: true }, { id: "files", label: "Files", enabled: true },

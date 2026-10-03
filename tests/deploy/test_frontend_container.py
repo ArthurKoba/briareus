@@ -37,3 +37,14 @@ def test_backend_container_topology_does_not_include_frontend() -> None:
     assert "management-ui" not in root_compose["services"]
     assert "AS management-ui" not in root_dockerfile
     assert "frontend" in root_dockerignore
+
+
+def test_frontend_has_no_legacy_admin_runtime_dependency() -> None:
+    source_files = list((FRONTEND / "src").rglob("*.ts")) + list((FRONTEND / "src").rglob("*.vue"))
+    source = "\n".join(path.read_text() for path in source_files)
+    nginx = (FRONTEND / "nginx.conf.template").read_text()
+
+    assert "legacy_admin_path" not in source
+    assert "/admin/browser/ws" not in source
+    assert "/admin/browser/ticket" not in source
+    assert "/admin/browser/ws" not in nginx
