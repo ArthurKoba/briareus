@@ -45,6 +45,13 @@ class AccountRepository(Protocol):
 class InvocationRepository(Protocol):
     def append(self, invocation: Invocation, *, capture_payloads: bool = True) -> None: ...
 
+    def append_many(
+        self,
+        invocations: Sequence[Invocation],
+        *,
+        capture_payloads: bool = True,
+    ) -> None: ...
+
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]: ...
 
     def clear(self) -> int: ...

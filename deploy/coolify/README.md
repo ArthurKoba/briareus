@@ -238,10 +238,17 @@ The exporter records `service.name`, `service.version`,
 
 MCP tool calls create spans and application exceptions are emitted as ERROR
 logs while the span is active. Metrics include runtime starts/up state, tool
-call/error counters and tool duration histograms. Invocation arguments,
-results, account IDs, credentials and authorization headers are never added to
-OpenTelemetry attributes. The Management invocation audit remains a separate,
-redacted local operator log under MCP Calls.
+call/error counters and tool duration histograms. Diagnostic spans include
+`management.http`, `cache.get`/`cache.set`, `management.db.*`, provider HTTP
+latency/pool wait, and MCP backend session/catalog-cache state. Invocation
+arguments, results, account IDs, credentials, authorization headers, full URLs
+and cache keys are never added to OpenTelemetry attributes.
+
+The Management invocation audit remains a separate redacted operator log under
+MCP Calls. Runtime processes enqueue events into a bounded memory queue and
+flush short batches, preserving individual audit records while sharing one
+internal HTTP request and one SQL transaction per batch. Audit batching is
+best-effort and does not block tool responses.
 
 
 ## Managed SigNoz and Coolify connections

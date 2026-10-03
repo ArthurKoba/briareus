@@ -222,6 +222,26 @@ def test_invocation_audit_captures_payloads_and_can_be_disabled(tmp_path: Path) 
     engine.dispose()
 
 
+
+def test_invocation_audit_records_batch_in_one_repository_call(tmp_path: Path) -> None:
+    engine, _sessions, _accounts, audit = _services(tmp_path)
+    events = [
+        Invocation(
+            request_id=f"request-{index}",
+            module="github",
+            tool=f"tool_{index}",
+            status="success",
+            duration_ms=float(index),
+        )
+        for index in range(5)
+    ]
+
+    audit.record_many(events)
+
+    recent = audit.recent(limit=10)
+    assert {event.request_id for event in recent} == {event.request_id for event in events}
+    engine.dispose()
+
 def test_provider_contracts_are_separate() -> None:
     with pytest.raises(ValueError, match="GitHub auth_type"):
         Account(

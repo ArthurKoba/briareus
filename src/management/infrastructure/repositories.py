@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, cast
+from functools import wraps
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
@@ -29,6 +32,29 @@ from .database import (
     RuntimeSettingsRecord,
     SigNozAccountRecord,
 )
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_DB_TRACER = trace.get_tracer("mcp-bridge.management-db")
+
+
+def _db_span(operation: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def decorate(function: Callable[_P, _R]) -> Callable[_P, _R]:
+        @wraps(function)
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with _DB_TRACER.start_as_current_span(
+                f"management.db.{operation}",
+                kind=SpanKind.INTERNAL,
+                attributes={
+                    "db.namespace": "management",
+                    "db.operation.name": operation,
+                },
+            ):
+                return function(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
 
 
 class SqlAlchemyAccountRepository:
@@ -96,6 +122,7 @@ class SqlAlchemyAccountRepository:
             updated_at=record.updated_at,
         )
 
+    @_db_span("accounts.list")
     def list(
         self,
         *,
@@ -134,6 +161,7 @@ class SqlAlchemyAccountRepository:
                 )
         return sorted(accounts, key=lambda item: (item.provider.value, item.alias))
 
+    @_db_span("accounts.get")
     def get(
         self,
         selector: str,
@@ -198,6 +226,7 @@ class SqlAlchemyAccountRepository:
                 raise KeyError(f"Coolify account not found: {selector}")
             return self._coolify_domain(record)
 
+    @_db_span("accounts.save")
     def save(self, account: Account, *, encrypted_credential: str | None = None) -> Account:
         with self.sessions.begin() as session:
             record: Any
@@ -240,6 +269,7 @@ class SqlAlchemyAccountRepository:
                 record.encrypted_credential = encrypted_credential
         return account
 
+    @_db_span("accounts.delete")
     def delete(self, account_id: str, *, provider: Provider) -> None:
         with self.sessions.begin() as session:
             record: Any
@@ -254,6 +284,7 @@ class SqlAlchemyAccountRepository:
             if record is not None:
                 session.delete(record)
 
+    @_db_span("accounts.set_credential")
     def set_credential(
         self,
         account_id: str,
@@ -275,6 +306,7 @@ class SqlAlchemyAccountRepository:
                 raise KeyError(f"account not found: {account_id}")
             record.encrypted_credential = encrypted_value
 
+    @_db_span("accounts.credential")
     def credential(self, account_id: str, *, provider: Provider) -> str:
         with self.sessions() as session:
             record: Any
@@ -327,24 +359,43 @@ class SqlAlchemyInvocationRepository:
             removed += overflow_result.rowcount or 0
         return int(removed)
 
+    @staticmethod
+    def _record(invocation: Invocation, *, capture_payloads: bool) -> InvocationRecord:
+        return InvocationRecord(
+            id=invocation.id,
+            request_id=invocation.request_id,
+            module=invocation.module,
+            tool=invocation.tool,
+            account_id=invocation.account_id,
+            provider=invocation.provider,
+            status=invocation.status,
+            duration_ms=invocation.duration_ms,
+            error_type=invocation.error_type,
+            arguments_json=invocation.arguments_json if capture_payloads else "",
+            result_json=invocation.result_json if capture_payloads else "",
+            error_message=invocation.error_message if capture_payloads else "",
+            occurred_at=invocation.occurred_at,
+        )
+
     def append(self, invocation: Invocation, *, capture_payloads: bool = True) -> None:
+        self.append_many([invocation], capture_payloads=capture_payloads)
+
+    @_db_span("audit.append_many")
+    def append_many(
+        self,
+        invocations: Sequence[Invocation],
+        *,
+        capture_payloads: bool = True,
+    ) -> None:
+        if not invocations:
+            return
+        trace.get_current_span().set_attribute("db.batch.size", len(invocations))
         with self.sessions.begin() as session:
-            session.add(
-                InvocationRecord(
-                    id=invocation.id,
-                    request_id=invocation.request_id,
-                    module=invocation.module,
-                    tool=invocation.tool,
-                    account_id=invocation.account_id,
-                    provider=invocation.provider,
-                    status=invocation.status,
-                    duration_ms=invocation.duration_ms,
-                    error_type=invocation.error_type,
-                    arguments_json=invocation.arguments_json if capture_payloads else "",
-                    result_json=invocation.result_json if capture_payloads else "",
-                    error_message=invocation.error_message if capture_payloads else "",
-                    occurred_at=invocation.occurred_at,
-                )
+            session.add_all(
+                [
+                    self._record(invocation, capture_payloads=capture_payloads)
+                    for invocation in invocations
+                ]
             )
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
@@ -378,6 +429,7 @@ class SqlAlchemyInvocationRepository:
             session.execute(delete(InvocationRecord))
             return int(count)
 
+    @_db_span("audit.cleanup")
     def cleanup(self) -> int:
         with self.sessions.begin() as session:
             return self._cleanup_in_session(session, self._config(session))
@@ -677,6 +729,7 @@ class SqlAlchemyManagementConfigRepository:
             maintenance_interval_minutes=record.maintenance_interval_minutes,
         )
 
+    @_db_span("config.get")
     def get(self) -> ManagementConfig:
         with self.sessions.begin() as session:
             record = session.get(ManagementConfigRecord, 1)
@@ -686,6 +739,7 @@ class SqlAlchemyManagementConfigRepository:
                 session.flush()
             return self._domain(record)
 
+    @_db_span("config.save")
     def save(self, config: ManagementConfig) -> ManagementConfig:
         with self.sessions.begin() as session:
             record = session.get(ManagementConfigRecord, 1)
@@ -708,6 +762,7 @@ class SqlAlchemyRuntimeSettingsRepository:
             max_job_runtime_seconds=record.terminal_max_job_runtime_seconds,
         )
 
+    @_db_span("runtime.terminal.get")
     def get_terminal_policy(self) -> TerminalRuntimePolicy:
         with self.sessions.begin() as session:
             record = session.get(RuntimeSettingsRecord, 1)
@@ -724,6 +779,7 @@ class SqlAlchemyRuntimeSettingsRepository:
                 session.flush()
             return self._domain(record)
 
+    @_db_span("runtime.terminal.save")
     def save_terminal_policy(
         self,
         policy: TerminalRuntimePolicy,
@@ -737,6 +793,7 @@ class SqlAlchemyRuntimeSettingsRepository:
             record.terminal_max_job_runtime_seconds = policy.max_job_runtime_seconds
         return policy
 
+    @_db_span("runtime.mcp.get")
     def get_mcp_policy(self) -> McpRuntimePolicy:
         with self.sessions.begin() as session:
             record = session.get(McpRuntimeSettingsRecord, 1)
@@ -746,6 +803,7 @@ class SqlAlchemyRuntimeSettingsRepository:
                 session.flush()
             return McpRuntimePolicy(call_timeout_seconds=record.call_timeout_seconds)
 
+    @_db_span("runtime.mcp.save")
     def save_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy:
         with self.sessions.begin() as session:
             record = session.get(McpRuntimeSettingsRecord, 1)

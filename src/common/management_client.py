@@ -8,7 +8,12 @@ import urllib.request
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 
-from .account_contracts import AccountList, InvocationEvent, ResolvedAccount
+from .account_contracts import (
+    AccountList,
+    InvocationEvent,
+    InvocationEventBatch,
+    ResolvedAccount,
+)
 from .cache import CacheBackend, CacheKeys, SharedCache
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
@@ -149,10 +154,17 @@ class ManagementClient:
         return account
 
     def record_invocation(self, event: InvocationEvent) -> None:
+        self.record_invocations([event])
+
+    def record_invocations(self, events: list[InvocationEvent]) -> None:
+        if not events:
+            return
+        batch = InvocationEventBatch(events=events)
+        trace.get_current_span().set_attribute("audit.batch.size", len(events))
         self._request(
             "POST",
-            "/internal/events",
-            payload=json_object(event.model_dump(mode="json"), context="invocation event"),
+            "/internal/events/batch",
+            payload=json_object(batch.model_dump(mode="json"), context="invocation event batch"),
             expect_body=False,
         )
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 
 import mcp.types as mt
@@ -66,12 +65,9 @@ def management_audit_enabled(module: str, proxy_origin: str) -> bool:
 class ToolObservabilityMiddleware(Middleware):
     """Measure one MCP call once, then fan the observation out to configured sinks."""
 
-    _MAX_PENDING_EVENTS = 128
-
     def __init__(self, module: str, sink: ObservabilitySink) -> None:
         self.module = module
         self.sink = sink
-        self._tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
     def _account_id(context: MiddlewareContext[mt.CallToolRequestParams]) -> str:
@@ -86,15 +82,8 @@ class ToolObservabilityMiddleware(Middleware):
             return ""
         return str(fastmcp_context.request_id)
 
-    async def _record(self, event: InvocationEvent, *, audit: bool) -> None:
-        await asyncio.to_thread(self.sink.record_invocation, event, audit=audit)
-
     def _submit(self, event: InvocationEvent, *, audit: bool = True) -> None:
-        if len(self._tasks) >= self._MAX_PENDING_EVENTS:
-            return
-        task = asyncio.create_task(self._record(event, audit=audit))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self.sink.record_invocation(event, audit=audit)
 
     async def on_call_tool(
         self,

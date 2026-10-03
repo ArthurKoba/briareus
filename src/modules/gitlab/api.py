@@ -40,6 +40,8 @@ class GitLabApiClient:
         self._transport = PooledHttpTransport(
             self._new_connection,
             max_connections=self.max_connections,
+            span_name="provider.gitlab.http",
+            provider="gitlab",
             acquire_timeout=45,
         )
 
