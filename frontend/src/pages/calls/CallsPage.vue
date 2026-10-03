@@ -47,9 +47,14 @@ function merge(item: InvocationRecord): void {
 }
 
 function handle(event: BusEvent): void {
-  if (event.type === "snapshot") {
-    const snapshot = event.data as { events?: InvocationRecord[] }
-    for (const item of (snapshot.events ?? []).slice().reverse()) merge(item)
+  if (event.type === "snapshot" || event.type === "batch") {
+    const payload = event.data as { events?: InvocationRecord[] }
+    const items = payload.events ?? []
+    if (event.type === "snapshot" || followLive.value) {
+      for (const item of items.slice().reverse()) merge(item)
+    } else {
+      for (const item of items) if (!pending.value.some((row) => row.id === item.id)) pending.value.unshift(item)
+    }
     return
   }
   if (event.type !== "item") return
