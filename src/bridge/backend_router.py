@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from fastmcp import Client
+from opentelemetry import trace
 
 from common.models import JsonObject, JsonValue, json_array, json_object, json_value
+
+from .backend_sessions import BackendClientSession, BackendTarget
 
 
 @dataclass(frozen=True)
 class BackendDescriptor:
     name: str
-    url: str
+    url: BackendTarget
     public_path: str
     purpose: str
 
@@ -74,6 +77,13 @@ class BackendRouter:
     ) -> None:
         self._backends = {backend.name: backend for backend in backends}
         self._timeout_provider = timeout_provider
+        self._sessions = {
+            name: BackendClientSession(backend.url, name=name)
+            for name, backend in self._backends.items()
+        }
+        self._catalog_cache: dict[str, tuple[float, list[_RemoteTool]]] = {}
+        self._catalog_locks = {name: asyncio.Lock() for name in self._backends}
+        self._catalog_ttl_seconds = 30.0
 
     async def _timeout_seconds(self) -> float:
         if self._timeout_provider is None:
@@ -90,10 +100,38 @@ class BackendRouter:
             raise ValueError(f"unknown backend {name!r}; expected one of {sorted(self._backends)}")
         return backend
 
-    async def _catalog(self, backend: BackendDescriptor) -> list[_RemoteTool]:
-        timeout = await self._timeout_seconds()
-        async with Client(backend.url, timeout=timeout) as client:
-            return list(cast(list[_RemoteTool], await client.list_tools()))
+    async def _catalog(
+        self,
+        backend: BackendDescriptor,
+        *,
+        refresh: bool = False,
+    ) -> list[_RemoteTool]:
+        now = time.monotonic()
+        cached = self._catalog_cache.get(backend.name)
+        if not refresh and cached is not None and cached[0] > now:
+            span = trace.get_current_span()
+            span.set_attribute("mcp.backend", backend.name)
+            span.set_attribute("mcp.backend.catalog_cache_hit", True)
+            return cached[1]
+        async with self._catalog_locks[backend.name]:
+            now = time.monotonic()
+            cached = self._catalog_cache.get(backend.name)
+            if not refresh and cached is not None and cached[0] > now:
+                span = trace.get_current_span()
+                span.set_attribute("mcp.backend", backend.name)
+                span.set_attribute("mcp.backend.catalog_cache_hit", True)
+                return cached[1]
+            span = trace.get_current_span()
+            span.set_attribute("mcp.backend", backend.name)
+            span.set_attribute("mcp.backend.catalog_cache_hit", False)
+            timeout = await self._timeout_seconds()
+            raw = await self._sessions[backend.name].list_tools(timeout)
+            tools = list(cast(list[_RemoteTool], raw))
+            self._catalog_cache[backend.name] = (
+                now + self._catalog_ttl_seconds,
+                tools,
+            )
+            return tools
 
     async def describe(self) -> JsonObject:
         async def probe(backend: BackendDescriptor) -> JsonObject:
@@ -123,10 +161,10 @@ class BackendRouter:
             "count": len(values),
         }
 
-    async def tools(self, name: str) -> JsonObject:
+    async def tools(self, name: str, *, refresh: bool = False) -> JsonObject:
         backend = self._get(name)
         try:
-            tools = await self._catalog(backend)
+            tools = await self._catalog(backend, refresh=refresh)
         except Exception as exc:
             return {
                 "backend": backend.name,
@@ -150,10 +188,15 @@ class BackendRouter:
         arguments: JsonObject | None = None,
     ) -> JsonObject:
         backend = self._get(name)
+        span = trace.get_current_span()
+        span.set_attribute("mcp.backend", backend.name)
         try:
             timeout = await self._timeout_seconds()
-            async with Client(backend.url, timeout=timeout) as client:
-                result = await client.call_tool(tool_name, arguments or {})
+            result = await self._sessions[backend.name].call_tool(
+                tool_name,
+                arguments or {},
+                timeout,
+            )
         except Exception as exc:
             message = str(exc)[:1000]
             timed_out = "timed out" in message.casefold() or isinstance(exc, TimeoutError)
@@ -175,3 +218,5 @@ class BackendRouter:
             "status": "ok",
             "result": _decode_call_result(result),
         }
+    async def close(self) -> None:
+        await asyncio.gather(*(session.close() for session in self._sessions.values()))
