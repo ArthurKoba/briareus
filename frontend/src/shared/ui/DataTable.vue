@@ -38,7 +38,7 @@ const props = withDefaults(defineProps<{
   clickable: false,
 })
 
-const emit = defineEmits<{ endReached: []; rowClick: [record: any] }>()
+const emit = defineEmits<{ endReached: []; rowClick: [record: any]; scrollPosition: [atTop: boolean] }>()
 const scrollElement = ref<HTMLElement | null>(null)
 
 const features = tableFeatures({
@@ -72,7 +72,7 @@ const rowVirtualizer = useVirtualizer(computed(() => ({
   count: props.virtual ? rows.value.length : 0,
   getScrollElement: () => scrollElement.value,
   estimateSize: () => rowHeight.value,
-  getItemKey: (index: number) => rows.value[index]?.id ?? index,
+  getItemKey: (index: number) => originalKey(rows.value[index]?.original, index),
   overscan: 10,
 })))
 
@@ -104,8 +104,15 @@ function toggleSort(columnId: string): void {
 
 function onScroll(event: Event): void {
   const target = event.target as HTMLElement
+  emit("scrollPosition", target.scrollTop < rowHeight.value * 2)
   if (target.scrollHeight - target.scrollTop - target.clientHeight < 320) emit("endReached")
 }
+
+function scrollToTop(): void {
+  scrollElement.value?.scrollTo({ top: 0, behavior: "smooth" })
+}
+
+defineExpose({ scrollToTop })
 
 function onRowClick(event: MouseEvent, record: any): void {
   if (!props.clickable || !isRowContentClick(event)) return

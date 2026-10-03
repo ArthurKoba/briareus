@@ -2,14 +2,12 @@ import { reactive, watch } from "vue"
 
 export interface TabWorkspaceState {
   realtimeEnabled: boolean
-  callsFollowLive: boolean
   topicOverrides: Record<string, boolean | null>
 }
 
 const STORAGE_KEY = "mcp-bridge:tab-workspace"
 const defaults: TabWorkspaceState = {
   realtimeEnabled: true,
-  callsFollowLive: true,
   topicOverrides: {},
 }
 
@@ -20,7 +18,6 @@ function load(): TabWorkspaceState {
     const parsed = JSON.parse(raw) as Partial<TabWorkspaceState>
     return {
       realtimeEnabled: parsed.realtimeEnabled ?? true,
-      callsFollowLive: parsed.callsFollowLive ?? true,
       topicOverrides: parsed.topicOverrides && typeof parsed.topicOverrides === "object" ? parsed.topicOverrides : {},
     }
   } catch {

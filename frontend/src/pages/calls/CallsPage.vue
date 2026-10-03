@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
-import { Switch } from "ant-design-vue"
-import { Activity, CheckCircle2, Circle, Radio, RefreshCw, Trash2, XCircle } from "lucide-vue-next"
+import { CheckCircle2, RefreshCw, Trash2, XCircle } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type AccountRecord, type InvocationRecord } from "@/shared/api/management"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatDate } from "@/shared/lib/format"
-import { tabWorkspace } from "@/shared/lib/tab-workspace"
 import { notifications } from "@/shared/notifications/bus"
 import AppDialog from "@/shared/ui/AppDialog.vue"
 import Button from "@/shared/ui/Button.vue"
 import DataTable from "@/shared/ui/DataTable.vue"
 import JsonView from "@/shared/ui/JsonView.vue"
+import { CALL_JOURNAL_LIMIT, enqueueCalls, mergeCallJournal } from "./model/call-journal"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 
 const { t } = useI18n()
@@ -20,10 +19,10 @@ const rows = ref<InvocationRecord[]>([])
 const loading = ref(false)
 const error = ref("")
 const selected = ref<InvocationRecord | null>(null)
-const limit = ref(250)
 const pending = ref<InvocationRecord[]>([])
 const accountsById = ref<Record<string, AccountRecord>>({})
-const followLive = computed({ get: () => tabWorkspace.callsFollowLive, set: (value: boolean) => { tabWorkspace.callsFollowLive = value } })
+const atLiveEdge = ref(true)
+const tableRef = ref<{ scrollToTop: () => void } | null>(null)
 let unsubscribe: undefined | (() => void)
 
 const columns = computed(() => [
@@ -39,54 +38,41 @@ const columns = computed(() => [
 const errorCount = computed(() => rows.value.filter((item) => item.status === "error").length)
 const live = computed(() => eventBus.state.status === "connected")
 
-function merge(item: InvocationRecord): void {
-  const index = rows.value.findIndex((row) => row.id === item.id)
-  if (index >= 0) rows.value.splice(index, 1, item)
-  else rows.value.unshift(item)
-  if (rows.value.length > 1000) rows.value.length = 1000
+function acceptIncoming(items: InvocationRecord[]): void {
+  if (!items.length) return
+  if (atLiveEdge.value) rows.value = mergeCallJournal(rows.value, items)
+  else pending.value = enqueueCalls(pending.value, items, rows.value)
 }
 
 function handle(event: BusEvent): void {
   if (event.type === "snapshot" || event.type === "batch") {
     const payload = event.data as { events?: InvocationRecord[] }
-    const items = payload.events ?? []
-    if (event.type === "snapshot" || followLive.value) {
-      for (const item of items.slice().reverse()) merge(item)
-    } else {
-      for (const item of items) if (!pending.value.some((row) => row.id === item.id)) pending.value.unshift(item)
-    }
+    acceptIncoming(payload.events ?? [])
     return
   }
-  if (event.type !== "item") return
-  const item = event.data as InvocationRecord
-  if (followLive.value) merge(item)
-  else if (!pending.value.some((row) => row.id === item.id)) pending.value.unshift(item)
+  if (event.type === "item") acceptIncoming([event.data as InvocationRecord])
 }
 
 function applyPending(): void {
-  for (const item of pending.value.slice().reverse()) merge(item)
+  rows.value = mergeCallJournal(rows.value, pending.value)
   pending.value = []
-  followLive.value = true
+  atLiveEdge.value = true
+  tableRef.value?.scrollToTop()
 }
 
-async function load(next = limit.value): Promise<void> {
+async function load(): Promise<void> {
   loading.value = true
   error.value = ""
   try {
-    limit.value = next
-    const [calls, accounts] = await Promise.all([managementApi.calls(next), managementApi.accounts()])
-    rows.value = calls.events
+    const [calls, accounts] = await Promise.all([managementApi.calls(CALL_JOURNAL_LIMIT), managementApi.accounts()])
+    // Merge instead of replace: a REST response must never roll back newer realtime deltas.
+    rows.value = mergeCallJournal(rows.value, calls.events)
     accountsById.value = Object.fromEntries(accounts.accounts.map((account) => [account.id, account]))
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to load calls"
   } finally {
     loading.value = false
   }
-}
-
-async function loadMore(): Promise<void> {
-  if (loading.value || limit.value >= 1000 || rows.value.length < limit.value) return
-  await load(Math.min(1000, limit.value + 250))
 }
 
 function inspect(item: unknown): void {
@@ -122,49 +108,34 @@ onBeforeUnmount(() => unsubscribe?.())
 <template>
   <div class="space-y-6">
     <PageHeader :title="t('nav.calls')" :description="t('calls.description')">
-      <details class="group relative">
-        <summary class="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden" :title="String(t('calls.liveControl'))">
-          <Radio v-if="live" class="size-4 text-emerald-500" />
-          <Activity v-else class="size-4" :class="eventBus.state.status === 'reconnecting' ? 'animate-pulse text-amber-500' : ''" />
-        </summary>
-        <div class="absolute right-0 top-10 z-40 w-72 rounded-xl border border-border bg-popover p-3 shadow-xl">
-          <div class="flex items-start justify-between gap-3">
-            <div><div class="text-sm font-semibold">{{ t("calls.liveControl") }}</div><div class="mt-0.5 text-[11px] text-muted-foreground">{{ t("calls.liveControlHint") }}</div></div>
-            <span class="inline-flex items-center gap-1 text-[10px] uppercase text-muted-foreground"><Circle class="size-2.5 fill-current" :class="live ? 'text-emerald-500' : 'text-muted-foreground'" />{{ eventBus.state.status }}</span>
-          </div>
-          <label class="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5 text-xs">
-            <span>{{ t("calls.follow") }}</span>
-            <Switch v-model:checked="followLive" size="small" />
-          </label>
-          <div class="mt-2 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-xs"><span class="text-muted-foreground">{{ t("realtime.lastEvent") }}</span><span>{{ eventBus.state.lastEventAt ? formatDate(eventBus.state.lastEventAt) : "—" }}</span></div>
-          <Button v-if="pending.length" class="mt-2 w-full" size="sm" @click="applyPending">{{ pending.length }} {{ t("calls.new") }}</Button>
-        </div>
-      </details>
-      <Button variant="outline" size="sm" @click="load()">
+      <Button v-if="!live" variant="outline" size="sm" @click="load()">
         <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
       </Button>
+      <Button v-if="pending.length" size="sm" @click="applyPending">{{ pending.length }} {{ t("calls.new") }}</Button>
       <Button variant="destructive" size="sm" @click="clearAll">
         <Trash2 class="mr-2 size-4" />{{ t("calls.clear") }}
       </Button>
     </PageHeader>
 
     <div class="flex gap-3 text-xs text-muted-foreground">
-      <span>{{ rows.length }} {{ t("calls.loaded") }}</span>
-      <span>{{ errorCount }} {{ t("calls.errors") }}</span>
-      <span>{{ t("calls.limit") }} {{ limit }}</span>
+      <span>{{ t("calls.window") }}: {{ rows.length }}/{{ CALL_JOURNAL_LIMIT }}</span>
+      <span>{{ t("calls.errors") }}: {{ errorCount }}</span>
+      <span v-if="pending.length">{{ t("calls.waiting") }}: {{ pending.length }}</span>
     </div>
     <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
 
     <DataTable
+      ref="tableRef"
       :columns="columns"
       :data-source="rows"
       :loading="loading"
       :pagination="false"
+      :row-key="(record: InvocationRecord) => record.id"
       virtual
       :scroll-y="620"
       clickable
       @row-click="inspect"
-      @end-reached="loadMore"
+      @scroll-position="atLiveEdge = $event"
     >
       <template #bodyCell="{ column, record, value }">
         <template v-if="column.key === 'occurred_at'">{{ formatDate(record.occurred_at) }}</template>
