@@ -23,8 +23,8 @@ RUN npm install --global --prefix /opt/chrome-devtools-mcp chrome-devtools-mcp@1
 
 FROM oven/bun:1.4.2-alpine AS management-ui-build
 WORKDIR /app
-COPY frontend/package.json ./
-RUN bun install
+COPY frontend/package.json frontend/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY frontend ./
 RUN bun run build
 

@@ -68,6 +68,7 @@ jobs:
           echo 'areas=${{ steps.plan.outputs.areas }}'
           echo 'full=${{ steps.plan.outputs.full }}'
           echo 'tests=${{ steps.plan.outputs.pytest_paths }}'
+          echo 'frontend=${{ steps.plan.outputs.frontend }}'
 
       - name: Validate Compose topology
         if: steps.plan.outputs.full == 'true'
@@ -93,6 +94,26 @@ jobs:
 
       - run: uv lock --check
         if: steps.plan.outputs.full == 'true'
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.plan.outputs.frontend == 'true'
+        with:
+          bun-version: "1.4.2"
+
+      - uses: actions/cache@v4
+        if: steps.plan.outputs.frontend == 'true'
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Build management frontend
+        if: steps.plan.outputs.frontend == 'true'
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run build
 
       - run: uv sync --frozen
         if: steps.plan.outputs.ruff_paths != '[]' || steps.plan.outputs.mypy_paths != '[]' || steps.plan.outputs.pytest_paths != '[]'
