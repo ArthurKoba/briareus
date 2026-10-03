@@ -38,6 +38,8 @@ class BrowserManager:
         timeout_ms: int,
         viewport_width: int,
         viewport_height: int,
+        screen_width: int | None = None,
+        screen_height: int | None = None,
         max_snapshot_text_chars: int,
         max_snapshot_elements: int,
         locale: str = "ru-RU",
@@ -56,6 +58,8 @@ class BrowserManager:
         self.timeout_ms = timeout_ms
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
+        self.screen_width = screen_width or viewport_width
+        self.screen_height = screen_height or viewport_height
         self.locale = locale.strip()
         self.accept_language = accept_language.strip()
         self.display = display.strip()
@@ -317,7 +321,7 @@ class BrowserManager:
             display,
             "-screen",
             "0",
-            f"{self.viewport_width}x{self.viewport_height}x{self.color_depth}",
+            f"{self.screen_width}x{self.screen_height}x{self.color_depth}",
             "-nolisten",
             "tcp",
             "-noreset",
@@ -1037,6 +1041,7 @@ class BrowserManager:
             "docked_devtools_page_id": self._operator_devtools_pages.get(owner_token, ""),
             "can_reopen_closed_tab": bool(self._closed_pages),
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
+            "screen": {"width": self.screen_width, "height": self.screen_height},
         }
 
     async def operator_select_page(self, owner_token: str, page_id: str) -> None:

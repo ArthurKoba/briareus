@@ -40,6 +40,8 @@ _browser = BrowserManager(
     timeout_ms=_browser_settings.timeout_ms,
     viewport_width=_browser_profile.viewport_width,
     viewport_height=_browser_profile.viewport_height,
+    screen_width=_browser_profile.screen_width,
+    screen_height=_browser_profile.screen_height,
     locale=_browser_profile.locale,
     accept_language=_browser_profile.accept_language,
     display=_browser_profile.display,
@@ -47,7 +49,7 @@ _browser = BrowserManager(
     xvfb_enabled=_browser_profile.xvfb_enabled,
     timezone=_browser_settings.timezone,
     posix_locale=_browser_profile.posix_locale,
-    chromium_args=resolve_chromium_gpu_args(),
+    chromium_args=(*_browser_profile.chromium_args, *resolve_chromium_gpu_args()),
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
 )
