@@ -25,9 +25,18 @@ _HOP_BY_HOP = {
 
 
 class ReverseProxy:
-    def __init__(self, base_url: str, *, backend_name: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        backend_name: str,
+        public_prefix: str = "",
+        upstream_prefix: str = "",
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.backend_name = backend_name
+        self.public_prefix = public_prefix.rstrip("/")
+        self.upstream_prefix = upstream_prefix.rstrip("/")
         self._client = httpx.AsyncClient(
             follow_redirects=False,
             timeout=30,
@@ -40,6 +49,19 @@ class ReverseProxy:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    def _upstream_path(self, path: str) -> str:
+        if not self.public_prefix:
+            return path
+        if path == self.public_prefix:
+            suffix = ""
+        elif path.startswith(self.public_prefix + "/"):
+            suffix = path[len(self.public_prefix) :]
+        else:
+            raise ValueError(f"path {path!r} is outside public prefix {self.public_prefix!r}")
+        if self.upstream_prefix:
+            return self.upstream_prefix + suffix
+        return suffix or "/"
 
     @staticmethod
     def _request_headers(request: Request) -> dict[str, str]:
@@ -107,7 +129,7 @@ class ReverseProxy:
         return forwarded
 
     async def handle(self, request: Request) -> Response:
-        target = self.base_url + request.url.path
+        target = self.base_url + self._upstream_path(request.url.path)
         if request.url.query:
             target += "?" + request.url.query
         with _TRACER.start_as_current_span(
@@ -120,8 +142,8 @@ class ReverseProxy:
         ) as span:
             try:
                 request_headers = self._request_headers(request)
-                wants_stream = request.headers.get("accept", "").casefold().startswith(
-                    "text/event-stream"
+                wants_stream = (
+                    request.headers.get("accept", "").casefold().startswith("text/event-stream")
                 )
                 if wants_stream:
                     backend_request = self._client.build_request(

@@ -24,7 +24,7 @@ MCP Bridge owns one private `management` runtime inside the modular monolith.
 
 ## Consequences
 
-Provider account management no longer depends on Infisical. Account onboarding and credential replacement happen through Admin. Account semantics match each provider instead of forcing one shared form.
+Provider account management no longer depends on Infisical. Account onboarding and credential replacement happen through the Management API used by the standalone frontend. Account semantics match each provider instead of forcing one shared form.
 
 SQLite is sufficient for the expected management scale. If requirements outgrow it, application ports keep provider runtimes independent from the persistence implementation.
 

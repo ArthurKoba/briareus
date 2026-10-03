@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.websockets import WebSocket
 
 from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
 from common.settings import FileSettings, ManagementSettings, ValkeySettings
-from common.websocket_proxy import relay_websocket
 from management.api_errors import install_admin_api_error_handlers
 from management.application.services import (
     AccountService,
@@ -26,10 +22,6 @@ from management.application.services import (
     SnapshotService,
 )
 from management.browser_api import build_browser_operator_api_router
-from management.browser_operator_auth import (
-    BrowserOperatorAuthError,
-    verify_browser_operator_ticket,
-)
 from management.dashboard_state import build_dashboard_state
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import (
@@ -50,7 +42,6 @@ from management.infrastructure.reverse import ReverseAdminClient
 from management.infrastructure.snapshot_worker import SnapshotRefresher
 from management.infrastructure.terminal import TerminalAdminClient
 from management.infrastructure.web import WebAdminClient
-from management.presentation.admin import build_admin
 from management.presentation.api import ApiServices, build_internal_router
 from management.presentation.web_api import WebApiServices, build_admin_api_router
 from management.realtime import RealtimeBus
@@ -240,55 +231,3 @@ app.include_router(build_browser_operator_api_router(settings))
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.websocket("/admin/browser/ws")
-async def browser_operator_socket(websocket: WebSocket) -> None:
-    origin = websocket.headers.get("origin", "")
-    public_host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host", "")
-    if origin and urlsplit(origin).netloc.casefold() != public_host.casefold():
-        await websocket.close(code=4403)
-        return
-
-    await websocket.accept()
-    try:
-        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
-        message = json.loads(raw)
-        if not isinstance(message, dict) or message.get("type") != "auth":
-            raise BrowserOperatorAuthError("browser operator auth message is required")
-        verify_browser_operator_ticket(
-            str(message.get("ticket") or ""),
-            settings.session_secret,
-            settings.admin_username,
-        )
-    except (
-        TimeoutError,
-        json.JSONDecodeError,
-        BrowserOperatorAuthError,
-    ):
-        await websocket.close(code=4401)
-        return
-
-    await relay_websocket(
-        websocket,
-        "ws://web:8000/operator/ws",
-        headers={"Authorization": f"Bearer {settings.service_token}"},
-        accept_downstream=False,
-    )
-
-
-admin = build_admin(
-    engine,
-    settings,
-    cipher,
-    accounts,
-    audit,
-    oauth_sessions,
-    snapshots,
-    config_service,
-    runtime_settings,
-    files,
-    reverse,
-    snapshot_refresher,
-)
-admin.mount_to(app)

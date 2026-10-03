@@ -259,7 +259,6 @@ def test_admin_api_route_contract_is_explicit_and_complete(tmp_path: Path) -> No
         ("GET", "/admin/api/analysis/projects/{project_id:path}/coverage"),
         ("GET", "/admin/api/browser/state"),
         ("PUT", "/admin/api/browser/viewport"),
-        ("GET", "/admin/api/browser/ticket"),
         ("POST", "/admin/api/telemetry"),
         ("GET", "/admin/api/settings"),
         ("PUT", "/admin/api/settings"),
@@ -613,10 +612,23 @@ def test_browser_operator_api_websocket_is_primary_session_surface(tmp_path: Pat
     ]
 
 
-def test_legacy_starlette_admin_remains_mounted() -> None:
+def test_legacy_admin_surface_is_absent_after_cutover(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _engine, services, _reverse, _web, _telemetry = _build_services(tmp_path, settings)
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, https_only=False)
+    install_admin_api_error_handlers(app)
+    app.include_router(build_admin_api_router(settings, services))
+    app.include_router(build_browser_operator_api_router(settings, relay=AsyncMock()))
+
+    with TestClient(app) as client:
+        response = client.get("/admin")
+        assert response.status_code == 404
+
     source = Path("src/management/runtime.py").read_text()
-    assert "build_admin(" in source
-    assert "admin.mount_to(app)" in source
+    assert "build_admin(" not in source
+    assert "admin.mount_to(app)" not in source
+    assert "/admin/browser/ws" not in source
 
 
 def test_admin_api_unhandled_error_is_json_500(tmp_path: Path) -> None:
