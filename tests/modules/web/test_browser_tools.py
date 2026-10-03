@@ -19,6 +19,9 @@ class FakeBrowser:
     async def status(self):
         return {"running": True, "page_count": 0, "pages": []}
 
+    async def restart(self):
+        return {"running": True, "restarted": True}
+
     async def pages(self):
         return {"count": 0, "pages": []}
 
@@ -83,6 +86,7 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
     assert tools == {
         "browser_diagnostics",
         "browser_status",
+        "browser_restart",
         "browser_pages",
         "browser_open",
         "browser_set_page_label",
@@ -147,6 +151,7 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         xvfb_enabled=profile.xvfb_enabled,
         timezone="Europe/Moscow",
         posix_locale=profile.posix_locale,
+        chromium_args=profile.chromium_args,
     )
 
     command = browser._browser_command()
@@ -156,6 +161,8 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert "--lang=ru-RU" in command
     assert "--accept-lang=ru-RU,ru,en-US,en" in command
     assert "--window-size=1440,900" in command
+    assert "--use-gl=angle" in command
+    assert "--use-angle=swiftshader" in command
     assert process_command[:5] == [
         "/usr/bin/env",
         "DISPLAY=:99",
@@ -182,3 +189,107 @@ def test_browser_timezone_uses_deployment_tz(monkeypatch: pytest.MonkeyPatch) ->
     settings = BrowserSettings()
 
     assert settings.timezone == "Europe/Moscow"
+
+
+class _HealthyProcess:
+    returncode = None
+
+
+class _HealthyBrowser:
+    def is_connected(self) -> bool:
+        return True
+
+
+class _HealthyContext:
+    def __init__(self) -> None:
+        self.pages: list[object] = []
+
+    async def cookies(self):
+        return []
+
+
+@pytest.mark.asyncio
+async def test_browser_status_reports_runtime_health_contract(tmp_path: Path) -> None:
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    browser = BrowserManager(
+        workspace=WorkspaceFileStore(tmp_path / "workspace"),
+        profile_dir=tmp_path / "profile",
+        executable_path="/usr/bin/chromium",
+        headless=True,
+        timeout_ms=30_000,
+        viewport_width=1440,
+        viewport_height=900,
+        max_snapshot_text_chars=30_000,
+        max_snapshot_elements=250,
+    )
+    browser._browser_process = _HealthyProcess()  # type: ignore[assignment]
+    browser._browser = _HealthyBrowser()  # type: ignore[assignment]
+    browser._context = _HealthyContext()  # type: ignore[assignment]
+    browser.set_developer_backend_connected(True)
+
+    async def cdp_ok() -> bool:
+        return True
+
+    async def observed() -> dict[str, object]:
+        return {"language": "ru-RU", "webgl": {"renderer": "SwiftShader"}}
+
+    browser._cdp_reachable = cdp_ok  # type: ignore[method-assign]
+    browser._observed_runtime = observed  # type: ignore[method-assign]
+
+    status = await browser.status()
+
+    assert status["running"] is True
+    assert status["process_running"] is True
+    assert status["cdp_reachable"] is True
+    assert status["context_usable"] is True
+    assert status["developer_backend_connected"] is True
+    assert status["observed"] == {
+        "language": "ru-RU",
+        "webgl": {"renderer": "SwiftShader"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_browser_restart_preserves_profile_and_extension_registry(tmp_path: Path) -> None:
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    workspace = WorkspaceFileStore(tmp_path / "workspace")
+    profile_dir = tmp_path / "browser" / "profile"
+    browser = BrowserManager(
+        workspace=workspace,
+        profile_dir=profile_dir,
+        executable_path="/usr/bin/chromium",
+        headless=True,
+        timeout_ms=30_000,
+        viewport_width=1440,
+        viewport_height=900,
+        max_snapshot_text_chars=30_000,
+        max_snapshot_elements=250,
+    )
+    profile_dir.mkdir(parents=True)
+    marker = profile_dir / "Cookies"
+    marker.write_text("preserve-me")
+    extension_dir = workspace.root / "demo-extension"
+    extension_dir.mkdir(parents=True)
+    extension_id = "abcdefghijklmnopabcdefghijklmnop"
+    browser.record_dev_extension(extension_id, str(extension_dir))
+
+    async def fake_stop(*, stop_display: bool) -> None:
+        assert stop_display is False
+
+    async def fake_start() -> None:
+        return None
+
+    async def fake_status() -> dict[str, object]:
+        return {"running": True}
+
+    browser._stop_runtime = fake_stop  # type: ignore[method-assign]
+    browser._start_locked = fake_start  # type: ignore[method-assign]
+    browser.status = fake_status  # type: ignore[method-assign]
+
+    result = await browser.restart()
+
+    assert result["running"] is True
+    assert marker.read_text() == "preserve-me"
+    assert browser.dev_extensions() == [{"id": extension_id, "path": str(extension_dir)}]

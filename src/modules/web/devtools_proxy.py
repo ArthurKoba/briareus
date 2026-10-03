@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import cast
@@ -21,9 +23,24 @@ CHROME_DEVTOOLS_MCP_VERSION = "1.10.1"
 class DeveloperAccessMiddleware(Middleware):
     """Gate the official Chrome DevTools MCP behind operator-controlled access."""
 
+    _EXTENSION_ID = re.compile(r"Extension installed\. Id:\s*([a-p]{32})")
+
     def __init__(self, browser: BrowserManager, transport: StdioTransport) -> None:
         self.browser = browser
         self.transport = transport
+
+    @staticmethod
+    def _result_text(result: ToolResult) -> str:
+        return "\n".join(
+            item.text
+            for item in result.content
+            if isinstance(item, mt.TextContent)
+        )
+
+    async def _disconnect(self) -> None:
+        disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
+        await disconnect()
+        self.browser.set_developer_backend_connected(False)
 
     async def on_list_tools(
         self,
@@ -32,6 +49,7 @@ class DeveloperAccessMiddleware(Middleware):
     ) -> Sequence[Tool]:
         try:
             tools = await call_next(context)
+            self.browser.set_developer_backend_connected(True)
             state = (
                 "Developer access is ON. "
                 if self.browser.developer_access_effective
@@ -44,8 +62,7 @@ class DeveloperAccessMiddleware(Middleware):
             ]
         finally:
             if not self.browser.developer_access_effective:
-                disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
-                await disconnect()
+                await self._disconnect()
 
     async def on_call_tool(
         self,
@@ -55,21 +72,38 @@ class DeveloperAccessMiddleware(Middleware):
         try:
             self.browser.require_developer_access()
         except BrowserError as exc:
-            disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
-            await disconnect()
+            await self._disconnect()
             raise ToolError(str(exc)) from exc
 
         # The browser is lazy. Ensure the private CDP endpoint exists before the
-        # upstream server attempts to connect to it.
-        await self.browser.status()
+        # upstream server attempts to connect to it. A stale Playwright context
+        # is recovered non-destructively before handing control to upstream.
+        status = await self.browser.status()
+        if not bool(status.get("running")):
+            await self.browser.restart()
+
+        tool_name = context.message.name
+        arguments = context.message.arguments or {}
         try:
-            return await call_next(context)
+            result = await call_next(context)
+            self.browser.set_developer_backend_connected(True)
+            if tool_name == "install_extension":
+                path_value = arguments.get("path")
+                match = self._EXTENSION_ID.search(self._result_text(result))
+                if isinstance(path_value, str) and match is not None:
+                    self.browser.record_dev_extension(match.group(1), path_value)
+            elif tool_name == "uninstall_extension":
+                extension_id = arguments.get("id")
+                if isinstance(extension_id, str):
+                    self.browser.forget_dev_extension(extension_id)
+            return result
         except Exception:
             # A timed-out or failed upstream request can leave the kept-alive stdio
-            # session wedged. Tear it down so the next call starts a clean official
-            # chrome-devtools-mcp process while preserving the original error.
-            disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
-            await disconnect()
+            # session wedged. Tear it down and repair Chromium only if its own health
+            # probes fail; preserve the original upstream error for the caller.
+            await self._disconnect()
+            with contextlib.suppress(Exception):
+                await self.browser.recover_if_broken()
             raise
 
 
@@ -114,8 +148,13 @@ class DevToolsProxyRuntime:
             DeveloperAccessMiddleware(browser, self.transport),
         )
         browser.add_privileged_access_hook(self._on_access_change)
+        browser.add_restart_hook(self._disconnect)
+
+    async def _disconnect(self) -> None:
+        disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
+        await disconnect()
+        self.browser.set_developer_backend_connected(False)
 
     async def _on_access_change(self, enabled: bool) -> None:
         if not enabled:
-            disconnect = cast(Callable[[], Awaitable[None]], self.transport.disconnect)
-            await disconnect()
+            await self._disconnect()

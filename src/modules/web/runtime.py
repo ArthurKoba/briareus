@@ -47,6 +47,7 @@ _browser = BrowserManager(
     xvfb_enabled=_browser_profile.xvfb_enabled,
     timezone=_browser_settings.timezone,
     posix_locale=_browser_profile.posix_locale,
+    chromium_args=_browser_profile.chromium_args,
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
 )

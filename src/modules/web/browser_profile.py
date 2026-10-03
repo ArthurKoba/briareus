@@ -16,6 +16,10 @@ class BrowserDesktopProfile:
     display: str = ":99"
     color_depth: int = 24
     xvfb_enabled: bool = True
+    chromium_args: tuple[str, ...] = (
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+    )
 
 
 DEFAULT_BROWSER_DESKTOP_PROFILE = BrowserDesktopProfile()
