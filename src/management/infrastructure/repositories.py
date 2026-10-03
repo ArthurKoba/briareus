@@ -429,6 +429,35 @@ class SqlAlchemyInvocationRepository:
             session.execute(delete(InvocationRecord))
             return int(count)
 
+    def delete(self, invocation_id: str) -> bool:
+        with self.sessions.begin() as session:
+            result = cast(
+                CursorResult[object],
+                session.execute(
+                    delete(InvocationRecord).where(InvocationRecord.id == invocation_id)
+                ),
+            )
+            return bool(result.rowcount)
+
+    def summary(self) -> dict[str, int | float]:
+        with self.sessions() as session:
+            total = session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
+            errors = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(InvocationRecord)
+                    .where(InvocationRecord.status == "error")
+                )
+                or 0
+            )
+            average = session.scalar(select(func.avg(InvocationRecord.duration_ms))) or 0.0
+        return {
+            "total": int(total),
+            "errors": int(errors),
+            "error_rate": round((float(errors) * 100.0 / float(total)), 1) if total else 0.0,
+            "average_duration_ms": round(float(average), 1),
+        }
+
     @_db_span("audit.cleanup")
     def cleanup(self) -> int:
         with self.sessions.begin() as session:
@@ -568,10 +597,9 @@ class SqlAlchemyOAuthSessionRepository:
             record.status = value.status
             record.last_event = value.event
             record.updated_at = value.occurred_at
-            successful_refresh = (
-                value.event.startswith("refresh_success")
-                or value.event.startswith("refresh_replay")
-            )
+            successful_refresh = value.event.startswith(
+                "refresh_success"
+            ) or value.event.startswith("refresh_replay")
             if value.event in {"authorized", "access_used"} or successful_refresh:
                 record.last_used_at = value.occurred_at
             if successful_refresh:

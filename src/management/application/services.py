@@ -73,8 +73,14 @@ class AccountService:
             )
         return accounts
 
-    def get(self, selector: str, *, provider: Provider) -> Account:
-        return self.repository.get(selector, provider=provider)
+    def get(
+        self,
+        selector: str,
+        *,
+        provider: Provider,
+        enabled_only: bool = True,
+    ) -> Account:
+        return self.repository.get(selector, provider=provider, enabled_only=enabled_only)
 
     def resolve(self, selector: str, *, provider: Provider) -> ResolvedAccount:
         if self.cache is not None and self.cache_keys is not None:
@@ -169,6 +175,12 @@ class InvocationAuditService:
 
     def clear(self) -> int:
         return self.repository.clear()
+
+    def delete(self, invocation_id: str) -> bool:
+        return self.repository.delete(invocation_id)
+
+    def summary(self) -> dict[str, int | float]:
+        return self.repository.summary()
 
     def cleanup(self) -> int:
         return self.repository.cleanup()

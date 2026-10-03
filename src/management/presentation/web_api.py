@@ -1,25 +1,144 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
+import json
+import posixpath
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import FileResponse, StreamingResponse
 
-from common.models import JsonObject
+from common.models import JsonObject, JsonValue, json_object
+from common.runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
 from common.settings import ManagementSettings
+from management.application.services import (
+    AccountService,
+    InvocationAuditService,
+    ManagementConfigService,
+    OAuthSessionService,
+    RuntimeSettingsService,
+    SnapshotService,
+)
+from management.browser_operator_auth import issue_browser_operator_ticket
+from management.domain.accounts import Account, AuthType, Provider
+from management.domain.configuration import ManagementConfig
+from management.infrastructure.files import FileAdminStore
+from management.infrastructure.reverse import ReverseAdminClient
+from management.infrastructure.snapshot_worker import (
+    REVERSE_OVERVIEW_KEY,
+    WORKSPACE_STATS_KEY,
+    SnapshotRefresher,
+    coverage_refresh_seconds,
+    coverage_snapshot_key,
+    snapshot_meta,
+)
+from management.infrastructure.terminal import TerminalAdminClient
 
 _SESSION_KEY = "management_admin"
 
 
+@dataclass(frozen=True)
+class WebApiServices:
+    accounts: AccountService
+    audit: InvocationAuditService
+    oauth_sessions: OAuthSessionService
+    snapshots: SnapshotService
+    config: ManagementConfigService
+    runtime_settings: RuntimeSettingsService
+    files: FileAdminStore
+    reverse: ReverseAdminClient
+    terminal: TerminalAdminClient
+    snapshot_refresher: SnapshotRefresher
+
+
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     username: str
     password: str
 
 
-def build_admin_api_router(settings: ManagementSettings) -> APIRouter:
+class AccountPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    alias: str
+    provider: Provider
+    auth_type: AuthType
+    base_url: str = ""
+    external_id: str = ""
+    verify_tls: bool = True
+    ca_cert_pem: str = ""
+    enabled: bool = True
+    credential: str = ""
+
+
+class ProjectCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=255)
+    parent_dir: str = ""
+
+
+class WorkerControlPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
+class SettingsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    logging_enabled: bool = True
+    logging_capture_payloads: bool = True
+    logging_retention_days: int = Field(30, ge=1, le=3650)
+    logging_max_records: int = Field(10_000, ge=100, le=1_000_000)
+    maintenance_interval_minutes: int = Field(60, ge=1, le=1440)
+    terminal_max_exec_timeout_seconds: int = Field(21_600, ge=1, le=86_400)
+    terminal_max_job_runtime_seconds: int = Field(43_200, ge=1, le=604_800)
+    mcp_call_timeout_seconds: int = Field(5, ge=1, le=300)
+    reverse_idle_timeout_seconds: float = Field(900.0, ge=0, le=86_400)
+
+
+def _oauth_json(session: object) -> JsonObject:
+    values = dict(getattr(session, "__dict__", {}))
+    for field in (
+        "created_at",
+        "updated_at",
+        "last_used_at",
+        "last_refresh_at",
+        "access_expires_at",
+        "refresh_expires_at",
+        "revoked_at",
+    ):
+        value = values.get(field)
+        values[field] = value.isoformat() if value is not None else None
+    return values
+
+
+def _account_from_payload(payload: AccountPayload, *, existing: Account | None = None) -> Account:
+    values: dict[str, object] = {
+        "alias": payload.alias,
+        "provider": payload.provider,
+        "auth_type": payload.auth_type,
+        "base_url": payload.base_url,
+        "external_id": payload.external_id,
+        "verify_tls": payload.verify_tls,
+        "ca_cert_pem": payload.ca_cert_pem,
+        "enabled": payload.enabled,
+    }
+    if existing is not None:
+        values.update(
+            id=existing.id,
+            created_at=existing.created_at,
+            updated_at=existing.updated_at,
+        )
+    return Account.model_validate(values)
+
+
+def build_admin_api_router(
+    settings: ManagementSettings, services: WebApiServices | None = None
+) -> APIRouter:
     router = APIRouter(prefix="/admin/api", tags=["admin"])
 
     def authenticated_username(request: Request) -> str | None:
@@ -45,6 +164,16 @@ def build_admin_api_router(settings: ManagementSettings) -> APIRouter:
         if urlsplit(origin).netloc.casefold() != public_host.casefold():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="origin rejected")
 
+    def available() -> WebApiServices:
+        if services is None:
+            raise HTTPException(status_code=503, detail="management API services unavailable")
+        return services
+
+    def mutation(request: Request) -> WebApiServices:
+        require_user(request)
+        same_origin(request)
+        return available()
+
     @router.get("/session")
     def session_state(request: Request) -> JsonObject:
         username = authenticated_username(request)
@@ -57,8 +186,7 @@ def build_admin_api_router(settings: ManagementSettings) -> APIRouter:
         valid_password = hmac.compare_digest(payload.password, settings.admin_password)
         if not (valid_user and valid_password):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="invalid credentials",
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
             )
         request.session[_SESSION_KEY] = settings.admin_username
         return {"authenticated": True, "username": settings.admin_username}
@@ -88,5 +216,463 @@ def build_admin_api_router(settings: ManagementSettings) -> APIRouter:
                 {"id": "settings", "label": "Settings", "enabled": True},
             ],
         }
+
+    @router.get("/dashboard")
+    async def dashboard(request: Request) -> JsonObject:
+        require_user(request)
+        api = available()
+        accounts, calls, oauth, workspace, reverse_snapshot = await asyncio.gather(
+            asyncio.to_thread(api.accounts.list),
+            asyncio.to_thread(api.audit.summary),
+            asyncio.to_thread(api.oauth_sessions.recent, limit=1000),
+            asyncio.to_thread(api.snapshots.get, WORKSPACE_STATS_KEY),
+            asyncio.to_thread(api.snapshots.get, REVERSE_OVERVIEW_KEY),
+        )
+        reverse_payload = reverse_snapshot.payload if reverse_snapshot is not None else {}
+        projects = reverse_payload.get("projects")
+        workers = reverse_payload.get("workers")
+        project_items = projects if isinstance(projects, list) else []
+        worker_items = workers if isinstance(workers, list) else []
+        return {
+            "accounts": {
+                "total": len(accounts),
+                "enabled": sum(1 for item in accounts if item.enabled),
+                "by_provider": {
+                    provider.value: sum(
+                        1 for item in accounts if item.provider == provider.value and item.enabled
+                    )
+                    for provider in Provider
+                },
+            },
+            "calls": json_object(calls, context="dashboard calls"),
+            "oauth": {
+                "tracked": len(oauth),
+                "active": sum(1 for item in oauth if item.status == "active"),
+            },
+            "workspace": workspace.payload if workspace is not None else {},
+            "workspace_meta": snapshot_meta(workspace),
+            "analysis": {
+                "projects": len(project_items),
+                "active_sessions": sum(
+                    1
+                    for item in project_items
+                    if isinstance(item, dict) and item.get("session") == "active"
+                ),
+                "workers": len(worker_items),
+                "running_workers": sum(
+                    1
+                    for item in worker_items
+                    if isinstance(item, dict) and bool(item.get("running"))
+                ),
+            },
+            "analysis_meta": snapshot_meta(reverse_snapshot),
+        }
+
+    @router.get("/accounts")
+    async def accounts(request: Request, provider: Provider | None = None) -> JsonObject:
+        require_user(request)
+        items = await asyncio.to_thread(available().accounts.list, provider=provider)
+        return {"accounts": [item.model_dump(mode="json") for item in items], "count": len(items)}
+
+    @router.post("/accounts", status_code=201)
+    async def create_account(payload: AccountPayload, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            account = _account_from_payload(payload)
+            saved = await asyncio.to_thread(
+                api.accounts.create, account, credential=payload.credential
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return saved.public()
+
+    @router.put("/accounts/{provider}/{account_id}")
+    async def update_account(
+        provider: Provider, account_id: str, payload: AccountPayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        if payload.provider is not provider:
+            raise HTTPException(status_code=400, detail="provider cannot be changed")
+        try:
+            existing = await asyncio.to_thread(
+                api.accounts.get, account_id, provider=provider, enabled_only=False
+            )
+            saved = await asyncio.to_thread(
+                api.accounts.update, _account_from_payload(payload, existing=existing)
+            )
+            if payload.credential.strip():
+                await asyncio.to_thread(
+                    api.accounts.set_credential, saved.id, payload.credential, provider=provider
+                )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return saved.public()
+
+    @router.delete("/accounts/{provider}/{account_id}")
+    async def delete_account(provider: Provider, account_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            await asyncio.to_thread(api.accounts.delete, account_id, provider=provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"deleted": True, "id": account_id}
+
+    @router.post("/accounts/{provider}/{account_id}/verify")
+    async def verify_account(provider: Provider, account_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await asyncio.to_thread(api.accounts.verify, account_id, provider=provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.get("/calls")
+    async def calls(request: Request, limit: int = Query(100, ge=1, le=1000)) -> JsonObject:
+        require_user(request)
+        items = await asyncio.to_thread(available().audit.recent, limit=limit)
+        return {"events": [item.model_dump(mode="json") for item in items], "count": len(items)}
+
+    @router.delete("/calls")
+    async def clear_calls(request: Request) -> JsonObject:
+        removed = await asyncio.to_thread(mutation(request).audit.clear)
+        return {"deleted": removed}
+
+    @router.delete("/calls/{call_id}")
+    async def delete_call(call_id: str, request: Request) -> JsonObject:
+        removed = await asyncio.to_thread(mutation(request).audit.delete, call_id)
+        if not removed:
+            raise HTTPException(status_code=404, detail="call not found")
+        return {"deleted": True, "id": call_id}
+
+    @router.get("/calls/stream")
+    async def calls_stream(request: Request) -> StreamingResponse:
+        require_user(request)
+        audit = available().audit
+
+        async def events() -> AsyncIterator[str]:
+            seen: set[str] = set()
+            initial = await asyncio.to_thread(audit.recent, limit=100)
+            for item in reversed(initial):
+                seen.add(item.id)
+                yield f"data: {json.dumps(item.model_dump(mode='json'), ensure_ascii=False)}\\n\\n"
+            while not await request.is_disconnected():
+                latest = await asyncio.to_thread(audit.recent, limit=100)
+                fresh = [item for item in reversed(latest) if item.id not in seen]
+                for item in fresh:
+                    seen.add(item.id)
+                    payload_json = json.dumps(
+                        item.model_dump(mode="json"),
+                        ensure_ascii=False,
+                    )
+                    yield f"data: {payload_json}\\n\\n"
+                if len(seen) > 5000:
+                    seen = {item.id for item in latest}
+                yield ": keepalive\\n\\n"
+                await asyncio.sleep(1)
+
+        return StreamingResponse(
+            events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+        )
+
+    @router.get("/oauth-sessions")
+    async def oauth_sessions(
+        request: Request, limit: int = Query(200, ge=1, le=1000)
+    ) -> JsonObject:
+        require_user(request)
+        items = await asyncio.to_thread(available().oauth_sessions.recent, limit=limit)
+        return {"sessions": [_oauth_json(item) for item in items], "count": len(items)}
+
+    @router.get("/files")
+    async def files_list(
+        request: Request,
+        path: str = "",
+        offset: int = Query(0, ge=0),
+        limit: int = Query(500, ge=1, le=1000),
+    ) -> JsonObject:
+        require_user(request)
+        api = available()
+        current = path.strip().strip("/")
+        listing, cached_stats = await asyncio.gather(
+            asyncio.to_thread(api.files.list, current, offset=offset, limit=limit),
+            asyncio.to_thread(api.snapshots.get, WORKSPACE_STATS_KEY),
+        )
+        return {
+            "listing": listing,
+            "current_path": current,
+            "parent_path": posixpath.dirname(current) if current else "",
+            "stats": cached_stats.payload if cached_stats is not None else {},
+            "stats_meta": snapshot_meta(cached_stats),
+        }
+
+    @router.post("/files/upload")
+    async def files_upload(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+        path: Annotated[str, Form()] = "",
+        overwrite: Annotated[bool, Form()] = False,
+    ) -> JsonObject:
+        api = mutation(request)
+        current = path.strip().strip("/")
+        name = Path(file.filename or "upload.bin").name
+        destination = posixpath.join(current, name) if current else name
+        try:
+            return await asyncio.to_thread(
+                api.files.upload, file.file, destination=destination, overwrite=overwrite
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/files/mkdir")
+    async def files_mkdir(
+        request: Request, path: Annotated[str, Form()] = "", name: Annotated[str, Form()] = ""
+    ) -> JsonObject:
+        api = mutation(request)
+        current = path.strip().strip("/")
+        clean = name.strip().strip("/")
+        if not clean or "/" in clean or "\\\\" in clean:
+            raise HTTPException(status_code=400, detail="a single directory name is required")
+        destination = posixpath.join(current, clean) if current else clean
+        try:
+            return await asyncio.to_thread(api.files.mkdir, destination)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/files/download")
+    async def files_download(request: Request, path: str) -> FileResponse:
+        require_user(request)
+        api = available()
+        try:
+            info = await asyncio.to_thread(api.files.info, path)
+            file_path = await asyncio.to_thread(api.files.path_for, path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if info.get("type") != "file":
+            raise HTTPException(status_code=400, detail="path is not a file")
+        return FileResponse(
+            file_path,
+            filename=str(info.get("name") or file_path.name),
+            media_type=str(info.get("mime_type") or "application/octet-stream"),
+        )
+
+    @router.delete("/files")
+    async def files_delete(request: Request, path: str, recursive: bool = False) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await asyncio.to_thread(api.files.delete, path, recursive=recursive)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/terminal")
+    async def terminal_overview(request: Request) -> JsonObject:
+        require_user(request)
+        try:
+            return await available().terminal.overview()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.get("/terminal/jobs/{job_id}")
+    async def terminal_job(job_id: str, request: Request) -> JsonObject:
+        require_user(request)
+        try:
+            job, tail = await asyncio.gather(
+                available().terminal.job_status(job_id), available().terminal.job_tail(job_id)
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"job": job, "tail": tail}
+
+    @router.post("/terminal/jobs/{job_id}/cancel")
+    async def terminal_cancel(job_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.terminal.cancel_job(job_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.delete("/terminal/jobs/{job_id}")
+    async def terminal_delete_job(job_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.terminal.delete_job(job_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/terminal/jobs/cleanup")
+    async def terminal_cleanup(
+        request: Request, older_than_hours: int = Query(168, ge=0, le=87600)
+    ) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.terminal.cleanup_jobs(older_than_hours=older_than_hours, dry_run=False)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.delete("/terminal/workspaces/{workspace_id}")
+    async def terminal_delete_workspace(workspace_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.terminal.delete_workspace(workspace_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.get("/analysis")
+    async def analysis_overview(request: Request) -> JsonObject:
+        require_user(request)
+        snapshot = await asyncio.to_thread(available().snapshots.get, REVERSE_OVERVIEW_KEY)
+        return {
+            "overview": snapshot.payload if snapshot is not None else {},
+            "meta": snapshot_meta(snapshot),
+        }
+
+    @router.get("/analysis/projects/{project_id:path}")
+    async def analysis_project(project_id: str, request: Request, folder: str = "/") -> JsonObject:
+        require_user(request)
+        api = available()
+        try:
+            session = await api.reverse.session_info(project_id)
+            files: JsonObject = {}
+            programs: list[JsonValue] = []
+            if session.get("session") == "active":
+                files = await api.reverse.project_files(project_id, folder)
+                programs = await api.reverse.open_programs(project_id)
+            return {"session": session, "files": files, "programs": programs, "folder": folder}
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/analysis/projects")
+    async def analysis_create(payload: ProjectCreatePayload, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.reverse.create_project(payload.name, payload.parent_dir)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/analysis/projects/{project_id:path}/open")
+    async def analysis_open(project_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.reverse.open_session(project_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/analysis/projects/{project_id:path}/release")
+    async def analysis_release(project_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.reverse.release_session(project_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.delete("/analysis/projects/{project_id:path}")
+    async def analysis_delete(project_id: str, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.reverse.delete_project(project_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.put("/analysis/workers/{worker_index}")
+    async def analysis_worker(
+        worker_index: int, payload: WorkerControlPayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        try:
+            return await api.reverse.set_worker_enabled(worker_index, payload.enabled)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.get("/analysis/projects/{project_id:path}/coverage")
+    async def analysis_coverage(
+        project_id: str, request: Request, program: str, full: bool = False
+    ) -> JsonObject:
+        require_user(request)
+        api = available()
+        key = coverage_snapshot_key(project_id, program, full=full)
+        snapshot = await asyncio.to_thread(
+            api.snapshots.ensure,
+            key,
+            category="reverse_coverage",
+            parameters={"project_id": project_id, "program": program, "full": full},
+            refresh_after_seconds=coverage_refresh_seconds(full=full),
+        )
+        api.snapshot_refresher.notify_coverage_requested()
+        return {"coverage": snapshot.payload, "meta": snapshot_meta(snapshot)}
+
+    @router.get("/browser/ticket")
+    async def browser_ticket(request: Request) -> JsonObject:
+        require_user(request)
+        return {
+            "ticket": issue_browser_operator_ticket(
+                settings.session_secret, settings.admin_username
+            )
+        }
+
+    @router.get("/settings")
+    async def settings_get(request: Request) -> JsonObject:
+        require_user(request)
+        api = available()
+        config, terminal_policy, mcp_policy = await asyncio.gather(
+            asyncio.to_thread(api.config.get),
+            asyncio.to_thread(api.runtime_settings.terminal_policy),
+            asyncio.to_thread(api.runtime_settings.mcp_policy),
+        )
+        try:
+            reverse_settings = await api.reverse.session_settings()
+            reverse_error = ""
+        except Exception as exc:
+            reverse_settings = {
+                "idle_timeout_seconds": 900.0,
+                "auto_release_enabled": True,
+                "source": "unavailable",
+            }
+            reverse_error = str(exc)
+        return {
+            "management": config.model_dump(mode="json"),
+            "terminal": terminal_policy.model_dump(mode="json"),
+            "mcp": mcp_policy.model_dump(mode="json"),
+            "analysis": reverse_settings,
+            "analysis_error": reverse_error,
+        }
+
+    @router.put("/settings")
+    async def settings_update(payload: SettingsPayload, request: Request) -> JsonObject:
+        api = mutation(request)
+        management = ManagementConfig(
+            logging_enabled=payload.logging_enabled,
+            logging_capture_payloads=payload.logging_capture_payloads,
+            logging_retention_days=payload.logging_retention_days,
+            logging_max_records=payload.logging_max_records,
+            maintenance_interval_minutes=payload.maintenance_interval_minutes,
+        )
+        terminal_policy = TerminalRuntimePolicy(
+            max_exec_timeout_seconds=payload.terminal_max_exec_timeout_seconds,
+            max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
+        )
+        mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
+        try:
+            reverse_settings = await api.reverse.set_idle_timeout(
+                payload.reverse_idle_timeout_seconds
+            )
+            saved_management, saved_terminal, saved_mcp = await asyncio.gather(
+                asyncio.to_thread(api.config.update, management),
+                asyncio.to_thread(api.runtime_settings.update_terminal_policy, terminal_policy),
+                asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "management": saved_management.model_dump(mode="json"),
+            "terminal": saved_terminal.model_dump(mode="json"),
+            "mcp": saved_mcp.model_dump(mode="json"),
+            "analysis": reverse_settings,
+        }
+
+    @router.post("/settings/cleanup-logs")
+    async def settings_cleanup(request: Request) -> JsonObject:
+        removed = await asyncio.to_thread(mutation(request).audit.cleanup)
+        return {"removed": removed}
 
     return router
