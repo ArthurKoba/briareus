@@ -360,4 +360,3 @@ point. The local Git transport authorizes a workspace/repository/account binding
 credential into the checkout's `.git` private credential store, configures the ordinary Git
 credential helper, and installs a reserved-branch pre-push guard. Agents can then use normal
 `git fetch` / `git push` from Terminal. Re-authorize the workspace when the credential expires.
-
