@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates gosu netcat-openbsd \
+    && apt-get install -y --no-install-recommends curl ca-certificates gosu netcat-openbsd util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./
@@ -97,6 +97,7 @@ COPY --from=chrome-devtools-mcp /opt/chrome-devtools-mcp /opt/chrome-devtools-mc
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         chromium chromium-l10n fonts-liberation fonts-noto-color-emoji locales tzdata xvfb \
+        libegl1 libgbm1 libgl1-mesa-dri libglx-mesa0 libva2 mesa-vulkan-drivers vainfo intel-media-va-driver \
     && sed -i 's/^# *\\(ru_RU.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen \
     && sed -i 's/^# *\\(en_US.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen \
     && locale-gen \

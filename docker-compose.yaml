@@ -181,6 +181,8 @@ services:
     volumes:
       - terminal-workspace:/workspace
       - web-browser:/browser
+    devices:
+      - ${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}:${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}
     shm_size: 1gb
 
   terminal:

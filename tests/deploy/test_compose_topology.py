@@ -378,6 +378,49 @@ def test_web_image_packages_persistent_browser_runtime() -> None:
     assert "BREAKPAD_DUMP_LOCATION=/browser/crash" in web_stage
 
 
+def test_web_gpu_passthrough_is_render_node_only_and_unprivileged() -> None:
+    compose = yaml.safe_load(COMPOSE_FILE.read_text())
+    web = compose["services"]["web"]
+
+    assert web["devices"] == [
+        "${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}:${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}"
+    ]
+    assert "privileged" not in web
+    assert "cap_add" not in web
+    assert "pid" not in web
+    assert "network_mode" not in web
+
+
+def test_web_image_packages_gpu_userspace_without_kernel_driver() -> None:
+    dockerfile = Path("Dockerfile").read_text()
+    web_stage = dockerfile.split("FROM runtime-base AS web", 1)[1].split(
+        "FROM runtime-base AS terminal", 1
+    )[0]
+
+    for package in (
+        "libegl1",
+        "libgbm1",
+        "libgl1-mesa-dri",
+        "libglx-mesa0",
+        "libva2",
+        "mesa-vulkan-drivers",
+        "vainfo",
+        "intel-media-va-driver",
+    ):
+        assert package in web_stage
+
+
+def test_entrypoint_drops_privileges_with_only_render_group() -> None:
+    entrypoint = Path("docker-entrypoint.sh").read_text()
+
+    assert "stat -c '%g' /dev/dri/renderD128" in entrypoint
+    assert "setpriv --reuid=1000 --regid=1000" in entrypoint
+    assert '--groups "${GPU_RENDER_GID}"' in entrypoint
+    assert "--no-new-privs" in entrypoint
+    assert "chmod" not in entrypoint
+    assert "chown /dev/dri" not in entrypoint
+
+
 def test_web_timezone_is_optional_with_utc_fallback() -> None:
     serialized = COMPOSE_FILE.read_text()
 

@@ -15,7 +15,7 @@ from common.settings import (
 from modules.files.workspace_store import WorkspaceFileStore
 
 from .browser import BrowserManager
-from .browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE
+from .browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE, resolve_chromium_gpu_args
 from .browser_tools import register_browser_tools
 from .devtools_proxy import DevToolsProxyRuntime
 from .executor import resolve_curl_binary
@@ -47,7 +47,7 @@ _browser = BrowserManager(
     xvfb_enabled=_browser_profile.xvfb_enabled,
     timezone=_browser_settings.timezone,
     posix_locale=_browser_profile.posix_locale,
-    chromium_args=_browser_profile.chromium_args,
+    chromium_args=resolve_chromium_gpu_args(),
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
 )
