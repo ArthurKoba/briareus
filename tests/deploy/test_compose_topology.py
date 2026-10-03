@@ -9,6 +9,7 @@ EXPECTED_SERVICES = {
     "auth",
     "gateway",
     "management",
+    "management-ui",
     "github",
     "gitlab",
     "files",
@@ -176,6 +177,7 @@ def test_compose_declares_machine_cache_routing_and_bootstrap_environment() -> N
         "OBSERVABILITY_URL",
     }
     expected = {
+        "management-ui": set(),
         "management": machine
         | cache
         | observability
@@ -335,7 +337,7 @@ def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
     }
 
     for name, service in services.items():
-        if name == "valkey":
+        if name in {"valkey", "management-ui"}:
             continue
         assert required.issubset(service.get("environment", {})), name
 

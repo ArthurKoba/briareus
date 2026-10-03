@@ -29,12 +29,14 @@ def test_frontend_compose_contains_only_frontend_service() -> None:
     }
 
 
-def test_backend_container_topology_does_not_include_frontend() -> None:
+def test_root_compose_runs_frontend_as_isolated_service() -> None:
     root_compose = yaml.safe_load(Path("docker-compose.yaml").read_text())
     root_dockerfile = Path("Dockerfile").read_text()
     root_dockerignore = Path(".dockerignore").read_text().splitlines()
 
-    assert "management-ui" not in root_compose["services"]
+    service = root_compose["services"]["management-ui"]
+    assert service["build"] == {"context": "./frontend", "dockerfile": "Dockerfile"}
+    assert service["expose"] == ["8080"]
     assert "AS management-ui" not in root_dockerfile
     assert "frontend" in root_dockerignore
 
