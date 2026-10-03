@@ -645,10 +645,17 @@ class BrowserSettings(ProcessSettings):
         "ru-RU,ru,en-US,en",
         validation_alias="BROWSER_ACCEPT_LANGUAGE",
     )
-    display: str = Field(":99", validation_alias="DISPLAY")
+    display: str = Field(
+        ":99",
+        validation_alias=AliasChoices("BROWSER_DISPLAY", "DISPLAY"),
+    )
     color_depth: int = Field(24, ge=16, le=32, validation_alias="BROWSER_COLOR_DEPTH")
     xvfb_enabled: bool = Field(True, validation_alias="BROWSER_XVFB_ENABLED")
-    timezone: str = Field("Europe/Moscow", validation_alias="TZ")
+    timezone: str = Field(
+        "Europe/Moscow",
+        validation_alias=AliasChoices("BROWSER_TIMEZONE", "TZ"),
+    )
+    posix_locale: str = Field("ru_RU.UTF-8", validation_alias="BROWSER_POSIX_LOCALE")
     devtools_mcp_script_path: Path = Field(
         Path("/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"),
         validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
@@ -675,6 +682,18 @@ class BrowserSettings(ProcessSettings):
         if not value.is_absolute():
             raise ValueError("browser paths must be absolute")
         return value.resolve(strict=False)
+
+    @field_validator("timezone", mode="before")
+    @classmethod
+    def _normalize_browser_timezone(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or "Europe/Moscow"
+        return value
+
+    @field_validator("locale", "accept_language", "display", "posix_locale", mode="before")
+    @classmethod
+    def _strip_browser_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("executable_path", mode="before")
     @classmethod

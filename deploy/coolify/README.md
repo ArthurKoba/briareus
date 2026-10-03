@@ -126,8 +126,12 @@ The image owns coherent Russian/Moscow desktop defaults: `TZ=Europe/Moscow`,
 `BROWSER_LOCALE=ru-RU`, `BROWSER_ACCEPT_LANGUAGE=ru-RU,ru,en-US,en`, 24-bit color, and Xvfb
 enabled. These remain normal BrowserSettings/process inputs rather than Compose bootstrap
 environment, preserving the repository boundary that runtime defaults belong to source/image
-configuration. A future deployment-level override should wire only the specific setting that
-needs to change instead of duplicating the full browser configuration in Compose.
+configuration. `BROWSER_TIMEZONE` and `BROWSER_DISPLAY` take precedence over generic `TZ` and
+`DISPLAY`; empty `TZ` is normalized back to `Europe/Moscow`. Chromium is launched with explicit
+`TZ`, `DISPLAY`, `LANG`, and `LC_ALL` values derived from `BrowserSettings`, so accidental empty
+container variables cannot silently revert the browser to UTC. A future deployment-level override
+should wire only the specific setting that needs to change instead of duplicating the full browser
+configuration in Compose.
 
 Do not spoof a foreign browser identity by overriding the user agent; use a real headful
 Chromium runtime and consistent locale/display/timezone inputs instead.
