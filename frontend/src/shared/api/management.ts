@@ -132,6 +132,8 @@ export const managementApi = {
   releaseAnalysisProject: (id: string): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/release`, { method: "POST", body: "{}" }),
   deleteAnalysisProject: (id: string): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
   setAnalysisWorker: (index: number, enabled: boolean): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}`, { method: "PUT", body: jsonBody({ enabled }) }),
+  clearAnalysisWorkerQueue: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/clear-queue`, { method: "POST", body: "{}" }),
+  recoverAnalysisWorker: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/recover`, { method: "POST", body: "{}" }),
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
   browserTicket: (): Promise<{ ticket: string }> => request("/api/browser/ticket"),
   settings: (): Promise<SettingsState> => request("/api/settings"),

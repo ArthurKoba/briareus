@@ -35,11 +35,11 @@ function inspect(record: unknown): void {
 
 <template>
   <div class="space-y-5">
-    <PageHeader :title="t('telemetry.title')" :description="runtimeConfig.telemetry.enabled ? runtimeConfig.telemetry.endpoint : t('telemetry.pending')">
+    <PageHeader :title="t('telemetry.title')" :description="frontendTelemetry.deliveryConfigured ? runtimeConfig.telemetry.endpoint : t('telemetry.pending')">
       <label class="inline-flex items-center gap-2 text-xs text-muted-foreground"><span>{{ t("telemetry.collection") }}</span><Switch v-model:checked="uiPreferences.telemetryEnabled.value" size="small" /></label>
     </PageHeader>
 
-    <div v-if="!runtimeConfig.telemetry.enabled" class="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">{{ t("telemetry.deliveryDisabledReason") }}</div>
+    <div v-if="!frontendTelemetry.deliveryConfigured" class="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">{{ t("telemetry.deliveryDisabledReason") }}</div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
@@ -47,10 +47,10 @@ function inspect(record: unknown): void {
         :value="uiPreferences.telemetryEnabled.value ? t('common.enabled') : t('common.disabled')"
         :hint="t('telemetry.localBuffer')"
       />
-      <StatCard :label="t('telemetry.delivery')" :value="runtimeConfig.telemetry.enabled ? t('common.enabled') : t('common.disabled')" :hint="runtimeConfig.telemetry.endpoint" />
+      <StatCard :label="t('telemetry.delivery')" :value="frontendTelemetry.delivery.status" :hint="frontendTelemetry.delivery.lastSuccessAt ? formatDate(frontendTelemetry.delivery.lastSuccessAt) : runtimeConfig.telemetry.endpoint" />
       <StatCard :label="t('telemetry.event')" :value="events.length" :hint="t('telemetry.localBuffer')" />
       <StatCard :label="t('calls.errors')" :value="errorCount" :hint="lastEvent ? formatDate(lastEvent) : '—'" />
-      <StatCard :label="t('telemetry.queue')" :value="frontendTelemetry.pendingCount" :hint="t('telemetry.batchHint')" />
+      <StatCard :label="t('telemetry.queue')" :value="frontendTelemetry.delivery.pending" :hint="t('telemetry.batchHint')" />
     </div>
 
     <div class="grid gap-3 md:grid-cols-3">
