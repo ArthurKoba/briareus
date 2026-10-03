@@ -40,6 +40,11 @@ def register_browser_tools(
         """Open a URL in a new page, or navigate an existing page_id."""
         return await browser.open(url, page_id)
 
+    @mcp.tool(title="Browser set viewport", annotations=write_annotations)
+    async def browser_set_viewport(page_id: str, width: int, height: int) -> JsonObject:
+        """Set one browser page viewport and return the effective measured viewport."""
+        return await browser.set_viewport(page_id, width, height)
+
     @mcp.tool(title="Browser set page label", annotations=write_annotations)
     async def browser_set_page_label(page_id: str, label: str) -> JsonObject:
         """Assign or clear a short human-readable label for one browser tab."""

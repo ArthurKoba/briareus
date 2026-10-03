@@ -185,6 +185,8 @@ def test_compose_declares_machine_cache_routing_and_bootstrap_environment() -> N
             "MANAGEMENT_ADMIN_USERNAME",
             "MANAGEMENT_ADMIN_PASSWORD",
             "MANAGEMENT_SESSION_SECRET",
+            "MANAGEMENT_FRONTEND_TELEMETRY_UPSTREAM_URL",
+            "MANAGEMENT_FRONTEND_TELEMETRY_BEARER_TOKEN",
         },
         "auth": common
         | {

@@ -23,14 +23,15 @@ _SENSITIVE_KEYS = {
     "private_key_pem",
     "api_key",
     "download_url",
+    "jwt",
+    "id_token",
 }
 
 _TEXT_SECRET_PATTERNS = (
-    re.compile(
-        r"(?i)(\bauthorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"
-    ),
+    re.compile(r"(?i)(\bauthorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"),
     re.compile(r"(?i)(\b(?:private-token|job-token)\s*[:=]\s*)[^\s,;]+"),
     re.compile(r"(?i)(\bBearer\s+)[^\s,;]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
     re.compile(
         r"(?i)(\b(?:access_token|refresh_token|token|password|secret|client_secret|api_key)"
         r"\s*[:=]\s*)[^\s&;,]+"
@@ -48,6 +49,7 @@ _SENSITIVE_SUFFIXES = (
     "_credential",
     "_private_key",
     "_api_key",
+    "_jwt",
 )
 
 

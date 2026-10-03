@@ -441,6 +441,14 @@ class ManagementSettings(ProcessSettings):
         True,
         validation_alias="MANAGEMENT_SESSION_HTTPS_ONLY",
     )
+    frontend_telemetry_upstream_url: str = Field(
+        "https://telemetry.koba-nexus.ru",
+        validation_alias="MANAGEMENT_FRONTEND_TELEMETRY_UPSTREAM_URL",
+    )
+    frontend_telemetry_bearer_token: str = Field(
+        "",
+        validation_alias="MANAGEMENT_FRONTEND_TELEMETRY_BEARER_TOKEN",
+    )
 
     @field_validator(
         "encryption_key",
@@ -448,6 +456,8 @@ class ManagementSettings(ProcessSettings):
         "admin_username",
         "admin_password",
         "session_secret",
+        "frontend_telemetry_upstream_url",
+        "frontend_telemetry_bearer_token",
         mode="before",
     )
     @classmethod
