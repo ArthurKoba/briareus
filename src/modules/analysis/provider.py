@@ -14,6 +14,7 @@ from fastmcp.server.providers import Provider
 from fastmcp.tools import FunctionTool, Tool
 from fastmcp.utilities.components import FastMCPComponent
 
+from common.mcp_client_pool import PersistentMcpClientPool
 from common.models import JsonObject, JsonValue, json_object
 from common.settings import AnalysisSettings
 
@@ -150,6 +151,11 @@ class AnalysisToolProvider(Provider):
         self.settings = settings
         self._cache: tuple[float, list[Tool]] | None = None
         self._cache_lock = asyncio.Lock()
+        self._backend_pool = PersistentMcpClientPool(
+            self._backend_client,
+            name="analysis-ghidra",
+            size=4,
+        )
 
     def _backend_url(self) -> str:
         value = self.settings.backend_url.strip()
@@ -181,8 +187,10 @@ class AnalysisToolProvider(Provider):
             if ttl > 0 and cached is not None and cached[0] > now:
                 return list(cached[1])
 
-            async with self._backend_client() as client:
-                backend_tools = cast(Sequence[_BackendTool], await client.list_tools())
+            backend_tools = cast(
+                Sequence[_BackendTool],
+                await self._backend_pool.list_tools(),
+            )
 
             tools = self._adapt_catalog(backend_tools)
             tools.extend(self._catalog_tools(tools))
@@ -349,8 +357,7 @@ class AnalysisToolProvider(Provider):
                 json_object(arguments, context=f"{analysis_name} arguments"),
                 ghidra_name,
             )
-            async with self._backend_client() as client:
-                result = await client.call_tool(ghidra_name, canonical)
+            result = await self._backend_pool.call_tool(ghidra_name, canonical)
             decoded = decode_call_result(result)
             return adapt_analysis_result(decoded) if decoded is not None else None
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 
+from common.mcp_client_pool import PersistentMcpClientPool
 from common.models import JsonObject, json_object
 from common.settings import AnalysisSettings
 from modules.files.workspace_store import WorkspaceFileStore
@@ -34,6 +35,11 @@ class AnalysisWorkspaceTransfers:
         self.workspace = workspace
         self.max_file_bytes = max_file_bytes
         self.chunk_bytes = chunk_bytes
+        self._backend_pool = PersistentMcpClientPool(
+            self._client,
+            name="analysis-transfer-ghidra",
+            size=2,
+        )
 
     def _client(self) -> Client[StreamableHttpTransport]:
         transport = StreamableHttpTransport(
@@ -43,8 +49,7 @@ class AnalysisWorkspaceTransfers:
         return Client(transport)
 
     async def _call(self, name: str, arguments: JsonObject) -> JsonObject:
-        async with self._client() as client:
-            result = await client.call_tool(name, arguments)
+        result = await self._backend_pool.call_tool(name, arguments)
         decoded = decode_call_result(result)
         if not isinstance(decoded, dict):
             raise AnalysisTransferError(
