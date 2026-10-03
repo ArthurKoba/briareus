@@ -38,6 +38,12 @@ _browser = BrowserManager(
     timeout_ms=_browser_settings.timeout_ms,
     viewport_width=_browser_settings.viewport_width,
     viewport_height=_browser_settings.viewport_height,
+    locale=_browser_settings.locale,
+    accept_language=_browser_settings.accept_language,
+    display=_browser_settings.display,
+    color_depth=_browser_settings.color_depth,
+    xvfb_enabled=_browser_settings.xvfb_enabled,
+    timezone=_browser_settings.timezone,
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
 )

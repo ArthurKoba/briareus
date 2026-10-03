@@ -113,6 +113,25 @@ Coolify may override these restart-required infrastructure limits with:
 
 Increase these only deliberately for a known workload; do not remove the containment boundary.
 
+## Persistent browser identity
+
+The `web` image runs persistent Chromium headful by default on an internal Xvfb display.
+This avoids the explicit `HeadlessChrome` user agent and keeps browser-visible screen metrics
+aligned with the configured window size. The profile remains persistent in the `web-browser`
+volume and the Browser Operator / DevTools surfaces continue to attach to the same Chromium
+process over loopback CDP.
+
+The image owns coherent Russian/Moscow desktop defaults: `TZ=Europe/Moscow`,
+`LANG=LC_ALL=ru_RU.UTF-8`, `DISPLAY=:99`, `BROWSER_HEADLESS=false`,
+`BROWSER_LOCALE=ru-RU`, `BROWSER_ACCEPT_LANGUAGE=ru-RU,ru,en-US,en`, 24-bit color, and Xvfb
+enabled. These remain normal BrowserSettings/process inputs rather than Compose bootstrap
+environment, preserving the repository boundary that runtime defaults belong to source/image
+configuration. A future deployment-level override should wire only the specific setting that
+needs to change instead of duplicating the full browser configuration in Compose.
+
+Do not spoof a foreign browser identity by overriding the user agent; use a real headful
+Chromium runtime and consistent locale/display/timezone inputs instead.
+
 ## Shared Valkey cache
 
 The stack includes a private `valkey/valkey:9.1.2-alpine` service for hot account resolution
