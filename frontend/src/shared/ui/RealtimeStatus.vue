@@ -43,6 +43,7 @@ const statusLabel = computed(() => live.value
 
       <div class="mt-3 grid gap-2 rounded-lg bg-muted/50 p-2.5 text-xs">
         <div class="flex justify-between gap-4"><span class="text-muted-foreground">{{ t("realtime.subscriptions") }}</span><span class="font-mono">{{ eventBus.state.subscriptions }}</span></div>
+        <div class="flex justify-between gap-4"><span class="text-muted-foreground">{{ t("realtime.transport") }}</span><span class="font-mono">{{ eventBus.state.transport }}</span></div>
         <div class="flex justify-between gap-4"><span class="text-muted-foreground">{{ t("realtime.lastEvent") }}</span><span class="text-right">{{ eventBus.state.enabled && eventBus.state.lastRemoteEventAt ? formatDate(eventBus.state.lastRemoteEventAt) : "—" }}</span></div>
       </div>
 

@@ -81,7 +81,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) window.dispatchEvent(new CustomEvent("management:auth-expired"))
       let detail = `Management API request failed: ${response.status}`
-      try { const body = await response.json() as { detail?: string }; if (body.detail) detail = body.detail } catch { /* no json */ }
+      try {
+        const body = await response.json() as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
+        const message = body.error?.message ?? body.detail
+        if (typeof message === "string" && message) detail = message
+        else if (message !== undefined) detail = JSON.stringify(message)
+      } catch { /* no json */ }
       notifications.error(`${response.status} · ${String(i18n.global.t("notifications.apiError"))}`, `${method} ${new URL(path, location.origin).pathname} — ${detail}`, `api:${response.status}:${method}:${new URL(path, location.origin).pathname}`)
       throw new Error(detail)
     }
@@ -132,8 +137,11 @@ export const managementApi = {
   releaseAnalysisProject: (id: string): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/release`, { method: "POST", body: "{}" }),
   deleteAnalysisProject: (id: string): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
   setAnalysisWorker: (index: number, enabled: boolean): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}`, { method: "PUT", body: jsonBody({ enabled }) }),
+  clearAnalysisWorkerQueue: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/clear-queue`, { method: "POST", body: "{}" }),
+  recoverAnalysisWorker: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/recover`, { method: "POST", body: "{}" }),
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
-  browserTicket: (): Promise<{ ticket: string }> => request("/api/browser/ticket"),
+  browserState: (): Promise<Record<string, unknown>> => request("/api/browser/state"),
+  setBrowserViewport: (pageId: string, width: number, height: number): Promise<Record<string, unknown>> => request("/api/browser/viewport", { method: "PUT", body: jsonBody({ page_id: pageId, width, height }) }),
   settings: (): Promise<SettingsState> => request("/api/settings"),
   updateSettings: (payload: object): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
   cleanupLogs: (): Promise<{ removed: number }> => request("/api/settings/cleanup-logs", { method: "POST", body: "{}" }),

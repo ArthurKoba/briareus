@@ -10,6 +10,7 @@ import { eventBus } from "@/shared/events/bus"
 import { setLocale } from "@/shared/i18n"
 import { uiPreferences } from "@/shared/lib/preferences"
 import { notifications } from "@/shared/notifications/bus"
+import { frontendTelemetry } from "@/shared/telemetry/client"
 import Button from "@/shared/ui/Button.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 import SectionTabs from "@/shared/ui/SectionTabs.vue"
@@ -145,7 +146,7 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
       <label class="setting-row">
         <span><b>{{ t("settings.eventBus") }}</b><small>{{ t("settings.eventBusHint") }}</small></span>
         <div class="flex items-center gap-3">
-          <span class="rounded-md bg-muted px-2 py-1 font-mono text-xs">{{ eventBus.state.status }} · {{ eventBus.state.subscriptions }}</span>
+          <span class="rounded-md bg-muted px-2 py-1 font-mono text-xs">{{ eventBus.state.status }} · {{ eventBus.state.transport }} · {{ eventBus.state.subscriptions }}</span>
           <Switch :checked="eventBus.state.enabled" @change="eventBus.setEnabled(Boolean($event))" />
         </div>
       </label>
@@ -156,7 +157,7 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
       <div class="setting-row">
         <span><b>{{ t("settings.telemetryDelivery") }}</b><small>{{ t("settings.telemetryDeliveryHint") }}</small></span>
         <span class="text-right text-xs">
-          <b>{{ runtimeConfig.telemetry.enabled ? t("common.enabled") : t("common.disabled") }}</b><br />
+          <b>{{ frontendTelemetry.delivery.status }}</b><br />
           <span class="text-muted-foreground">{{ runtimeConfig.telemetry.endpoint }}</span>
         </span>
       </div>

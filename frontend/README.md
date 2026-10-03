@@ -58,18 +58,18 @@ Current frontend infrastructure includes:
 
 ### Frontend telemetry contract
 
-The browser must never receive an OTLP/Bearer secret. When telemetry is enabled it sends sanitized events to the same-origin endpoint configured by `MANAGEMENT_UI_TELEMETRY_ENDPOINT` (default `/api/client-telemetry`) using the existing authenticated browser session.
+The browser must never receive an OTLP/Bearer secret. When telemetry is enabled it sends sanitized events to the same-origin endpoint configured by `MANAGEMENT_UI_TELEMETRY_ENDPOINT` (default `/api/telemetry`) using the existing authenticated browser session.
 
-The future gateway/backend contract is responsible for authenticating the management session and forwarding accepted telemetry to the infrastructure telemetry endpoint using server-owned authorization. Passwords, cookies, authorization headers, account credentials, request bodies and other sensitive payload fields are filtered by the frontend telemetry facade and must also be rejected/redacted server-side.
+The management backend authenticates the browser session and forwards accepted telemetry to the infrastructure telemetry endpoint using server-owned authorization. Passwords, cookies, authorization headers, account credentials, request bodies and other sensitive payload fields are filtered by the frontend telemetry facade and must also be rejected/redacted server-side.
 
 Runtime variables:
 
-- `MANAGEMENT_UI_TELEMETRY_ENABLED=false`;
-- `MANAGEMENT_UI_TELEMETRY_ENDPOINT=/api/client-telemetry`;
+- `MANAGEMENT_UI_TELEMETRY_ENABLED=true`;
+- `MANAGEMENT_UI_TELEMETRY_ENDPOINT=/api/telemetry`;
 - `MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE=1`;
 - `MANAGEMENT_UI_EVENTS_MODE=hybrid` (`mock`, `hybrid`, or `websocket`);
-- `MANAGEMENT_UI_EVENTS_URL=/events/ws`.
+- `MANAGEMENT_UI_EVENTS_URL=/api/realtime`.
 
-`hybrid` keeps the existing MCP Calls SSE transport behind the shared event-bus API while other future topics remain mockable. Once the unified backend WebSocket is implemented, deployment can switch to `websocket` without rewriting pages.
+`hybrid` uses the unified management WebSocket as the primary transport and retains the existing MCP Calls SSE stream only as a compatibility fallback during migration. Deployment may switch to `websocket` after the fallback is no longer required.
 
 The implementation roadmap and backend follow-ups are tracked in GitHub issue #233.

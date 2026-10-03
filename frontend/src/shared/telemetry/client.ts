@@ -4,6 +4,7 @@ import { runtimeConfig } from "@/shared/config/runtime"
 import { uiPreferences } from "@/shared/lib/preferences"
 
 export type TelemetryLevel = "debug" | "info" | "warn" | "error"
+export type TelemetryDeliveryStatus = "disabled" | "idle" | "sending" | "delivered" | "retrying" | "error"
 
 export interface FrontendTelemetryEvent {
   id: string
@@ -17,14 +18,26 @@ export interface FrontendTelemetryEvent {
 
 const buffer = reactive<FrontendTelemetryEvent[]>([])
 const pending: FrontendTelemetryEvent[] = []
+const delivery = reactive({
+  status: (runtimeConfig.telemetry.enabled ? "idle" : "disabled") as TelemetryDeliveryStatus,
+  pending: 0,
+  lastSuccessAt: "",
+  lastError: "",
+  retryAt: "",
+})
 const MAX_BUFFER = 500
 const MAX_BATCH = 40
+const MAX_PENDING = MAX_BATCH * 5
 const FLUSH_INTERVAL_MS = 5000
+const MAX_BACKOFF_MS = 60000
 const SENSITIVE_KEY = /(password|passwd|credential|token|cookie|authorization|secret|payload|body|private[_-]?key)/i
 const SECRET_ASSIGNMENT = /(password|passwd|credential|token|cookie|authorization|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+\-/]+=*/gi
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g
 const PROVIDER_TOKEN = /\b(?:ghp_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{12,}\b/g
+let failures = 0
+let nextAttemptAt = 0
+let flushing = false
 
 function redactText(value: string): string {
   if (/-----BEGIN [^-]*PRIVATE KEY-----/i.test(value)) return "[redacted private key]"
@@ -74,16 +87,47 @@ function sampled(): boolean {
   return Math.random() <= sampleRate
 }
 
+function syncDeliveryState(): void {
+  delivery.pending = pending.length
+  if (!runtimeConfig.telemetry.enabled || !telemetryEndpoint()) delivery.status = "disabled"
+}
+
 function queue(item: FrontendTelemetryEvent): void {
   if (!uiPreferences.telemetryEnabled.value || !runtimeConfig.telemetry.enabled || !sampled() || !telemetryEndpoint()) return
   pending.push(item)
+  if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING)
+  syncDeliveryState()
   if (pending.length >= MAX_BATCH) void flush()
+}
+
+function retryDelay(response?: Response): number {
+  const retryAfter = response?.headers.get("retry-after")
+  if (retryAfter) {
+    const seconds = Number(retryAfter)
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(MAX_BACKOFF_MS, seconds * 1000)
+  }
+  return Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(failures, 6))
+}
+
+function markFailure(message: string, response?: Response): void {
+  failures += 1
+  const delay = retryDelay(response)
+  nextAttemptAt = Date.now() + delay
+  delivery.status = "retrying"
+  delivery.lastError = redactText(message)
+  delivery.retryAt = new Date(nextAttemptAt).toISOString()
 }
 
 async function flush(): Promise<void> {
   const endpoint = telemetryEndpoint()
-  if (!runtimeConfig.telemetry.enabled || !endpoint || !pending.length) return
+  syncDeliveryState()
+  if (!runtimeConfig.telemetry.enabled || !endpoint || !pending.length || flushing) return
+  if (Date.now() < nextAttemptAt) return
+
   const events = pending.splice(0, MAX_BATCH)
+  flushing = true
+  delivery.status = "sending"
+  delivery.pending = pending.length
   try {
     const response = await fetch(endpoint, {
       method: "POST",
@@ -92,11 +136,31 @@ async function flush(): Promise<void> {
       body: JSON.stringify({ events }),
       keepalive: true,
     })
-    if (!response.ok) pending.unshift(...events)
-  } catch {
+    if (!response.ok) {
+      pending.unshift(...events)
+      if (response.status === 401 || response.status === 403) {
+        delivery.status = "error"
+        delivery.lastError = `HTTP ${response.status}`
+        window.dispatchEvent(new CustomEvent("management:auth-expired"))
+      } else {
+        markFailure(`HTTP ${response.status}`, response)
+      }
+      return
+    }
+    failures = 0
+    nextAttemptAt = 0
+    delivery.status = "delivered"
+    delivery.lastSuccessAt = new Date().toISOString()
+    delivery.lastError = ""
+    delivery.retryAt = ""
+  } catch (caught) {
     pending.unshift(...events)
+    markFailure(caught instanceof Error ? caught.message : String(caught))
+  } finally {
+    if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING)
+    delivery.pending = pending.length
+    flushing = false
   }
-  if (pending.length > MAX_BATCH * 5) pending.splice(0, pending.length - MAX_BATCH * 5)
 }
 
 function flushBeacon(): void {
@@ -108,6 +172,7 @@ function flushBeacon(): void {
     new Blob([JSON.stringify({ events })], { type: "application/json" }),
   )
   if (!accepted) pending.unshift(...events)
+  delivery.pending = pending.length
 }
 
 function event(
@@ -150,10 +215,12 @@ document.addEventListener("visibilitychange", () => {
 
 export const frontendTelemetry = {
   events: readonly(buffer),
+  delivery: readonly(delivery),
   event,
   error,
   flush,
   get pendingCount() { return pending.length },
+  get deliveryConfigured() { return runtimeConfig.telemetry.enabled && Boolean(telemetryEndpoint()) },
   api(path: string, method: string, status: number, durationMs: number) {
     return event("api.request", { path: safeApiPath(path), method, status }, {
       level: status >= 500 ? "error" : status >= 400 ? "warn" : "info",
@@ -161,5 +228,7 @@ export const frontendTelemetry = {
     })
   },
   navigation(id: string) { return event("navigation", { page: id }) },
-  websocket(state: string, topic?: string) { return event("realtime.websocket", { state, topic: topic ?? null }) },
+  websocket(state: string, topic?: string, transport?: string) {
+    return event("realtime.websocket", { state, topic: topic ?? null, transport: transport ?? null })
+  },
 }
