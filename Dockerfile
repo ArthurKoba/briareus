@@ -21,6 +21,21 @@ RUN uv sync --frozen --no-dev --no-install-project
 FROM node:22-bookworm-slim AS chrome-devtools-mcp
 RUN npm install --global --prefix /opt/chrome-devtools-mcp chrome-devtools-mcp@1.10.1
 
+FROM oven/bun:1.4.2-alpine AS management-ui-build
+WORKDIR /app
+COPY frontend/package.json ./
+RUN bun install
+COPY frontend ./
+RUN bun run build
+
+FROM nginx:1.28-alpine AS management-ui
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=management-ui-build /app/dist /usr/share/nginx/html/admin
+EXPOSE 8080
+HEALTHCHECK --interval=2s --timeout=1s --start-period=1s --retries=10 \
+    CMD ["wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+
+
 FROM dependencies AS runtime-base
 
 ARG BUILD_SHA=unknown

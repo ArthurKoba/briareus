@@ -69,6 +69,7 @@ def test_bridge_settings_use_canonical_backends_by_default(monkeypatch) -> None:
         "GHIDRA_URL",
         "TERMINAL_URL",
         "OBSERVABILITY_URL",
+        "MANAGEMENT_UI_URL",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -82,6 +83,7 @@ def test_bridge_settings_use_canonical_backends_by_default(monkeypatch) -> None:
         "terminal": "http://terminal:8000/mcp",
         "observability": "http://observability:8000/mcp",
     }
+    assert BridgeSettings().management_ui_url == "http://management-ui:8080"
 
 
 def test_bridge_build_sha_uses_coolify_source_commit(monkeypatch) -> None:

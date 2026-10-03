@@ -172,6 +172,10 @@ class BridgeSettings(ProcessSettings):
         "http://observability:8000/mcp",
         validation_alias="OBSERVABILITY_URL",
     )
+    management_ui_url: str = Field(
+        "http://management-ui:8080",
+        validation_alias="MANAGEMENT_UI_URL",
+    )
     build_sha: str = Field(
         "unknown",
         validation_alias=AliasChoices("BUILD_SHA", "SOURCE_COMMIT"),
@@ -195,6 +199,7 @@ class BridgeSettings(ProcessSettings):
         "ghidra_url",
         "terminal_url",
         "observability_url",
+        "management_ui_url",
         "build_sha",
         "build_time",
         mode="before",
