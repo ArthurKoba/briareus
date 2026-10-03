@@ -113,6 +113,13 @@ cache when an immediate schema refresh is required.
 The multi-stage Dockerfile keeps rebuilds fast by installing locked dependencies before
 copying runtime-specific source trees, so unchanged stages reuse the local Docker cache.
 
+Valkey is the private shared cache for account resolution and runtime/system settings. It is
+not a source of truth: Management remains authoritative, cache failures fall back to Management,
+and account/settings mutations invalidate or replace cached values. The production Valkey
+container is memory-only (no RDB/AOF volume and no published port). Resolved account entries may
+contain provider credentials, so they are short-lived and remain only inside the private Compose
+network and process/cache memory.
+
 See `deploy/coolify/README.md` for production configuration and failure-isolation rules.
 
 ## Locked Python dependencies

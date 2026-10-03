@@ -12,8 +12,9 @@ from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.websockets import WebSocket
 
+from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
-from common.settings import FileSettings, ManagementSettings
+from common.settings import FileSettings, ManagementSettings, ValkeySettings
 from common.websocket_proxy import relay_websocket
 from management.application.services import (
     AccountService,
@@ -58,6 +59,8 @@ engine, sessions = create_database(settings.database_url)
 if ensure_zero_state_schema(engine):
     logger.info("management schema initialized missing tables")
 
+cache_settings = ValkeySettings()
+shared_cache = SharedCache(cache_settings)
 cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
@@ -65,13 +68,23 @@ config_repository = SqlAlchemyManagementConfigRepository(sessions)
 runtime_settings_repository = SqlAlchemyRuntimeSettingsRepository(sessions)
 oauth_session_repository = SqlAlchemyOAuthSessionRepository(sessions)
 snapshot_repository = SqlAlchemySnapshotRepository(sessions)
-config_service = ManagementConfigService(config_repository)
-runtime_settings = RuntimeSettingsService(runtime_settings_repository)
+config_service = ManagementConfigService(
+    config_repository, cache=shared_cache, cache_settings=cache_settings
+)
+runtime_settings = RuntimeSettingsService(
+    runtime_settings_repository, cache=shared_cache, cache_settings=cache_settings
+)
 oauth_sessions = OAuthSessionService(oauth_session_repository)
 snapshots = SnapshotService(snapshot_repository)
 config_service.get()
-accounts = AccountService(account_repository, cipher, ProviderConnectionVerifier())
-audit = InvocationAuditService(invocation_repository)
+accounts = AccountService(
+    account_repository,
+    cipher,
+    ProviderConnectionVerifier(),
+    cache=shared_cache,
+    cache_settings=cache_settings,
+)
+audit = InvocationAuditService(invocation_repository, config_service)
 files = FileAdminStore(FileSettings())
 reverse = ReverseAdminClient()
 snapshot_refresher = SnapshotRefresher(snapshots, files, reverse)
