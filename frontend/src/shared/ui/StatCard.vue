@@ -1,0 +1,2 @@
+<script setup lang="ts">defineProps<{ label: string; value: string | number; hint?: string }>()</script>
+<template><section class="rounded-xl border border-border bg-card p-4 shadow-sm"><div class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{{ label }}</div><div class="mt-2 text-2xl font-semibold tracking-tight">{{ value }}</div><div v-if="hint" class="mt-1 text-xs text-muted-foreground">{{ hint }}</div></section></template>
