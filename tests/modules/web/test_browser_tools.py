@@ -142,13 +142,50 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         color_depth=24,
         xvfb_enabled=True,
         timezone="Europe/Moscow",
+        posix_locale="ru_RU.UTF-8",
     )
 
     command = browser._browser_command()
+    process_command = browser._browser_process_command()
 
     assert "--headless=new" not in command
     assert "--lang=ru-RU" in command
     assert "--accept-lang=ru-RU,ru,en-US,en" in command
     assert "--window-size=1440,900" in command
+    assert process_command[:5] == [
+        "/usr/bin/env",
+        "DISPLAY=:99",
+        "TZ=Europe/Moscow",
+        "LANG=ru_RU.UTF-8",
+        "LC_ALL=ru_RU.UTF-8",
+    ]
     assert browser.display == ":99"
     assert browser.timezone == "Europe/Moscow"
+    assert browser.posix_locale == "ru_RU.UTF-8"
+
+
+def test_browser_timezone_blank_env_falls_back_to_moscow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from common.settings import BrowserSettings
+
+    monkeypatch.setenv("TZ", "")
+    monkeypatch.delenv("BROWSER_TIMEZONE", raising=False)
+    settings = BrowserSettings()
+
+    assert settings.timezone == "Europe/Moscow"
+
+
+def test_browser_specific_environment_aliases_take_priority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from common.settings import BrowserSettings
+
+    monkeypatch.setenv("TZ", "UTC")
+    monkeypatch.setenv("DISPLAY", ":1")
+    monkeypatch.setenv("BROWSER_TIMEZONE", "Europe/Moscow")
+    monkeypatch.setenv("BROWSER_DISPLAY", ":99")
+    settings = BrowserSettings()
+
+    assert settings.timezone == "Europe/Moscow"
+    assert settings.display == ":99"

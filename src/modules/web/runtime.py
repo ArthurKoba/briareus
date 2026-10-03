@@ -44,6 +44,7 @@ _browser = BrowserManager(
     color_depth=_browser_settings.color_depth,
     xvfb_enabled=_browser_settings.xvfb_enabled,
     timezone=_browser_settings.timezone,
+    posix_locale=_browser_settings.posix_locale,
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
 )

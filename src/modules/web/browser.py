@@ -44,6 +44,7 @@ class BrowserManager:
         color_depth: int = 24,
         xvfb_enabled: bool = True,
         timezone: str = "Europe/Moscow",
+        posix_locale: str = "ru_RU.UTF-8",
     ) -> None:
         self.workspace = workspace
         self.profile_dir = profile_dir.resolve(strict=False)
@@ -57,7 +58,8 @@ class BrowserManager:
         self.display = display.strip()
         self.color_depth = color_depth
         self.xvfb_enabled = xvfb_enabled
-        self.timezone = timezone.strip()
+        self.timezone = timezone.strip() or "Europe/Moscow"
+        self.posix_locale = posix_locale.strip()
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
         self._playwright: Playwright | None = None
@@ -211,6 +213,21 @@ class BrowserManager:
         command.append("about:blank")
         return command
 
+    def _browser_process_command(self) -> list[str]:
+        environment = ["/usr/bin/env"]
+        if not self.headless and self.display:
+            environment.append(f"DISPLAY={self.display}")
+        if self.timezone:
+            environment.append(f"TZ={self.timezone}")
+        if self.posix_locale:
+            environment.extend(
+                [
+                    f"LANG={self.posix_locale}",
+                    f"LC_ALL={self.posix_locale}",
+                ]
+            )
+        return [*environment, *self._browser_command()]
+
     async def _ensure_display_locked(self) -> str:
         if self.headless:
             return ""
@@ -252,7 +269,7 @@ class BrowserManager:
 
         await self._ensure_display_locked()
         playwright = await async_playwright().start()
-        command = self._browser_command()
+        command = self._browser_process_command()
         process: asyncio.subprocess.Process | None = None
         browser: Browser | None = None
         try:
@@ -441,6 +458,7 @@ class BrowserManager:
             "display": "" if self.headless else self.display,
             "xvfb_enabled": self.xvfb_enabled,
             "timezone": self.timezone,
+            "posix_locale": self.posix_locale,
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "page_count": len(pages),
