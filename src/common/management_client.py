@@ -9,6 +9,7 @@ from opentelemetry import trace
 
 from .account_contracts import (
     AccountList,
+    GitHubAuthenticatedReaderSync,
     InvocationEvent,
     InvocationEventBatch,
     ResolvedAccount,
@@ -181,6 +182,22 @@ class ManagementClient:
                 ttl_seconds=self.cache_settings.account_ttl_seconds,
             )
         return account
+
+    def sync_github_authenticated_reader(self, token: str, *, login: str) -> JsonObject:
+        payload = GitHubAuthenticatedReaderSync(token=token, login=login)
+        result = self._request(
+            "PUT",
+            "/internal/accounts/github/authenticated-reader",
+            payload=json_object(
+                payload.model_dump(mode="json"),
+                context="GitHub authenticated reader sync",
+            ),
+        )
+        self.cache.delete(
+            self.cache_keys.account_list("github"),
+            self.cache_keys.account("github", "authenticated"),
+        )
+        return result
 
     def record_invocation(self, event: InvocationEvent) -> None:
         self.record_invocations([event])

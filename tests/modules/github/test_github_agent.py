@@ -333,12 +333,14 @@ def test_authenticated_public_checkout_uses_reader_credentials(monkeypatch) -> N
         }
 
     monkeypatch.setattr("modules.github.github_agent.checkout_repository", fake_checkout)
+    monkeypatch.setattr(GitHubAppClient, "_assert_public_repository", lambda self, repository: None)
     client = GitHubAppClient(
         account_id="public",
         auth_type="public",
         public_only=True,
         token="reader-token",
     )
+    monkeypatch.setattr(client, "_assert_public_repository", lambda _repository: None)
 
     client.checkout_repository("octocat/Hello-World", "repos/hello", mode="git")
 
@@ -448,3 +450,45 @@ def test_rate_limit_error_includes_bucket_reset_and_retry_after() -> None:
     assert "auth_mode=user_token" in message
     assert "remaining=0" in message
     assert "retry_after_seconds=60" in message
+
+
+def test_public_authenticated_reader_rejects_private_repository_before_contents() -> None:
+    calls: list[str] = []
+
+    class PrivateReaderClient(GitHubAppClient):
+        def _request(
+            self,
+            method: str,
+            url: str,
+            *,
+            token: str | None = None,
+            payload: object | None = None,
+            allowed_errors: set[int] | None = None,
+            auth_mode: str = "",
+        ) -> tuple[int, object]:
+            del method, token, payload, allowed_errors, auth_mode
+            calls.append(url)
+            return 200, {
+                "full_name": "private-owner/repo",
+                "default_branch": "main",
+                "private": True,
+                "archived": False,
+                "fork": False,
+            }
+
+    client = PrivateReaderClient(
+        account_id="public",
+        auth_type="public",
+        public_only=True,
+        token="reader-token",
+        public_reader_account="authenticated",
+    )
+
+    with pytest.raises(GitHubAgentError, match="cannot read private"):
+        client._repo_request(
+            "private-owner/repo",
+            "GET",
+            "/repos/private-owner/repo/contents/README.md",
+        )
+
+    assert calls == ["https://api.github.com/repos/private-owner/repo"]
