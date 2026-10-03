@@ -250,7 +250,7 @@ class BrowserManager:
             (self.profile_dir / lock_name).unlink(missing_ok=True)
         from playwright.async_api import async_playwright
 
-        display = await self._ensure_display_locked()
+        await self._ensure_display_locked()
         playwright = await async_playwright().start()
         command = self._browser_command()
         process: asyncio.subprocess.Process | None = None
