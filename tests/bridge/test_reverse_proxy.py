@@ -187,3 +187,48 @@ async def test_reverse_proxy_forwards_public_origin_headers(
     assert captured["host"] == "mcp.koba-nexus.ru"
     assert captured["x-forwarded-host"] == "mcp.koba-nexus.ru"
     assert captured["x-forwarded-proto"] == "https"
+
+
+@pytest.mark.asyncio
+async def test_reverse_proxy_reuses_one_http_client_across_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = {"clients": 0, "requests": 0, "closed": 0}
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            state["clients"] += 1
+
+        async def request(self, *args: object, **kwargs: object) -> httpx.Response:
+            del args, kwargs
+            state["requests"] += 1
+            request = httpx.Request("GET", "http://management:8000/admin")
+            return httpx.Response(200, request=request)
+
+        async def aclose(self) -> None:
+            state["closed"] += 1
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    proxy = ReverseProxy("http://management:8000", backend_name="management")
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/admin",
+        "raw_path": b"/admin",
+        "query_string": b"",
+        "headers": [(b"host", b"mcp.koba-nexus.ru")],
+        "client": ("127.0.0.1", 1234),
+        "server": ("mcp.koba-nexus.ru", 443),
+        "http_version": "1.1",
+    }
+
+    assert (await proxy.handle(Request(scope, receive=receive))).status_code == 200
+    assert (await proxy.handle(Request(scope, receive=receive))).status_code == 200
+    await proxy.close()
+
+    assert state == {"clients": 1, "requests": 2, "closed": 1}

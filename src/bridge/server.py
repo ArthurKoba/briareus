@@ -364,6 +364,7 @@ _MCP_HTTP_APPS = (
     _observability_http_app,
 )
 _MCP_LIFESPANS = tuple(mcp_app.router.lifespan_context for mcp_app in _MCP_HTTP_APPS)
+_REVERSE_PROXIES: list[ReverseProxy] = []
 
 
 @asynccontextmanager
@@ -375,6 +376,10 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
             yield
         finally:
             await _backend_router.close()
+            await asyncio.gather(
+                *(proxy.close() for proxy in _REVERSE_PROXIES),
+                return_exceptions=True,
+            )
 
 
 app = Starlette(lifespan=_gateway_lifespan)
@@ -384,6 +389,7 @@ for _route in _resource_discovery_routes():
 
 if _auth_settings.enabled:
     _auth_proxy = _build_auth_reverse_proxy()
+    _REVERSE_PROXIES.append(_auth_proxy)
     for _path in _AUTH_PROXY_PATHS:
         app.add_route(_path, _auth_proxy.handle, methods=_PROXY_METHODS)
 
@@ -411,6 +417,7 @@ async def _admin_browser_websocket(websocket: WebSocket) -> None:
 
 
 _admin_proxy = ReverseProxy(_management_settings.url, backend_name="management")
+_REVERSE_PROXIES.append(_admin_proxy)
 app.router.routes.append(WebSocketRoute("/admin/browser/ws", _admin_browser_websocket))
 app.add_route("/admin", _admin_proxy.handle, methods=_PROXY_METHODS)
 app.add_route("/admin/{path:path}", _admin_proxy.handle, methods=_PROXY_METHODS)

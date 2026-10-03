@@ -4,8 +4,12 @@ from collections.abc import Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
+
+_TRACER = trace.get_tracer("mcp-bridge.reverse-proxy")
 
 _HOP_BY_HOP = {
     "connection",
@@ -23,6 +27,18 @@ class ReverseProxy:
     def __init__(self, base_url: str, *, backend_name: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.backend_name = backend_name
+        self._client = httpx.AsyncClient(
+            follow_redirects=False,
+            timeout=30,
+            limits=httpx.Limits(
+                max_connections=32,
+                max_keepalive_connections=16,
+                keepalive_expiry=30,
+            ),
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     @staticmethod
     def _request_headers(request: Request) -> dict[str, str]:
@@ -93,19 +109,28 @@ class ReverseProxy:
         target = self.base_url + request.url.path
         if request.url.query:
             target += "?" + request.url.query
-        try:
-            async with httpx.AsyncClient(follow_redirects=False, timeout=30) as client:
-                response = await client.request(
+        with _TRACER.start_as_current_span(
+            "gateway.reverse_proxy",
+            kind=SpanKind.CLIENT,
+            attributes={
+                "mcp.backend": self.backend_name,
+                "http.request.method": request.method,
+            },
+        ) as span:
+            try:
+                response = await self._client.request(
                     request.method,
                     target,
                     content=await request.body(),
                     headers=self._request_headers(request),
                 )
-        except httpx.RequestError:
-            return PlainTextResponse(
-                f"{self.backend_name} backend unavailable",
-                status_code=502,
-            )
+            except httpx.RequestError as exc:
+                span.record_exception(exc)
+                return PlainTextResponse(
+                    f"{self.backend_name} backend unavailable",
+                    status_code=502,
+                )
+            span.set_attribute("http.response.status_code", response.status_code)
 
         return Response(
             content=response.content,
