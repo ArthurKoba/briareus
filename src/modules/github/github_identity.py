@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import subprocess
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +15,6 @@ from common.models import (
     json_str,
     json_value,
 )
-from common.repository_checkout import RepositoryCheckoutError, push_repository
 from common.settings import GitHubPolicySettings
 
 from .github_actions import GitHubActionsClient
@@ -239,10 +237,51 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             raise GitHubAgentError(
                 f"workspace remote {remote!r} does not match repository {repository!r}: {current}"
             )
+
+        token = self.token or self._installation_token(repository)
         signature = self._git_signature()
+        git_dir = target / ".git"
+        credential_file = git_dir / "koba-credentials"
+        credential_file.write_text(
+            f"https://x-access-token:{token}@github.com/{repository}.git\n",
+            encoding="utf-8",
+        )
+        credential_file.chmod(0o600)
+
+        hook = git_dir / "hooks" / "pre-push"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        marker = "# koba-managed-local-git-guard"
+        if hook.exists():
+            existing = hook.read_text(encoding="utf-8", errors="replace")
+            if marker not in existing:
+                raise GitHubAgentError(
+                    "existing pre-push hook is not managed by Koba; refusing to overwrite it"
+                )
+        reserved = " ".join(sorted(self.protected_branches))
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"{marker}\n"
+            "set -eu\n"
+            f'reserved=" {reserved} "\n'
+            "while read local_ref local_oid remote_ref remote_oid; do\n"
+            '  case "$remote_ref" in\n'
+            "    refs/heads/*) branch=${remote_ref#refs/heads/} ;;\n"
+            "    *) continue ;;\n"
+            "  esac\n"
+            '  case "$reserved" in\n'
+            '    *" $branch "*) echo "push to reserved branch denied: $branch" >&2; exit 1 ;;\n'
+            "  esac\n"
+            "done\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o700)
+
+        helper = f"store --file={credential_file}"
         self._git_output(target, "config", "--local", "user.name", signature["name"])
         self._git_output(target, "config", "--local", "user.email", signature["email"])
         self._git_output(target, "config", "--local", f"remote.{remote}.url", expected)
+        self._git_output(target, "config", "--local", "credential.helper", helper)
+        self._git_output(target, "config", "--local", "credential.useHttpPath", "true")
         self._git_output(target, "config", "--local", "koba.github.repository", repository)
         self._git_output(target, "config", "--local", "koba.github.accountId", self.account_id)
         self._git_output(target, "config", "--local", "koba.github.transportAuthorized", "true")
@@ -255,10 +294,12 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             "remote_url": expected,
             "branch": branch,
             "account_id": self.account_id,
-            "credential_storage": "none",
-            "push_mode": "github_mcp_git_transport",
+            "credential_storage": "git_credential_store",
+            "credential_file": credential_file.relative_to(target).as_posix(),
+            "push_mode": "ordinary_git",
             "warning": (
-                "Experimental local Git transport. Existing GitHub mutation tools remain "
+                "Experimental local Git transport. Re-authorize the workspace when the "
+                "short-lived GitHub credential expires. Existing GitHub mutation tools remain "
                 "available until this path is fully accepted."
             ),
         }
@@ -300,21 +341,12 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
         if not push_branch:
             raise GitHubAgentError("cannot push a detached HEAD; specify a local branch")
         self._assert_branch_mutation_allowed(repository, push_branch)
-        token = self.token or self._installation_token(repository)
-        encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
-        try:
-            pushed = push_repository(
-                target,
-                remote=remote,
-                branch=push_branch,
-                auth_scope="https://github.com/",
-                auth_header=f"Authorization: Basic {encoded}",
-                set_upstream=set_upstream,
-            )
-        except RepositoryCheckoutError as exc:
-            raise GitHubAgentError(str(exc)) from exc
-        head = str(pushed["head"])
-        output = str(pushed["git_output"])
+        args = ["push", "--porcelain"]
+        if set_upstream:
+            args.append("--set-upstream")
+        args += [remote, f"HEAD:refs/heads/{push_branch}"]
+        output = self._git_output(target, *args)
+        head = self._git_output(target, "rev-parse", "HEAD")
         return {
             "pushed": True,
             "repository": repository,
