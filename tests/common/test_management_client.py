@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from common.account_contracts import AccountList, AccountPublic
+from common.account_contracts import AccountList, AccountPublic, InvocationEvent
 from common.management_client import ManagementClient, ManagementClientError
 from common.models import JsonValue
 from common.settings import ManagementClientSettings
@@ -108,6 +108,8 @@ class _CachingClient(ManagementClient):
                 "max_exec_timeout_seconds": 100,
                 "max_job_runtime_seconds": 200,
             }
+        if path == "/internal/events/batch":
+            return {}
         raise AssertionError(path)
 
 
@@ -137,3 +139,20 @@ def test_management_client_caches_account_lists_and_runtime_policies() -> None:
         "/internal/runtime-settings/mcp",
         "/internal/runtime-settings/terminal",
     ]
+
+
+def test_management_client_batches_invocation_events_into_one_request() -> None:
+    client = _CachingClient()
+    events = [
+        InvocationEvent(
+            module="github",
+            tool=f"tool_{index}",
+            status="success",
+            duration_ms=1.0,
+        )
+        for index in range(3)
+    ]
+
+    client.record_invocations(events)
+
+    assert client.calls == ["/internal/events/batch"]

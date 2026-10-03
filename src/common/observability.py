@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import queue
 import threading
 import time
 import urllib.parse
@@ -27,6 +28,7 @@ from .management_client import ManagementClient
 from .settings import ObservabilitySettings
 
 logger = logging.getLogger("mcp_bridge.observability")
+_AUDIT_TRACER = trace.get_tracer("mcp-bridge.management-audit")
 if not logger.handlers:
     _console_handler = logging.StreamHandler()
     _console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
@@ -115,10 +117,25 @@ class CompositeObservabilitySink(ObservabilitySink):
 
 
 class ManagementAuditSink(ObservabilitySink):
-    """Persist redacted invocation history in Management for operator audit."""
+    """Batch redacted invocation history into Management without blocking tool calls."""
+
+    _MAX_BATCH = 32
+    _MAX_QUEUE = 1024
+    _BATCH_WINDOW_SECONDS = 0.05
 
     def __init__(self, management: ManagementClient) -> None:
         self.management = management
+        self._queue: queue.Queue[tuple[InvocationEvent, float]] = queue.Queue(
+            maxsize=self._MAX_QUEUE
+        )
+        self._stop = threading.Event()
+        self._worker = threading.Thread(
+            target=self._run,
+            name="management-audit-batch",
+            daemon=True,
+        )
+        self._worker.start()
+        atexit.register(self.close)
 
     def record_runtime_started(self, scope: str) -> None:
         del scope
@@ -132,8 +149,60 @@ class ManagementAuditSink(ObservabilitySink):
         *,
         audit: bool = True,
     ) -> None:
-        if audit:
-            self.management.record_invocation(event)
+        if not audit or self._stop.is_set():
+            return
+        try:
+            self._queue.put_nowait((event, time.monotonic()))
+        except queue.Full:
+            logger.warning(
+                "Management audit queue full; dropping event scope=%s tool=%s",
+                event.module,
+                event.tool,
+            )
+
+    def _run(self) -> None:
+        while not self._stop.is_set() or not self._queue.empty():
+            try:
+                first = self._queue.get(timeout=self._BATCH_WINDOW_SECONDS)
+            except queue.Empty:
+                continue
+            batch = [first]
+            deadline = time.monotonic() + self._BATCH_WINDOW_SECONDS
+            while len(batch) < self._MAX_BATCH:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    batch.append(self._queue.get(timeout=remaining))
+                except queue.Empty:
+                    break
+            events = [item[0] for item in batch]
+            oldest_wait_ms = (time.monotonic() - batch[0][1]) * 1000
+            try:
+                with _AUDIT_TRACER.start_as_current_span(
+                    "management.audit.batch",
+                    kind=SpanKind.INTERNAL,
+                    attributes={
+                        "audit.batch.size": len(events),
+                        "audit.queue.depth": self._queue.qsize(),
+                        "audit.queue.oldest_wait_ms": oldest_wait_ms,
+                    },
+                ):
+                    self.management.record_invocations(events)
+            except Exception:
+                logger.exception(
+                    "Management audit batch failed count=%d",
+                    len(events),
+                )
+            finally:
+                for _ in batch:
+                    self._queue.task_done()
+
+    def close(self) -> None:
+        if self._stop.is_set():
+            return
+        self._stop.set()
+        self._worker.join(timeout=1.0)
 
     def trace_span(
         self,

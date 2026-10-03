@@ -242,3 +242,10 @@ SigNoz-backed tools provide runtime logs, traces, metrics/query access, service 
 field discovery. Coolify-backed tools provide application and deployment state. Coolify runtime
 logs, environment variables, secrets and all deploy/restart/mutation operations are deliberately
 absent; runtime diagnostics belong to the SigNoz side of the same Observability interface.
+
+Hot-path telemetry distinguishes cache/Management access, backend MCP session reuse, provider
+HTTP latency and connection-pool wait, and Management repository operations. Management audit
+delivery is batched through a bounded in-memory queue: each MCP call remains an individual audit
+record and metric event, while short batches share one internal HTTP request and one SQL
+transaction. Sensitive arguments, credentials, authorization headers, full request URLs and
+cache keys are not exported as span attributes.

@@ -5,8 +5,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
 from common.account_contracts import ResolvedAccount
 from common.models import JsonObject, JsonValue, json_loads, json_object, json_object_list
+
+_TRACER = trace.get_tracer("mcp-bridge.provider.coolify")
 
 
 class CoolifyClientError(RuntimeError):
@@ -94,18 +99,29 @@ class CoolifyClient:
                 "User-Agent": "mcp-bridge-coolify",
             },
         )
-        try:
-            with urllib.request.urlopen(
-                request,
-                timeout=self.timeout_seconds,
-                context=self._context(),
-            ) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            # Never echo arbitrary upstream bodies: Coolify error envelopes can contain secrets.
-            raise CoolifyClientError(f"Coolify HTTP {exc.code}") from exc
-        except urllib.error.URLError as exc:
-            raise CoolifyClientError(f"Coolify transport error: {exc.reason}") from exc
+        with _TRACER.start_as_current_span(
+            "provider.coolify.http",
+            kind=SpanKind.CLIENT,
+            attributes={
+                "mcp.provider": "coolify",
+                "http.request.method": "GET",
+            },
+        ) as span:
+            try:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=self.timeout_seconds,
+                    context=self._context(),
+                ) as response:
+                    raw = response.read()
+                    span.set_attribute("http.response.status_code", response.status)
+                    span.set_attribute("http.response.body.size", len(raw))
+            except urllib.error.HTTPError as exc:
+                span.set_attribute("http.response.status_code", exc.code)
+                # Never echo arbitrary upstream bodies: Coolify error envelopes can contain secrets.
+                raise CoolifyClientError(f"Coolify HTTP {exc.code}") from exc
+            except urllib.error.URLError as exc:
+                raise CoolifyClientError(f"Coolify transport error: {exc.reason}") from exc
         return json_loads(raw, context="Coolify response")
 
     def current_team(self) -> JsonObject:

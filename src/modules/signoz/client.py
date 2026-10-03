@@ -6,8 +6,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
 from common.account_contracts import ResolvedAccount
 from common.models import JsonObject, JsonValue, json_loads, json_object
+
+_TRACER = trace.get_tracer("mcp-bridge.provider.signoz")
 
 
 class SigNozClientError(RuntimeError):
@@ -49,18 +54,29 @@ class SigNozClient:
             "User-Agent": "mcp-bridge-signoz",
         }
         request = urllib.request.Request(target, data=body, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(
-                request,
-                timeout=self.timeout_seconds,
-                context=self._context(),
-            ) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            detail = exc.read()[:4096].decode("utf-8", "replace")
-            raise SigNozClientError(f"SigNoz HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise SigNozClientError(f"SigNoz transport error: {exc.reason}") from exc
+        with _TRACER.start_as_current_span(
+            "provider.signoz.http",
+            kind=SpanKind.CLIENT,
+            attributes={
+                "mcp.provider": "signoz",
+                "http.request.method": method,
+            },
+        ) as span:
+            try:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=self.timeout_seconds,
+                    context=self._context(),
+                ) as response:
+                    raw = response.read()
+                    span.set_attribute("http.response.status_code", response.status)
+                    span.set_attribute("http.response.body.size", len(raw))
+            except urllib.error.HTTPError as exc:
+                span.set_attribute("http.response.status_code", exc.code)
+                detail = exc.read()[:4096].decode("utf-8", "replace")
+                raise SigNozClientError(f"SigNoz HTTP {exc.code}: {detail}") from exc
+            except urllib.error.URLError as exc:
+                raise SigNozClientError(f"SigNoz transport error: {exc.reason}") from exc
         return json_loads(raw, context="SigNoz response")
 
     def whoami(self) -> JsonObject:

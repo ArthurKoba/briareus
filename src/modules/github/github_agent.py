@@ -80,6 +80,8 @@ class GitHubAppClient:
             ),
             max_connections=self.max_connections,
             acquire_timeout=30,
+            span_name="provider.github.http",
+            provider="github",
         )
 
 

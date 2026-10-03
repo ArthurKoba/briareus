@@ -45,3 +45,7 @@ class InvocationEvent(StrictModel):
     arguments_json: str = ""
     result_json: str = ""
     error_message: str = ""
+
+
+class InvocationEventBatch(StrictModel):
+    events: list[InvocationEvent] = Field(min_length=1, max_length=128)

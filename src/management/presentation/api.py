@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
-from common.account_contracts import AccountList, InvocationEvent
+from common.account_contracts import AccountList, InvocationEvent, InvocationEventBatch
 from common.models import JsonObject
 from common.oauth_session_contracts import OAuthSessionEvent
 from management.application.services import (
@@ -79,6 +79,15 @@ def build_internal_router(services: ApiServices) -> APIRouter:
         _authorized: None = Depends(authorize),
     ) -> None:
         services.audit.record(Invocation.model_validate(event.model_dump()))
+
+    @router.post("/events/batch", status_code=204)
+    def record_event_batch(
+        batch: InvocationEventBatch,
+        _authorized: None = Depends(authorize),
+    ) -> None:
+        services.audit.record_many(
+            [Invocation.model_validate(event.model_dump()) for event in batch.events]
+        )
 
     @router.post("/oauth-sessions/events", status_code=204)
     def record_oauth_session(

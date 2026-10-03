@@ -6,6 +6,9 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
 from .models import StrictModel
 
 
@@ -32,6 +35,8 @@ class PooledHttpTransport:
         *,
         max_connections: int = 8,
         acquire_timeout: float = 30.0,
+        span_name: str = "provider.http",
+        provider: str = "",
     ) -> None:
         self._connection_factory = connection_factory
         self._max_connections = max(1, int(max_connections))
@@ -39,6 +44,9 @@ class PooledHttpTransport:
         self._connections: queue.LifoQueue[http.client.HTTPConnection] = queue.LifoQueue()
         self._connection_count = 0
         self._lock = threading.Lock()
+        self._span_name = span_name
+        self._provider = provider
+        self._tracer = trace.get_tracer("mcp-bridge.http-transport")
 
     @property
     def connection_count(self) -> int:
@@ -104,34 +112,57 @@ class PooledHttpTransport:
         attempts = max(0, int(reconnect_retries)) + 1
         last_error: OSError | http.client.HTTPException | None = None
 
-        for attempt in range(attempts):
-            connection = self._acquire()
-            try:
-                connection.request(
-                    method,
-                    target,
-                    body=body,
-                    headers=dict(headers or {}),
-                )
-                response = connection.getresponse()
-                raw = response.read()
-                response_headers = dict(response.headers.items())
-                result = HttpTransportResponse(
-                    status=response.status,
-                    headers=response_headers,
-                    body=raw,
-                    will_close=response.will_close,
-                )
-                self._release(connection, reusable=not response.will_close)
-                return result
-            except (OSError, http.client.HTTPException) as exc:
-                last_error = exc
-                self._release(connection, reusable=False)
-                if attempt + 1 >= attempts:
-                    break
-                if retry_backoff_seconds > 0:
-                    time.sleep(retry_backoff_seconds * (2 ** attempt))
+        attributes: dict[str, object] = {
+            "http.request.method": method.upper(),
+            "http.retry.max": attempts - 1,
+        }
+        if self._provider:
+            attributes["mcp.provider"] = self._provider
 
-        raise HttpTransportError(
-            f"HTTP request failed after reconnect: {last_error}"
-        ) from last_error
+        with self._tracer.start_as_current_span(
+            self._span_name,
+            kind=SpanKind.CLIENT,
+            attributes=attributes,
+        ) as span:
+            total_pool_wait_ms = 0.0
+            for attempt in range(attempts):
+                acquire_started = time.monotonic()
+                connection = self._acquire()
+                total_pool_wait_ms += (time.monotonic() - acquire_started) * 1000
+                try:
+                    connection.request(
+                        method,
+                        target,
+                        body=body,
+                        headers=dict(headers or {}),
+                    )
+                    response = connection.getresponse()
+                    raw = response.read()
+                    response_headers = dict(response.headers.items())
+                    result = HttpTransportResponse(
+                        status=response.status,
+                        headers=response_headers,
+                        body=raw,
+                        will_close=response.will_close,
+                    )
+                    self._release(connection, reusable=not response.will_close)
+                    span.set_attribute("http.response.status_code", response.status)
+                    span.set_attribute("http.response.body.size", len(raw))
+                    span.set_attribute("http.retry.count", attempt)
+                    span.set_attribute("http.pool.wait_ms", total_pool_wait_ms)
+                    span.set_attribute("http.pool.connections", self.connection_count)
+                    span.set_attribute("http.pool.idle_connections", self.idle_connection_count)
+                    return result
+                except (OSError, http.client.HTTPException) as exc:
+                    last_error = exc
+                    self._release(connection, reusable=False)
+                    if attempt + 1 >= attempts:
+                        break
+                    if retry_backoff_seconds > 0:
+                        time.sleep(retry_backoff_seconds * (2**attempt))
+
+            span.set_attribute("http.retry.count", attempts - 1)
+            span.set_attribute("http.pool.wait_ms", total_pool_wait_ms)
+            raise HttpTransportError(
+                f"HTTP request failed after reconnect: {last_error}"
+            ) from last_error

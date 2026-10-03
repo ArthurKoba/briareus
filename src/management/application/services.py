@@ -151,13 +151,18 @@ class InvocationAuditService:
         self.config = config
 
     def record(self, invocation: Invocation) -> None:
+        self.record_many([invocation])
+
+    def record_many(self, invocations: Sequence[Invocation]) -> None:
+        if not invocations:
+            return
         capture_payloads = True
         if self.config is not None:
             config = self.config.get()
             if not config.logging_enabled:
                 return
             capture_payloads = config.logging_capture_payloads
-        self.repository.append(invocation, capture_payloads=capture_payloads)
+        self.repository.append_many(invocations, capture_payloads=capture_payloads)
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
         return self.repository.recent(limit=limit)

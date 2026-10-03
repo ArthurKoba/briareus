@@ -169,8 +169,8 @@ def test_management_audit_can_be_suppressed_for_internal_proxy_calls() -> None:
         def __init__(self) -> None:
             self.events: list[InvocationEvent] = []
 
-        def record_invocation(self, event: InvocationEvent) -> None:
-            self.events.append(event)
+        def record_invocations(self, events: list[InvocationEvent]) -> None:
+            self.events.extend(events)
 
     management = FakeManagement()
     sink = ManagementAuditSink(management)  # type: ignore[arg-type]
@@ -182,10 +182,42 @@ def test_management_audit_can_be_suppressed_for_internal_proxy_calls() -> None:
     )
 
     sink.record_invocation(event, audit=False)
+    sink.close()
     assert management.events == []
 
+    sink = ManagementAuditSink(management)  # type: ignore[arg-type]
     sink.record_invocation(event, audit=True)
+    sink.close()
     assert management.events == [event]
+
+
+def test_management_audit_batches_events(monkeypatch) -> None:
+    class FakeManagement:
+        def __init__(self) -> None:
+            self.batches: list[list[InvocationEvent]] = []
+
+        def record_invocations(self, events: list[InvocationEvent]) -> None:
+            self.batches.append(list(events))
+
+    monkeypatch.setattr(ManagementAuditSink, "_BATCH_WINDOW_SECONDS", 0.2)
+    management = FakeManagement()
+    sink = ManagementAuditSink(management)  # type: ignore[arg-type]
+    events = [
+        InvocationEvent(
+            module="github",
+            tool=f"tool_{index}",
+            status="success",
+            duration_ms=float(index),
+        )
+        for index in range(10)
+    ]
+
+    for event in events:
+        sink.record_invocation(event)
+    sink.close()
+
+    assert [event for batch in management.batches for event in batch] == events
+    assert len(management.batches) == 1
 
 
 def test_analysis_and_ghidra_audit_visibility_contract() -> None:
