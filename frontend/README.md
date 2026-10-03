@@ -86,3 +86,11 @@ The public gateway owns the split:
 - MCP surfaces remain independent.
 
 The frontend nginx serves only static SPA files and `/health`; it must not proxy management API or WebSocket traffic.
+
+## Frontend regression tests
+
+Run `bun run test` for the deterministic frontend regression suite, then `bun run build`
+for Vue type checking and the production build. The frontend image build runs both gates.
+The settings round-trip suite covers GitHub policy preservation and rejects incomplete
+snapshots instead of allowing backend defaults to silently enable remote writes.
+This client guard is not a replacement for backend partial-update/revision protection (#295).

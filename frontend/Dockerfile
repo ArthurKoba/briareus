@@ -6,7 +6,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY . ./
-RUN bun run build
+RUN bun run test && bun run build
 
 
 FROM nginx:1.28-alpine

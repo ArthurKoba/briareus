@@ -2,6 +2,7 @@ import { runtimeConfig } from "@/shared/config/runtime"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 import { notifications } from "@/shared/notifications/bus"
 import { i18n } from "@/shared/i18n"
+import type { SettingsUpdatePayload } from "@/shared/settings/payload"
 
 export interface SessionState { authenticated: boolean; username: string | null }
 export interface NavigationItem { id: string; label: string; enabled: boolean }
@@ -51,10 +52,17 @@ export interface TerminalJobState { job: Record<string, unknown>; tail: Record<s
 export interface AnalysisState { overview: Record<string, unknown>; meta: Record<string, unknown> }
 export interface AnalysisProjectState { session: Record<string, unknown>; files: Record<string, unknown>; programs: unknown[]; folder: string }
 
+export interface GitHubPolicyState {
+  local_first_guidance: boolean
+  local_git_transport_enabled: boolean
+  remote_source_mutations_enabled: boolean
+}
+
 export interface SettingsState {
   management: { logging_enabled: boolean; logging_capture_payloads: boolean; logging_retention_days: number; logging_max_records: number; maintenance_interval_minutes: number }
   terminal: { max_exec_timeout_seconds: number; max_job_runtime_seconds: number }
   mcp: { call_timeout_seconds: number }
+  github: GitHubPolicyState
   analysis: { idle_timeout_seconds?: number; auto_release_enabled?: boolean; source?: string }
   analysis_error: string
 }
@@ -142,6 +150,6 @@ export const managementApi = {
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
   setBrowserViewport: (pageId: string, width: number, height: number): Promise<Record<string, unknown>> => request("/api/browser/viewport", { method: "PUT", body: jsonBody({ page_id: pageId, width, height }) }),
   settings: (): Promise<SettingsState> => request("/api/settings"),
-  updateSettings: (payload: object): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
+  updateSettings: (payload: SettingsUpdatePayload): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
   cleanupLogs: (): Promise<{ removed: number }> => request("/api/settings/cleanup-logs", { method: "POST", body: "{}" }),
 }
