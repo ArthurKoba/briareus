@@ -123,14 +123,10 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     assert '"Xvfb"' in source
 
 
-def test_browser_headful_identity_configuration(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     from modules.files.workspace_store import WorkspaceFileStore
 
     browser = BrowserManager(
-
         workspace=WorkspaceFileStore(tmp_path / "workspace"),
         profile_dir=tmp_path / "profile",
         executable_path="/usr/bin/chromium",

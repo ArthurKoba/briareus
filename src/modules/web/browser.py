@@ -211,7 +211,6 @@ class BrowserManager:
         command.append("about:blank")
         return command
 
-
     async def _ensure_display_locked(self) -> str:
         if self.headless:
             return ""
