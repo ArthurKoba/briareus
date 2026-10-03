@@ -39,3 +39,7 @@ Do not put provider implementation back into `bridge`. Shared code belongs in
 
 Native Ghidra remains an independent backend. Analysis adapts its live MCP schema and
 terminology without modifying or duplicating the Ghidra implementation.
+
+## Upstream-first MCP refactor
+
+The provider/runtime architecture is being re-evaluated around an upstream-first MCP model: Koba owns account routing, authorization, policy, audit and workspace glue, while maintained official/native MCP servers should own provider-domain semantics. See [`docs/refactoring/mcp-upstream-roadmap.md`](refactoring/mcp-upstream-roadmap.md) for the audit, provider decisions and phased migration plan.
