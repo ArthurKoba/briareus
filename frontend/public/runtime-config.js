@@ -1,3 +1,5 @@
 window.__MCP_MANAGEMENT_UI_CONFIG__ = {
-  preview: true
+  preview: true,
+  telemetry: { enabled: false, endpoint: "/api/client-telemetry", sampleRate: 1 },
+  events: { mode: "mock", url: "/events/ws" }
 }
