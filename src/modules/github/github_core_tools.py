@@ -27,6 +27,11 @@ def register_github_core_tools(
         """Verify access and basic repository metadata for the selected account."""
         return client_factory(account_id).status(repository)
 
+    @mcp.tool(title="GitHub rate limits", annotations=read_annotations)
+    def github_agent_rate_limits(account_id: str, repository: str = "") -> JsonObject:
+        """Refresh and report GitHub API rate-limit buckets for the selected identity."""
+        return client_factory(account_id).refresh_rate_limits(repository)
+
     @mcp.tool(title="GitHub agent get file", annotations=read_annotations)
     def github_agent_get_file(
         account_id: str,

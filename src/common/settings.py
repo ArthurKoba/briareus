@@ -512,6 +512,14 @@ class GhidraSettings(ProcessSettings):
 
 
 class GitHubPolicySettings(ProcessSettings):
+    public_reader_account: str = Field(
+        "",
+        validation_alias="GITHUB_PUBLIC_READER_ACCOUNT",
+    )
+    public_allow_anonymous_fallback: bool = Field(
+        False,
+        validation_alias="GITHUB_PUBLIC_ALLOW_ANONYMOUS_FALLBACK",
+    )
     protected_branches: Annotated[frozenset[str], NoDecode] = Field(
         frozenset({"main", "master"}),
         validation_alias="GITHUB_AGENT_PROTECTED_BRANCHES",
@@ -524,6 +532,11 @@ class GitHubPolicySettings(ProcessSettings):
         (),
         validation_alias="GITHUB_AGENT_REQUIRED_REVIEWERS",
     )
+
+    @field_validator("public_reader_account", mode="before")
+    @classmethod
+    def _strip_public_reader_account(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("protected_branches", mode="before")
     @classmethod
