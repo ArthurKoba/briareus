@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
+import mcp.types as mt
 import pytest
 from fastmcp.client.transports import StdioTransport
 from fastmcp.exceptions import ToolError
@@ -40,6 +42,15 @@ class _FakeTransport:
         self.disconnects += 1
 
 
+def _context(name: str = "evaluate_script", arguments: dict[str, object] | None = None) -> Any:
+    return cast(
+        Any,
+        SimpleNamespace(
+            message=SimpleNamespace(name=name, arguments=arguments or {}),
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_devtools_middleware_blocks_when_developer_access_is_off(
     tmp_path: Path,
@@ -58,7 +69,7 @@ async def test_devtools_middleware_blocks_when_developer_access_is_off(
         return ToolResult(content=[])
 
     with pytest.raises(ToolError, match="developer access is disabled"):
-        await middleware.on_call_tool(cast(Any, object()), call_next)
+        await middleware.on_call_tool(_context(), call_next)
 
     assert transport.disconnects == 1
     assert called is False
@@ -89,7 +100,7 @@ async def test_devtools_middleware_runs_upstream_only_with_effective_access(
     async def call_next(_context: Any) -> ToolResult:
         return expected
 
-    result = await middleware.on_call_tool(cast(Any, object()), call_next)
+    result = await middleware.on_call_tool(_context(), call_next)
 
     assert result is expected
     assert status_calls == 1
@@ -114,14 +125,98 @@ async def test_devtools_middleware_disconnects_failed_upstream_session(
         return {"running": True}
 
     browser.status = fake_status  # type: ignore[method-assign]
+    recover_calls = 0
+
+    async def fake_recover() -> bool:
+        nonlocal recover_calls
+        recover_calls += 1
+        return False
+
+    browser.recover_if_broken = fake_recover  # type: ignore[method-assign]
 
     async def call_next(_context: Any) -> ToolResult:
         raise TimeoutError("upstream stalled")
 
     with pytest.raises(TimeoutError, match="upstream stalled"):
-        await middleware.on_call_tool(cast(Any, object()), call_next)
+        await middleware.on_call_tool(_context(), call_next)
 
     assert transport.disconnects == 1
+    assert recover_calls == 1
+    assert browser.developer_backend_connected is False
+
+@pytest.mark.asyncio
+async def test_devtools_install_records_extension_for_browser_restart(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+    await browser.operator_set_developer_access("owner", True)
+    transport = _FakeTransport()
+    middleware = DeveloperAccessMiddleware(
+        browser,
+        cast(StdioTransport, transport),
+    )
+    extension_dir = browser.workspace.root / "demo-extension"
+    extension_dir.mkdir(parents=True)
+    extension_id = "abcdefghijklmnopabcdefghijklmnop"
+
+    async def fake_status() -> dict[str, object]:
+        return {"running": True}
+
+    browser.status = fake_status  # type: ignore[method-assign]
+
+    async def call_next(_context: Any) -> ToolResult:
+        return ToolResult(
+            content=[
+                mt.TextContent(
+                    type="text",
+                    text=f"Extension installed. Id: {extension_id}",
+                )
+            ]
+        )
+
+    result = await middleware.on_call_tool(
+        _context("install_extension", {"path": str(extension_dir)}),
+        call_next,
+    )
+
+    assert result.content
+    assert browser.developer_backend_connected is True
+    assert browser.dev_extensions() == [{"id": extension_id, "path": str(extension_dir)}]
+    assert f"--load-extension={extension_dir}" in browser._browser_command()
+
+    reloaded = _browser(tmp_path)
+    assert reloaded.dev_extensions() == [{"id": extension_id, "path": str(extension_dir)}]
+
+
+@pytest.mark.asyncio
+async def test_devtools_uninstall_forgets_persistent_extension(tmp_path: Path) -> None:
+    browser = _browser(tmp_path)
+    browser._operator_pages["owner"] = ""
+    await browser.operator_set_developer_access("owner", True)
+    transport = _FakeTransport()
+    middleware = DeveloperAccessMiddleware(
+        browser,
+        cast(StdioTransport, transport),
+    )
+    extension_dir = browser.workspace.root / "demo-extension"
+    extension_dir.mkdir(parents=True)
+    extension_id = "abcdefghijklmnopabcdefghijklmnop"
+    browser.record_dev_extension(extension_id, str(extension_dir))
+
+    async def fake_status() -> dict[str, object]:
+        return {"running": True}
+
+    browser.status = fake_status  # type: ignore[method-assign]
+
+    async def call_next(_context: Any) -> ToolResult:
+        return ToolResult(content=[])
+
+    await middleware.on_call_tool(
+        _context("uninstall_extension", {"id": extension_id}),
+        call_next,
+    )
+
+    assert browser.dev_extensions() == []
+
 
 def test_devtools_proxy_pins_official_server_and_restricts_workspace(tmp_path: Path) -> None:
     browser = _browser(tmp_path)

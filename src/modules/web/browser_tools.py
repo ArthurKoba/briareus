@@ -25,6 +25,11 @@ def register_browser_tools(
         """Start the persistent Chromium profile if needed and report browser/page status."""
         return await browser.status()
 
+    @mcp.tool(title="Browser restart", annotations=write_annotations)
+    async def browser_restart() -> JsonObject:
+        """Restart Chromium while preserving profile, cookies, storage and dev extensions."""
+        return await browser.restart()
+
     @mcp.tool(title="Browser pages", annotations=read_annotations)
     async def browser_pages() -> JsonObject:
         """List open browser pages/tabs in the persistent browser context."""

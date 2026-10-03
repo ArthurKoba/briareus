@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 from common.models import JsonObject, JsonValue
 from modules.files.workspace_store import WorkspaceFileStore
 
+from .browser_extensions import BrowserExtensionRegistry
+
 _REMOTE_DEBUGGING_HOST = "127.0.0.1"
 _REMOTE_DEBUGGING_PORT = 9222
 
@@ -45,6 +47,7 @@ class BrowserManager:
         xvfb_enabled: bool = True,
         timezone: str = "UTC",
         posix_locale: str = "ru_RU.UTF-8",
+        chromium_args: tuple[str, ...] = (),
     ) -> None:
         self.workspace = workspace
         self.profile_dir = profile_dir.resolve(strict=False)
@@ -60,6 +63,7 @@ class BrowserManager:
         self.xvfb_enabled = xvfb_enabled
         self.timezone = timezone.strip() or "UTC"
         self.posix_locale = posix_locale.strip()
+        self.chromium_args = tuple(arg.strip() for arg in chromium_args if arg.strip())
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
         self._playwright: Playwright | None = None
@@ -80,6 +84,12 @@ class BrowserManager:
         self._agent_access_enabled = True
         self._developer_access_enabled = False
         self._privileged_access_hooks: list[Callable[[bool], Awaitable[None]]] = []
+        self._restart_hooks: list[Callable[[], Awaitable[None]]] = []
+        self._developer_backend_connected = False
+        self._extension_registry = BrowserExtensionRegistry(
+            self.profile_dir.parent / "dev-extensions.json",
+            self.workspace.root,
+        )
         self._page_labels: dict[str, str] = {}
         self._page_agent_access: dict[str, bool] = {}
         self._closed_pages: list[dict[str, object]] = []
@@ -130,11 +140,26 @@ class BrowserManager:
                 "use browser_status to inspect the current access mode"
             )
 
+    @property
+    def developer_backend_connected(self) -> bool:
+        return self._developer_backend_connected
+
+    def set_developer_backend_connected(self, connected: bool) -> None:
+        self._developer_backend_connected = bool(connected)
+
     def add_privileged_access_hook(
         self,
         hook: Callable[[bool], Awaitable[None]],
     ) -> None:
         self._privileged_access_hooks.append(hook)
+
+    def add_restart_hook(self, hook: Callable[[], Awaitable[None]]) -> None:
+        self._restart_hooks.append(hook)
+
+    async def _notify_restart(self) -> None:
+        for hook in list(self._restart_hooks):
+            with contextlib.suppress(Exception):
+                await hook()
 
     async def _notify_privileged_access(self) -> None:
         enabled = self.developer_access_effective
@@ -182,6 +207,37 @@ class BrowserManager:
             + (f": {last_error}" if last_error else "")
         )
 
+    async def _cdp_reachable(self) -> bool:
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(_REMOTE_DEBUGGING_HOST, _REMOTE_DEBUGGING_PORT),
+                timeout=1.0,
+            )
+            request = (
+                f"GET /json/version HTTP/1.1\r\n"
+                f"Host: {_REMOTE_DEBUGGING_HOST}:{_REMOTE_DEBUGGING_PORT}\r\n"
+                "Connection: close\r\n\r\n"
+            )
+            writer.write(request.encode("ascii"))
+            await writer.drain()
+            status_line = await asyncio.wait_for(reader.readline(), timeout=1.0)
+            writer.close()
+            await writer.wait_closed()
+            return b" 200 " in status_line
+        except (OSError, TimeoutError):
+            return False
+
+    async def _context_usable(self) -> bool:
+        browser = self._browser
+        context = self._context
+        if browser is None or context is None or not browser.is_connected():
+            return False
+        try:
+            await asyncio.wait_for(context.cookies(), timeout=2.0)
+        except Exception:
+            return False
+        return True
+
     async def _terminate_browser_process(
         self,
         process: asyncio.subprocess.Process | None,
@@ -217,6 +273,10 @@ class BrowserManager:
             f"--user-data-dir={self.profile_dir}",
             f"--window-size={self.viewport_width},{self.viewport_height}",
         ]
+        command.extend(self.chromium_args)
+        extension_paths = self._extension_registry.load_paths()
+        if extension_paths:
+            command.append(f"--load-extension={','.join(extension_paths)}")
         if self.locale:
             command.append(f"--lang={self.locale}")
         if self.accept_language:
@@ -320,12 +380,85 @@ class BrowserManager:
             self._register_page(page)
 
     async def _ensure_started(self) -> BrowserContext:
-        if self._context is None:
+        if self._context is not None and await self._context_usable():
+            return self._context
+        if self._context is not None or (
+            self._browser_process is not None and self._browser_process.returncode is None
+        ):
+            await self.restart()
+        elif self._context is None:
             async with self._start_lock:
                 await self._start_locked()
-        if self._context is None:
-            raise BrowserError("browser failed to start")
+        if self._context is None or not await self._context_usable():
+            raise BrowserError("browser failed to start a usable context")
         return self._context
+
+    async def _stop_runtime(self, *, stop_display: bool) -> None:
+        context = self._context
+        browser = self._browser
+        process = self._browser_process
+        playwright = self._playwright
+        display_process = self._display_process if stop_display else None
+        self._context = None
+        self._browser = None
+        self._browser_process = None
+        self._playwright = None
+        if stop_display:
+            self._display_process = None
+
+        if context is not None:
+            with contextlib.suppress(Exception):
+                await context.close()
+        if browser is not None:
+            with contextlib.suppress(Exception):
+                await browser.close()
+        await self._terminate_browser_process(process)
+        if stop_display:
+            await self._terminate_display_process(display_process)
+        if playwright is not None:
+            with contextlib.suppress(Exception):
+                await playwright.stop()
+
+        self._pages.clear()
+        self._page_ids.clear()
+        self._page_labels.clear()
+        self._page_agent_access.clear()
+        self._operator_devtools_pages.clear()
+        self._internal_page_ids.clear()
+        async with self._operator_lock:
+            for token in list(self._operator_pages):
+                self._operator_pages[token] = ""
+
+    async def restart(self) -> JsonObject:
+        """Restart Chromium without deleting the persistent browser profile."""
+        async with self._reset_lock:
+            await self._notify_restart()
+            self._developer_backend_connected = False
+            await self._stop_runtime(stop_display=False)
+            async with self._start_lock:
+                await self._start_locked()
+        return await self.status()
+
+    async def recover_if_broken(self) -> bool:
+        process_running = (
+            self._browser_process is not None and self._browser_process.returncode is None
+        )
+        if process_running and await self._cdp_reachable() and await self._context_usable():
+            return False
+        await self.restart()
+        return True
+
+    def record_dev_extension(self, extension_id: str, path: str) -> None:
+        self._extension_registry.record(extension_id, path)
+
+    def forget_dev_extension(self, extension_id: str) -> None:
+        self._extension_registry.remove(extension_id)
+
+    def dev_extensions(self) -> list[JsonValue]:
+        return [
+            {"id": item.id, "path": item.path}
+            for item in self._extension_registry.items()
+        ]
 
     def _register_page(self, page: Page) -> str:
         key = id(page)
@@ -451,22 +584,80 @@ class BrowserManager:
             "probe_stderr": probe_stderr,
         }
 
+    async def _observed_runtime(self) -> JsonObject:
+        context = self._context
+        if context is None or not await self._context_usable():
+            return {}
+        pages = [page for page in context.pages if not page.is_closed()]
+        if not pages:
+            return {}
+        page = pages[0]
+        try:
+            observed = await asyncio.wait_for(
+                page.evaluate(
+                    """() => {
+                      const glInfo = (kind) => {
+                        const canvas = document.createElement('canvas');
+                        const gl = canvas.getContext(kind);
+                        if (!gl) return null;
+                        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+                        return {
+                          vendor: ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '',
+                          renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ''
+                        };
+                      };
+                      return {
+                        user_agent: navigator.userAgent,
+                        user_agent_brands: navigator.userAgentData?.brands ?? [],
+                        language: navigator.language,
+                        languages: navigator.languages,
+                        intl_locale: Intl.DateTimeFormat().resolvedOptions().locale,
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        webdriver: navigator.webdriver,
+                        webgl: glInfo('webgl'),
+                        webgl2: glInfo('webgl2'),
+                        screen: {width: screen.width, height: screen.height}
+                      };
+                    }"""
+                ),
+                timeout=3.0,
+            )
+        except Exception:
+            return {}
+        return cast(JsonObject, observed) if isinstance(observed, dict) else {}
+
     async def status(self) -> JsonObject:
-        context = await self._ensure_started()
+        if self._context is None and self._browser_process is None:
+            await self._ensure_started()
+
+        process_running = (
+            self._browser_process is not None and self._browser_process.returncode is None
+        )
+        cdp_reachable = process_running and await self._cdp_reachable()
+        context_usable = cdp_reachable and await self._context_usable()
         pages: list[JsonValue] = []
-        for page in list(context.pages):
-            if page.is_closed():
-                continue
-            page_id = self._register_page(page)
-            if page_id in self._internal_page_ids:
-                continue
-            pages.append(await self._agent_summary(page_id, page))
+        if context_usable and self._context is not None:
+            for page in list(self._context.pages):
+                if page.is_closed():
+                    continue
+                page_id = self._register_page(page)
+                if page_id in self._internal_page_ids:
+                    continue
+                pages.append(await self._agent_summary(page_id, page))
+        observed = await self._observed_runtime() if context_usable else {}
+        if not cdp_reachable:
+            self._developer_backend_connected = False
+        running = bool(process_running and cdp_reachable and context_usable)
         return {
-            "running": True,
+            "running": running,
+            "process_running": process_running,
+            "cdp_reachable": cdp_reachable,
+            "context_usable": context_usable,
             "agent_access_enabled": self._agent_access_enabled,
             "developer_access_enabled": self._developer_access_enabled,
             "developer_access_effective": self.developer_access_effective,
             "developer_backend": "chrome-devtools-mcp",
+            "developer_backend_connected": self._developer_backend_connected,
             "headless": self.headless,
             "browser": "chromium",
             "locale": self.locale,
@@ -475,8 +666,11 @@ class BrowserManager:
             "xvfb_enabled": self.xvfb_enabled,
             "timezone": self.timezone,
             "posix_locale": self.posix_locale,
+            "chromium_args": list(self.chromium_args),
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
+            "dev_extensions": self.dev_extensions(),
+            "observed": observed,
             "page_count": len(pages),
             "pages": pages,
         }
@@ -1054,34 +1248,10 @@ class BrowserManager:
                 self._developer_access_enabled = False
             await self._notify_privileged_access()
 
-            context = self._context
-            browser = self._browser
-            process = self._browser_process
-            display_process = self._display_process
-            playwright = self._playwright
-            self._context = None
-            self._browser = None
-            self._browser_process = None
-            self._display_process = None
-            self._playwright = None
-            if context is not None:
-                with contextlib.suppress(Exception):
-                    await context.close()
-            if browser is not None:
-                with contextlib.suppress(Exception):
-                    await browser.close()
-            await self._terminate_browser_process(process)
-            await self._terminate_display_process(display_process)
-            if playwright is not None:
-                with contextlib.suppress(Exception):
-                    await playwright.stop()
-
-            self._pages.clear()
-            self._page_ids.clear()
-            self._page_labels.clear()
-            self._page_agent_access.clear()
-            self._operator_devtools_pages.clear()
-            self._internal_page_ids.clear()
+            await self._notify_restart()
+            self._developer_backend_connected = False
+            await self._stop_runtime(stop_display=True)
+            self._extension_registry.clear()
             await asyncio.to_thread(shutil.rmtree, self.profile_dir, True)
             state_root = self.profile_dir.parent
             for name in ("cache", "config", "crash"):
@@ -1091,9 +1261,18 @@ class BrowserManager:
 
             async with self._start_lock:
                 await self._start_locked()
-            page_items = await self._operator_page_items()
+            context = self._context
+            if context is None:
+                raise BrowserError("browser failed to restart after clean")
+            page_items: list[JsonValue] = []
+            for page in list(context.pages):
+                if page.is_closed():
+                    continue
+                page_id = self._register_page(page)
+                if page_id in self._internal_page_ids:
+                    continue
+                page_items.append(await self._summary(page_id, page))
             if not page_items:
-                context = await self._ensure_started()
                 page = await context.new_page()
                 page_id = self._register_page(page)
                 page_items = [await self._summary(page_id, page)]
