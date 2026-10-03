@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import { Modal, Switch, Tag } from "ant-design-vue"
-import { Radio, RefreshCw, Trash2 } from "lucide-vue-next"
+import { Activity, Circle, Radio, RefreshCw, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type InvocationRecord } from "@/shared/api/management"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatDate } from "@/shared/lib/format"
+import { tabWorkspace } from "@/shared/lib/tab-workspace"
 import { notifications } from "@/shared/notifications/bus"
 import Button from "@/shared/ui/Button.vue"
 import DataTable from "@/shared/ui/DataTable.vue"
@@ -18,8 +19,8 @@ const loading = ref(false)
 const error = ref("")
 const selected = ref<InvocationRecord | null>(null)
 const limit = ref(250)
-const followLive = ref(true)
 const pending = ref<InvocationRecord[]>([])
+const followLive = computed({ get: () => tabWorkspace.callsFollowLive, set: (value: boolean) => { tabWorkspace.callsFollowLive = value } })
 let unsubscribe: undefined | (() => void)
 
 const columns = computed(() => [
@@ -101,15 +102,24 @@ onBeforeUnmount(() => unsubscribe?.())
 <template>
   <div class="space-y-6">
     <PageHeader :title="t('nav.calls')" :description="t('calls.description')">
-      <span class="inline-flex items-center gap-1.5 text-xs" :class="live ? 'text-emerald-500' : 'text-muted-foreground'">
-        <Radio class="size-3.5" />{{ eventBus.state.status }}
-      </span>
-      <label class="inline-flex items-center gap-2 text-xs text-muted-foreground">
-        <Switch v-model:checked="followLive" size="small" />{{ t("calls.follow") }}
-      </label>
-      <Button v-if="pending.length" size="sm" @click="applyPending">
-        {{ pending.length }} {{ t("calls.new") }}
-      </Button>
+      <details class="group relative">
+        <summary class="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden" :title="String(t('calls.liveControl'))">
+          <Radio v-if="live" class="size-4 text-emerald-500" />
+          <Activity v-else class="size-4" :class="eventBus.state.status === 'reconnecting' ? 'animate-pulse text-amber-500' : ''" />
+        </summary>
+        <div class="absolute right-0 top-10 z-40 w-72 rounded-xl border border-border bg-popover p-3 shadow-xl">
+          <div class="flex items-start justify-between gap-3">
+            <div><div class="text-sm font-semibold">{{ t("calls.liveControl") }}</div><div class="mt-0.5 text-[11px] text-muted-foreground">{{ t("calls.liveControlHint") }}</div></div>
+            <span class="inline-flex items-center gap-1 text-[10px] uppercase text-muted-foreground"><Circle class="size-2.5 fill-current" :class="live ? 'text-emerald-500' : 'text-muted-foreground'" />{{ eventBus.state.status }}</span>
+          </div>
+          <label class="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5 text-xs">
+            <span>{{ t("calls.follow") }}</span>
+            <Switch v-model:checked="followLive" size="small" />
+          </label>
+          <div class="mt-2 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-xs"><span class="text-muted-foreground">{{ t("realtime.lastEvent") }}</span><span>{{ eventBus.state.lastEventAt ? formatDate(eventBus.state.lastEventAt) : "—" }}</span></div>
+          <Button v-if="pending.length" class="mt-2 w-full" size="sm" @click="applyPending">{{ pending.length }} {{ t("calls.new") }}</Button>
+        </div>
+      </details>
       <Button variant="outline" size="sm" @click="load()">
         <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
       </Button>
@@ -134,7 +144,7 @@ onBeforeUnmount(() => unsubscribe?.())
       :scroll-y="620"
       @end-reached="loadMore"
     >
-      <template #bodyCell="{ column, record }">
+      <template #bodyCell="{ column, record, value }">
         <template v-if="column.key === 'occurred_at'">{{ formatDate(record.occurred_at) }}</template>
         <template v-else-if="column.key === 'status'">
           <Tag :color="record.status === 'success' ? 'green' : 'red'">{{ record.status }}</Tag>
@@ -146,6 +156,7 @@ onBeforeUnmount(() => unsubscribe?.())
             <Button variant="ghost" size="sm" @click="remove(record as InvocationRecord)">{{ t("common.delete") }}</Button>
           </div>
         </template>
+        <template v-else><span class="truncate">{{ value ?? "—" }}</span></template>
       </template>
     </DataTable>
 

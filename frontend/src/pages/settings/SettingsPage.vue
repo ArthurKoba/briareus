@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue"
 import { InputNumber, Select, Switch } from "ant-design-vue"
 import { RefreshCw, Save, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
@@ -12,8 +12,10 @@ import { uiPreferences } from "@/shared/lib/preferences"
 import { notifications } from "@/shared/notifications/bus"
 import Button from "@/shared/ui/Button.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
+import SectionTabs from "@/shared/ui/SectionTabs.vue"
 
 const { t } = useI18n()
+const section = ref("interface")
 const state = ref<SettingsState | null>(null)
 const loading = ref(false)
 const saving = ref(false)
@@ -30,6 +32,12 @@ const form = reactive({
   reverse_idle_timeout_seconds: 900,
 })
 
+const sections = computed(() => [
+  { id: "interface", label: t("settings.interface"), description: t("settings.interfaceHint") },
+  { id: "realtime", label: t("settings.realtime"), description: t("settings.realtimeHint") },
+  { id: "logging", label: t("settings.logging"), description: t("settings.loggingHint") },
+  { id: "mcp", label: t("settings.mcp"), description: t("settings.mcpHint") },
+])
 const languageOptions = [
   { label: "Русский", value: "ru" },
   { label: "English", value: "en" },
@@ -43,6 +51,15 @@ const densityOptions = computed(() => [
   { label: t("common.comfortable"), value: "comfortable" },
   { label: t("common.compact"), value: "compact" },
 ])
+
+function readHash(): void {
+  const [, child] = location.hash.slice(1).split("/")
+  if (["interface", "realtime", "logging", "mcp"].includes(child ?? "")) section.value = child!
+}
+function setSection(value: string): void {
+  section.value = value
+  history.replaceState(null, "", `#settings/${value}`)
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -85,11 +102,16 @@ function changeLocale(value: string): void {
   if (value === "en" || value === "ru") setLocale(value)
 }
 
-onMounted(load)
+onMounted(() => {
+  readHash()
+  window.addEventListener("hashchange", readHash)
+  void load()
+})
+onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="space-y-5">
     <PageHeader :title="t('settings.title')" :description="t('settings.description')">
       <Button variant="outline" size="sm" @click="load">
         <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
@@ -99,84 +121,72 @@ onMounted(load)
       </Button>
     </PageHeader>
 
+    <SectionTabs :model-value="section" :items="sections" @update:model-value="setSection" />
     <p v-if="error" class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{{ error }}</p>
 
-    <div class="grid gap-5 lg:grid-cols-2">
-      <section class="settings-card">
-        <h2>{{ t("settings.interface") }}</h2>
-        <label class="setting-row">
-          <span><b>{{ t("settings.language") }}</b><small>{{ t("settings.languageHint") }}</small></span>
-          <Select
-            :value="uiPreferences.locale.value"
-            :options="languageOptions"
-            class="w-40"
-            @change="changeLocale(String($event))"
-          />
-        </label>
-        <label class="setting-row">
-          <span><b>{{ t("settings.theme") }}</b><small>{{ t("settings.themeHint") }}</small></span>
-          <Select v-model:value="uiPreferences.theme.value" :options="themeOptions" class="w-40" />
-        </label>
-        <label class="setting-row">
-          <span><b>{{ t("settings.density") }}</b><small>{{ t("settings.densityHint") }}</small></span>
-          <Select v-model:value="uiPreferences.density.value" :options="densityOptions" class="w-40" />
-        </label>
-      </section>
+    <section v-if="section === 'interface'" class="settings-card max-w-3xl">
+      <h2>{{ t("settings.interface") }}</h2>
+      <label class="setting-row">
+        <span><b>{{ t("settings.language") }}</b><small>{{ t("settings.languageHint") }}</small></span>
+        <Select :value="uiPreferences.locale.value" :options="languageOptions" class="w-44" @change="changeLocale(String($event))" />
+      </label>
+      <label class="setting-row">
+        <span><b>{{ t("settings.theme") }}</b><small>{{ t("settings.themeHint") }}</small></span>
+        <Select v-model:value="uiPreferences.theme.value" :options="themeOptions" class="w-44" />
+      </label>
+      <label class="setting-row">
+        <span><b>{{ t("settings.density") }}</b><small>{{ t("settings.densityHint") }}</small></span>
+        <Select v-model:value="uiPreferences.density.value" :options="densityOptions" class="w-44" />
+      </label>
+    </section>
 
-      <section class="settings-card">
-        <h2>{{ t("settings.realtime") }}</h2>
-        <div class="setting-row">
-          <span><b>{{ t("settings.eventBus") }}</b><small>{{ t("settings.eventBusHint") }}</small></span>
-          <span class="rounded-md bg-muted px-2 py-1 font-mono text-xs">
-            {{ eventBus.state.status }} · {{ eventBus.state.subscriptions }}
-          </span>
+    <section v-else-if="section === 'realtime'" class="settings-card max-w-3xl">
+      <h2>{{ t("settings.realtime") }}</h2>
+      <label class="setting-row">
+        <span><b>{{ t("settings.eventBus") }}</b><small>{{ t("settings.eventBusHint") }}</small></span>
+        <div class="flex items-center gap-3">
+          <span class="rounded-md bg-muted px-2 py-1 font-mono text-xs">{{ eventBus.state.status }} · {{ eventBus.state.subscriptions }}</span>
+          <Switch :checked="eventBus.state.enabled" @change="eventBus.setEnabled(Boolean($event))" />
         </div>
-        <div class="setting-row">
-          <span><b>{{ t("settings.telemetry") }}</b><small>{{ t("settings.telemetryHint") }}</small></span>
-          <span class="text-right text-xs">
-            <b>{{ runtimeConfig.telemetry.enabled ? t("common.enabled") : t("common.disabled") }}</b><br />
-            <span class="text-muted-foreground">{{ runtimeConfig.telemetry.endpoint }}</span>
-          </span>
-        </div>
-      </section>
+      </label>
+      <label class="setting-row">
+        <span><b>{{ t("settings.telemetry") }}</b><small>{{ t("settings.telemetryHint") }}</small></span>
+        <Switch v-model:checked="uiPreferences.telemetryEnabled.value" />
+      </label>
+      <div class="setting-row">
+        <span><b>{{ t("settings.telemetryDelivery") }}</b><small>{{ t("settings.telemetryDeliveryHint") }}</small></span>
+        <span class="text-right text-xs">
+          <b>{{ runtimeConfig.telemetry.enabled ? t("common.enabled") : t("common.disabled") }}</b><br />
+          <span class="text-muted-foreground">{{ runtimeConfig.telemetry.endpoint }}</span>
+        </span>
+      </div>
+    </section>
 
-      <section class="settings-card">
-        <h2>{{ t("settings.logging") }}</h2>
-        <label class="setting-row">
-          <span><b>{{ t("settings.loggingEnabled") }}</b><small>{{ t("settings.loggingEnabledHint") }}</small></span>
-          <Switch v-model:checked="form.logging_enabled" />
-        </label>
-        <label class="setting-row">
-          <span><b>{{ t("settings.capturePayloads") }}</b><small>{{ t("settings.capturePayloadsHint") }}</small></span>
-          <Switch v-model:checked="form.logging_capture_payloads" />
-        </label>
-        <label class="setting-row">
-          <span><b>{{ t("settings.retentionDays") }}</b></span>
-          <InputNumber v-model:value="form.logging_retention_days" :min="1" :max="3650" />
-        </label>
-        <label class="setting-row">
-          <span><b>{{ t("settings.maxRecords") }}</b></span>
-          <InputNumber v-model:value="form.logging_max_records" :min="100" :max="1000000" />
-        </label>
-        <label class="setting-row">
-          <span><b>{{ t("settings.cleanupInterval") }}</b></span>
-          <InputNumber v-model:value="form.maintenance_interval_minutes" :min="1" :max="1440" />
-        </label>
-        <Button variant="outline" size="sm" @click="cleanup">
-          <Trash2 class="mr-2 size-4" />{{ t("settings.applyRetention") }}
-        </Button>
-      </section>
+    <section v-else-if="section === 'logging'" class="settings-card max-w-3xl">
+      <h2>{{ t("settings.logging") }}</h2>
+      <label class="setting-row">
+        <span><b>{{ t("settings.loggingEnabled") }}</b><small>{{ t("settings.loggingEnabledHint") }}</small></span>
+        <Switch v-model:checked="form.logging_enabled" />
+      </label>
+      <label class="setting-row">
+        <span><b>{{ t("settings.capturePayloads") }}</b><small>{{ t("settings.capturePayloadsHint") }}</small></span>
+        <Switch v-model:checked="form.logging_capture_payloads" />
+      </label>
+      <label class="setting-row"><span><b>{{ t("settings.retentionDays") }}</b></span><InputNumber v-model:value="form.logging_retention_days" :min="1" :max="3650" /></label>
+      <label class="setting-row"><span><b>{{ t("settings.maxRecords") }}</b></span><InputNumber v-model:value="form.logging_max_records" :min="100" :max="1000000" /></label>
+      <label class="setting-row"><span><b>{{ t("settings.cleanupInterval") }}</b></span><InputNumber v-model:value="form.maintenance_interval_minutes" :min="1" :max="1440" /></label>
+      <Button variant="outline" size="sm" @click="cleanup"><Trash2 class="mr-2 size-4" />{{ t("settings.applyRetention") }}</Button>
+    </section>
 
-      <section class="settings-card">
-        <h2>{{ t("settings.mcp") }}</h2>
-        <label class="setting-row">
-          <span><b>{{ t("settings.callTimeout") }}</b><small>{{ t("settings.callTimeoutHint") }}</small></span>
-          <InputNumber v-model:value="form.mcp_call_timeout_seconds" :min="1" :max="300" />
-        </label>
-      </section>
-    </div>
+    <section v-else class="settings-card max-w-3xl">
+      <h2>{{ t("settings.mcp") }}</h2>
+      <label class="setting-row">
+        <span><b>{{ t("settings.callTimeout") }}</b><small>{{ t("settings.callTimeoutHint") }}</small></span>
+        <InputNumber v-model:value="form.mcp_call_timeout_seconds" :min="1" :max="300" />
+      </label>
+    </section>
 
-    <section class="rounded-xl border border-border bg-card p-5">
+    <section class="max-w-3xl rounded-xl border border-border/70 bg-card p-4">
       <h2 class="text-sm font-semibold">{{ t("settings.domain") }}</h2>
       <p class="mt-1 text-xs text-muted-foreground">{{ t("settings.domainHint") }}</p>
     </section>
