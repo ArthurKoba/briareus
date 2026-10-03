@@ -183,7 +183,8 @@ class GitLabRepositoryClient(GitLabApiClient):
             "    *) continue ;;\n"
             "  esac\n"
             '  case "$reserved" in\n'
-            '    *" $branch "*) echo "push to bridge-reserved branch denied: $branch" >&2; exit 1 ;;\n'
+            '    *" $branch "*) echo "push to bridge-reserved branch denied: $branch" >&2; '
+            "exit 1 ;;\n"
             "  esac\n"
             "done\n",
             encoding="utf-8",
