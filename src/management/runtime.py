@@ -221,6 +221,5 @@ admin = build_admin(
     runtime_settings,
     files,
     reverse,
-    base_url="/admin/legacy",
 )
 admin.mount_to(app)

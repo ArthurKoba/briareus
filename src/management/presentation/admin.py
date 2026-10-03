@@ -760,7 +760,7 @@ class ReverseView(CustomView):
             flash(request, f"Open session failed: {exc}", "error")
         else:
             flash(request, "Project session opened", "success")
-        return RedirectResponse("/admin/legacy/reverse", status_code=303)
+        return RedirectResponse("/admin/reverse", status_code=303)
 
     @route("/release/{project_id:path}", methods=["POST"])
     async def release_session(self, request: Request) -> Response:
@@ -771,7 +771,7 @@ class ReverseView(CustomView):
             flash(request, f"Release session failed: {exc}", "error")
         else:
             flash(request, "Project session released", "success")
-        return RedirectResponse("/admin/legacy/reverse", status_code=303)
+        return RedirectResponse("/admin/reverse", status_code=303)
 
     @route("/create", methods=["POST"])
     async def create_project(self, request: Request) -> Response:
@@ -780,7 +780,7 @@ class ReverseView(CustomView):
         parent_dir = str(form.get("parent_dir", "")).strip()
         if not name:
             flash(request, "Project name is required", "error")
-            return RedirectResponse("/admin/legacy/reverse", status_code=303)
+            return RedirectResponse("/admin/reverse", status_code=303)
         try:
             result = await self.reverse.create_project(name, parent_dir)
         except Exception as exc:
@@ -790,10 +790,10 @@ class ReverseView(CustomView):
             flash(request, f"Created project {name}", "success")
             if project_id:
                 return RedirectResponse(
-                    f"/admin/legacy/reverse/project/{project_id}",
+                    f"/admin/reverse/project/{project_id}",
                     status_code=303,
                 )
-        return RedirectResponse("/admin/legacy/reverse", status_code=303)
+        return RedirectResponse("/admin/reverse", status_code=303)
 
     @route("/delete/{project_id:path}", methods=["POST"])
     async def delete_project(self, request: Request) -> Response:
@@ -805,7 +805,7 @@ class ReverseView(CustomView):
         else:
             name = str(result.get("name") or project_id)
             flash(request, f"Deleted project {name}", "success")
-        return RedirectResponse("/admin/legacy/reverse", status_code=303)
+        return RedirectResponse("/admin/reverse", status_code=303)
 
     @route("/worker/{worker_index:path}/{action}", methods=["POST"])
     async def worker_control(self, request: Request) -> Response:
@@ -813,12 +813,12 @@ class ReverseView(CustomView):
             worker_index = int(request.path_params["worker_index"])
         except ValueError:
             flash(request, "Invalid worker index", "error")
-            return RedirectResponse("/admin/legacy/reverse", status_code=303)
+            return RedirectResponse("/admin/reverse", status_code=303)
 
         action = request.path_params["action"].casefold()
         if action not in {"enable", "disable"}:
             flash(request, "Invalid worker action", "error")
-            return RedirectResponse("/admin/legacy/reverse", status_code=303)
+            return RedirectResponse("/admin/reverse", status_code=303)
 
         try:
             await self.reverse.set_worker_enabled(
@@ -833,7 +833,7 @@ class ReverseView(CustomView):
                 f"Worker #{worker_index} {action}d",
                 "success",
             )
-        return RedirectResponse("/admin/legacy/reverse", status_code=303)
+        return RedirectResponse("/admin/reverse", status_code=303)
 
 
 class TerminalView(CustomView):
@@ -916,7 +916,7 @@ class TerminalView(CustomView):
             flash(request, f"Cancel job failed: {exc}", "error")
         else:
             flash(request, "Job cancelled", "success")
-        return RedirectResponse("/admin/legacy/terminal", status_code=303)
+        return RedirectResponse("/admin/terminal", status_code=303)
 
     @route("/job/{job_id:path}/delete", methods=["POST"])
     async def delete_job(self, request: Request) -> Response:
@@ -927,7 +927,7 @@ class TerminalView(CustomView):
             flash(request, f"Delete job failed: {exc}", "error")
         else:
             flash(request, "Job log deleted", "success")
-        return RedirectResponse("/admin/legacy/terminal", status_code=303)
+        return RedirectResponse("/admin/terminal", status_code=303)
 
     @route("/cleanup-jobs", methods=["POST"])
     async def cleanup_jobs(self, request: Request) -> Response:
@@ -942,7 +942,7 @@ class TerminalView(CustomView):
             flash(request, f"Job cleanup failed: {exc}", "error")
         else:
             flash(request, f"Deleted {result.get('count', 0)} retained jobs", "success")
-        return RedirectResponse("/admin/legacy/terminal", status_code=303)
+        return RedirectResponse("/admin/terminal", status_code=303)
 
     @route("/workspace/{workspace_id:path}/delete", methods=["POST"])
     async def delete_workspace(self, request: Request) -> Response:
@@ -953,7 +953,7 @@ class TerminalView(CustomView):
             flash(request, f"Delete workspace failed: {exc}", "error")
         else:
             flash(request, f"Deleted workspace {workspace_id}", "success")
-        return RedirectResponse("/admin/legacy/terminal", status_code=303)
+        return RedirectResponse("/admin/terminal", status_code=303)
 
 
 class BrowserView(CustomView):
@@ -1058,7 +1058,7 @@ class SettingsView(CustomView):
                 flash(request, f"Invalid settings: {exc}", "error")
             else:
                 flash(request, "Settings saved", "success")
-                return RedirectResponse("/admin/legacy/settings", status_code=303)
+                return RedirectResponse("/admin/settings", status_code=303)
 
         config = await asyncio.to_thread(self.config.get)
         terminal_policy = await asyncio.to_thread(self.runtime_settings.terminal_policy)
@@ -1091,7 +1091,7 @@ class SettingsView(CustomView):
     async def cleanup_logs(self, request: Request) -> Response:
         removed = await asyncio.to_thread(self.audit.cleanup)
         flash(request, f"Removed {removed} expired MCP call records", "success")
-        return RedirectResponse("/admin/legacy/settings", status_code=303)
+        return RedirectResponse("/admin/settings", status_code=303)
 
 
 class FilesView(CustomView):
@@ -1162,7 +1162,7 @@ class FilesView(CustomView):
             else:
                 flash(request, f"Uploaded {destination}", "success")
         return RedirectResponse(
-            f"/admin/legacy/files?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
@@ -1182,7 +1182,7 @@ class FilesView(CustomView):
             else:
                 flash(request, f"Created {destination}", "success")
         return RedirectResponse(
-            f"/admin/legacy/files?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
@@ -1221,7 +1221,7 @@ class FilesView(CustomView):
         else:
             flash(request, f"Deleted {path}", "success")
         return RedirectResponse(
-            f"/admin/legacy/files?{urllib.parse.urlencode({'path': current})}",
+            f"/admin/files?{urllib.parse.urlencode({'path': current})}",
             status_code=303,
         )
 
