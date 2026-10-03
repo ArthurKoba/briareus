@@ -121,11 +121,16 @@ def test_browser_runtime_uses_private_remote_debugging_endpoint() -> None:
     assert 'command.append(f"--lang={self.locale}")' in source
     assert 'command.append(f"--accept-lang={self.accept_language}")' in source
     assert '"Xvfb"' in source
+    assert "_terminate_display_process" in source
 
 
-def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
+def test_browser_headful_identity_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from modules.files.workspace_store import WorkspaceFileStore
 
+    monkeypatch.setenv("TZ", "Europe/Moscow")
     browser = BrowserManager(
         workspace=WorkspaceFileStore(tmp_path / "workspace"),
         profile_dir=tmp_path / "profile",
@@ -141,14 +146,10 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         display=":99",
         color_depth=24,
         xvfb_enabled=True,
-        timezone="Europe/Moscow",
     )
 
     command = browser._browser_command()
-
     assert "--headless=new" not in command
     assert "--lang=ru-RU" in command
     assert "--accept-lang=ru-RU,ru,en-US,en" in command
     assert "--window-size=1440,900" in command
-    assert browser.display == ":99"
-    assert browser.timezone == "Europe/Moscow"

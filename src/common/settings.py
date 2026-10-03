@@ -645,7 +645,7 @@ class BrowserSettings(ProcessSettings):
         "ru-RU,ru,en-US,en",
         validation_alias="BROWSER_ACCEPT_LANGUAGE",
     )
-    display: str = Field(":99", validation_alias="DISPLAY")
+    display: str = Field(":99", validation_alias="BROWSER_DISPLAY")
     color_depth: int = Field(24, ge=16, le=32, validation_alias="BROWSER_COLOR_DEPTH")
     xvfb_enabled: bool = Field(True, validation_alias="BROWSER_XVFB_ENABLED")
     timezone: str = Field("Europe/Moscow", validation_alias="TZ")
