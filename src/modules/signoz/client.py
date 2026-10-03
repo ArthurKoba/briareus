@@ -1,18 +1,13 @@
 from __future__ import annotations
 
+import http.client
 import json
 import ssl
-import urllib.error
 import urllib.parse
-import urllib.request
-
-from opentelemetry import trace
-from opentelemetry.trace import SpanKind
 
 from common.account_contracts import ResolvedAccount
+from common.http_transport import HttpTransportError, PooledHttpTransport
 from common.models import JsonObject, JsonValue, json_loads, json_object
-
-_TRACER = trace.get_tracer("mcp-bridge.provider.signoz")
 
 
 class SigNozClientError(RuntimeError):
@@ -24,6 +19,20 @@ class SigNozClient:
         self.account = account
         self.base_url = account.base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        parsed = urllib.parse.urlsplit(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise SigNozClientError("SigNoz base_url must be absolute HTTP(S)")
+        self._scheme = parsed.scheme
+        self._hostname = parsed.hostname
+        self._port = parsed.port
+        self._base_path = parsed.path.rstrip("/")
+        self._transport = PooledHttpTransport(
+            self._new_connection,
+            max_connections=4,
+            acquire_timeout=self.timeout_seconds,
+            span_name="provider.signoz.http",
+            provider="signoz",
+        )
 
     def _context(self) -> ssl.SSLContext | None:
         parsed = urllib.parse.urlsplit(self.base_url)
@@ -35,6 +44,28 @@ class SigNozClient:
             return ssl.create_default_context(cadata=self.account.ca_cert_pem.replace("\\n", "\n"))
         return ssl.create_default_context()
 
+    def _new_connection(self) -> http.client.HTTPConnection:
+        if self._scheme == "https":
+            return http.client.HTTPSConnection(
+                self._hostname,
+                self._port,
+                timeout=self.timeout_seconds,
+                context=self._context(),
+            )
+        return http.client.HTTPConnection(
+            self._hostname,
+            self._port,
+            timeout=self.timeout_seconds,
+        )
+
+    def _target(self, path: str, query: dict[str, str] | None = None) -> str:
+        if not path.startswith("/"):
+            raise SigNozClientError("SigNoz path must start with /")
+        target = self._base_path + path
+        if query:
+            target += "?" + urllib.parse.urlencode(query)
+        return target
+
     def _request(
         self,
         method: str,
@@ -43,9 +74,6 @@ class SigNozClient:
         query: dict[str, str] | None = None,
         payload: JsonObject | None = None,
     ) -> JsonValue:
-        target = self.base_url + path
-        if query:
-            target += "?" + urllib.parse.urlencode(query)
         body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode()
         headers = {
             "Accept": "application/json",
@@ -53,31 +81,20 @@ class SigNozClient:
             "SIGNOZ-API-KEY": self.account.credential,
             "User-Agent": "mcp-bridge-signoz",
         }
-        request = urllib.request.Request(target, data=body, method=method, headers=headers)
-        with _TRACER.start_as_current_span(
-            "provider.signoz.http",
-            kind=SpanKind.CLIENT,
-            attributes={
-                "mcp.provider": "signoz",
-                "http.request.method": method,
-            },
-        ) as span:
-            try:
-                with urllib.request.urlopen(
-                    request,
-                    timeout=self.timeout_seconds,
-                    context=self._context(),
-                ) as response:
-                    raw = response.read()
-                    span.set_attribute("http.response.status_code", response.status)
-                    span.set_attribute("http.response.body.size", len(raw))
-            except urllib.error.HTTPError as exc:
-                span.set_attribute("http.response.status_code", exc.code)
-                detail = exc.read()[:4096].decode("utf-8", "replace")
-                raise SigNozClientError(f"SigNoz HTTP {exc.code}: {detail}") from exc
-            except urllib.error.URLError as exc:
-                raise SigNozClientError(f"SigNoz transport error: {exc.reason}") from exc
-        return json_loads(raw, context="SigNoz response")
+        try:
+            response = self._transport.request(
+                method.upper(),
+                self._target(path, query),
+                body=body,
+                headers=headers,
+                reconnect_retries=1,
+            )
+        except HttpTransportError as exc:
+            raise SigNozClientError(f"SigNoz transport error: {exc}") from exc
+        if response.status >= 400:
+            detail = response.body[:4096].decode("utf-8", "replace")
+            raise SigNozClientError(f"SigNoz HTTP {response.status}: {detail}")
+        return json_loads(response.body, context="SigNoz response")
 
     def whoami(self) -> JsonObject:
         return json_object(

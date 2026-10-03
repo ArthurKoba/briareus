@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import http.client
 import json
-import urllib.error
+import ssl
 import urllib.parse
-import urllib.request
 
 from opentelemetry import trace
-from opentelemetry.trace import SpanKind
 
 from .account_contracts import (
     AccountList,
@@ -15,6 +14,7 @@ from .account_contracts import (
     ResolvedAccount,
 )
 from .cache import CacheBackend, CacheKeys, SharedCache
+from .http_transport import HttpTransportError, PooledHttpTransport
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
 from .runtime_policy_contracts import McpRuntimePolicy, TerminalRuntimePolicy
@@ -44,6 +44,41 @@ class ManagementClient:
         self.cache_settings = cache_settings or ValkeySettings()
         self.cache = cache or SharedCache(self.cache_settings)
         self.cache_keys = CacheKeys(self.cache)
+        parsed = urllib.parse.urlsplit(self.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("MANAGEMENT_URL must be an absolute HTTP(S) URL")
+        self._scheme = parsed.scheme
+        self._hostname = parsed.hostname
+        self._port = parsed.port
+        self._base_path = parsed.path.rstrip("/")
+        self._transport = PooledHttpTransport(
+            self._new_connection,
+            max_connections=8,
+            acquire_timeout=self.timeout_seconds,
+            span_name="management.http",
+        )
+
+    def _new_connection(self) -> http.client.HTTPConnection:
+        if self._scheme == "https":
+            return http.client.HTTPSConnection(
+                self._hostname,
+                self._port,
+                timeout=self.timeout_seconds,
+                context=ssl.create_default_context(),
+            )
+        return http.client.HTTPConnection(
+            self._hostname,
+            self._port,
+            timeout=self.timeout_seconds,
+        )
+
+    def _target(self, path: str, query: dict[str, str] | None = None) -> str:
+        if not path.startswith("/"):
+            raise ValueError("management path must start with /")
+        target = self._base_path + path
+        if query:
+            target += "?" + urllib.parse.urlencode(query)
+        return target
 
     def _request(
         self,
@@ -54,9 +89,6 @@ class ManagementClient:
         payload: JsonObject | None = None,
         expect_body: bool = True,
     ) -> JsonObject:
-        target = self.url + path
-        if query:
-            target += "?" + urllib.parse.urlencode(query)
         body = None
         headers = {
             "Accept": "application/json",
@@ -66,27 +98,26 @@ class ManagementClient:
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(target, data=body, method=method, headers=headers)
-        with _TRACER.start_as_current_span(
-            "management.http",
-            kind=SpanKind.CLIENT,
-            attributes={
-                "http.request.method": method,
-                "url.path": path,
-            },
-        ):
-            try:
-                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                    raw = response.read()
-            except urllib.error.HTTPError as exc:
-                detail = exc.read()[:2048].decode("utf-8", "replace")
-                raise ManagementClientError(f"management HTTP {exc.code}: {detail}") from exc
-            except urllib.error.URLError as exc:
-                raise ManagementClientError(f"management transport error: {exc.reason}") from exc
-        if not expect_body or not raw:
+        normalized_method = method.upper()
+        try:
+            response = self._transport.request(
+                normalized_method,
+                self._target(path, query),
+                body=body,
+                headers=headers,
+                reconnect_retries=1 if normalized_method in {"GET", "HEAD"} else 0,
+            )
+        except HttpTransportError as exc:
+            raise ManagementClientError(f"management transport error: {exc}") from exc
+        if response.status >= 400:
+            detail = response.body[:2048].decode("utf-8", "replace")
+            raise ManagementClientError(
+                f"management HTTP {response.status}: {detail}"
+            )
+        if not expect_body or not response.body:
             return {}
         return json_object(
-            json_loads(raw, context="management response"),
+            json_loads(response.body, context="management response"),
             context="management response",
         )
 

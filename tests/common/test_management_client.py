@@ -156,3 +156,18 @@ def test_management_client_batches_invocation_events_into_one_request() -> None:
     client.record_invocations(events)
 
     assert client.calls == ["/internal/events/batch"]
+
+
+def test_management_client_uses_pooled_transport_and_preserves_base_path() -> None:
+    client = ManagementClient(
+        ManagementClientSettings(
+            url="http://management:8000/control",
+            service_token="test",
+        ),
+        cache=_MemoryCache(),
+    )
+
+    assert client._target("/internal/accounts", {"provider": "github"}) == (
+        "/control/internal/accounts?provider=github"
+    )
+    assert client._transport.connection_count == 0
