@@ -157,8 +157,8 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
         "DISPLAY=:99",
         "TZ=Europe/Moscow",
         "LANG=ru_RU.UTF-8",
+        "LC_ALL=ru_RU.UTF-8",
     ]
-    assert "LC_ALL=ru_RU.UTF-8" in process_command
     assert browser.display == ":99"
     assert browser.timezone == "Europe/Moscow"
     assert browser.posix_locale == "ru_RU.UTF-8"
