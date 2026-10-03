@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates gosu \
+    && apt-get install -y --no-install-recommends curl ca-certificates gosu netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./
@@ -41,7 +41,7 @@ COPY src/common ./src/common
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=6 \
-    CMD /app/.venv/bin/python -c "import socket; s=socket.create_connection(('127.0.0.1', 8000), 2); s.close()" || exit 1
+    CMD ["nc", "-z", "-w", "1", "127.0.0.1", "8000"]
 
 ENTRYPOINT ["/usr/local/bin/bridge-entrypoint"]
 CMD ["/app/.venv/bin/python", "-m", "common.asgi"]
