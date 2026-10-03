@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
-import { Modal, Switch, Tag } from "ant-design-vue"
-import { Activity, Circle, Radio, RefreshCw, Trash2 } from "lucide-vue-next"
+import { Switch } from "ant-design-vue"
+import { Activity, CheckCircle2, Circle, Radio, RefreshCw, Trash2, XCircle } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi, type InvocationRecord } from "@/shared/api/management"
+import { managementApi, type AccountRecord, type InvocationRecord } from "@/shared/api/management"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatDate } from "@/shared/lib/format"
 import { tabWorkspace } from "@/shared/lib/tab-workspace"
 import { notifications } from "@/shared/notifications/bus"
+import AppDialog from "@/shared/ui/AppDialog.vue"
 import Button from "@/shared/ui/Button.vue"
 import DataTable from "@/shared/ui/DataTable.vue"
+import JsonView from "@/shared/ui/JsonView.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 
 const { t } = useI18n()
@@ -20,6 +22,7 @@ const error = ref("")
 const selected = ref<InvocationRecord | null>(null)
 const limit = ref(250)
 const pending = ref<InvocationRecord[]>([])
+const accountsById = ref<Record<string, AccountRecord>>({})
 const followLive = computed({ get: () => tabWorkspace.callsFollowLive, set: (value: boolean) => { tabWorkspace.callsFollowLive = value } })
 let unsubscribe: undefined | (() => void)
 
@@ -29,8 +32,8 @@ const columns = computed(() => [
   { title: t("calls.tool"), dataIndex: "tool", key: "tool", width: 260 },
   { title: t("common.status"), dataIndex: "status", key: "status", width: 100 },
   { title: t("calls.duration"), dataIndex: "duration_ms", key: "duration_ms", width: 110 },
-  { title: t("common.provider"), dataIndex: "provider", key: "provider", width: 120 },
-  { title: t("common.actions"), key: "actions", width: 130 },
+  { title: t("calls.account"), dataIndex: "account_id", key: "account_id", width: 170 },
+  { title: "", key: "actions", width: 56, sortable: false, align: "right" as const },
 ])
 
 const errorCount = computed(() => rows.value.filter((item) => item.status === "error").length)
@@ -61,7 +64,9 @@ async function load(next = limit.value): Promise<void> {
   error.value = ""
   try {
     limit.value = next
-    rows.value = (await managementApi.calls(next)).events
+    const [calls, accounts] = await Promise.all([managementApi.calls(next), managementApi.accounts()])
+    rows.value = calls.events
+    accountsById.value = Object.fromEntries(accounts.accounts.map((account) => [account.id, account]))
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to load calls"
   } finally {
@@ -76,6 +81,11 @@ async function loadMore(): Promise<void> {
 
 function inspect(item: unknown): void {
   selected.value = item as InvocationRecord
+}
+
+function accountDisplay(item: InvocationRecord): string {
+  if (!item.account_id) return "—"
+  return accountsById.value[item.account_id]?.alias || item.account_id.slice(0, 12)
 }
 
 async function clearAll(): Promise<void> {
@@ -142,48 +152,43 @@ onBeforeUnmount(() => unsubscribe?.())
       :pagination="false"
       virtual
       :scroll-y="620"
+      clickable
+      @row-click="inspect"
       @end-reached="loadMore"
     >
       <template #bodyCell="{ column, record, value }">
         <template v-if="column.key === 'occurred_at'">{{ formatDate(record.occurred_at) }}</template>
         <template v-else-if="column.key === 'status'">
-          <Tag :color="record.status === 'success' ? 'green' : 'red'">{{ record.status }}</Tag>
+          <span class="inline-flex items-center gap-1.5" :class="record.status === 'success' ? 'text-emerald-500' : 'text-destructive'">
+            <CheckCircle2 v-if="record.status === 'success'" class="size-4" />
+            <XCircle v-else class="size-4" />
+            <span class="text-[11px]">{{ record.status }}</span>
+          </span>
         </template>
         <template v-else-if="column.key === 'duration_ms'">{{ Number(record.duration_ms).toFixed(1) }} ms</template>
+        <template v-else-if="column.key === 'account_id'">{{ accountDisplay(record as InvocationRecord) }}</template>
         <template v-else-if="column.key === 'actions'">
-          <div class="flex gap-1">
-            <Button variant="ghost" size="sm" @click="inspect(record)">{{ t("calls.inspect") }}</Button>
-            <Button variant="ghost" size="sm" @click="remove(record as InvocationRecord)">{{ t("common.delete") }}</Button>
-          </div>
+          <button data-row-action class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" :title="String(t('common.delete'))" @click="remove(record as InvocationRecord)">
+            <Trash2 class="size-4" />
+          </button>
         </template>
         <template v-else><span class="truncate">{{ value ?? "—" }}</span></template>
       </template>
     </DataTable>
 
-    <Modal :open="Boolean(selected)" :title="t('calls.callTitle')" :footer="null" width="860px" @cancel="selected = null">
-      <div v-if="selected" class="space-y-4 text-sm">
-        <div class="grid gap-3 sm:grid-cols-2">
-          <div>
-            <span class="text-muted-foreground">{{ t("calls.tool") }}</span>
-            <div class="font-medium">{{ selected.tool }}</div>
-          </div>
-          <div>
-            <span class="text-muted-foreground">{{ t("calls.requestId") }}</span>
-            <div class="break-all font-mono text-xs">{{ selected.request_id || "—" }}</div>
-          </div>
+    <AppDialog :open="Boolean(selected)" :title="t('calls.callTitle')" width="880px" :close-label="String(t('common.close'))" @close="selected = null">
+      <div v-if="selected" class="space-y-5 text-sm">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="rounded-lg bg-muted/50 p-3"><div class="text-[10px] uppercase text-muted-foreground">{{ t("calls.tool") }}</div><div class="mt-1 font-medium">{{ selected.tool }}</div></div>
+          <div class="rounded-lg bg-muted/50 p-3"><div class="text-[10px] uppercase text-muted-foreground">{{ t("calls.module") }}</div><div class="mt-1">{{ selected.module }}</div></div>
+          <div class="rounded-lg bg-muted/50 p-3"><div class="text-[10px] uppercase text-muted-foreground">{{ t("calls.account") }}</div><div class="mt-1">{{ accountDisplay(selected) }}</div></div>
+          <div class="rounded-lg bg-muted/50 p-3"><div class="text-[10px] uppercase text-muted-foreground">{{ t("calls.duration") }}</div><div class="mt-1 tabular-nums">{{ Number(selected.duration_ms).toFixed(1) }} ms</div></div>
         </div>
-        <div
-          v-for="[label, value] in [
-            [t('calls.arguments'), selected.arguments_json],
-            [t('calls.result'), selected.result_json],
-            [t('calls.error'), selected.error_message],
-          ]"
-          :key="String(label)"
-        >
-          <div class="mb-1 text-xs font-medium uppercase text-muted-foreground">{{ label }}</div>
-          <pre class="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">{{ value || "—" }}</pre>
-        </div>
+        <div><div class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ t("calls.arguments") }}</div><JsonView :value="selected.arguments_json" /></div>
+        <div v-if="selected.result_json"><div class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ t("calls.result") }}</div><JsonView :value="selected.result_json" /></div>
+        <div v-if="selected.error_message || selected.error_type"><div class="mb-1 text-xs font-semibold uppercase tracking-wide text-destructive">{{ t("calls.error") }}</div><JsonView :value="selected.error_message || selected.error_type" /></div>
+        <div class="text-[11px] text-muted-foreground">{{ t("calls.requestId") }}: <span class="font-mono">{{ selected.request_id || "—" }}</span></div>
       </div>
-    </Modal>
+    </AppDialog>
   </div>
 </template>
