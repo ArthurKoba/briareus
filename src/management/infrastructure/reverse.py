@@ -6,6 +6,7 @@ from typing import cast
 
 from fastmcp import Client
 
+from common.mcp_client_pool import PersistentMcpClientPool
 from common.models import JsonObject, JsonValue, json_loads, json_object, json_value
 
 _DEFAULT_GHIDRA_MCP_URL = "http://ghidra:8000/mcp"
@@ -62,10 +63,18 @@ class ReverseAdminClient:
     ) -> None:
         self.url = url
         self.timeout_seconds = timeout_seconds
+        self._pool = PersistentMcpClientPool(
+            lambda: Client(self.url, timeout=self.timeout_seconds),
+            name="management-reverse",
+            size=3,
+        )
 
     async def _call(self, tool: str, arguments: JsonObject | None = None) -> JsonValue:
-        async with Client(self.url, timeout=self.timeout_seconds) as client:
-            result = await client.call_tool(tool, arguments or {})
+        result = await self._pool.call_tool(
+            tool,
+            arguments or {},
+            timeout_seconds=self.timeout_seconds,
+        )
         decoded = _decode_call_result(result)
         if decoded is None:
             raise RuntimeError(f"{tool} returned no result")
