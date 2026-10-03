@@ -9,6 +9,7 @@ EXPECTED_SERVICES = {
     "auth",
     "gateway",
     "management",
+    "management-ui",
     "github",
     "gitlab",
     "files",
@@ -74,6 +75,7 @@ def test_compose_declares_only_primary_runtime_dependencies() -> None:
     services = _services()
 
     expected = {
+        "gateway": {"management-ui": {"condition": "service_healthy", "required": True}},
         "github": {"management": {"condition": "service_healthy", "required": True}},
         "gitlab": {"management": {"condition": "service_healthy", "required": True}},
         "observability": {"management": {"condition": "service_healthy", "required": True}},
@@ -88,7 +90,9 @@ def test_compose_declares_only_primary_runtime_dependencies() -> None:
 
 
 def test_gateway_is_not_health_gated_on_provider_availability() -> None:
-    assert "depends_on" not in _services()["gateway"]
+    assert _services()["gateway"]["depends_on"] == {
+        "management-ui": {"condition": "service_healthy", "required": True}
+    }
 
 
 def test_compose_does_not_publish_host_ports() -> None:
@@ -176,6 +180,7 @@ def test_compose_declares_machine_cache_routing_and_bootstrap_environment() -> N
         "OBSERVABILITY_URL",
     }
     expected = {
+        "management-ui": set(),
         "management": machine
         | cache
         | observability
@@ -335,7 +340,7 @@ def test_compose_wires_standard_otlp_environment_to_every_service() -> None:
     }
 
     for name, service in services.items():
-        if name == "valkey":
+        if name in {"valkey", "management-ui"}:
             continue
         assert required.issubset(service.get("environment", {})), name
 
