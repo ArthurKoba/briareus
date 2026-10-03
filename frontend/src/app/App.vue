@@ -41,7 +41,7 @@ const nav=computed(()=>[
   {id:"settings",label:t("nav.settings"),icon:Settings,component:SettingsPage},
 ])
 const current=computed(()=>nav.value.find(item=>item.id===activePage.value)??nav.value[0])
-const fallbackBootstrap:ManagementBootstrap={product:"MCP Bridge",environment:"unavailable",legacy_admin_path:"#",navigation:[]}
+const fallbackBootstrap:ManagementBootstrap={product:"MCP Bridge",environment:"unavailable",navigation:[]}
 const knownAuth=()=>sessionStorage.getItem("mcp-bridge:known-auth")==="true"
 function rememberSession(value:SessionState){session.value=value;if(value.authenticated){sessionStorage.setItem("mcp-bridge:known-auth","true");sessionStorage.setItem("mcp-bridge:username",value.username??"")}else{sessionStorage.removeItem("mcp-bridge:known-auth");sessionStorage.removeItem("mcp-bridge:username")}}
 function expireAuth(){rememberSession({authenticated:false,username:null});bootstrap.value=null;gatewayUnavailable.value=false}
