@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
+import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.testclient import TestClient
 
 from common.settings import FileSettings, ManagementSettings
+from management.application.ports import ConnectionVerifier
 from management.application.services import (
     AccountService,
     InvocationAuditService,
@@ -17,6 +19,7 @@ from management.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
+from management.domain.accounts import Account
 from management.infrastructure.crypto import FernetCredentialCipher
 from management.infrastructure.database import Base, ManagementConfigRecord, create_database
 from management.infrastructure.files import FileAdminStore
@@ -32,7 +35,19 @@ from management.infrastructure.repositories import (
 from management.presentation.web_api import WebApiServices, build_admin_api_router
 
 
-def _client(tmp_path: Path) -> TestClient:
+class _CandidateVerifier:
+    def __init__(self, *, fail: str = "") -> None:
+        self.fail = fail
+        self.calls: list[tuple[Account, str]] = []
+
+    def verify(self, account: Account, credential: str) -> dict[str, object]:
+        self.calls.append((account, credential))
+        if self.fail:
+            raise ValueError(self.fail)
+        return {"ok": True, "provider": account.provider.value, "secret_echo": credential}
+
+
+def _client(tmp_path: Path, *, verifier: ConnectionVerifier | None = None) -> TestClient:
     database = tmp_path / "api.sqlite3"
     engine, sessions = create_database(f"sqlite:///{database}")
     Base.metadata.create_all(engine)
@@ -54,7 +69,7 @@ def _client(tmp_path: Path) -> TestClient:
         accounts=AccountService(
             SqlAlchemyAccountRepository(sessions),
             cipher,
-            ProviderConnectionVerifier(),
+            verifier or ProviderConnectionVerifier(),
         ),
         audit=InvocationAuditService(SqlAlchemyInvocationRepository(sessions), config),
         oauth_sessions=OAuthSessionService(SqlAlchemyOAuthSessionRepository(sessions)),
@@ -294,3 +309,167 @@ def test_settings_revision_is_optional_for_legacy_clients(tmp_path: Path) -> Non
         assert response.status_code == 200
         assert response.json()["management"]["logging_retention_days"] == 16
         assert len(response.json()["revision"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("provider", "auth_type", "base_url", "external_id"),
+    [
+        ("github", "github_token", "", ""),
+        ("gitlab", "private_token", "https://gitlab.example.test", ""),
+        ("signoz", "signoz_api_key", "https://signoz.example.test", ""),
+        ("coolify", "coolify_api_token", "https://coolify.example.test", ""),
+    ],
+)
+def test_account_candidate_verify_does_not_persist_or_return_provider_payload(
+    tmp_path: Path,
+    provider: str,
+    auth_type: str,
+    base_url: str,
+    external_id: str,
+) -> None:
+    verifier = _CandidateVerifier()
+    with _client(tmp_path, verifier=verifier) as client:
+        _login(client)
+        before = client.get("/admin/api/accounts").json()["count"]
+        response = client.post(
+            "/admin/api/accounts/verify-candidate",
+            json={
+                "alias": f"{provider}-candidate",
+                "provider": provider,
+                "auth_type": auth_type,
+                "base_url": base_url,
+                "external_id": external_id,
+                "credential": "draft-secret",
+                "draft_revision": "draft-1",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": True,
+            "provider": provider,
+            "draft_revision": "draft-1",
+        }
+        assert client.get("/admin/api/accounts").json()["count"] == before
+        assert len(verifier.calls) == 1
+        assert verifier.calls[0][1] == "draft-secret"
+        assert "secret" not in response.text.casefold()
+
+
+def test_account_candidate_edit_reuses_saved_credential_without_persisting_draft(
+    tmp_path: Path,
+) -> None:
+    verifier = _CandidateVerifier()
+    with _client(tmp_path, verifier=verifier) as client:
+        _login(client)
+        created = client.post(
+            "/admin/api/accounts",
+            json={
+                "alias": "gitlab-existing",
+                "provider": "gitlab",
+                "auth_type": "private_token",
+                "base_url": "https://gitlab.old.test",
+                "credential": "stored-secret",
+            },
+        )
+        assert created.status_code == 201
+        account_id = created.json()["id"]
+        response = client.post(
+            "/admin/api/accounts/verify-candidate",
+            json={
+                "account_id": account_id,
+                "alias": "gitlab-existing",
+                "provider": "gitlab",
+                "auth_type": "private_token",
+                "base_url": "https://gitlab.new.test",
+                "credential": "",
+                "draft_revision": "edit-2",
+            },
+        )
+        assert response.status_code == 200
+        candidate, credential = verifier.calls[-1]
+        assert credential == "stored-secret"
+        assert candidate.base_url == "https://gitlab.new.test"
+        persisted = client.get("/admin/api/accounts").json()["accounts"][0]
+        assert persisted["base_url"] == "https://gitlab.old.test"
+
+
+def test_account_candidate_new_requires_credential(tmp_path: Path) -> None:
+    verifier = _CandidateVerifier()
+    with _client(tmp_path, verifier=verifier) as client:
+        _login(client)
+        response = client.post(
+            "/admin/api/accounts/verify-candidate",
+            json={
+                "alias": "candidate",
+                "provider": "github",
+                "auth_type": "github_token",
+                "credential": "",
+                "draft_revision": "draft-blank",
+            },
+        )
+        assert response.status_code == 400
+        assert verifier.calls == []
+        assert client.get("/admin/api/accounts").json()["count"] == 0
+
+
+def test_account_candidate_verify_requires_session_and_same_origin(tmp_path: Path) -> None:
+    payload = {
+        "alias": "candidate",
+        "provider": "github",
+        "auth_type": "github_token",
+        "credential": "draft-secret",
+        "draft_revision": "draft-origin",
+    }
+    with _client(tmp_path, verifier=_CandidateVerifier()) as client:
+        assert client.post("/admin/api/accounts/verify-candidate", json=payload).status_code == 401
+        _login(client)
+        rejected = client.post(
+            "/admin/api/accounts/verify-candidate",
+            json=payload,
+            headers={"Origin": "https://evil.example"},
+        )
+        assert rejected.status_code == 403
+
+
+def test_account_candidate_verify_redacts_provider_failure(tmp_path: Path) -> None:
+    secret = "provider-super-secret"
+    verifier = _CandidateVerifier(fail=f"upstream leaked {secret}")
+    with _client(tmp_path, verifier=verifier) as client:
+        _login(client)
+        response = client.post(
+            "/admin/api/accounts/verify-candidate",
+            json={
+                "alias": "candidate",
+                "provider": "github",
+                "auth_type": "github_token",
+                "credential": secret,
+                "draft_revision": "draft-error",
+            },
+        )
+        assert response.status_code == 502
+        assert response.json()["detail"] == "candidate verification failed"
+        assert secret not in response.text
+        assert client.get("/admin/api/accounts").json()["count"] == 0
+
+
+def test_account_candidate_verify_rate_limit(tmp_path: Path) -> None:
+    verifier = _CandidateVerifier()
+    with _client(tmp_path, verifier=verifier) as client:
+        _login(client)
+        payload = {
+            "alias": "candidate",
+            "provider": "github",
+            "auth_type": "github_token",
+            "credential": "draft-secret",
+            "draft_revision": "draft-rate",
+        }
+        for index in range(20):
+            response = client.post(
+                "/admin/api/accounts/verify-candidate",
+                json={**payload, "draft_revision": f"draft-{index}"},
+            )
+            assert response.status_code == 200
+        limited = client.post("/admin/api/accounts/verify-candidate", json=payload)
+        assert limited.status_code == 429
+        assert limited.headers["retry-after"] == "60"
+        assert len(verifier.calls) == 20

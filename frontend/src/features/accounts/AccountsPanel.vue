@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref, watch } from "vue"
 import { Select, Switch } from "ant-design-vue"
 import {
   Check,
@@ -41,6 +41,12 @@ const editing = ref<AccountRecord | null>(null)
 const saving = ref(false)
 const modalVerified = ref(false)
 const modalVerifying = ref(false)
+const modalVerifyError = ref("")
+const verifiedDraftRevision = ref("")
+const draftSession = ref(0)
+const draftGeneration = ref(0)
+let draftHydrating = false
+let modalVerifyRun = 0
 const verification = useAccountVerification(managementApi.verifyAccount)
 
 const initialProvider = props.defaultProvider ?? props.providers[0] ?? "github"
@@ -55,6 +61,51 @@ const form = reactive<AccountPayload>({
   enabled: true,
   credential: "",
 })
+
+const draftRevision = computed(() => `${draftSession.value}:${draftGeneration.value}`)
+const connectionChanged = computed(() => {
+  if (!editing.value) return true
+  const record = editing.value
+  return Boolean(form.credential?.trim())
+    || form.provider !== record.provider
+    || form.auth_type !== record.auth_type
+    || (form.base_url ?? "") !== (record.base_url ?? "")
+    || (form.external_id ?? "") !== (record.external_id ?? "")
+    || Boolean(form.verify_tls) !== record.verify_tls
+    || (form.ca_cert_pem ?? "") !== (record.ca_cert_pem ?? "")
+})
+const requiresDraftVerification = computed(() => !editing.value || connectionChanged.value)
+const currentDraftVerified = computed(() => !requiresDraftVerification.value || (
+  modalVerified.value && verifiedDraftRevision.value === draftRevision.value
+))
+
+function clearDraftVerification(): void {
+  modalVerified.value = false
+  modalVerifyError.value = ""
+  verifiedDraftRevision.value = ""
+}
+
+function beginDraft(): void {
+  draftSession.value += 1
+  draftGeneration.value = 0
+  modalVerifyRun += 1
+  modalVerifying.value = false
+  clearDraftVerification()
+}
+
+watch([
+  () => form.provider,
+  () => form.auth_type,
+  () => form.base_url,
+  () => form.external_id,
+  () => form.verify_tls,
+  () => form.ca_cert_pem,
+  () => form.credential,
+], () => {
+  if (draftHydrating) return
+  draftGeneration.value += 1
+  clearDraftVerification()
+}, { flush: "sync" })
 
 const providerOptions = computed(() => props.providers.map((value) => ({ label: value, value })))
 const authOptions = computed(() => ({
@@ -105,7 +156,7 @@ function defaults(provider: AccountRecord["provider"]): void {
 
 function newAccount(): void {
   editing.value = null
-  modalVerified.value = false
+  draftHydrating = true
   Object.assign(form, {
     alias: "",
     provider: initialProvider,
@@ -118,12 +169,14 @@ function newAccount(): void {
     credential: "",
   })
   defaults(initialProvider)
+  draftHydrating = false
+  beginDraft()
   modalOpen.value = true
 }
 
 function editAccount(record: AccountRecord): void {
   editing.value = record
-  modalVerified.value = false
+  draftHydrating = true
   Object.assign(form, {
     alias: record.alias,
     provider: record.provider,
@@ -135,6 +188,8 @@ function editAccount(record: AccountRecord): void {
     enabled: record.enabled,
     credential: "",
   })
+  draftHydrating = false
+  beginDraft()
   modalOpen.value = true
 }
 
@@ -164,23 +219,41 @@ function verificationLabel(record: AccountRecord): string {
 }
 
 async function verifyCurrent(): Promise<void> {
-  if (!editing.value) return
+  if (modalVerifying.value) return
+  const revision = draftRevision.value
+  const run = ++modalVerifyRun
   modalVerifying.value = true
-  modalVerified.value = await verify(editing.value)
-  modalVerifying.value = false
+  modalVerified.value = false
+  modalVerifyError.value = ""
+  verifiedDraftRevision.value = ""
+  try {
+    const result = await managementApi.verifyAccountCandidate({
+      ...form,
+      account_id: editing.value?.id,
+      draft_revision: revision,
+    })
+    if (run !== modalVerifyRun || !modalOpen.value || revision !== draftRevision.value) return
+    if (result.draft_revision !== revision) return
+    modalVerified.value = true
+    verifiedDraftRevision.value = revision
+  } catch (caught) {
+    if (run !== modalVerifyRun || !modalOpen.value || revision !== draftRevision.value) return
+    modalVerifyError.value = caught instanceof Error ? caught.message : String(t("accounts.connectionFailed"))
+  } finally {
+    if (run === modalVerifyRun) modalVerifying.value = false
+  }
 }
 
 async function save(): Promise<void> {
-  if (editing.value && !modalVerified.value) return
+  if (!currentDraftVerified.value) return
   saving.value = true
   try {
-    let record: AccountRecord
-    if (editing.value) record = await managementApi.updateAccount(editing.value, { ...form })
-    else record = await managementApi.createAccount({ ...form })
+    if (editing.value) await managementApi.updateAccount(editing.value, { ...form })
+    else await managementApi.createAccount({ ...form })
     modalOpen.value = false
+    modalVerifyRun += 1
     notifications.success(String(t("notifications.saved")))
     await load()
-    if (!editing.value) void verify(record)
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to save account"
   } finally {
@@ -285,17 +358,22 @@ onMounted(load)
         <label v-if="form.provider !== 'github'" class="space-y-1 text-sm sm:col-span-2"><span>{{ t("accounts.customCa") }}</span><textarea v-model="form.ca_cert_pem" class="field min-h-24 font-mono text-xs" /></label>
       </div>
 
-      <div v-if="editing && verification.stateFor(editing).status === 'error'" class="mt-3 text-sm text-destructive" role="status">{{ verificationLabel(editing) }}</div>
+      <div class="mt-3 min-h-5 text-sm" role="status">
+        <span v-if="modalVerifying" class="text-muted-foreground">{{ t("accounts.checkingDraft") }}</span>
+        <span v-else-if="requiresDraftVerification && currentDraftVerified" class="text-emerald-500">{{ t("accounts.draftVerified") }}</span>
+        <span v-else-if="modalVerifyError" class="text-destructive">{{ t("accounts.connectionFailed") }}: {{ modalVerifyError }}</span>
+        <span v-else-if="requiresDraftVerification" class="text-muted-foreground">{{ t("accounts.verifyDraftRequired") }}</span>
+      </div>
 
       <template #footer>
-        <Button variant="ghost" @click="modalOpen = false">{{ t("common.cancel") }}</Button>
-        <Button v-if="editing" variant="outline" :disabled="modalVerifying" @click="verifyCurrent">
+        <Button variant="ghost" @click="modalOpen = false; modalVerifyRun += 1">{{ t("common.cancel") }}</Button>
+        <Button variant="outline" :disabled="modalVerifying" @click="verifyCurrent">
           <LoaderCircle v-if="modalVerifying" class="mr-2 size-4 animate-spin" />
-          <CircleCheck v-else-if="modalVerified" class="mr-2 size-4 text-emerald-500" />
+          <CircleCheck v-else-if="requiresDraftVerification && currentDraftVerified" class="mr-2 size-4 text-emerald-500" />
           <PlugZap v-else class="mr-2 size-4" />
           {{ t("common.test") }}
         </Button>
-        <Button :disabled="saving || Boolean(editing && !modalVerified)" @click="save">
+        <Button :disabled="saving || !currentDraftVerified" @click="save">
           {{ editing ? t("common.confirm") : t("common.add") }}
         </Button>
       </template>

@@ -151,6 +151,29 @@ class AccountService:
             context="connection verification result",
         )
 
+    def verify_candidate(
+        self,
+        account: Account,
+        *,
+        credential: str = "",
+        credential_account_id: str = "",
+    ) -> JsonObject:
+        secret = credential.strip()
+        if not secret:
+            selector = credential_account_id.strip()
+            if not selector:
+                raise ValueError("credential is required for a new account")
+            existing = self.repository.get(
+                selector, provider=account.provider, enabled_only=False
+            )
+            secret = self.cipher.decrypt(
+                self.repository.credential(existing.id, provider=account.provider)
+            )
+        return json_object(
+            self.verifier.verify(account, secret),
+            context="candidate connection verification result",
+        )
+
 
 class InvocationAuditService:
     def __init__(
