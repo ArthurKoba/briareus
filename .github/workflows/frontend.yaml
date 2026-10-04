@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'frontend/**'
+      - 'admin-web-app/**'
       - '.github/workflows/frontend.yaml'
   pull_request:
     paths:
-      - 'frontend/**'
+      - 'admin-web-app/**'
       - '.github/workflows/frontend.yaml'
   workflow_dispatch:
 
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: admin-web-app
     steps:
       - uses: actions/checkout@v4
         with:
