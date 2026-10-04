@@ -32,3 +32,11 @@ Application source changes must not rebuild the infrastructure resource.
 PostgreSQL provisioning and Admin API migration are separate steps. The Admin API currently still derives its database URL from the SQLite `ADMIN_API_DATABASE_PATH` contract, so switching to PostgreSQL requires source support and a data migration first.
 
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
+
+Infrastructure bootstrap defaults:
+
+```text
+POSTGRES_DB=mcp-bridge
+POSTGRES_USER=${SERVICE_LOWERCASEUSER_POSTGRES}
+POSTGRES_PASSWORD=${SERVICE_PASSWORD_64_POSTGRES}
+```
