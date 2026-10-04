@@ -15,6 +15,7 @@ from common.models import (
     json_str,
     json_value,
 )
+from common.repository_checkout import RepositoryCheckoutError, resolve_workspace_destination
 from common.settings import GitHubPolicySettings
 
 from .github_actions import GitHubActionsClient
@@ -166,13 +167,12 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
         }
 
     def _local_git_path(self, destination: str) -> Path:
-        root = self.workspace_root.resolve(strict=False)
-        raw = destination.strip().replace("\\", "/").lstrip("/")
-        if not raw:
-            raise GitHubAgentError("workspace destination is required")
-        target = (root / raw).resolve(strict=False)
-        if target == root or not target.is_relative_to(root):
-            raise GitHubAgentError("workspace destination escapes workspace root")
+        try:
+            target = resolve_workspace_destination(self.workspace_root, destination)
+        except RepositoryCheckoutError as exc:
+            raise GitHubAgentError(
+                str(exc).replace("destination", "workspace destination")
+            ) from exc
         if not (target / ".git").exists():
             raise GitHubAgentError(f"workspace is not a Git checkout: {destination}")
         return target
@@ -290,6 +290,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             "authorized": True,
             "repository": repository,
             "workspace": target.relative_to(self.workspace_root.resolve(strict=False)).as_posix(),
+            "resolved_workspace_path": target.as_posix(),
             "remote": remote,
             "remote_url": expected,
             "branch": branch,
@@ -351,6 +352,7 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
             "pushed": True,
             "repository": repository,
             "workspace": target.relative_to(self.workspace_root.resolve(strict=False)).as_posix(),
+            "resolved_workspace_path": target.as_posix(),
             "remote": remote,
             "branch": push_branch,
             "head": head,

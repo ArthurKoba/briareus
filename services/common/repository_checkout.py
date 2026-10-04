@@ -13,15 +13,28 @@ class RepositoryCheckoutError(RuntimeError):
     pass
 
 
-def _destination(root: Path, value: str) -> Path:
+def resolve_workspace_destination(root: Path, value: str) -> Path:
     root = root.resolve(strict=False)
-    raw = value.strip().replace("\\", "/").lstrip("/")
+    raw = value.strip().replace("\\", "/")
     if not raw:
         raise RepositoryCheckoutError("destination is required")
-    target = (root / raw).resolve(strict=False)
+
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        target = candidate.resolve(strict=False)
+    else:
+        parts = candidate.parts
+        if parts and parts[0] == root.name:
+            candidate = Path(*parts[1:])
+        target = (root / candidate).resolve(strict=False)
+
     if target == root or not target.is_relative_to(root):
         raise RepositoryCheckoutError("destination escapes workspace root")
     return target
+
+
+def _destination(root: Path, value: str) -> Path:
+    return resolve_workspace_destination(root, value)
 
 
 def _run(
@@ -121,6 +134,7 @@ def checkout_repository(
 
     return {
         "path": target.relative_to(root).as_posix(),
+        "resolved_path": target.as_posix(),
         "mode": normalized_mode,
         "ref": ref,
         "git_metadata": normalized_mode == "git",
