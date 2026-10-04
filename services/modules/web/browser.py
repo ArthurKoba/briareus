@@ -90,6 +90,7 @@ class BrowserManager:
         self._restart_hooks: list[Callable[[], Awaitable[None]]] = []
         self._developer_backend_connected = False
         self._managed_user_scripts_extension_ids: set[str] = set()
+        self._user_scripts_sync_error = ""
         self._extension_registry = BrowserExtensionRegistry(
             self.profile_dir.parent / "dev-extensions.json",
             self.workspace.root,
@@ -389,10 +390,15 @@ class BrowserManager:
         for page in context.pages:
             self._register_page(page)
             await self._apply_color_scheme(page)
-        await self._set_chromium_developer_state(
-            self._developer_access_enabled,
-            context=context,
-        )
+        try:
+            await self._set_chromium_developer_state(
+                self._developer_access_enabled,
+                context=context,
+            )
+        except BrowserError as exc:
+            self._user_scripts_sync_error = str(exc)
+        else:
+            self._user_scripts_sync_error = ""
         context.on("page", self._on_context_page)
 
     async def _ensure_started(self) -> BrowserContext:
@@ -899,6 +905,7 @@ class BrowserManager:
                 self._managed_user_scripts_extension_ids
             ),
             "user_scripts_follow_developer_access": True,
+            "user_scripts_sync_error": self._user_scripts_sync_error,
             "observed": observed,
             "page_count": len(pages),
             "pages": pages,
@@ -1229,6 +1236,7 @@ class BrowserManager:
                 with contextlib.suppress(Exception):
                     await self._set_chromium_developer_state(previous)
                 raise
+        self._user_scripts_sync_error = ""
         async with self._policy_lock:
             self._developer_access_enabled = allowed
             await asyncio.to_thread(self._persist_policy)
