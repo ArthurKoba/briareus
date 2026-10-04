@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { Select, Switch } from "ant-design-vue"
 import {
   Check,
@@ -17,8 +17,10 @@ import {
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type AccountPayload, type AccountRecord } from "@/shared/api/management"
+import { ManagementApiError } from "@/shared/api/error"
 import { formatDate } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
+import { accountConnectionChanged, accountDraftDirty } from "./model/account-draft"
 import { useAccountVerification } from "./model/use-account-verification"
 import AppDialog from "@/shared/ui/AppDialog.vue"
 import Button from "@/shared/ui/Button.vue"
@@ -45,6 +47,9 @@ const modalVerifyError = ref("")
 const verifiedDraftRevision = ref("")
 const draftSession = ref(0)
 const draftGeneration = ref(0)
+const draftBaseline = ref<AccountPayload | null>(null)
+const discardConfirmOpen = ref(false)
+const accountConflict = ref("")
 let draftHydrating = false
 let modalVerifyRun = 0
 const verification = useAccountVerification(managementApi.verifyAccount)
@@ -63,16 +68,25 @@ const form = reactive<AccountPayload>({
 })
 
 const draftRevision = computed(() => `${draftSession.value}:${draftGeneration.value}`)
+
+function currentPayload(): AccountPayload {
+  return {
+    alias: form.alias,
+    provider: form.provider,
+    auth_type: form.auth_type,
+    base_url: form.base_url ?? "",
+    external_id: form.external_id ?? "",
+    verify_tls: Boolean(form.verify_tls),
+    ca_cert_pem: form.ca_cert_pem ?? "",
+    enabled: Boolean(form.enabled),
+    credential: form.credential ?? "",
+  }
+}
+
+const dirty = computed(() => Boolean(draftBaseline.value) && accountDraftDirty(currentPayload(), draftBaseline.value!))
 const connectionChanged = computed(() => {
-  if (!editing.value) return true
-  const record = editing.value
-  return Boolean(form.credential?.trim())
-    || form.provider !== record.provider
-    || form.auth_type !== record.auth_type
-    || (form.base_url ?? "") !== (record.base_url ?? "")
-    || (form.external_id ?? "") !== (record.external_id ?? "")
-    || Boolean(form.verify_tls) !== record.verify_tls
-    || (form.ca_cert_pem ?? "") !== (record.ca_cert_pem ?? "")
+  if (!editing.value || !draftBaseline.value) return !editing.value
+  return accountConnectionChanged(currentPayload(), draftBaseline.value)
 })
 const requiresDraftVerification = computed(() => !editing.value || connectionChanged.value)
 const currentDraftVerified = computed(() => !requiresDraftVerification.value || (
@@ -90,6 +104,7 @@ function beginDraft(): void {
   draftGeneration.value = 0
   modalVerifyRun += 1
   modalVerifying.value = false
+  accountConflict.value = ""
   clearDraftVerification()
 }
 
@@ -171,6 +186,8 @@ function newAccount(): void {
   defaults(initialProvider)
   draftHydrating = false
   beginDraft()
+  draftBaseline.value = currentPayload()
+  discardConfirmOpen.value = false
   modalOpen.value = true
 }
 
@@ -190,7 +207,64 @@ function editAccount(record: AccountRecord): void {
   })
   draftHydrating = false
   beginDraft()
+  draftBaseline.value = currentPayload()
+  discardConfirmOpen.value = false
   modalOpen.value = true
+}
+
+function resetDraft(): void {
+  const baseline = draftBaseline.value
+  if (!baseline) return
+  draftHydrating = true
+  Object.assign(form, { ...baseline, credential: "" })
+  draftHydrating = false
+  beginDraft()
+}
+
+function closeEditor(): void {
+  modalOpen.value = false
+  discardConfirmOpen.value = false
+  modalVerifyRun += 1
+  editing.value = null
+  draftBaseline.value = null
+  accountConflict.value = ""
+  clearDraftVerification()
+}
+
+function requestClose(): void {
+  if (dirty.value) {
+    discardConfirmOpen.value = true
+    return
+  }
+  closeEditor()
+}
+
+function discardAndClose(): void {
+  discardConfirmOpen.value = false
+  closeEditor()
+}
+
+async function reloadEditing(): Promise<void> {
+  const current = editing.value
+  if (!current) return
+  await load()
+  const fresh = rows.value.find((row) => row.id === current.id && row.provider === current.provider)
+  if (!fresh) {
+    accountConflict.value = String(t("accounts.accountMissing"))
+    return
+  }
+  editAccount(fresh)
+}
+
+function handleEditorKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || event.defaultPrevented) return
+  if (discardConfirmOpen.value) {
+    discardConfirmOpen.value = false
+    return
+  }
+  if (!modalOpen.value) return
+  event.preventDefault()
+  requestClose()
 }
 
 async function load(): Promise<void> {
@@ -245,17 +319,21 @@ async function verifyCurrent(): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  if (!currentDraftVerified.value) return
+  if (!dirty.value || !currentDraftVerified.value) return
   saving.value = true
+  accountConflict.value = ""
   try {
-    if (editing.value) await managementApi.updateAccount(editing.value, { ...form })
-    else await managementApi.createAccount({ ...form })
-    modalOpen.value = false
-    modalVerifyRun += 1
+    if (editing.value) await managementApi.updateAccount(editing.value, currentPayload())
+    else await managementApi.createAccount(currentPayload())
+    closeEditor()
     notifications.success(String(t("notifications.saved")))
     await load()
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Unable to save account"
+    if (caught instanceof ManagementApiError && caught.status === 409 && caught.code === "account_conflict") {
+      accountConflict.value = String(t("accounts.accountConflict"))
+    } else {
+      error.value = caught instanceof Error ? caught.message : "Unable to save account"
+    }
   } finally {
     saving.value = false
   }
@@ -268,7 +346,8 @@ async function remove(record: AccountRecord): Promise<void> {
   await load()
 }
 
-onMounted(load)
+onMounted(() => { void load(); window.addEventListener("keydown", handleEditorKeydown) })
+onBeforeUnmount(() => window.removeEventListener("keydown", handleEditorKeydown))
 </script>
 
 <template>
@@ -344,7 +423,7 @@ onMounted(load)
       :title="editing ? `${t('accounts.editTitle')}: ${editing.alias}` : t('accounts.addTitle')"
       width="700px"
       :close-label="String(t('common.close'))"
-      @close="modalOpen = false"
+      @close="requestClose"
     >
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="space-y-1 text-sm"><span>{{ t("accounts.alias") }}</span><input v-model="form.alias" class="field" /></label>
@@ -360,22 +439,41 @@ onMounted(load)
 
       <div class="mt-3 min-h-5 text-sm" role="status">
         <span v-if="modalVerifying" class="text-muted-foreground">{{ t("accounts.checkingDraft") }}</span>
-        <span v-else-if="requiresDraftVerification && currentDraftVerified" class="text-emerald-500">{{ t("accounts.draftVerified") }}</span>
+        <span v-else-if="dirty && requiresDraftVerification && currentDraftVerified" class="text-emerald-500">{{ t("accounts.draftVerified") }}</span>
         <span v-else-if="modalVerifyError" class="text-destructive">{{ t("accounts.connectionFailed") }}: {{ modalVerifyError }}</span>
-        <span v-else-if="requiresDraftVerification" class="text-muted-foreground">{{ t("accounts.verifyDraftRequired") }}</span>
+        <span v-else-if="dirty && requiresDraftVerification" class="text-muted-foreground">{{ t("accounts.verifyDraftRequired") }}</span>
+      </div>
+      <div v-if="accountConflict" class="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300" role="status">
+        <span>{{ accountConflict }}</span>
+        <Button size="sm" variant="outline" @click="reloadEditing">{{ t("accounts.reloadAccount") }}</Button>
       </div>
 
       <template #footer>
-        <Button variant="ghost" @click="modalOpen = false; modalVerifyRun += 1">{{ t("common.cancel") }}</Button>
-        <Button variant="outline" :disabled="modalVerifying" @click="verifyCurrent">
+        <Button v-if="dirty" variant="ghost" @click="resetDraft">{{ t("accounts.discardChanges") }}</Button>
+        <Button v-else variant="ghost" @click="closeEditor">{{ t("common.exit") }}</Button>
+        <Button v-if="dirty && requiresDraftVerification" variant="outline" :disabled="modalVerifying" @click="verifyCurrent">
           <LoaderCircle v-if="modalVerifying" class="mr-2 size-4 animate-spin" />
-          <CircleCheck v-else-if="requiresDraftVerification && currentDraftVerified" class="mr-2 size-4 text-emerald-500" />
+          <CircleCheck v-else-if="currentDraftVerified" class="mr-2 size-4 text-emerald-500" />
           <PlugZap v-else class="mr-2 size-4" />
           {{ t("common.test") }}
         </Button>
-        <Button :disabled="saving || !currentDraftVerified" @click="save">
-          {{ editing ? t("common.confirm") : t("common.add") }}
+        <Button v-if="dirty" :disabled="saving || !currentDraftVerified" @click="save">
+          {{ editing ? t("common.save") : t("common.add") }}
         </Button>
+      </template>
+    </AppDialog>
+
+    <AppDialog
+      :open="discardConfirmOpen"
+      :title="t('accounts.discardTitle')"
+      width="460px"
+      :close-label="String(t('common.close'))"
+      @close="discardConfirmOpen = false"
+    >
+      <p class="text-sm text-muted-foreground">{{ t("accounts.discardHint") }}</p>
+      <template #footer>
+        <Button variant="ghost" @click="discardConfirmOpen = false">{{ t("accounts.keepEditing") }}</Button>
+        <Button variant="destructive" @click="discardAndClose">{{ t("accounts.discardAndExit") }}</Button>
       </template>
     </AppDialog>
   </div>
