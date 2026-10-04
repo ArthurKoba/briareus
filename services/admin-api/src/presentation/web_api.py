@@ -15,11 +15,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import FileResponse, Response, StreamingResponse
-
-from admin_api.application.services import (
+from application.services import (
     AccountService,
     AdminConfigService,
     InvocationAuditService,
@@ -27,13 +23,14 @@ from admin_api.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
-from admin_api.dashboard_state import build_dashboard_state
-from admin_api.domain.accounts import Account, AccountConflictError, AuthType, Provider
-from admin_api.domain.configuration import AdminConfig
-from admin_api.domain.telemetry import InvocationQuery
-from admin_api.infrastructure.files import FileAdminStore
-from admin_api.infrastructure.reverse import ReverseAdminClient
-from admin_api.infrastructure.snapshot_worker import (
+from dashboard_state import build_dashboard_state
+from domain.accounts import Account, AccountConflictError, AuthType, Provider
+from domain.configuration import AdminConfig
+from domain.telemetry import InvocationQuery
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from infrastructure.files import FileAdminStore
+from infrastructure.reverse import ReverseAdminClient
+from infrastructure.snapshot_worker import (
     REVERSE_OVERVIEW_KEY,
     WORKSPACE_STATS_KEY,
     SnapshotRefresher,
@@ -41,11 +38,14 @@ from admin_api.infrastructure.snapshot_worker import (
     coverage_snapshot_key,
     snapshot_meta,
 )
-from admin_api.infrastructure.terminal import TerminalAdminClient
-from admin_api.infrastructure.web import WebAdminClient
-from admin_api.origin import origin_allowed
-from admin_api.realtime import RealtimeBus
-from admin_api.telemetry_ingest import FrontendTelemetryProxy
+from infrastructure.terminal import TerminalAdminClient
+from infrastructure.web import WebAdminClient
+from origin import origin_allowed
+from pydantic import BaseModel, ConfigDict, Field
+from realtime import RealtimeBus
+from starlette.responses import FileResponse, Response, StreamingResponse
+from telemetry_ingest import FrontendTelemetryProxy
+
 from common.browser_remote_debug import (
     BROWSER_REMOTE_DEBUG_TTL_SECONDS,
     issue_browser_remote_debug_token,

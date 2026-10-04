@@ -5,13 +5,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware import Middleware
-from starlette.middleware.sessions import SessionMiddleware
-
-from admin_api.api_errors import install_admin_api_error_handlers
-from admin_api.application.services import (
+from api_errors import install_admin_api_error_handlers
+from application.services import (
     AccountService,
     AdminConfigService,
     InvocationAuditService,
@@ -19,16 +14,18 @@ from admin_api.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
-from admin_api.browser_api import build_browser_operator_api_router
-from admin_api.dashboard_state import build_dashboard_state
-from admin_api.infrastructure.crypto import FernetCredentialCipher
-from admin_api.infrastructure.database import (
+from browser_api import build_browser_operator_api_router
+from dashboard_state import build_dashboard_state
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from infrastructure.crypto import FernetCredentialCipher
+from infrastructure.database import (
     create_database,
     ensure_zero_state_schema,
 )
-from admin_api.infrastructure.files import FileAdminStore
-from admin_api.infrastructure.provider_checks import ProviderConnectionVerifier
-from admin_api.infrastructure.repositories import (
+from infrastructure.files import FileAdminStore
+from infrastructure.provider_checks import ProviderConnectionVerifier
+from infrastructure.repositories import (
     SqlAlchemyAccountRepository,
     SqlAlchemyAdminConfigRepository,
     SqlAlchemyInvocationRepository,
@@ -36,15 +33,18 @@ from admin_api.infrastructure.repositories import (
     SqlAlchemyRuntimeSettingsRepository,
     SqlAlchemySnapshotRepository,
 )
-from admin_api.infrastructure.reverse import ReverseAdminClient
-from admin_api.infrastructure.snapshot_worker import SnapshotRefresher
-from admin_api.infrastructure.terminal import TerminalAdminClient
-from admin_api.infrastructure.web import WebAdminClient
-from admin_api.presentation.api import ApiServices, build_internal_router
-from admin_api.presentation.web_api import WebApiServices, build_admin_api_router
-from admin_api.realtime import RealtimeBus
-from admin_api.realtime_api import build_realtime_router
-from admin_api.telemetry_ingest import FrontendTelemetryProxy
+from infrastructure.reverse import ReverseAdminClient
+from infrastructure.snapshot_worker import SnapshotRefresher
+from infrastructure.terminal import TerminalAdminClient
+from infrastructure.web import WebAdminClient
+from presentation.api import ApiServices, build_internal_router
+from presentation.web_api import WebApiServices, build_admin_api_router
+from realtime import RealtimeBus
+from realtime_api import build_realtime_router
+from starlette.middleware import Middleware
+from starlette.middleware.sessions import SessionMiddleware
+from telemetry_ingest import FrontendTelemetryProxy
+
 from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
 from common.settings import AdminApiSettings, FileSettings, ObservabilitySettings, ValkeySettings

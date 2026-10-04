@@ -4,10 +4,11 @@ import asyncio
 import logging
 from typing import cast
 
-from admin_api.application.services import SnapshotService
-from admin_api.infrastructure.files import FileAdminStore
-from admin_api.infrastructure.reverse import ReverseAdminClient
+from application.services import SnapshotService
+
 from common.models import JsonObject
+from infrastructure.files import FileAdminStore
+from infrastructure.reverse import ReverseAdminClient
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ def coverage_refresh_seconds(*, full: bool) -> int:
 
 
 def snapshot_meta(snapshot: object) -> JsonObject:
-    from admin_api.domain.snapshots import CachedSnapshot
+    from domain.snapshots import CachedSnapshot
 
     if not isinstance(snapshot, CachedSnapshot):
         return {}

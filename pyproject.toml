@@ -46,9 +46,6 @@ packages = [
   "services/modules",
 ]
 
-[tool.hatch.build.targets.wheel.force-include]
-"services/admin-api/src/admin_api" = "admin_api"
-
 [tool.ruff]
 src = ["services"]
 line-length = 100

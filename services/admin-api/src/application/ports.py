@@ -4,11 +4,12 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
-from admin_api.domain.accounts import Account, Provider
-from admin_api.domain.configuration import AdminConfig
-from admin_api.domain.oauth_sessions import OAuthSession
-from admin_api.domain.snapshots import CachedSnapshot
-from admin_api.domain.telemetry import Invocation, InvocationPage, InvocationQuery
+from domain.accounts import Account, Provider
+from domain.configuration import AdminConfig
+from domain.oauth_sessions import OAuthSession
+from domain.snapshots import CachedSnapshot
+from domain.telemetry import Invocation, InvocationPage, InvocationQuery
+
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,

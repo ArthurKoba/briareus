@@ -4,9 +4,9 @@ import hmac
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter
+from origin import origin_allowed
 from starlette.websockets import WebSocket
 
-from admin_api.origin import origin_allowed
 from common.browser_remote_debug import (
     BROWSER_REMOTE_DEBUG_TTL_SECONDS,
     BrowserRemoteDebugAuthError,

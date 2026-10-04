@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
-from admin_api.domain.accounts import Account, Provider
-from admin_api.domain.configuration import AdminConfig
-from admin_api.domain.oauth_sessions import OAuthSession
-from admin_api.domain.snapshots import CachedSnapshot
-from admin_api.domain.telemetry import Invocation, InvocationPage, InvocationQuery
+from domain.accounts import Account, Provider
+from domain.configuration import AdminConfig
+from domain.oauth_sessions import OAuthSession
+from domain.snapshots import CachedSnapshot
+from domain.telemetry import Invocation, InvocationPage, InvocationQuery
+
 from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
 from common.audit_payloads import redact_payload
 from common.cache import CacheBackend, CacheKeys

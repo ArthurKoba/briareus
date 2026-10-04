@@ -3,16 +3,16 @@ from __future__ import annotations
 import hmac
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-
-from admin_api.application.services import (
+from application.services import (
     AccountService,
     InvocationAuditService,
     OAuthSessionService,
     RuntimeSettingsService,
 )
-from admin_api.domain.accounts import Account, AuthType, Provider
-from admin_api.domain.telemetry import Invocation
+from domain.accounts import Account, AuthType, Provider
+from domain.telemetry import Invocation
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+
 from common.account_contracts import (
     AccountList,
     GitHubAuthenticatedReaderSync,

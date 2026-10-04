@@ -7,8 +7,8 @@ import urllib.parse
 import urllib.request
 
 import jwt
+from domain.accounts import Account, AuthType, Provider
 
-from admin_api.domain.accounts import Account, AuthType, Provider
 from common.models import json_loads, json_object
 
 

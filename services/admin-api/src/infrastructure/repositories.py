@@ -7,17 +7,17 @@ from datetime import UTC, datetime, timedelta
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 
+from domain.accounts import Account, AccountConflictError, AuthType, Provider
+from domain.configuration import AdminConfig
+from domain.oauth_sessions import OAuthSession
+from domain.snapshots import CachedSnapshot
+from domain.telemetry import Invocation, InvocationPage, InvocationQuery
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
-from admin_api.domain.accounts import Account, AccountConflictError, AuthType, Provider
-from admin_api.domain.configuration import AdminConfig
-from admin_api.domain.oauth_sessions import OAuthSession
-from admin_api.domain.snapshots import CachedSnapshot
-from admin_api.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,

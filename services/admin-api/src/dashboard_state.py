@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import asyncio
 
-from admin_api.application.services import (
+from application.services import (
     AccountService,
     InvocationAuditService,
     OAuthSessionService,
     SnapshotService,
 )
-from admin_api.domain.accounts import Provider
-from admin_api.infrastructure.snapshot_worker import (
+from domain.accounts import Provider
+from infrastructure.snapshot_worker import (
     REVERSE_OVERVIEW_KEY,
     WORKSPACE_STATS_KEY,
     snapshot_meta,
 )
+
 from common.models import JsonObject, json_object
 
 

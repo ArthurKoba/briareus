@@ -3,19 +3,19 @@ from __future__ import annotations
 import asyncio
 import hmac
 
-from fastapi import APIRouter
-from starlette.websockets import WebSocket, WebSocketDisconnect
-
-from admin_api.application.services import (
+from application.services import (
     AccountService,
     InvocationAuditService,
     OAuthSessionService,
     SnapshotService,
 )
-from admin_api.dashboard_state import build_dashboard_state
-from admin_api.infrastructure.web import WebAdminClient
-from admin_api.origin import origin_allowed
-from admin_api.realtime import REALTIME_TOPICS, RealtimeBus, RealtimeEnvelope
+from dashboard_state import build_dashboard_state
+from fastapi import APIRouter
+from infrastructure.web import WebAdminClient
+from origin import origin_allowed
+from realtime import REALTIME_TOPICS, RealtimeBus, RealtimeEnvelope
+from starlette.websockets import WebSocket, WebSocketDisconnect
+
 from common.settings import AdminApiSettings
 
 _SESSION_KEY = "admin_api_session"
