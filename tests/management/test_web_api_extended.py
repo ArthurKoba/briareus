@@ -230,3 +230,67 @@ def test_mutations_require_session(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         response = client.delete("/admin/api/calls")
     assert response.status_code == 401
+
+
+def test_settings_revision_rejects_stale_full_put(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _login(client)
+        first = client.get("/admin/api/settings")
+        second = client.get("/admin/api/settings")
+        assert first.status_code == second.status_code == 200
+        first_revision = first.json()["revision"]
+        assert first_revision == second.json()["revision"]
+        assert len(first_revision) == 64
+
+        payload = {
+            "expected_revision": first_revision,
+            "logging_enabled": True,
+            "logging_capture_payloads": False,
+            "logging_retention_days": 15,
+            "logging_max_records": 2000,
+            "maintenance_interval_minutes": 30,
+            "terminal_max_exec_timeout_seconds": 3600,
+            "terminal_max_job_runtime_seconds": 7200,
+            "mcp_call_timeout_seconds": 15,
+            "reverse_idle_timeout_seconds": 600,
+        }
+        saved = client.put("/admin/api/settings", json=payload)
+        assert saved.status_code == 200
+        assert saved.json()["management"]["logging_retention_days"] == 15
+        assert saved.json()["revision"] != first_revision
+
+        stale = client.put(
+            "/admin/api/settings",
+            json={**payload, "logging_retention_days": 22},
+        )
+        assert stale.status_code == 409
+        detail = stale.json()["detail"]
+        assert detail["code"] == "settings_conflict"
+        assert detail["current_revision"] == saved.json()["revision"]
+
+        current = client.get("/admin/api/settings")
+        assert current.status_code == 200
+        assert current.json()["management"]["logging_retention_days"] == 15
+        assert current.json()["revision"] == saved.json()["revision"]
+
+
+def test_settings_revision_is_optional_for_legacy_clients(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _login(client)
+        response = client.put(
+            "/admin/api/settings",
+            json={
+                "logging_enabled": True,
+                "logging_capture_payloads": False,
+                "logging_retention_days": 16,
+                "logging_max_records": 2000,
+                "maintenance_interval_minutes": 30,
+                "terminal_max_exec_timeout_seconds": 3600,
+                "terminal_max_job_runtime_seconds": 7200,
+                "mcp_call_timeout_seconds": 15,
+                "reverse_idle_timeout_seconds": 600,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["management"]["logging_retention_days"] == 16
+        assert len(response.json()["revision"]) == 64

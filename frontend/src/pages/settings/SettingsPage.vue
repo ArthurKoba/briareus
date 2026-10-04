@@ -5,6 +5,7 @@ import { RefreshCw, Save, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type SettingsState } from "@/shared/api/management"
+import { ManagementApiError } from "@/shared/api/error"
 import { runtimeConfig } from "@/shared/config/runtime"
 import { eventBus } from "@/shared/events/bus"
 import { setLocale } from "@/shared/i18n"
@@ -92,7 +93,9 @@ async function save(): Promise<void> {
   } catch (caught) {
     error.value = caught instanceof IncompleteSettingsSnapshotError
       ? String(t("settings.reloadBeforeSave"))
-      : caught instanceof Error ? caught.message : "Unable to save settings"
+      : caught instanceof ManagementApiError && caught.status === 409 && caught.code === "settings_conflict"
+        ? String(t("settings.conflict"))
+        : caught instanceof Error ? caught.message : "Unable to save settings"
   } finally {
     saving.value = false
   }

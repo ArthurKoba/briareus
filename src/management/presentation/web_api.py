@@ -6,6 +6,7 @@ import json
 import posixpath
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -116,6 +117,7 @@ class FrontendTelemetryBatch(BaseModel):
 
 class SettingsPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    expected_revision: str = Field("", max_length=64)
     logging_enabled: bool = True
     logging_capture_payloads: bool = True
     logging_retention_days: int = Field(30, ge=1, le=3650)
@@ -170,6 +172,7 @@ def build_admin_api_router(
     settings: ManagementSettings, services: WebApiServices | None = None
 ) -> APIRouter:
     router = APIRouter(prefix="/admin/api", tags=["admin"])
+    settings_update_lock = asyncio.Lock()
 
     def authenticated_username(request: Request) -> str | None:
         username = request.session.get(_SESSION_KEY)
@@ -727,10 +730,21 @@ def build_admin_api_router(
             raise HTTPException(status_code=503, detail="frontend telemetry unavailable")
         return api.telemetry.enqueue(list(payload.events))
 
-    @router.get("/settings")
-    async def settings_get(request: Request) -> JsonObject:
-        require_user(request)
-        api = available()
+    def settings_revision(snapshot: JsonObject) -> str:
+        analysis = json_object(snapshot["analysis"], context="analysis settings")
+        idle_raw = analysis.get("idle_timeout_seconds", 900.0)
+        idle_timeout = float(idle_raw) if isinstance(idle_raw, (int, float)) else 900.0
+        versioned = {
+            "management": snapshot["management"],
+            "terminal": snapshot["terminal"],
+            "mcp": snapshot["mcp"],
+            "github": snapshot["github"],
+            "analysis_idle_timeout_seconds": idle_timeout,
+        }
+        encoded = json.dumps(versioned, sort_keys=True, separators=(",", ":")).encode()
+        return sha256(encoded).hexdigest()
+
+    async def settings_snapshot(api: WebApiServices) -> JsonObject:
         config, terminal_policy, mcp_policy, github_policy = await asyncio.gather(
             asyncio.to_thread(api.config.get),
             asyncio.to_thread(api.runtime_settings.terminal_policy),
@@ -747,7 +761,7 @@ def build_admin_api_router(
                 "source": "unavailable",
             }
             reverse_error = str(exc)
-        return {
+        snapshot: JsonObject = {
             "management": config.model_dump(mode="json"),
             "terminal": terminal_policy.model_dump(mode="json"),
             "mcp": mcp_policy.model_dump(mode="json"),
@@ -755,74 +769,104 @@ def build_admin_api_router(
             "analysis": reverse_settings,
             "analysis_error": reverse_error,
         }
+        snapshot["revision"] = settings_revision(snapshot)
+        return snapshot
+
+    @router.get("/settings")
+    async def settings_get(request: Request) -> JsonObject:
+        require_user(request)
+        return await settings_snapshot(available())
 
     @router.put("/settings")
     async def settings_update(payload: SettingsPayload, request: Request) -> JsonObject:
         api = mutation(request)
-        management = ManagementConfig(
-            logging_enabled=payload.logging_enabled,
-            logging_capture_payloads=payload.logging_capture_payloads,
-            logging_retention_days=payload.logging_retention_days,
-            logging_max_records=payload.logging_max_records,
-            maintenance_interval_minutes=payload.maintenance_interval_minutes,
-        )
-        terminal_policy = TerminalRuntimePolicy(
-            max_exec_timeout_seconds=payload.terminal_max_exec_timeout_seconds,
-            max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
-        )
-        mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
-        github_fields = {
-            "github_local_first_guidance",
-            "github_local_git_transport_enabled",
-            "github_remote_source_mutations_enabled",
-        }
-        try:
-            if github_fields.issubset(payload.model_fields_set):
-                github_policy = GitHubRuntimePolicy(
-                    local_first_guidance=payload.github_local_first_guidance,
-                    local_git_transport_enabled=payload.github_local_git_transport_enabled,
-                    remote_source_mutations_enabled=payload.github_remote_source_mutations_enabled,
-                )
-            else:
-                current_github = await asyncio.to_thread(api.runtime_settings.github_policy)
-                github_policy = GitHubRuntimePolicy(
-                    local_first_guidance=(
-                        payload.github_local_first_guidance
-                        if "github_local_first_guidance" in payload.model_fields_set
-                        else current_github.local_first_guidance
-                    ),
-                    local_git_transport_enabled=(
-                        payload.github_local_git_transport_enabled
-                        if "github_local_git_transport_enabled" in payload.model_fields_set
-                        else current_github.local_git_transport_enabled
-                    ),
-                    remote_source_mutations_enabled=(
-                        payload.github_remote_source_mutations_enabled
-                        if "github_remote_source_mutations_enabled" in payload.model_fields_set
-                        else current_github.remote_source_mutations_enabled
-                    ),
-                )
-            reverse_settings = await api.reverse.set_idle_timeout(
-                payload.reverse_idle_timeout_seconds
+        async with settings_update_lock:
+            current: JsonObject | None = None
+            if payload.expected_revision:
+                try:
+                    current = await settings_snapshot(api)
+                except (ValueError, RuntimeError) as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                if payload.expected_revision != current["revision"]:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "settings_conflict",
+                            "message": (
+                                "settings changed since they were loaded; "
+                                "reload before saving"
+                            ),
+                            "current_revision": current["revision"],
+                        },
+                    )
+            management = ManagementConfig(
+                logging_enabled=payload.logging_enabled,
+                logging_capture_payloads=payload.logging_capture_payloads,
+                logging_retention_days=payload.logging_retention_days,
+                logging_max_records=payload.logging_max_records,
+                maintenance_interval_minutes=payload.maintenance_interval_minutes,
             )
-            saved_management, saved_terminal, saved_mcp, saved_github = await asyncio.gather(
-                asyncio.to_thread(api.config.update, management),
-                asyncio.to_thread(api.runtime_settings.update_terminal_policy, terminal_policy),
-                asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
-                asyncio.to_thread(api.runtime_settings.update_github_policy, github_policy),
+            terminal_policy = TerminalRuntimePolicy(
+                max_exec_timeout_seconds=payload.terminal_max_exec_timeout_seconds,
+                max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
             )
-        except (ValueError, RuntimeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        response: JsonObject = {
-            "management": saved_management.model_dump(mode="json"),
-            "terminal": saved_terminal.model_dump(mode="json"),
-            "mcp": saved_mcp.model_dump(mode="json"),
-            "github": saved_github.model_dump(mode="json"),
-            "analysis": reverse_settings,
-        }
-        await publish_management_event(api, "settings.updated", response)
-        return response
-
+            mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
+            github_fields = {
+                "github_local_first_guidance",
+                "github_local_git_transport_enabled",
+                "github_remote_source_mutations_enabled",
+            }
+            try:
+                if github_fields.issubset(payload.model_fields_set):
+                    github_policy = GitHubRuntimePolicy(
+                        local_first_guidance=payload.github_local_first_guidance,
+                        local_git_transport_enabled=payload.github_local_git_transport_enabled,
+                        remote_source_mutations_enabled=payload.github_remote_source_mutations_enabled,
+                    )
+                else:
+                    if current is not None:
+                        current_github = GitHubRuntimePolicy.model_validate(current["github"])
+                    else:
+                        current_github = await asyncio.to_thread(api.runtime_settings.github_policy)
+                    github_policy = GitHubRuntimePolicy(
+                        local_first_guidance=(
+                            payload.github_local_first_guidance
+                            if "github_local_first_guidance" in payload.model_fields_set
+                            else current_github.local_first_guidance
+                        ),
+                        local_git_transport_enabled=(
+                            payload.github_local_git_transport_enabled
+                            if "github_local_git_transport_enabled" in payload.model_fields_set
+                            else current_github.local_git_transport_enabled
+                        ),
+                        remote_source_mutations_enabled=(
+                            payload.github_remote_source_mutations_enabled
+                            if "github_remote_source_mutations_enabled" in payload.model_fields_set
+                            else current_github.remote_source_mutations_enabled
+                        ),
+                    )
+                reverse_settings = await api.reverse.set_idle_timeout(
+                    payload.reverse_idle_timeout_seconds
+                )
+                saved_management, saved_terminal, saved_mcp, saved_github = await asyncio.gather(
+                    asyncio.to_thread(api.config.update, management),
+                    asyncio.to_thread(api.runtime_settings.update_terminal_policy, terminal_policy),
+                    asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
+                    asyncio.to_thread(api.runtime_settings.update_github_policy, github_policy),
+                )
+            except (ValueError, RuntimeError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            response: JsonObject = {
+                "management": saved_management.model_dump(mode="json"),
+                "terminal": saved_terminal.model_dump(mode="json"),
+                "mcp": saved_mcp.model_dump(mode="json"),
+                "github": saved_github.model_dump(mode="json"),
+                "analysis": reverse_settings,
+                "analysis_error": "",
+            }
+            response["revision"] = settings_revision(response)
+            await publish_management_event(api, "settings.updated", response)
+            return response
     @router.post("/settings/cleanup-logs")
     async def settings_cleanup(request: Request) -> JsonObject:
         api = mutation(request)

@@ -1,6 +1,7 @@
 import type { SettingsState } from "@/shared/api/management"
 
 export interface SettingsUpdatePayload {
+  expected_revision: string
   logging_enabled: boolean
   logging_capture_payloads: boolean
   logging_retention_days: number
@@ -30,6 +31,7 @@ export function settingsUpdatePayload(state: SettingsState, overrides: Partial<S
     throw new IncompleteSettingsSnapshotError()
   }
   const payload: SettingsUpdatePayload = {
+    expected_revision: state.revision,
     logging_enabled: state.management.logging_enabled,
     logging_capture_payloads: state.management.logging_capture_payloads,
     logging_retention_days: state.management.logging_retention_days,
