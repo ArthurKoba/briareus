@@ -31,6 +31,19 @@ describe("management API error ownership", () => {
     expect(telemetry.error).not.toHaveBeenCalled()
   })
 
+  it("parses FastAPI detail objects into a typed conflict error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: { code: "settings_conflict", message: "settings changed", current_revision: "rev-2" } }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    )))
+    const error = await managementApi.settings().catch(value => value)
+    expect(error).toBeInstanceOf(ManagementApiError)
+    expect(error).toMatchObject({ kind: "http", status: 409, code: "settings_conflict" })
+    expect(error.message).toBe("settings changed")
+    expect(notify.error).toHaveBeenCalledTimes(1)
+    expect(telemetry.error).not.toHaveBeenCalled()
+  })
+
   it("keeps a non-JSON HTTP failure as one HTTP outcome", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("gateway exploded", { status: 500 })))
     const error = await managementApi.accounts().catch(value => value)

@@ -9,6 +9,7 @@ function snapshot(github: SettingsState["github"] = {
   remote_source_mutations_enabled: false,
 }): SettingsState {
   return {
+    revision: "revision-1",
     management: { logging_enabled: true, logging_capture_payloads: false, logging_retention_days: 14, logging_max_records: 4000, maintenance_interval_minutes: 17 },
     terminal: { max_exec_timeout_seconds: 120, max_job_runtime_seconds: 600 },
     mcp: { call_timeout_seconds: 13 },
@@ -29,6 +30,7 @@ describe("settings round-trip preserves GitHub policy (#295)", () => {
     const before = structuredClone(state)
     const payload = settingsUpdatePayload(state, overrides)
     expect(payload).toMatchObject({
+      expected_revision: "revision-1",
       ...overrides,
       github_local_first_guidance: false,
       github_local_git_transport_enabled: true,

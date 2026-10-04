@@ -60,6 +60,7 @@ export interface GitHubPolicyState {
 }
 
 export interface SettingsState {
+  revision: string
   management: { logging_enabled: boolean; logging_capture_payloads: boolean; logging_retention_days: number; logging_max_records: number; maintenance_interval_minutes: number }
   terminal: { max_exec_timeout_seconds: number; max_job_runtime_seconds: number }
   mcp: { call_timeout_seconds: number }
@@ -108,10 +109,12 @@ async function request<T>(path: string, init: RequestInit = {}, options: { notif
     let code = ""
     try {
       const body = await response.json() as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
-      const message = body.error?.message ?? body.detail
+      const nested = body.detail && typeof body.detail === "object" ? body.detail as Record<string, unknown> : null
+      const message = body.error?.message ?? nested?.message ?? body.detail
       if (typeof message === "string" && message) detail = message
       else if (message !== undefined) detail = JSON.stringify(message)
-      if (typeof body.error?.code === "string") code = body.error.code
+      const errorCode = body.error?.code ?? nested?.code
+      if (typeof errorCode === "string") code = errorCode
     } catch { /* non-JSON upstream error */ }
     const requestId = response.headers.get("x-request-id") ?? response.headers.get("x-correlation-id") ?? ""
     const error = new ManagementApiError(detail, "http", response.status, code, requestId)
