@@ -1,77 +1,25 @@
-x-build: &build
-  context: .
-  dockerfile: Dockerfile
-
-x-runtime: &runtime
-  restart: unless-stopped
-  healthcheck:
-    test:
-      - CMD
-      - nc
-      - -z
-      - -w
-      - "1"
-      - 127.0.0.1
-      - "8000"
-    interval: 2s
-    timeout: 1s
-    start_period: 2s
-    retries: 10
-
-x-machine: &machine
-  TZ: ${TZ:-UTC}
-  LANG: ${LANG:-C.UTF-8}
-  LC_ALL: ${LC_ALL:-C.UTF-8}
-
-x-cache-client: &cache-client
-  VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
-
-x-admin-api-client: &admin-api-client
-  ADMIN_API_URL: ${ADMIN_API_URL:-http://admin-api:8000}
-  ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:-${SERVICE_REALBASE64_64_ADMIN_API_SERVICE_TOKEN}}
-
-x-gateway-routing: &gateway-routing
-  GITHUB_URL: ${GITHUB_URL:-http://github:8000/mcp}
-  GITLAB_URL: ${GITLAB_URL:-http://gitlab:8000/mcp}
-  FILES_URL: ${FILES_URL:-http://files:8000/mcp}
-  WEB_URL: ${WEB_URL:-http://web:8000/mcp}
-  ANALYSIS_URL: ${ANALYSIS_URL:-http://analysis:8000/mcp}
-  GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
-  TERMINAL_URL: ${TERMINAL_URL:-http://terminal:8000/mcp}
-  OBSERVABILITY_URL: ${OBSERVABILITY_URL:-http://observability:8000/mcp}
-
-x-observability: &observability
-  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-mcp-bridge}
-  SERVICE_NAMESPACE: ${SERVICE_NAMESPACE:-MCP}
-  DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-${OTEL_ENVIRONMENT:-production}}
-  OTLP_ENDPOINT: ${OTLP_ENDPOINT:-${OTEL_EXPORTER_OTLP_ENDPOINT:-}}
-  OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
-  OTEL_SERVICE_VERSION: ${OTEL_SERVICE_VERSION:-0.1.0}
-  OTEL_SERVICE_INSTANCE_ID: ${OTEL_SERVICE_INSTANCE_ID:-}
-  OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
-  OTEL_EXPORTER_OTLP_TIMEOUT: ${OTEL_EXPORTER_OTLP_TIMEOUT:-10000}
-  OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-30000}
-  OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:-INFO}
-  # Migration fallback for the legacy monolith only.
-  OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
-  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
-
-x-private-service: &private-service
-  <<: *runtime
-
-x-file-service: &file-service
-  <<: *private-service
-  volumes:
-    - terminal-workspace:/workspace
-
 services:
-  valkey:
+  postgres:
+    image: postgres:18-alpine
     restart: unless-stopped
-    image: valkey/valkey:9.1.2-alpine
     environment:
-      <<: *machine
+      POSTGRES_DB: ${POSTGRES_DB:-core}
+      POSTGRES_USER: ${POSTGRES_USER:-core}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${SERVICE_PASSWORD_64_POSTGRES}}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-core} -d ${POSTGRES_DB:-core}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-2g}
+    cpus: ${POSTGRES_CPU_LIMIT:-2.0}
+    pids_limit: 256
+
+  valkey:
+    image: valkey/valkey:9.1.2-alpine
+    restart: unless-stopped
     command:
       - valkey-server
       - --save
@@ -79,7 +27,7 @@ services:
       - --appendonly
       - "no"
       - --maxmemory
-      - 128mb
+      - ${VALKEY_MAX_MEMORY:-128mb}
       - --maxmemory-policy
       - allkeys-lru
     healthcheck:
@@ -87,185 +35,9 @@ services:
       interval: 2s
       timeout: 1s
       retries: 10
-    mem_limit: 192m
-    cpus: 0.5
+    mem_limit: ${VALKEY_MEMORY_LIMIT:-192m}
+    cpus: ${VALKEY_CPU_LIMIT:-0.5}
     pids_limit: 128
 
-  admin-api:
-    <<: *runtime
-    build:
-      <<: *build
-      target: admin-api
-    environment:
-      <<: [*machine, *cache-client, *observability]
-      ADMIN_API_ENCRYPTION_KEY: ${ADMIN_API_ENCRYPTION_KEY:-${SERVICE_REALBASE64_32_ADMIN_API_ENCRYPTION_KEY}}
-      ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:-${SERVICE_REALBASE64_64_ADMIN_API_SERVICE_TOKEN}}
-      ADMIN_API_USERNAME: ${ADMIN_API_USERNAME:-admin}
-      ADMIN_API_PASSWORD: ${ADMIN_API_PASSWORD:-${SERVICE_PASSWORD_64_ADMIN_API}}
-      ADMIN_API_SESSION_SECRET: ${ADMIN_API_SESSION_SECRET:-${SERVICE_REALBASE64_64_ADMIN_API_SESSION_SECRET}}
-      ADMIN_UI_ORIGIN: ${ADMIN_UI_ORIGIN:-}
-    volumes:
-      - admin-api:/admin-api
-      - terminal-workspace:/workspace
-
-  admin-ui:
-    restart: unless-stopped
-    build:
-      context: ./admin-web-app
-      dockerfile: Dockerfile
-    expose:
-      - "8080"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
-      interval: 2s
-      timeout: 1s
-      start_period: 1s
-      retries: 10
-
-  auth:
-    <<: *runtime
-    build:
-      <<: *build
-      target: auth
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-${SERVICE_URL_GATEWAY_8000}}
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
-      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:-${SERVICE_REALBASE64_64_GITHUB_OAUTH_JWT_SIGNING_KEY}}
-      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS:?}
-    volumes:
-      - auth:/auth
-
-  gateway:
-    <<: *runtime
-    build:
-      <<: *build
-      target: gateway
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *gateway-routing, *observability]
-      SERVICE_URL_GATEWAY_8000: /
-      OAUTH_ENABLED: ${OAUTH_ENABLED:-true}
-      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-${SERVICE_URL_GATEWAY_8000}}
-      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:-${SERVICE_REALBASE64_64_GITHUB_OAUTH_JWT_SIGNING_KEY}}
-      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS:?}
-      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-${SERVICE_FQDN_GATEWAY_8000}}
-      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-${SERVICE_URL_GATEWAY_8000}}
-
-  github:
-    <<: *private-service
-    depends_on:
-      admin-api:
-        condition: service_healthy
-        required: true
-    build:
-      <<: *build
-      target: github
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-    volumes:
-      - terminal-workspace:/workspace
-
-  gitlab:
-    <<: *private-service
-    depends_on:
-      admin-api:
-        condition: service_healthy
-        required: true
-    build:
-      <<: *build
-      target: gitlab
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-    volumes:
-      - terminal-workspace:/workspace
-
-  files:
-    <<: *file-service
-    build:
-      <<: *build
-      target: files
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-
-  web:
-    <<: *file-service
-    build:
-      <<: *build
-      target: web
-    environment:
-      <<: [*cache-client, *admin-api-client, *observability]
-      TZ: ${TZ:-UTC}
-    volumes:
-      - terminal-workspace:/workspace
-      - web-browser:/browser
-    devices:
-      - ${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}:${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}
-    shm_size: 1gb
-
-  terminal:
-    <<: *private-service
-    build:
-      <<: *build
-      target: terminal
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-      TERMINAL_LANG: ${TERMINAL_LANG:-${LANG:-C.UTF-8}}
-    mem_limit: ${TERMINAL_MEMORY_LIMIT:-2g}
-    memswap_limit: ${TERMINAL_MEMORY_SWAP_LIMIT:-2g}
-    cpus: ${TERMINAL_CPU_LIMIT:-1.5}
-    pids_limit: ${TERMINAL_PIDS_LIMIT:-256}
-    volumes:
-      - terminal-workspace:/workspace
-      - terminal-home:/home/agent
-
-  analysis:
-    <<: *private-service
-    depends_on:
-      ghidra:
-        condition: service_healthy
-        required: true
-    build:
-      <<: *build
-      target: analysis
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-      GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
-    volumes:
-      - terminal-workspace:/workspace
-
-  ghidra:
-    <<: *private-service
-    build:
-      <<: *build
-      target: ghidra
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-      GHIDRA_MCP_URL: ${GHIDRA_MCP_URL:-http://bridge:8081/mcp}
-    networks:
-      - default
-      - coolify
-
-  observability:
-    <<: *private-service
-    depends_on:
-      admin-api:
-        condition: service_healthy
-        required: true
-    build:
-      <<: *build
-      target: observability
-    environment:
-      <<: [*machine, *cache-client, *admin-api-client, *observability]
-
 volumes:
-  admin-api:
-  auth:
-  terminal-workspace:
-  terminal-home:
-  web-browser:
-
-networks:
-  coolify:
-    external: true
-    name: coolify
+  postgres-data:

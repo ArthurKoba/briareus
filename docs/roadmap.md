@@ -15,7 +15,7 @@
 - schema-driven Analysis facade over the native Ghidra MCP tool catalog;
 - Analysis terminology aliases with new names preferred and legacy Ghidra argument names accepted as fallback;
 - architecture tests preventing provider-to-provider imports and provider code from leaking into `bridge`/`common`;
-- one production `docker-compose.yaml` at repository root;
+- one root `docker-compose.yaml` for shared PostgreSQL/Valkey infrastructure;
 - persistent administration, auth, shared workspace and terminal-home volumes.
 
 ## Remaining

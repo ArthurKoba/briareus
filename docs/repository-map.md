@@ -36,4 +36,4 @@ mcp-bridge/
 provider account persistence and encrypted credentials. Each provider module owns its API
 semantics and consumes account data only through the common account port/client.
 
-The root `docker-compose.yaml` is the production topology definition.
+The root `docker-compose.yaml` owns only shared external infrastructure (`postgres` and `valkey`). Production application runtimes are independent Coolify Applications built directly from Dockerfile targets.
