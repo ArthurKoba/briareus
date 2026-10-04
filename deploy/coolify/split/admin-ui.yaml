@@ -1,0 +1,32 @@
+services:
+  admin-ui:
+    restart: unless-stopped
+    build:
+      context: ../../../admin-web-app
+      dockerfile: Dockerfile
+    expose:
+      - "8080"
+    environment:
+      ADMIN_API_BASE_URL: ${ADMIN_API_BASE_URL:?}
+      ADMIN_UI_PREVIEW: ${ADMIN_UI_PREVIEW:-false}
+      ADMIN_UI_TELEMETRY_ENABLED: ${ADMIN_UI_TELEMETRY_ENABLED:-true}
+      ADMIN_UI_TELEMETRY_SAMPLE_RATE: ${ADMIN_UI_TELEMETRY_SAMPLE_RATE:-1}
+      ADMIN_UI_EVENTS_MODE: ${ADMIN_UI_EVENTS_MODE:-websocket}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 2s
+      timeout: 1s
+      start_period: 1s
+      retries: 10
+    networks:
+      mcp:
+        aliases: [admin-ui]
+      coolify: {}
+
+networks:
+  mcp:
+    external: true
+    name: ${MCP_NETWORK_NAME:-mcp}
+  coolify:
+    external: true
+    name: coolify

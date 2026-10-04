@@ -1,0 +1,45 @@
+services:
+  auth:
+    restart: unless-stopped
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: auth
+    healthcheck:
+      test: ["CMD", "nc", "-z", "-w", "1", "127.0.0.1", "8000"]
+      interval: 2s
+      timeout: 1s
+      start_period: 2s
+      retries: 10
+    environment:
+      TZ: ${TZ:-UTC}
+      LANG: ${LANG:-C.UTF-8}
+      LC_ALL: ${LC_ALL:-C.UTF-8}
+      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
+      ADMIN_API_URL: ${ADMIN_API_URL:-http://admin-api:8000}
+      ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:?}
+      SERVICE_NAMESPACE: ${SERVICE_NAMESPACE:-MCP}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-production}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAME: auth
+      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
+      GITHUB_OAUTH_JWT_SIGNING_KEY: ${GITHUB_OAUTH_JWT_SIGNING_KEY:?}
+      GITHUB_OAUTH_ALLOWED_USERS: ${GITHUB_OAUTH_ALLOWED_USERS:?}
+    volumes:
+      - auth-data:/auth
+    networks:
+      mcp:
+        aliases: [auth]
+
+volumes:
+  auth-data:
+    external: true
+    name: ${MCP_AUTH_VOLUME:?}
+
+networks:
+  mcp:
+    external: true
+    name: ${MCP_NETWORK_NAME:-mcp}
