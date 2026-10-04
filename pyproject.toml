@@ -43,9 +43,11 @@ packages = [
   "services/auth_service",
   "services/bridge",
   "services/common",
-  "services/admin_api",
   "services/modules",
 ]
+
+[tool.hatch.build.targets.wheel.force-include]
+"services/admin-api/src/admin_api" = "admin_api"
 
 [tool.ruff]
 src = ["services"]
@@ -79,7 +81,7 @@ select = [
 "services/modules/github/github_workflow.py" = ["E501"]
 
 [tool.mypy]
-mypy_path = "services"
+mypy_path = "services,services/admin-api/src"
 python_version = "3.13"
 plugins = ["pydantic.mypy"]
 strict = true

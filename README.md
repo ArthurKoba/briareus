@@ -89,7 +89,9 @@ services/
 ├── auth_service/
 ├── bridge/
 ├── common/
-├── admin_api/
+├── admin-api/
+│   └── src/
+│       └── admin_api/
 └── modules/
     ├── github/
     ├── gitlab/

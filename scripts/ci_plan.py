@@ -26,7 +26,7 @@ class Area:
 AREAS: dict[str, Area] = {
     "auth": Area(("services/auth_service/",), ("services/auth_service",)),
     "gateway": Area(("services/bridge/",), ("services/bridge",)),
-    "admin-api": Area(("services/admin_api/",), ("services/admin_api",)),
+    "admin-api": Area(("services/admin-api/",), ("services/admin-api/src/admin_api",)),
     "github": Area(("services/modules/github/",), ("services/modules/github",)),
     "gitlab": Area(("services/modules/gitlab/",), ("services/modules/gitlab",)),
     "files": Area(("services/modules/files/",), ("services/modules/files",)),
@@ -85,8 +85,8 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
         return {
             "full": True,
             "areas": ["full"],
-            "mypy_paths": ["src"],
-            "ruff_paths": ["src", "scripts"],
+            "mypy_paths": ["services"],
+            "ruff_paths": ["services", "scripts"],
         }
 
     mypy_paths: list[str] = []

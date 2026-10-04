@@ -5,24 +5,26 @@ mcp-bridge/
 ├── .github/
 ├── docs/
 ├── services/
+│   ├── auth_service/
 │   ├── bridge/                 # public gateway only
 │   ├── common/                 # shared contracts/settings/runtime primitives
-│   ├── admin_api/
-│   │   ├── domain/
-│   │   ├── application/
-│   │   ├── infrastructure/
-│   │   └── presentation/
+│   ├── admin-api/
+│   │   └── src/
+│   │       └── admin_api/      # Python import package
+│   │           ├── domain/
+│   │           ├── application/
+│   │           ├── infrastructure/
+│   │           └── presentation/
 │   └── modules/
 │       ├── github/
 │       ├── gitlab/
 │       ├── files/
 │       ├── web/
 │       ├── analysis/
-│       └── terminal/
-│   ├── bridge/
-│   ├── common/
-│   ├── admin_api/
-│   └── modules/
+│       ├── ghidra/
+│       ├── terminal/
+│       └── observability/
+├── admin-web-app/
 ├── Dockerfile
 ├── docker-compose.yaml
 ├── docker-entrypoint.sh

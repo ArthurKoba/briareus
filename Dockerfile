@@ -58,7 +58,7 @@ ENV ASGI_APP=bridge.server:app
 
 
 FROM runtime-base AS admin-api
-COPY services/admin_api ./services/admin_api
+COPY services/admin-api/src/admin_api ./services/admin_api
 COPY services/modules/__init__.py ./services/modules/__init__.py
 COPY services/modules/files ./services/modules/files
 ENV ASGI_APP=admin_api.runtime:app \
