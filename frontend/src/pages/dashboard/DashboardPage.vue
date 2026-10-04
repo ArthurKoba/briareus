@@ -92,62 +92,93 @@ onBeforeUnmount(() => unsubscribe?.())
       {{ t("dashboard.staleData") }}: {{ staleSources.join(", ") }}
     </p>
 
-    <div v-if="data" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard
-        :label="t('dashboard.activeAccounts')"
-        :value="data.accounts.enabled"
-        :hint="`${data.accounts.total} ${t('dashboard.configured')}`"
-      />
-      <StatCard
-        :label="t('dashboard.calls')"
-        :value="data.calls.total"
-        :hint="`${data.calls.error_rate}% ${t('dashboard.errorRate')}`"
-      />
-      <StatCard
-        :label="t('dashboard.averageLatency')"
-        :value="`${data.calls.average_duration_ms} ms`"
-        :hint="`${data.calls.errors} ${t('dashboard.errors')}`"
-      />
-      <StatCard
-        :label="t('dashboard.oauthSessions')"
-        :value="data.oauth.active"
-        :hint="`${data.oauth.tracked} ${t('dashboard.tracked')}`"
-      />
-      <StatCard
-        :label="t('dashboard.analysisProjects')"
-        :value="data.analysis.projects"
-        :hint="`${data.analysis.active_sessions} ${t('dashboard.activeSessions')}`"
-      />
-      <StatCard
-        :label="t('dashboard.workers')"
-        :value="data.analysis.workers"
-        :hint="`${data.analysis.running_workers} ${t('dashboard.running')}`"
-      />
-      <StatCard
-        :label="t('dashboard.workspaceFree')"
-        :value="formatBytes(data.workspace.free_bytes)"
-        :hint="`${String(data.workspace.files ?? 0)} ${t('dashboard.files')}`"
-      />
-      <StatCard
-        :label="t('dashboard.workspaceSize')"
-        :value="formatBytes(data.workspace.size_bytes)"
-        :hint="t('dashboard.cached')"
-      />
-    </div>
-
-    <section v-if="data" class="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <h2 class="text-sm font-semibold">{{ t("dashboard.accountProviders") }}</h2>
-      <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div
-          v-for="(value, provider) in data.accounts.by_provider"
-          :key="provider"
-          class="rounded-lg bg-muted px-4 py-3"
-        >
-          <div class="text-xs uppercase text-muted-foreground">{{ provider }}</div>
-          <div class="mt-1 text-xl font-semibold">{{ value }}</div>
+    <div v-if="data" class="space-y-6">
+      <section class="space-y-3">
+        <div>
+          <h2 class="text-sm font-semibold">{{ t("dashboard.mcpGroup") }}</h2>
+          <p class="mt-0.5 text-xs text-muted-foreground">{{ t("dashboard.mcpGroupHint") }}</p>
         </div>
-      </div>
-    </section>
+        <div class="grid gap-4 md:grid-cols-2">
+          <StatCard
+            :label="t('dashboard.calls')"
+            :value="data.calls.total"
+            :hint="`${data.calls.errors} ${t('dashboard.errors')} · ${data.calls.error_rate}%`"
+          />
+          <StatCard
+            :label="t('dashboard.averageLatency')"
+            :value="`${data.calls.average_duration_ms} ms`"
+            :hint="t('dashboard.averageLatencyHint')"
+          />
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <div>
+          <h2 class="text-sm font-semibold">{{ t("dashboard.integrationsGroup") }}</h2>
+          <p class="mt-0.5 text-xs text-muted-foreground">{{ t("dashboard.integrationsGroupHint") }}</p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <StatCard
+            :label="t('dashboard.enabledIntegrations')"
+            :value="data.accounts.enabled"
+            :hint="`${data.accounts.total} ${t('dashboard.configured')}`"
+          >
+            <template #footer>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="(value, provider) in data.accounts.by_provider"
+                  :key="provider"
+                  class="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-[11px]"
+                >
+                  <span class="uppercase text-muted-foreground">{{ provider }}</span>
+                  <b class="tabular-nums text-foreground">{{ value }}</b>
+                </span>
+              </div>
+            </template>
+          </StatCard>
+          <StatCard
+            :label="t('dashboard.oauthClientSessions')"
+            :value="data.oauth.active"
+            :hint="`${data.oauth.tracked} ${t('dashboard.oauthTracked')}`"
+          />
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <div>
+          <h2 class="text-sm font-semibold">Ghidra</h2>
+          <p class="mt-0.5 text-xs text-muted-foreground">{{ t("dashboard.ghidraGroupHint") }}</p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <StatCard
+            :label="t('dashboard.ghidraProjects')"
+            :value="data.analysis.projects"
+            :hint="`${data.analysis.active_sessions} ${t('dashboard.ghidraActiveSessions')}`"
+          />
+          <StatCard
+            :label="t('dashboard.ghidraWorkers')"
+            :value="data.analysis.workers"
+            :hint="`${data.analysis.running_workers} ${t('dashboard.ghidraRunningWorkers')}`"
+          />
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ t("dashboard.workspaceGroup") }}</h2>
+        <div class="grid gap-4 md:grid-cols-2">
+          <StatCard
+            :label="t('dashboard.workspaceFree')"
+            :value="formatBytes(data.workspace.free_bytes)"
+            :hint="`${String(data.workspace.files ?? 0)} ${t('dashboard.files')}`"
+          />
+          <StatCard
+            :label="t('dashboard.workspaceSize')"
+            :value="formatBytes(data.workspace.size_bytes)"
+            :hint="t('dashboard.cached')"
+          />
+        </div>
+      </section>
+    </div>
 
     <section class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div class="border-b border-border/70 px-4 py-3">
