@@ -131,7 +131,7 @@ container is memory-only (no RDB/AOF volume and no published port). Resolved acc
 contain provider credentials, so they are short-lived and remain only inside the private Compose
 network and process/cache memory.
 
-See `deploy/coolify/README.md` for production configuration and failure-isolation rules.
+See `docs/deployment.md` for production deployment configuration.
 
 ## Locked Python dependencies
 

@@ -72,4 +72,4 @@ Production uses one Coolify application per Docker target. Provider-only changes
 restart auth, gateway or unrelated providers. Shared runtime/dependency changes may
 intentionally redeploy multiple applications.
 
-See `deploy/coolify/README.md`.
+See `docs/deployment.md`.
