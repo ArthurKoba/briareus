@@ -6,6 +6,7 @@ from typing import Protocol
 
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
+    GitLabRuntimePolicy,
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
@@ -133,6 +134,10 @@ class RuntimeSettingsRepository(Protocol):
     def get_github_policy(self) -> GitHubRuntimePolicy: ...
 
     def save_github_policy(self, policy: GitHubRuntimePolicy) -> GitHubRuntimePolicy: ...
+
+    def get_gitlab_policy(self) -> GitLabRuntimePolicy: ...
+
+    def save_gitlab_policy(self, policy: GitLabRuntimePolicy) -> GitLabRuntimePolicy: ...
 
 
 class CredentialCipher(Protocol):

@@ -16,5 +16,11 @@ class McpRuntimePolicy(StrictModel):
 
 class GitHubRuntimePolicy(StrictModel):
     local_first_guidance: bool = True
-    local_git_transport_enabled: bool = False
-    remote_source_mutations_enabled: bool = True
+    local_git_transport_enabled: bool = True
+    remote_source_mutations_enabled: bool = False
+
+
+class GitLabRuntimePolicy(StrictModel):
+    local_first_guidance: bool = True
+    local_git_transport_enabled: bool = True
+    remote_source_mutations_enabled: bool = False

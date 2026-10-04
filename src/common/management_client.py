@@ -18,7 +18,12 @@ from .cache import CacheBackend, CacheKeys, SharedCache
 from .http_transport import HttpTransportError, PooledHttpTransport
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
-from .runtime_policy_contracts import GitHubRuntimePolicy, McpRuntimePolicy, TerminalRuntimePolicy
+from .runtime_policy_contracts import (
+    GitHubRuntimePolicy,
+    GitLabRuntimePolicy,
+    McpRuntimePolicy,
+    TerminalRuntimePolicy,
+)
 from .settings import ManagementClientSettings, ValkeySettings
 
 
@@ -249,6 +254,20 @@ class ManagementClient:
             return GitHubRuntimePolicy.model_validate(cached)
         data = self._request("GET", "/internal/runtime-settings/github")
         result = GitHubRuntimePolicy.model_validate(data)
+        self.cache.set_json(
+            cache_key,
+            result.to_json(),
+            ttl_seconds=self.cache_settings.policy_ttl_seconds,
+        )
+        return result
+
+    def gitlab_runtime_policy(self) -> GitLabRuntimePolicy:
+        cache_key = self.cache_keys.gitlab_policy()
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return GitLabRuntimePolicy.model_validate(cached)
+        data = self._request("GET", "/internal/runtime-settings/gitlab")
+        result = GitLabRuntimePolicy.model_validate(data)
         self.cache.set_json(
             cache_key,
             result.to_json(),

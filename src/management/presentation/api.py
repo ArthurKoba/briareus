@@ -122,6 +122,12 @@ def build_internal_router(services: ApiServices) -> APIRouter:
     ) -> JsonObject:
         return services.runtime_settings.github_policy().to_json()
 
+    @router.get("/runtime-settings/gitlab")
+    def gitlab_runtime_settings(
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        return services.runtime_settings.gitlab_policy().to_json()
+
     @router.post("/events", status_code=204)
     def record_event(
         event: InvocationEvent,

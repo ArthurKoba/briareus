@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
+    GitLabRuntimePolicy,
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
@@ -30,6 +31,7 @@ from .database import (
     GitHubAccountRecord,
     GitHubRuntimeSettingsRecord,
     GitLabAccountRecord,
+    GitLabRuntimeSettingsRecord,
     InvocationRecord,
     ManagementConfigRecord,
     McpRuntimeSettingsRecord,
@@ -986,6 +988,32 @@ class SqlAlchemyRuntimeSettingsRepository:
             record = session.get(GitHubRuntimeSettingsRecord, 1)
             if record is None:
                 record = GitHubRuntimeSettingsRecord(id=1)
+                session.add(record)
+            record.local_first_guidance = policy.local_first_guidance
+            record.local_git_transport_enabled = policy.local_git_transport_enabled
+            record.remote_source_mutations_enabled = policy.remote_source_mutations_enabled
+        return policy
+
+    @_db_span("runtime.gitlab.get")
+    def get_gitlab_policy(self) -> GitLabRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(GitLabRuntimeSettingsRecord, 1)
+            if record is None:
+                record = GitLabRuntimeSettingsRecord(id=1)
+                session.add(record)
+                session.flush()
+            return GitLabRuntimePolicy(
+                local_first_guidance=record.local_first_guidance,
+                local_git_transport_enabled=record.local_git_transport_enabled,
+                remote_source_mutations_enabled=record.remote_source_mutations_enabled,
+            )
+
+    @_db_span("runtime.gitlab.save")
+    def save_gitlab_policy(self, policy: GitLabRuntimePolicy) -> GitLabRuntimePolicy:
+        with self.sessions.begin() as session:
+            record = session.get(GitLabRuntimeSettingsRecord, 1)
+            if record is None:
+                record = GitLabRuntimeSettingsRecord(id=1)
                 session.add(record)
             record.local_first_guidance = policy.local_first_guidance
             record.local_git_transport_enabled = policy.local_git_transport_enabled
