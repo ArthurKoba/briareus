@@ -388,6 +388,10 @@ class BrowserManager:
         for page in context.pages:
             self._register_page(page)
             await self._apply_color_scheme(page)
+        await self._set_chromium_developer_state(
+            self._developer_access_enabled,
+            context=context,
+        )
         context.on("page", self._on_context_page)
 
     async def _ensure_started(self) -> BrowserContext:
@@ -465,6 +469,157 @@ class BrowserManager:
 
     def dev_extensions(self) -> list[JsonValue]:
         return [{"id": item.id, "path": item.path} for item in self._extension_registry.items()]
+
+    @staticmethod
+    def _extension_requests_user_scripts(path: str) -> bool:
+        manifest_path = Path(path) / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(manifest, dict):
+            return False
+        for key in ("permissions", "optional_permissions"):
+            values = manifest.get(key)
+            if isinstance(values, list) and "userScripts" in values:
+                return True
+        return False
+
+    def _user_script_extension_ids(self, only_extension_id: str = "") -> list[str]:
+        normalized = only_extension_id.strip()
+        return [
+            item.id
+            for item in self._extension_registry.items()
+            if (not normalized or item.id == normalized)
+            and self._extension_requests_user_scripts(item.path)
+        ]
+
+    async def _set_chromium_developer_state(
+        self,
+        enabled: bool,
+        *,
+        extension_ids: list[str] | None = None,
+        update_profile_mode: bool = True,
+        context: BrowserContext | None = None,
+    ) -> JsonObject:
+        context = context or await self._ensure_started()
+        page = await context.new_page()
+        page_id = self._register_page(page)
+        try:
+            await page.goto("chrome://extensions/", wait_until="domcontentloaded")
+            ids = (
+                self._user_script_extension_ids()
+                if extension_ids is None
+                else [value for value in extension_ids if value]
+            )
+            result = await page.evaluate(
+                """
+                async ({enabled, extensionIds, updateProfileMode}) => {
+                  if (!chrome?.developerPrivate) {
+                    throw new Error(
+                      'chrome.developerPrivate is unavailable on chrome://extensions'
+                    );
+                  }
+
+                  if (updateProfileMode) {
+                    await chrome.developerPrivate.updateProfileConfiguration({
+                      inDeveloperMode: enabled,
+                    });
+                  }
+
+                  const extensions = [];
+                  for (const extensionId of extensionIds) {
+                    try {
+                      await chrome.developerPrivate.updateExtensionConfiguration({
+                        extensionId,
+                        userScriptsAccess: enabled,
+                      });
+                      await chrome.developerPrivate.reload(extensionId, {
+                        failQuietly: true,
+                      });
+                      extensions.push({
+                        id: extensionId,
+                        userScriptsAccess: enabled,
+                        ok: true,
+                      });
+                    } catch (error) {
+                      extensions.push({
+                        id: extensionId,
+                        userScriptsAccess: enabled,
+                        ok: false,
+                        error: String(error),
+                      });
+                    }
+                  }
+
+                  const profile = updateProfileMode
+                    ? await chrome.developerPrivate.getProfileConfiguration()
+                    : null;
+                  return {
+                    inDeveloperMode: profile?.inDeveloperMode ?? null,
+                    extensions,
+                  };
+                }
+                """,
+                {
+                    "enabled": enabled,
+                    "extensionIds": ids,
+                    "updateProfileMode": update_profile_mode,
+                },
+            )
+        except Exception as exc:
+            raise BrowserError(
+                f"Chromium developer-mode synchronization failed: {exc}"
+            ) from exc
+        finally:
+            with contextlib.suppress(Exception):
+                await page.close()
+            self._forget_page(page_id)
+
+        payload = result if isinstance(result, dict) else {}
+        extensions = payload.get("extensions")
+        extension_items = extensions if isinstance(extensions, list) else []
+        failures = [
+            item
+            for item in extension_items
+            if isinstance(item, dict) and not bool(item.get("ok"))
+        ]
+        if failures:
+            details = "; ".join(
+                f"{item.get('id')}: {item.get('error') or 'unknown error'}"
+                for item in failures[:5]
+                if isinstance(item, dict)
+            )
+            raise BrowserError(
+                "Chromium userScripts access synchronization failed"
+                + (f": {details}" if details else "")
+            )
+        return {
+            "in_developer_mode": payload.get("inDeveloperMode"),
+            "user_scripts_enabled": enabled,
+            "user_scripts_extension_count": len(extension_items),
+            "extensions": extension_items,
+        }
+
+    async def sync_dev_extension_user_scripts(self, extension_id: str) -> JsonObject:
+        ids = self._user_script_extension_ids(extension_id)
+        if not ids:
+            return {
+                "extension_id": extension_id,
+                "user_scripts_managed": False,
+                "user_scripts_enabled": False,
+            }
+        result = await self._set_chromium_developer_state(
+            self._developer_access_enabled,
+            extension_ids=ids,
+            update_profile_mode=False,
+        )
+        return {
+            "extension_id": extension_id,
+            "user_scripts_managed": True,
+            "user_scripts_enabled": self._developer_access_enabled,
+            **result,
+        }
 
     async def _apply_color_scheme(self, page: Page) -> None:
         scheme = None if self._color_scheme == "system" else self._color_scheme
@@ -730,6 +885,8 @@ class BrowserManager:
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "dev_extensions": self.dev_extensions(),
+            "managed_user_scripts_extension_count": len(self._user_script_extension_ids()),
+            "user_scripts_follow_developer_access": True,
             "observed": observed,
             "page_count": len(pages),
             "pages": pages,
@@ -1046,6 +1203,20 @@ class BrowserManager:
 
     async def operator_set_developer_access(self, owner_token: str, allowed: bool) -> JsonObject:
         self._require_operator(owner_token)
+        previous = self._developer_access_enabled
+        sync_result: JsonObject = {
+            "in_developer_mode": None,
+            "user_scripts_enabled": allowed,
+            "user_scripts_extension_count": 0,
+            "extensions": [],
+        }
+        if allowed != previous:
+            try:
+                sync_result = await self._set_chromium_developer_state(allowed)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await self._set_chromium_developer_state(previous)
+                raise
         async with self._policy_lock:
             self._developer_access_enabled = allowed
             await asyncio.to_thread(self._persist_policy)
@@ -1053,6 +1224,7 @@ class BrowserManager:
         return {
             "developer_access_enabled": self._developer_access_enabled,
             "developer_access_effective": self.developer_access_effective,
+            **sync_result,
         }
 
     async def _operator_page_items(self) -> list[JsonValue]:
