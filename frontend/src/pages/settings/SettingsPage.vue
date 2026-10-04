@@ -4,7 +4,7 @@ import { InputNumber, Select, Switch } from "ant-design-vue"
 import { RefreshCw, Save, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi, type SettingsState } from "@/shared/api/management"
+import { managementApi, type BrowserState, type SettingsState } from "@/shared/api/management"
 import { ManagementApiError } from "@/shared/api/error"
 import { runtimeConfig } from "@/shared/config/runtime"
 import { eventBus } from "@/shared/events/bus"
@@ -20,6 +20,8 @@ import SectionTabs from "@/shared/ui/SectionTabs.vue"
 const { t } = useI18n()
 const section = ref("interface")
 const state = ref<SettingsState | null>(null)
+const browserState = ref<BrowserState | null>(null)
+const browserTheme = ref<"system" | "light" | "dark">("dark")
 const loading = ref(false)
 const saving = ref(false)
 const error = ref("")
@@ -37,6 +39,7 @@ const form = reactive({
 
 const sections = computed(() => [
   { id: "interface", label: t("settings.interface"), description: t("settings.interfaceHint") },
+  { id: "browser", label: t("settings.browser"), description: t("settings.browserHint") },
   { id: "realtime", label: t("settings.realtime"), description: t("settings.realtimeHint") },
   { id: "logging", label: t("settings.logging"), description: t("settings.loggingHint") },
   { id: "mcp", label: t("settings.mcp"), description: t("settings.mcpHint") },
@@ -57,7 +60,7 @@ const densityOptions = computed(() => [
 
 function readHash(): void {
   const [, child] = location.hash.slice(1).split("/")
-  if (["interface", "realtime", "logging", "mcp"].includes(child ?? "")) section.value = child!
+  if (["interface", "browser", "realtime", "logging", "mcp"].includes(child ?? "")) section.value = child!
 }
 function setSection(value: string): void {
   section.value = value
@@ -80,6 +83,27 @@ async function load(): Promise<void> {
     error.value = caught instanceof Error ? caught.message : "Unable to load settings"
   } finally {
     loading.value = false
+  }
+}
+
+async function loadBrowser(): Promise<void> {
+  try {
+    browserState.value = await managementApi.browserState()
+    const scheme = browserState.value.color_scheme
+    if (scheme === "system" || scheme === "light" || scheme === "dark") browserTheme.value = scheme
+  } catch (caught) {
+    frontendTelemetry.error("settings.browser_load_failed", caught)
+  }
+}
+
+async function changeBrowserTheme(value: string): Promise<void> {
+  if (value !== "system" && value !== "light" && value !== "dark") return
+  try {
+    browserState.value = await managementApi.setBrowserTheme(value)
+    browserTheme.value = browserState.value.color_scheme ?? value
+    notifications.success(String(t("notifications.saved")))
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "Unable to update browser theme"
   }
 }
 
@@ -114,6 +138,7 @@ onMounted(() => {
   readHash()
   window.addEventListener("hashchange", readHash)
   void load()
+  void loadBrowser()
 })
 onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
 </script>
@@ -146,6 +171,18 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
         <span><b>{{ t("settings.density") }}</b><small>{{ t("settings.densityHint") }}</small></span>
         <Select v-model:value="uiPreferences.density.value" :options="densityOptions" class="w-44" />
       </label>
+    </section>
+
+    <section v-else-if="section === 'browser'" class="settings-card max-w-3xl">
+      <h2>{{ t("settings.browser") }}</h2>
+      <label class="setting-row">
+        <span><b>{{ t("settings.browserTheme") }}</b><small>{{ t("settings.browserThemeHint") }}</small></span>
+        <Select :value="browserTheme" :options="themeOptions" class="w-44" @change="changeBrowserTheme(String($event))" />
+      </label>
+      <div class="setting-row">
+        <span><b>{{ t("settings.browserViewport") }}</b><small>{{ t("settings.browserViewportHint") }}</small></span>
+        <span class="font-mono text-xs">{{ browserState?.viewport?.width ?? 1280 }} × {{ browserState?.viewport?.height ?? 720 }}</span>
+      </div>
     </section>
 
     <section v-else-if="section === 'realtime'" class="settings-card max-w-3xl">
