@@ -31,8 +31,6 @@ mcp-serve = "common.asgi:main"
 web = ["playwright>=1.55,<2"]
 dev = [
   "mypy>=1.18,<2",
-  "pytest>=8.4,<9",
-  "pytest-asyncio>=1.1,<2",
   "ruff>=0.12,<1",
 ]
 
@@ -48,10 +46,6 @@ packages = [
   "src/management",
   "src/modules",
 ]
-
-[tool.pytest.ini_options]
-addopts = "-q"
-testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
@@ -81,7 +75,6 @@ select = [
   "RUF",
 ]
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["ANN", "ARG"]
 "src/modules/github/github_workflow.py" = ["E501"]
 
 [tool.mypy]
@@ -92,7 +85,3 @@ warn_unreachable = true
 show_error_codes = true
 pretty = true
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false

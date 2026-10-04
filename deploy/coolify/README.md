@@ -235,7 +235,7 @@ target. The dependency layer copies only `pyproject.toml` and `uv.lock` and runs
 copied. Normal source changes therefore reuse the server-local dependency cache.
 
 GitHub CI intentionally does not build production container images. CI owns static analysis
-and pytest validation; Coolify owns the single production image build on the deployment host.
+and static validation; Coolify owns the single production image build on the deployment host.
 This avoids building the same image once on a hosted CI runner and again on the server.
 
 Compose overrides the image healthcheck for deployment responsiveness. The shared runtime
