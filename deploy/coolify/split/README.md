@@ -3,7 +3,7 @@
 Each file in this directory is one independent Coolify Compose application. The legacy monolith stays
 pinned to e41085d9c86124a0f711411314265b36f4c23dea until the split gateway passes acceptance.
 
-One-time topology: create one external Docker network named mcp and set MCP_NETWORK_NAME=mcp.
+Infrastructure is a separate, rarely-changing Coolify Compose resource at `/deploy/coolify/infrastructure.yaml`. It owns PostgreSQL and Valkey and does not build repository code.
 
 For the first cutover, reuse the existing legacy persistent volumes:
 MCP_WORKSPACE_VOLUME=vaxvdsixzrp87pos3hg0frht_terminal-workspace
@@ -20,7 +20,6 @@ GITHUB_OAUTH_JWT_SIGNING_KEY and GITHUB_OAUTH_ALLOWED_USERS. Only Auth receives 
 client ID/secret.
 
 Application -> Compose location:
-mcp-valkey -> /deploy/coolify/split/valkey.yaml
 mcp-auth -> /deploy/coolify/split/auth.yaml
 mcp-github -> /deploy/coolify/split/github.yaml
 mcp-gitlab -> /deploy/coolify/split/gitlab.yaml
@@ -35,8 +34,8 @@ admin-api -> /deploy/coolify/split/admin-api.yaml
 admin-ui -> /deploy/coolify/split/admin-ui.yaml
 
 Cutover order:
-1. Create network/shared variables and all Applications without starting stateful replacements.
-2. Deploy mcp-valkey.
+1. Deploy the shared infrastructure Compose (`postgres` + `valkey`) on the MCP destination.
+2. Create shared variables and all application resources without starting stateful replacements.
 3. Put Admin API on the common network, or temporarily use its public API URL.
 4. Stop the legacy monolith for the stateful cutover.
 5. Start auth/files/github/gitlab/observability.
