@@ -4,7 +4,7 @@ Standalone Vue 3 + TypeScript + Vite + Tailwind CSS management frontend.
 
 ## Isolation boundary
 
-The frontend container is built with `admin-web-app/` as its Docker build context. The build cannot read or copy the Python backend, root `Dockerfile`, `src/`, `uv.lock`, or the backend Compose topology.
+The frontend container is built with `admin-web-app/` as its Docker build context. The build cannot read or copy the Python backend, root `Dockerfile`, `services/`, `uv.lock`, or the backend Compose topology.
 
 For a standalone Coolify application use:
 
