@@ -368,6 +368,7 @@ class SqlAlchemyAccountRepository:
             if record is None:
                 raise KeyError(f"account not found: {account_id}")
             record.encrypted_credential = encrypted_value
+            record.updated_at = datetime.now(UTC)
 
     @_db_span("accounts.credential")
     def credential(self, account_id: str, *, provider: Provider) -> str:

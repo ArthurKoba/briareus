@@ -326,9 +326,7 @@ def build_admin_api_router(
             )
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        response = saved.public()
-        await publish_management_event(api, "account.created", response)
-        return response
+        return saved.public()
 
     @router.put("/accounts/{provider}/{account_id}")
     async def update_account(
@@ -380,9 +378,7 @@ def build_admin_api_router(
             ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        response = saved.public()
-        await publish_management_event(api, "account.updated", response)
-        return response
+        return saved.public()
 
     @router.delete("/accounts/{provider}/{account_id}")
     async def delete_account(provider: Provider, account_id: str, request: Request) -> JsonObject:
@@ -391,9 +387,7 @@ def build_admin_api_router(
             await asyncio.to_thread(api.accounts.delete, account_id, provider=provider)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        response: JsonObject = {"deleted": True, "id": account_id}
-        await publish_management_event(api, "account.deleted", response)
-        return response
+        return {"deleted": True, "id": account_id, "provider": provider.value}
 
     @router.post("/accounts/verify-candidate")
     async def verify_account_candidate(
@@ -455,9 +449,7 @@ def build_admin_api_router(
     async def verify_account(provider: Provider, account_id: str, request: Request) -> JsonObject:
         api = mutation(request)
         try:
-            result = await asyncio.to_thread(api.accounts.verify, account_id, provider=provider)
-            await publish_management_event(api, "account.verified", result)
-            return result
+            return await asyncio.to_thread(api.accounts.verify, account_id, provider=provider)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:

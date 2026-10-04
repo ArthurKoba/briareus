@@ -90,6 +90,7 @@ accounts = AccountService(
     ProviderConnectionVerifier(),
     cache=shared_cache,
     cache_settings=cache_settings,
+    publisher=realtime.publish_sync,
 )
 audit = InvocationAuditService(
     invocation_repository, config_service, publisher=realtime.publish_sync

@@ -40,6 +40,7 @@ class AccountService:
         *,
         cache: CacheBackend | None = None,
         cache_settings: ValkeySettings | None = None,
+        publisher: Callable[[str, str, object], object] | None = None,
     ) -> None:
         self.repository = repository
         self.cipher = cipher
@@ -47,6 +48,11 @@ class AccountService:
         self.cache = cache
         self.cache_settings = cache_settings or ValkeySettings()
         self.cache_keys = CacheKeys(cache) if cache is not None else None
+        self.publisher = publisher
+
+    def publish(self, event_type: str, data: object) -> None:
+        if self.publisher is not None:
+            self.publisher("management.events", event_type, data)
 
     def invalidate(self, account: Account) -> None:
         if self.cache is None or self.cache_keys is None:
@@ -116,6 +122,7 @@ class AccountService:
             encrypted_credential=self.cipher.encrypt(secret),
         )
         self.invalidate(saved)
+        self.publish("account.created", saved.public())
         return saved
 
     def update(
@@ -135,6 +142,7 @@ class AccountService:
         )
         self.invalidate(previous)
         self.invalidate(saved)
+        self.publish("account.updated", saved.public())
         return saved
 
     def set_credential(self, account_id: str, credential: str, *, provider: Provider) -> None:
@@ -147,20 +155,29 @@ class AccountService:
             self.cipher.encrypt(secret),
             provider=provider,
         )
+        updated = self.repository.get(account_id, provider=provider, enabled_only=False)
         self.invalidate(account)
+        self.invalidate(updated)
+        self.publish("account.updated", updated.public())
 
     def delete(self, account_id: str, *, provider: Provider) -> None:
         account = self.repository.get(account_id, provider=provider, enabled_only=False)
         self.repository.delete(account_id, provider=provider)
         self.invalidate(account)
+        self.publish("account.deleted", {"id": account.id, "provider": account.provider.value})
 
     def verify(self, selector: str, *, provider: Provider) -> JsonObject:
         account = self.repository.get(selector, provider=provider)
         credential = self.cipher.decrypt(self.repository.credential(account.id, provider=provider))
-        return json_object(
+        result = json_object(
             self.verifier.verify(account, credential),
             context="connection verification result",
         )
+        self.publish(
+            "account.verified",
+            {"id": account.id, "provider": account.provider.value, "ok": result.get("ok") is True},
+        )
+        return result
 
     def verify_candidate(
         self,
