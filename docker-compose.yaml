@@ -106,7 +106,7 @@ services:
       - management:/management
       - terminal-workspace:/workspace
 
-  management-ui:
+  admin-ui:
     restart: unless-stopped
     build:
       context: ./admin-web-app

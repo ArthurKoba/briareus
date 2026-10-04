@@ -40,7 +40,7 @@ public domain. Auth and all provider runtimes remain private on the Compose netw
 /analysis/mcp
 /terminal/mcp
 /observability/mcp
-/admin/*        -> standalone management frontend
+/admin/*        -> standalone admin frontend
 /api/*          -> management API/realtime
 ```
 
@@ -182,7 +182,7 @@ click and fill without serializing full page HTML into model context. Browser pa
 and filled values are omitted from Management audit payloads; tool/status metadata remains
 observable.
 
-The standalone management frontend uses the session-authenticated
+The standalone admin frontend uses the session-authenticated
 `/api/browser/operator/ws` public Gateway surface for the same persistent Chromium profile. It shares
 tabs, input, agent/developer access controls, DevTools, reopen/cleanup operations and browser
 state with the Web runtime. Viewport changes use public `PUT /api/browser/viewport`. The legacy

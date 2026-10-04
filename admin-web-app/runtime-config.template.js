@@ -1,12 +1,12 @@
-window.__MCP_MANAGEMENT_UI_CONFIG__ = {
-  preview: "${MANAGEMENT_UI_PREVIEW}".toLowerCase() === "true",
+window.__MCP_ADMIN_UI_CONFIG__ = {
+  preview: "${ADMIN_UI_PREVIEW}".toLowerCase() === "true",
   telemetry: {
-    enabled: "${MANAGEMENT_UI_TELEMETRY_ENABLED}".toLowerCase() === "true",
-    endpoint: "${MANAGEMENT_UI_TELEMETRY_ENDPOINT}",
-    sampleRate: Number("${MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE}") || 1
+    enabled: "${ADMIN_UI_TELEMETRY_ENABLED}".toLowerCase() === "true",
+    endpoint: "${ADMIN_UI_TELEMETRY_ENDPOINT}",
+    sampleRate: Number("${ADMIN_UI_TELEMETRY_SAMPLE_RATE}") || 1
   },
   events: {
-    mode: "${MANAGEMENT_UI_EVENTS_MODE}",
-    url: "${MANAGEMENT_UI_EVENTS_URL}"
+    mode: "${ADMIN_UI_EVENTS_MODE}",
+    url: "${ADMIN_UI_EVENTS_URL}"
   }
 }

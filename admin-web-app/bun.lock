@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@mcp-bridge/management-ui",
+      "name": "@mcp-bridge/admin-ui",
       "dependencies": {
         "@tanstack/vue-table": "9.2.4",
         "@tanstack/vue-virtual": "3.13.39",

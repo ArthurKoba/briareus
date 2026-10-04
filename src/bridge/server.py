@@ -50,7 +50,7 @@ _STARTED_AT = datetime.now(UTC).isoformat()
 _observability = build_observability("gateway")
 announce_runtime_started(_observability, "gateway")
 _AUTH_BACKEND_URL = "http://auth:8000"
-_MANAGEMENT_UI_URL = "http://management-ui:8080"
+_ADMIN_UI_URL = "http://admin-ui:8080"
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _AUTH_PROXY_PATHS = (
     "/.well-known/oauth-authorization-server",
@@ -446,9 +446,9 @@ _management_api_proxy = ReverseProxy(
     public_prefix="/api",
     upstream_prefix="/admin/api",
 )
-_management_ui_proxy = ReverseProxy(
-    _MANAGEMENT_UI_URL,
-    backend_name="management-ui",
+_admin_ui_proxy = ReverseProxy(
+    _ADMIN_UI_URL,
+    backend_name="admin-ui",
     public_prefix="/admin",
 )
 _browser_devtools_ui_proxy = ReverseProxy(
@@ -457,7 +457,7 @@ _browser_devtools_ui_proxy = ReverseProxy(
     public_prefix="/api/browser/devtools",
     upstream_prefix="/cdp-ui",
 )
-_REVERSE_PROXIES.extend([_management_api_proxy, _management_ui_proxy, _browser_devtools_ui_proxy])
+_REVERSE_PROXIES.extend([_management_api_proxy, _admin_ui_proxy, _browser_devtools_ui_proxy])
 app.router.routes.extend(
     [
         WebSocketRoute("/api/realtime", _api_realtime_websocket),
@@ -477,8 +477,8 @@ app.add_route("/api", _management_api_proxy.handle, methods=_PROXY_METHODS)
 app.add_route("/api/{path:path}", _management_api_proxy.handle, methods=_PROXY_METHODS)
 app.add_route("/admin/api", _removed_admin_api, methods=_PROXY_METHODS)
 app.add_route("/admin/api/{path:path}", _removed_admin_api, methods=_PROXY_METHODS)
-app.add_route("/admin", _management_ui_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/{path:path}", _management_ui_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/admin", _admin_ui_proxy.handle, methods=_PROXY_METHODS)
+app.add_route("/admin/{path:path}", _admin_ui_proxy.handle, methods=_PROXY_METHODS)
 
 app.mount("/github", _github_http_app)
 app.mount("/gitlab", _gitlab_http_app)

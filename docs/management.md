@@ -48,7 +48,7 @@ render or serve an HTML management UI.
 Public frontend surfaces include session login/logout/bootstrap, dashboard/accounts/calls/files/
 terminal/analysis/oauth/settings APIs and telemetry under `/api/*`, plus `/api/realtime` and
 `/api/browser/operator/ws`. Gateway strips the `/admin` prefix when proxying UI requests to
-`http://management-ui:8080`, so `/admin/assets/x.js` becomes frontend `/assets/x.js`.
+`http://admin-ui:8080`, so `/admin/assets/x.js` becomes frontend `/assets/x.js`.
 
 ## Invocation logging
 

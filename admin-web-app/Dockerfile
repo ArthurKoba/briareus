@@ -11,19 +11,19 @@ RUN bun run build
 
 FROM nginx:1.28-alpine
 
-ENV MANAGEMENT_UI_PREVIEW=false \
-    MANAGEMENT_UI_TELEMETRY_ENABLED=true \
-    MANAGEMENT_UI_TELEMETRY_ENDPOINT=/api/telemetry \
-    MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE=1 \
-    MANAGEMENT_UI_EVENTS_MODE=hybrid \
-    MANAGEMENT_UI_EVENTS_URL=/api/realtime
+ENV ADMIN_UI_PREVIEW=false \
+    ADMIN_UI_TELEMETRY_ENABLED=true \
+    ADMIN_UI_TELEMETRY_ENDPOINT=/api/telemetry \
+    ADMIN_UI_TELEMETRY_SAMPLE_RATE=1 \
+    ADMIN_UI_EVENTS_MODE=hybrid \
+    ADMIN_UI_EVENTS_URL=/api/realtime
 
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY runtime-config.template.js /usr/share/nginx/html/runtime-config.template.js
-COPY docker-entrypoint.d/50-management-ui-runtime-config.sh /docker-entrypoint.d/50-management-ui-runtime-config.sh
+COPY docker-entrypoint.d/50-admin-ui-runtime-config.sh /docker-entrypoint.d/50-admin-ui-runtime-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 
-RUN chmod 0755 /docker-entrypoint.d/50-management-ui-runtime-config.sh
+RUN chmod 0755 /docker-entrypoint.d/50-admin-ui-runtime-config.sh
 
 EXPOSE 8080
 

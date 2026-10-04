@@ -1,6 +1,6 @@
-# Management UI
+# Admin UI
 
-Standalone Vue 3 + TypeScript + Vite + Tailwind CSS management frontend.
+Standalone Vue 3 + TypeScript + Vite + Tailwind CSS admin frontend.
 
 ## Isolation boundary
 
@@ -19,11 +19,11 @@ No backend container is required to build or start the frontend.
 
 ### Preview
 
-Set `MANAGEMENT_UI_PREVIEW=true`. The UI renders using local preview state and makes no management API requests. Use this only when the backend is intentionally unavailable.
+Set `ADMIN_UI_PREVIEW=true`. The UI renders using local preview state and makes no management API requests. Use this only when the backend is intentionally unavailable.
 
 ### Connected
 
-Connected mode is the default. `MANAGEMENT_UI_PREVIEW=false` is already the default.
+Connected mode is the default. `ADMIN_UI_PREVIEW=false` is already the default.
 
 The frontend container is a static SPA only. It does not know the management backend origin and does not proxy API traffic. The public MCP gateway owns routing:
 
@@ -59,17 +59,17 @@ Current frontend infrastructure includes:
 
 ### Frontend telemetry contract
 
-The browser must never receive an OTLP/Bearer secret. When telemetry is enabled it sends sanitized events to the same-origin endpoint configured by `MANAGEMENT_UI_TELEMETRY_ENDPOINT` (default `/api/telemetry`) using the existing authenticated browser session.
+The browser must never receive an OTLP/Bearer secret. When telemetry is enabled it sends sanitized events to the same-origin endpoint configured by `ADMIN_UI_TELEMETRY_ENDPOINT` (default `/api/telemetry`) using the existing authenticated browser session.
 
 The management backend authenticates the browser session and forwards accepted telemetry to the infrastructure telemetry endpoint using server-owned authorization. Passwords, cookies, authorization headers, account credentials, request bodies and other sensitive payload fields are filtered by the frontend telemetry facade and must also be rejected/redacted server-side.
 
 Runtime variables:
 
-- `MANAGEMENT_UI_TELEMETRY_ENABLED=true`;
-- `MANAGEMENT_UI_TELEMETRY_ENDPOINT=/api/telemetry`;
-- `MANAGEMENT_UI_TELEMETRY_SAMPLE_RATE=1`;
-- `MANAGEMENT_UI_EVENTS_MODE=hybrid` (`mock`, `hybrid`, or `websocket`);
-- `MANAGEMENT_UI_EVENTS_URL=/api/realtime`.
+- `ADMIN_UI_TELEMETRY_ENABLED=true`;
+- `ADMIN_UI_TELEMETRY_ENDPOINT=/api/telemetry`;
+- `ADMIN_UI_TELEMETRY_SAMPLE_RATE=1`;
+- `ADMIN_UI_EVENTS_MODE=hybrid` (`mock`, `hybrid`, or `websocket`);
+- `ADMIN_UI_EVENTS_URL=/api/realtime`.
 
 `hybrid` uses the unified management WebSocket as the primary transport and retains the existing MCP Calls SSE stream only as a compatibility fallback during migration. Deployment may switch to `websocket` after the fallback is no longer required.
 
