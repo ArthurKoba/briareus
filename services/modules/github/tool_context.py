@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from common.management_client import ManagementClient
+from common.admin_api_client import AdminApiClient
 from common.models import JsonObject, json_array
 from common.settings import GitHubPolicySettings
 
@@ -13,10 +13,10 @@ from .github_identity import GitHubPrettyIdentityClient
 class GitHubRuntimeContext:
     def __init__(
         self,
-        management: ManagementClient,
+        admin_api: AdminApiClient,
         policy: GitHubPolicySettings,
     ) -> None:
-        self.management = management
+        self.admin_api = admin_api
         self.policy = policy
         self._lock = threading.Lock()
         self._clients: dict[
@@ -25,7 +25,7 @@ class GitHubRuntimeContext:
         ] = {}
 
     def list_accounts(self) -> JsonObject:
-        result = self.management.list_accounts(provider="github").to_json()
+        result = self.admin_api.list_accounts(provider="github").to_json()
         accounts = result.get("accounts")
         if isinstance(accounts, list):
             for account in accounts:
@@ -115,7 +115,7 @@ class GitHubRuntimeContext:
         configured = self.policy.public_reader_account.strip()
         if configured:
             return configured
-        accounts = self.management.list_accounts(provider="github").accounts
+        accounts = self.admin_api.list_accounts(provider="github").accounts
         candidates = [
             account.alias
             for account in accounts
@@ -150,7 +150,7 @@ class GitHubRuntimeContext:
                 required_checks=self.policy.required_checks,
                 required_reviewers=self.policy.required_reviewers,
             )
-        account = self.management.resolve_account(selector, provider="github")
+        account = self.admin_api.resolve_account(selector, provider="github")
         if not account.enabled:
             raise GitHubAgentError(f"GitHub public reader account is disabled: {selector}")
         if account.auth_type != "github_token":
@@ -184,7 +184,7 @@ class GitHubRuntimeContext:
         selector = account_id.strip().casefold()
         if selector in {"public", "anonymous"}:
             return self._public_client()
-        account = self.management.resolve_account(account_id, provider="github")
+        account = self.admin_api.resolve_account(account_id, provider="github")
         key = ("github", account.id)
         with self._lock:
             cached = self._clients.get(key)

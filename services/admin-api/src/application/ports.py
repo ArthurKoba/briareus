@@ -4,17 +4,18 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
+from domain.accounts import Account, Provider
+from domain.configuration import AdminConfig
+from domain.oauth_sessions import OAuthSession
+from domain.snapshots import CachedSnapshot
+from domain.telemetry import Invocation, InvocationPage, InvocationQuery
+
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
-from management.domain.accounts import Account, Provider
-from management.domain.configuration import ManagementConfig
-from management.domain.oauth_sessions import OAuthSession
-from management.domain.snapshots import CachedSnapshot
-from management.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 
 
 class AccountRepository(Protocol):
@@ -113,10 +114,10 @@ class SnapshotRepository(Protocol):
     def store_error(self, key: str, exc: Exception) -> CachedSnapshot: ...
 
 
-class ManagementConfigRepository(Protocol):
-    def get(self) -> ManagementConfig: ...
+class AdminConfigRepository(Protocol):
+    def get(self) -> AdminConfig: ...
 
-    def save(self, config: ManagementConfig) -> ManagementConfig: ...
+    def save(self, config: AdminConfig) -> AdminConfig: ...
 
 
 class RuntimeSettingsRepository(Protocol):

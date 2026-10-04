@@ -5,7 +5,7 @@ export type DensityPreference = "comfortable" | "compact"
 export type LocalePreference = "en" | "ru"
 
 const STORAGE_KEY = "mcp-bridge:ui:v2"
-const LEGACY_STORAGE_KEY = "mcp-management:ui"
+const LEGACY_STORAGE_KEY = "mcp-admin:ui"
 const theme = ref<ThemePreference>("system")
 const sidebarCollapsed = ref(false)
 const density = ref<DensityPreference>("compact")

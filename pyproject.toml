@@ -43,7 +43,6 @@ packages = [
   "services/auth_service",
   "services/bridge",
   "services/common",
-  "services/management",
   "services/modules",
 ]
 
@@ -79,7 +78,7 @@ select = [
 "services/modules/github/github_workflow.py" = ["E501"]
 
 [tool.mypy]
-mypy_path = "services"
+mypy_path = "services,services/admin-api/src"
 python_version = "3.13"
 plugins = ["pydantic.mypy"]
 strict = true

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from common.management_client import ManagementClient, ManagementClientError
+from common.admin_api_client import AdminApiClient, AdminApiClientError
 from common.models import JsonObject, JsonValue
 from common.runtime_policy_contracts import TerminalRuntimePolicy
 from common.settings import TerminalSettings
@@ -68,10 +68,10 @@ class TerminalManager:
     def __init__(
         self,
         settings: TerminalSettings,
-        management: ManagementClient | None = None,
+        admin_api: AdminApiClient | None = None,
     ) -> None:
         self.settings = settings
-        self.management = management
+        self.admin_api = admin_api
         self.workspace_root = settings.workspace_root
         self.projects_root = self.workspace_root / "projects"
         self.home = settings.home
@@ -318,11 +318,11 @@ class TerminalManager:
         }
 
     def _runtime_policy(self) -> TerminalRuntimePolicy:
-        if self.management is None:
+        if self.admin_api is None:
             return TerminalRuntimePolicy()
         try:
-            return self.management.terminal_runtime_policy()
-        except (ManagementClientError, ValueError):
+            return self.admin_api.terminal_runtime_policy()
+        except (AdminApiClientError, ValueError):
             return TerminalRuntimePolicy()
 
     def _environment(self, overrides: dict[str, str] | None) -> dict[str, str]:

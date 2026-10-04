@@ -4,8 +4,8 @@ import { InputNumber, Select, Switch } from "ant-design-vue"
 import { Save, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi, type BrowserState, type SettingsState } from "@/shared/api/management"
-import { ManagementApiError } from "@/shared/api/error"
+import { adminApi, type BrowserState, type SettingsState } from "@/shared/api/admin"
+import { AdminApiError } from "@/shared/api/error"
 import { runtimeConfig } from "@/shared/config/runtime"
 import { eventBus } from "@/shared/events/bus"
 import { setLocale } from "@/shared/i18n"
@@ -75,7 +75,7 @@ function setSection(value: string): void {
 
 function formFromState(value: SettingsState) {
   return {
-    ...value.management,
+    ...value.admin,
     terminal_max_exec_timeout_seconds: value.terminal.max_exec_timeout_seconds,
     terminal_max_job_runtime_seconds: value.terminal.max_job_runtime_seconds,
     mcp_call_timeout_seconds: value.mcp.call_timeout_seconds,
@@ -108,7 +108,7 @@ async function load(): Promise<void> {
 
 async function loadBrowser(): Promise<void> {
   try {
-    browserState.value = await managementApi.browserState()
+    browserState.value = await adminApi.browserState()
     const scheme = browserState.value.color_scheme
     if (scheme === "system" || scheme === "light" || scheme === "dark") browserTheme.value = scheme
   } catch (caught) {
@@ -119,7 +119,7 @@ async function loadBrowser(): Promise<void> {
 async function changeBrowserTheme(value: string): Promise<void> {
   if (value !== "system" && value !== "light" && value !== "dark") return
   try {
-    browserState.value = await managementApi.setBrowserTheme(value)
+    browserState.value = await adminApi.setBrowserTheme(value)
     browserTheme.value = browserState.value.color_scheme ?? value
     notifications.success(String(t("notifications.saved")))
   } catch (caught) {
@@ -132,7 +132,7 @@ async function save(): Promise<void> {
   saving.value = true
   error.value = ""
   try {
-    const saved = await managementApi.updateSettings(settingsUpdatePayload(state.value, { ...form }))
+    const saved = await adminApi.updateSettings(settingsUpdatePayload(state.value, { ...form }))
     settingsStore.accept(saved)
     applyState(saved)
     error.value = ""
@@ -140,7 +140,7 @@ async function save(): Promise<void> {
   } catch (caught) {
     error.value = caught instanceof IncompleteSettingsSnapshotError
       ? String(t("settings.reloadBeforeSave"))
-      : caught instanceof ManagementApiError && caught.status === 409 && caught.code === "settings_conflict"
+      : caught instanceof AdminApiError && caught.status === 409 && caught.code === "settings_conflict"
         ? String(t("settings.conflict"))
         : caught instanceof Error ? caught.message : "Unable to save settings"
   } finally {
@@ -149,7 +149,7 @@ async function save(): Promise<void> {
 }
 
 async function cleanup(): Promise<void> {
-  const result = await managementApi.cleanupLogs()
+  const result = await adminApi.cleanupLogs()
   notifications.success(String(t("notifications.deleted")), `${result.removed}`)
 }
 

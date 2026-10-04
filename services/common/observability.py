@@ -24,11 +24,11 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, SpanKind
 
 from .account_contracts import InvocationEvent
-from .management_client import ManagementClient
+from .admin_api_client import AdminApiClient
 from .settings import ObservabilitySettings
 
 logger = logging.getLogger("mcp_bridge.observability")
-_AUDIT_TRACER = trace.get_tracer("mcp-bridge.management-audit")
+_AUDIT_TRACER = trace.get_tracer("mcp-bridge.admin-api-audit")
 if not logger.handlers:
     _console_handler = logging.StreamHandler()
     _console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
@@ -116,22 +116,22 @@ class CompositeObservabilitySink(ObservabilitySink):
             yield active_span
 
 
-class ManagementAuditSink(ObservabilitySink):
-    """Batch redacted invocation history into Management without blocking tool calls."""
+class AdminApiAuditSink(ObservabilitySink):
+    """Batch redacted invocation history into Admin API without blocking tool calls."""
 
     _MAX_BATCH = 32
     _MAX_QUEUE = 1024
     _BATCH_WINDOW_SECONDS = 0.05
 
-    def __init__(self, management: ManagementClient) -> None:
-        self.management = management
+    def __init__(self, admin_api: AdminApiClient) -> None:
+        self.admin_api = admin_api
         self._queue: queue.Queue[tuple[InvocationEvent, float]] = queue.Queue(
             maxsize=self._MAX_QUEUE
         )
         self._stop = threading.Event()
         self._worker = threading.Thread(
             target=self._run,
-            name="management-audit-batch",
+            name="admin-api-audit-batch",
             daemon=True,
         )
         self._worker.start()
@@ -155,7 +155,7 @@ class ManagementAuditSink(ObservabilitySink):
             self._queue.put_nowait((event, time.monotonic()))
         except queue.Full:
             logger.warning(
-                "Management audit queue full; dropping event scope=%s tool=%s",
+                "Admin API audit queue full; dropping event scope=%s tool=%s",
                 event.module,
                 event.tool,
             )
@@ -180,7 +180,7 @@ class ManagementAuditSink(ObservabilitySink):
             oldest_wait_ms = (time.monotonic() - batch[0][1]) * 1000
             try:
                 with _AUDIT_TRACER.start_as_current_span(
-                    "management.audit.batch",
+                    "admin_api.audit.batch",
                     kind=SpanKind.INTERNAL,
                     attributes={
                         "audit.batch.size": len(events),
@@ -188,10 +188,10 @@ class ManagementAuditSink(ObservabilitySink):
                         "audit.queue.oldest_wait_ms": oldest_wait_ms,
                     },
                 ):
-                    self.management.record_invocations(events)
+                    self.admin_api.record_invocations(events)
             except Exception:
                 logger.exception(
-                    "Management audit batch failed count=%d",
+                    "Admin API audit batch failed count=%d",
                     len(events),
                 )
             finally:
@@ -232,21 +232,43 @@ def _parse_key_values(value: str) -> dict[str, str]:
     return result
 
 
-def _resource_attributes(
+def resource_attributes(
     settings: ObservabilitySettings,
     scope: str,
+    *,
+    service_name: str | None = None,
 ) -> dict[str, object]:
     attributes: dict[str, object] = dict(_parse_key_values(settings.resource_attributes))
     attributes.update(
         {
-            "service.name": settings.service_name,
+            "service.name": service_name or settings.service_name,
             "service.version": settings.service_version,
             "service.instance.id": settings.resolved_instance_id,
             "deployment.environment.name": settings.environment,
             "mcp.scope": scope,
         }
     )
+    if settings.service_namespace:
+        attributes["service.namespace"] = settings.service_namespace
     return attributes
+
+
+def otlp_headers(settings: ObservabilitySettings) -> dict[str, str] | None:
+    headers = _parse_key_values(settings.legacy_headers)
+    if settings.bearer_token:
+        headers["Authorization"] = f"Bearer {settings.bearer_token}"
+    return headers or None
+
+
+def telemetry_resource(
+    settings: ObservabilitySettings,
+    scope: str,
+    *,
+    service_name: str | None = None,
+) -> Resource:
+    return Resource.create(
+        resource_attributes(settings, scope, service_name=service_name)
+    )
 
 
 def _logging_level(value: str) -> int:
@@ -263,8 +285,8 @@ class OpenTelemetrySink(ObservabilitySink):
         self._shutdown = False
         self._attached_loggers: list[logging.Logger] = []
 
-        headers = _parse_key_values(settings.headers) or None
-        resource = Resource.create(_resource_attributes(settings, scope))
+        headers = otlp_headers(settings)
+        resource = telemetry_resource(settings, scope)
 
         self.logger_provider = LoggerProvider(resource=resource)
         self.logger_provider.add_log_record_processor(
@@ -453,13 +475,13 @@ class OpenTelemetrySink(ObservabilitySink):
 def build_observability(
     scope: str,
     *,
-    management: ManagementClient | None = None,
+    admin_api: AdminApiClient | None = None,
     settings: ObservabilitySettings | None = None,
 ) -> CompositeObservabilitySink:
     configured = settings or ObservabilitySettings()
     sinks: list[ObservabilitySink] = []
-    if management is not None:
-        sinks.append(ManagementAuditSink(management))
+    if admin_api is not None:
+        sinks.append(AdminApiAuditSink(admin_api))
     if configured.enabled:
         try:
             sinks.append(OpenTelemetrySink(scope, configured))

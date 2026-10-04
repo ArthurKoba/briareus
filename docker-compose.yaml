@@ -26,9 +26,9 @@ x-machine: &machine
 x-cache-client: &cache-client
   VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
 
-x-management-client: &management-client
-  MANAGEMENT_URL: ${MANAGEMENT_URL:-http://management:8000}
-  MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN:-${SERVICE_REALBASE64_64_MANAGEMENT_SERVICE_TOKEN}}
+x-admin-api-client: &admin-api-client
+  ADMIN_API_URL: ${ADMIN_API_URL:-http://admin-api:8000}
+  ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:-${SERVICE_REALBASE64_64_ADMIN_API_SERVICE_TOKEN}}
 
 x-gateway-routing: &gateway-routing
   GITHUB_URL: ${GITHUB_URL:-http://github:8000/mcp}
@@ -42,18 +42,21 @@ x-gateway-routing: &gateway-routing
 
 x-observability: &observability
   OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-mcp-bridge}
+  SERVICE_NAMESPACE: ${SERVICE_NAMESPACE:-MCP}
+  DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-${OTEL_ENVIRONMENT:-production}}
+  OTLP_ENDPOINT: ${OTLP_ENDPOINT:-${OTEL_EXPORTER_OTLP_ENDPOINT:-}}
+  OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
   OTEL_SERVICE_VERSION: ${OTEL_SERVICE_VERSION:-0.1.0}
   OTEL_SERVICE_INSTANCE_ID: ${OTEL_SERVICE_INSTANCE_ID:-}
-  OTEL_ENVIRONMENT: ${OTEL_ENVIRONMENT:-production}
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
-  OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
   OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
   OTEL_EXPORTER_OTLP_TIMEOUT: ${OTEL_EXPORTER_OTLP_TIMEOUT:-10000}
   OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-30000}
   OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:-INFO}
+  # Migration fallback for the legacy monolith only.
+  OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
 
 x-private-service: &private-service
   <<: *runtime
@@ -88,25 +91,24 @@ services:
     cpus: 0.5
     pids_limit: 128
 
-  management:
+  admin-api:
     <<: *runtime
     build:
       <<: *build
-      target: management
+      target: admin-api
     environment:
       <<: [*machine, *cache-client, *observability]
-      MANAGEMENT_ENCRYPTION_KEY: ${MANAGEMENT_ENCRYPTION_KEY:-${SERVICE_REALBASE64_32_MANAGEMENT_ENCRYPTION_KEY}}
-      MANAGEMENT_SERVICE_TOKEN: ${MANAGEMENT_SERVICE_TOKEN:-${SERVICE_REALBASE64_64_MANAGEMENT_SERVICE_TOKEN}}
-      MANAGEMENT_ADMIN_USERNAME: ${MANAGEMENT_ADMIN_USERNAME:-admin}
-      MANAGEMENT_ADMIN_PASSWORD: ${MANAGEMENT_ADMIN_PASSWORD:-${SERVICE_PASSWORD_64_MANAGEMENT_ADMIN}}
-      MANAGEMENT_SESSION_SECRET: ${MANAGEMENT_SESSION_SECRET:-${SERVICE_REALBASE64_64_MANAGEMENT_SESSION_SECRET}}
-      MANAGEMENT_FRONTEND_TELEMETRY_UPSTREAM_URL: ${MANAGEMENT_FRONTEND_TELEMETRY_UPSTREAM_URL:-https://telemetry.koba-nexus.ru}
-      MANAGEMENT_FRONTEND_TELEMETRY_BEARER_TOKEN: ${MANAGEMENT_FRONTEND_TELEMETRY_BEARER_TOKEN:-}
+      ADMIN_API_ENCRYPTION_KEY: ${ADMIN_API_ENCRYPTION_KEY:-${SERVICE_REALBASE64_32_ADMIN_API_ENCRYPTION_KEY}}
+      ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:-${SERVICE_REALBASE64_64_ADMIN_API_SERVICE_TOKEN}}
+      ADMIN_API_USERNAME: ${ADMIN_API_USERNAME:-admin}
+      ADMIN_API_PASSWORD: ${ADMIN_API_PASSWORD:-${SERVICE_PASSWORD_64_ADMIN_API}}
+      ADMIN_API_SESSION_SECRET: ${ADMIN_API_SESSION_SECRET:-${SERVICE_REALBASE64_64_ADMIN_API_SESSION_SECRET}}
+      ADMIN_UI_ORIGIN: ${ADMIN_UI_ORIGIN:-}
     volumes:
-      - management:/management
+      - admin-api:/admin-api
       - terminal-workspace:/workspace
 
-  management-ui:
+  admin-ui:
     restart: unless-stopped
     build:
       context: ./admin-web-app
@@ -126,7 +128,7 @@ services:
       <<: *build
       target: auth
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-${SERVICE_URL_GATEWAY_8000}}
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
@@ -141,7 +143,7 @@ services:
       <<: *build
       target: gateway
     environment:
-      <<: [*machine, *cache-client, *management-client, *gateway-routing, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *gateway-routing, *observability]
       SERVICE_URL_GATEWAY_8000: /
       OAUTH_ENABLED: ${OAUTH_ENABLED:-true}
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-${SERVICE_URL_GATEWAY_8000}}
@@ -153,28 +155,28 @@ services:
   github:
     <<: *private-service
     depends_on:
-      management:
+      admin-api:
         condition: service_healthy
         required: true
     build:
       <<: *build
       target: github
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
     volumes:
       - terminal-workspace:/workspace
 
   gitlab:
     <<: *private-service
     depends_on:
-      management:
+      admin-api:
         condition: service_healthy
         required: true
     build:
       <<: *build
       target: gitlab
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
     volumes:
       - terminal-workspace:/workspace
 
@@ -184,7 +186,7 @@ services:
       <<: *build
       target: files
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
 
   web:
     <<: *file-service
@@ -192,7 +194,7 @@ services:
       <<: *build
       target: web
     environment:
-      <<: [*cache-client, *management-client, *observability]
+      <<: [*cache-client, *admin-api-client, *observability]
       TZ: ${TZ:-UTC}
     volumes:
       - terminal-workspace:/workspace
@@ -207,7 +209,7 @@ services:
       <<: *build
       target: terminal
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
       TERMINAL_LANG: ${TERMINAL_LANG:-${LANG:-C.UTF-8}}
     mem_limit: ${TERMINAL_MEMORY_LIMIT:-2g}
     memswap_limit: ${TERMINAL_MEMORY_SWAP_LIMIT:-2g}
@@ -227,7 +229,7 @@ services:
       <<: *build
       target: analysis
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
       GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
     volumes:
       - terminal-workspace:/workspace
@@ -238,7 +240,7 @@ services:
       <<: *build
       target: ghidra
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
       GHIDRA_MCP_URL: ${GHIDRA_MCP_URL:-http://bridge:8081/mcp}
     networks:
       - default
@@ -247,17 +249,17 @@ services:
   observability:
     <<: *private-service
     depends_on:
-      management:
+      admin-api:
         condition: service_healthy
         required: true
     build:
       <<: *build
       target: observability
     environment:
-      <<: [*machine, *cache-client, *management-client, *observability]
+      <<: [*machine, *cache-client, *admin-api-client, *observability]
 
 volumes:
-  management:
+  admin-api:
   auth:
   terminal-workspace:
   terminal-home:

@@ -6,19 +6,15 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.providers.proxy import FastMCPProxy
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import PlainTextResponse
-from starlette.routing import BaseRoute, WebSocketRoute
-from starlette.websockets import WebSocket
+from starlette.routing import BaseRoute
 
-from common.management_client import ManagementClient, ManagementClientError
+from common.admin_api_client import AdminApiClient, AdminApiClientError
 from common.mcp_surfaces import (
     MCP_SURFACE_PATHS,
     resource_url,
@@ -33,11 +29,10 @@ from common.runtime_annotations import (
 )
 from common.runtime_policy_contracts import McpRuntimePolicy
 from common.settings import (
+    AdminApiClientSettings,
     BridgeSettings,
     GatewayAuthSettings,
-    ManagementClientSettings,
 )
-from common.websocket_proxy import relay_websocket
 
 from . import __version__
 from .auth_client import LocalAuthTokenVerifier
@@ -50,7 +45,6 @@ _STARTED_AT = datetime.now(UTC).isoformat()
 _observability = build_observability("gateway")
 announce_runtime_started(_observability, "gateway")
 _AUTH_BACKEND_URL = "http://auth:8000"
-_MANAGEMENT_UI_URL = "http://management-ui:8080"
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _AUTH_PROXY_PATHS = (
     "/.well-known/oauth-authorization-server",
@@ -67,10 +61,10 @@ _AUTH_PROXY_PATHS = (
 async def _backend_timeout_seconds() -> float:
     try:
         policy = await asyncio.wait_for(
-            asyncio.to_thread(_management.mcp_runtime_policy),
+            asyncio.to_thread(_admin_api.mcp_runtime_policy),
             timeout=1.0,
         )
-    except (TimeoutError, ManagementClientError, ValueError):
+    except (TimeoutError, AdminApiClientError, ValueError):
         policy = McpRuntimePolicy()
     return float(policy.call_timeout_seconds)
 
@@ -99,7 +93,7 @@ def _build_auth_reverse_proxy() -> ReverseProxy:
 
 def _build_surface_auth(
     settings: GatewayAuthSettings,
-    management: ManagementClient | None,
+    admin_api: AdminApiClient | None,
 ) -> dict[str, RemoteAuthProvider]:
     if not settings.enabled:
         return {}
@@ -109,7 +103,7 @@ def _build_surface_auth(
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
         resource = resource_url(settings.public_base_url, surface)
-        verifier = LocalAuthTokenVerifier(settings, resource, management)
+        verifier = LocalAuthTokenVerifier(settings, resource, admin_api)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
@@ -137,10 +131,10 @@ def _public_facade(
 
 _settings = BridgeSettings()
 _auth_settings = GatewayAuthSettings()
-_management_settings = ManagementClientSettings()
+_admin_api_settings = AdminApiClientSettings()
 _BACKENDS = _settings.backends
-_management = ManagementClient(_management_settings)
-_auth_by_surface = _build_surface_auth(_auth_settings, _management)
+_admin_api = AdminApiClient(_admin_api_settings)
+_auth_by_surface = _build_surface_auth(_auth_settings, _admin_api)
 
 _backend_router = BackendRouter(
     (
@@ -294,7 +288,7 @@ async def bridge_call(
 def bridge_capabilities() -> JsonObject:
     return BridgeCapabilities(
         backends=sorted(_BACKENDS),
-        public_surfaces=[*MCP_SURFACE_PATHS.values(), "/admin", "/api"],
+        public_surfaces=list(MCP_SURFACE_PATHS.values()),
         features=[
             "mcp",
             "streamable-http",
@@ -303,7 +297,7 @@ def bridge_capabilities() -> JsonObject:
             "backend-map",
             "backend-signatures",
             "generic-forwarding",
-            "account-management",
+            "account-admin",
             "multi-account-github",
             "multi-account-gitlab",
             "files",
@@ -317,7 +311,6 @@ def bridge_capabilities() -> JsonObject:
             "observability",
             "multi-account-signoz",
             "multi-account-coolify",
-            "admin",
         ],
     ).to_json()
 
@@ -397,88 +390,6 @@ if _auth_settings.enabled:
         app.add_route(_path, _auth_proxy.handle, methods=_PROXY_METHODS)
 
 
-def _websocket_backend_url(base_url: str, path: str) -> str:
-    parsed = urlsplit(base_url)
-    scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunsplit((scheme, parsed.netloc, path, "", ""))
-
-
-async def _management_websocket(websocket: WebSocket, path: str) -> None:
-    headers: dict[str, str] = {}
-    cookie = websocket.headers.get("cookie")
-    if cookie:
-        headers["Cookie"] = cookie
-    public_host = websocket.headers.get("host", "")
-    headers["X-Forwarded-Host"] = public_host
-    headers["X-Forwarded-Proto"] = websocket.headers.get("x-forwarded-proto", "https")
-    await relay_websocket(
-        websocket,
-        _websocket_backend_url(_management_settings.url, path),
-        headers=headers,
-        origin=websocket.headers.get("origin"),
-    )
-
-
-async def _api_realtime_websocket(websocket: WebSocket) -> None:
-    await _management_websocket(websocket, "/admin/api/realtime")
-
-
-async def _api_browser_operator_websocket(websocket: WebSocket) -> None:
-    await _management_websocket(websocket, "/admin/api/browser/operator/ws")
-
-
-async def _api_browser_cdp_websocket(websocket: WebSocket) -> None:
-    token = str(websocket.path_params.get("token") or "")
-    target_id = str(websocket.path_params.get("target_id") or "")
-    await _management_websocket(
-        websocket,
-        f"/admin/api/browser/cdp/{token}/page/{target_id}",
-    )
-
-
-async def _removed_admin_api(_request: Request) -> PlainTextResponse:
-    return PlainTextResponse("Not Found", status_code=404)
-
-
-_management_api_proxy = ReverseProxy(
-    _management_settings.url,
-    backend_name="management",
-    public_prefix="/api",
-    upstream_prefix="/admin/api",
-)
-_management_ui_proxy = ReverseProxy(
-    _MANAGEMENT_UI_URL,
-    backend_name="management-ui",
-    public_prefix="/admin",
-)
-_browser_devtools_ui_proxy = ReverseProxy(
-    "http://web:8000",
-    backend_name="web-devtools",
-    public_prefix="/api/browser/devtools",
-    upstream_prefix="/cdp-ui",
-)
-_REVERSE_PROXIES.extend([_management_api_proxy, _management_ui_proxy, _browser_devtools_ui_proxy])
-app.router.routes.extend(
-    [
-        WebSocketRoute("/api/realtime", _api_realtime_websocket),
-        WebSocketRoute("/api/browser/operator/ws", _api_browser_operator_websocket),
-        WebSocketRoute(
-            "/api/browser/cdp/{token}/page/{target_id}",
-            _api_browser_cdp_websocket,
-        ),
-    ]
-)
-app.add_route(
-    "/api/browser/devtools/{path:path}",
-    _browser_devtools_ui_proxy.handle,
-    methods=_PROXY_METHODS,
-)
-app.add_route("/api", _management_api_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/api/{path:path}", _management_api_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/api", _removed_admin_api, methods=_PROXY_METHODS)
-app.add_route("/admin/api/{path:path}", _removed_admin_api, methods=_PROXY_METHODS)
-app.add_route("/admin", _management_ui_proxy.handle, methods=_PROXY_METHODS)
-app.add_route("/admin/{path:path}", _management_ui_proxy.handle, methods=_PROXY_METHODS)
 
 app.mount("/github", _github_http_app)
 app.mount("/gitlab", _gitlab_http_app)

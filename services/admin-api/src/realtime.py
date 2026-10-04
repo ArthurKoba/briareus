@@ -25,7 +25,7 @@ REALTIME_TOPICS: Final[frozenset[str]] = frozenset(
         "system.metrics",
         "system.notifications",
         "browser.runtime",
-        "management.events",
+        "admin.events",
     }
 )
 
@@ -69,7 +69,7 @@ class RealtimeBus:
         self._loop = asyncio.get_running_loop()
         if self._listener_task is None or self._listener_task.done():
             self._listener_task = asyncio.create_task(
-                self._listen(), name="management-realtime-valkey"
+                self._listen(), name="admin-api-realtime-valkey"
             )
 
     async def close(self) -> None:

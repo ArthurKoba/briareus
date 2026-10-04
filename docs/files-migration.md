@@ -18,13 +18,13 @@ storage.
 The active stack uses:
 
 ```text
-management         -> /management
+admin-api              -> /admin-api
 auth               -> /auth
 terminal-workspace -> /workspace
 terminal-home      -> /home/agent
 ```
 
-Files, Curl, Terminal and the Management API share `terminal-workspace`. There is no
+Files, Curl, Terminal and the Admin API share `terminal-workspace`. There is no
 `/files` volume, Files SQLite database, immutable object index, collection/reference
 registry, or resumable CAS upload session.
 

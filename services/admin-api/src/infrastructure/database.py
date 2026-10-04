@@ -191,8 +191,8 @@ class CachedSnapshotRecord(Base):
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
 
-class ManagementConfigRecord(Base):
-    __tablename__ = "management_config"
+class AdminConfigRecord(Base):
+    __tablename__ = "admin_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     logging_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -254,7 +254,7 @@ def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
 
 
 def ensure_zero_state_schema(engine: Engine) -> bool:
-    """Ensure the management schema exists without destroying persisted data.
+    """Ensure the admin-api schema exists without destroying persisted data.
 
     Missing tables are created additively. Extra legacy tables/columns are tolerated so
     a code rollout that removes fields cannot erase accounts or invocation history.
@@ -276,7 +276,7 @@ def ensure_zero_state_schema(engine: Engine) -> bool:
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
             raise RuntimeError(
-                f"management database migration required for {table_name}: "
+                f"admin-api database migration required for {table_name}: "
                 f"missing columns: {missing}"
             )
 

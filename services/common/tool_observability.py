@@ -34,7 +34,7 @@ def invocation_arguments_payload(
     if normalized_module == "terminal":
         return _terminal_arguments_payload(arguments)
     if normalized_module == "web" and tool.startswith("devtools_"):
-        return render_payload({"detail": "Chrome DevTools arguments omitted from Management audit"})
+        return render_payload({"detail": "Chrome DevTools arguments omitted from Admin API audit"})
     if normalized_module == "web" and tool.startswith("browser_") and isinstance(arguments, dict):
         bounded = dict(arguments)
         if tool == "browser_fill" and "value" in bounded:
@@ -46,15 +46,15 @@ def invocation_arguments_payload(
 def invocation_result_payload(module: str, result: object, tool: str = "") -> str:
     normalized_module = module.strip().casefold()
     if normalized_module == "terminal":
-        return render_payload({"detail": "terminal result omitted from Management audit"})
+        return render_payload({"detail": "terminal result omitted from Admin API audit"})
     if normalized_module == "web" and tool.startswith("devtools_"):
-        return render_payload({"detail": "Chrome DevTools result omitted from Management audit"})
+        return render_payload({"detail": "Chrome DevTools result omitted from Admin API audit"})
     if normalized_module == "web" and tool.startswith("browser_"):
-        return render_payload({"detail": "browser result omitted from Management audit"})
+        return render_payload({"detail": "browser result omitted from Admin API audit"})
     return render_payload(result)
 
 
-def management_audit_enabled(module: str, proxy_origin: str) -> bool:
+def admin_api_audit_enabled(module: str, proxy_origin: str) -> bool:
     """Persist user-visible calls, but suppress Analysis->Ghidra proxy duplicates."""
     return not (
         module.strip().casefold() == "ghidra"
@@ -99,7 +99,7 @@ class ToolObservabilityMiddleware(Middleware):
         )
         headers = get_http_headers()
         proxy_origin = headers.get("x-koba-proxy-origin", "").strip().casefold()
-        audit = management_audit_enabled(self.module, proxy_origin)
+        audit = admin_api_audit_enabled(self.module, proxy_origin)
         span_attributes: dict[str, object] = {
             "mcp.scope": self.module,
             "mcp.tool": context.message.name,

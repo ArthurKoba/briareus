@@ -23,8 +23,7 @@ gateway
   +-- /analysis/mcp -------------> analysis ---> ghidra (private)
   +-- /terminal/mcp -------------> terminal
   +-- /observability/mcp -------> observability (SigNoz + Coolify, read-only)
-  +-- /admin        -------------> management
-```
+  ```
 
 The public domain is `mcp.koba-nexus.ru`. Gateway is the only process assigned that
 public domain. Auth and all provider runtimes remain private on the Compose network.
@@ -40,12 +39,20 @@ public domain. Auth and all provider runtimes remain private on the Compose netw
 /analysis/mcp
 /terminal/mcp
 /observability/mcp
-/admin/*        -> standalone management frontend
-/api/*          -> management API/realtime
 ```
 
 Native Ghidra is not a public MCP surface. Analysis is the external structured-analysis
 contract; Ghidra is an implementation backend.
+
+## Administration surfaces
+
+```text
+https://admin.mcp.koba-nexus.ru/       -> admin-ui
+https://api.mcp.koba-nexus.ru/v1/*    -> admin-api
+```
+
+Admin UI/Admin API are independent deployment units. Gateway does not proxy their HTTP or
+WebSocket routes.
 
 ## OAuth boundary
 
@@ -73,7 +80,7 @@ https://mcp.koba-nexus.ru/analysis/mcp
 The `auth` runtime owns GitHub OAuth credentials, DCR registrations, authorization
 transactions, refresh state and audience-bound FastMCP tokens. Gateway owns public
 routing, protected-resource metadata and local verification of already-issued signed
-tokens. GitHub OAuth credentials are never configured on provider runtimes or management.
+tokens. GitHub OAuth credentials are never configured on provider runtimes or Admin API.
 
 ## Repository layout
 
@@ -82,7 +89,9 @@ services/
 ├── auth_service/
 ├── bridge/
 ├── common/
-├── management/
+├── admin-api/
+│   └── src/
+│       └── admin_api/
 └── modules/
     ├── github/
     ├── gitlab/
@@ -95,14 +104,15 @@ services/
 
 ## Runtime and deployment isolation
 
-Production is one Git-backed Coolify Docker Compose application. The Compose file is the
-topology authority and starts separate containers for `auth`, `gateway`, `management`,
-`github`, `gitlab`, `files`, `web`, `terminal`, `analysis`, `ghidra`, and `observability`.
+Production is migrating from the legacy single Compose resource to independent Coolify
+Applications built from the same repository/Dockerfile targets. `admin-ui` and `admin-api` are
+already separate deployment units; remaining runtimes move independently. The root Compose file
+remains the integration/local topology authority during the cutover.
 
 Deployments may rebuild or recreate the stack. Runtime correctness does not depend on
 selective-restart scripts. Each service has its own restart policy, and Compose
 dependencies exist only where a runtime cannot perform its primary job without another
-service: GitHub and GitLab require Management for account resolution, while Analysis
+service: GitHub and GitLab require Admin API for account resolution, while Analysis
 requires Ghidra. Gateway is deliberately not health-gated on provider availability, so
 one broken provider does not prevent the remaining MCP surfaces from starting and being
 used to repair the system. Backend MCP connections are lazy and reused: each public proxy
@@ -115,7 +125,7 @@ The multi-stage Dockerfile keeps rebuilds fast by installing locked dependencies
 copying runtime-specific source trees, so unchanged stages reuse the local Docker cache.
 
 Valkey is the private shared cache for account resolution and runtime/system settings. It is
-not a source of truth: Management remains authoritative, cache failures fall back to Management,
+not a source of truth: Admin API remains authoritative, cache failures fall back to Admin API,
 and account/settings mutations invalidate or replace cached values. The production Valkey
 container is memory-only (no RDB/AOF volume and no published port). Resolved account entries may
 contain provider credentials, so they are short-lived and remain only inside the private Compose
@@ -136,7 +146,7 @@ This prevents clean deployments from resolving a different dependency graph.
 ## Files
 
 Files is the path-based file manager for the shared persistent `/workspace` filesystem.
-Terminal, Files, Web/curl and the Management API see the same working files immediately.
+Terminal, Files, Web/curl and the Admin API see the same working files immediately.
 There is no separate content-addressed file store and no `file_id` storage contract.
 
 ## Analysis
@@ -145,14 +155,14 @@ Analysis dynamically adapts the internal analysis backend catalog into the proje
 terminology and validates/normalizes arguments before dispatch. Internal backend naming
 is not part of the external ChatGPT contract.
 
-## Management
+## Admin API
 
-Management owns provider accounts, encrypted credentials, invocation telemetry, settings,
-Files administration and the management API/realtime backend. GitHub, GitLab, SigNoz and Coolify can each have
-multiple named accounts. SigNoz API keys and Coolify API tokens are encrypted in Management;
+Admin API owns provider accounts, encrypted credentials, invocation telemetry, settings,
+Files administration and the Admin API/realtime backend. GitHub, GitLab, SigNoz and Coolify can each have
+multiple named accounts. SigNoz API keys and Coolify API tokens are encrypted in Admin API;
 they are not deployment environment variables. Provider runtimes resolve the explicitly
-selected `account_id`/alias through the private management API rather than opening the
-management database directly. Expensive
+selected `account_id`/alias through the private Admin API rather than opening the
+Admin API database directly. Expensive
 workspace statistics and Reverse overview/coverage calculations are refreshed by background
 workers into persistent snapshots; the standalone frontend consumes the latest cached value with freshness
 metadata instead of performing long scans or analyses in the HTTP request path.
@@ -167,10 +177,10 @@ MIT
 Terminal is a dedicated non-root Linux development runtime exposed at `/terminal/mcp`.
 It provides persistent workspaces, bounded shell execution, durable long-running jobs,
 interactive PTY input/output and cursor-based incremental logs. Terminal, Files, Curl and
-Management API file operations share the same mutable `/workspace` volume, so working files are
+Admin API file operations share the same mutable `/workspace` volume, so working files are
 immediately available by path without import/export copies. System toolchain packages are
 installed in the image; normal runtime commands execute as the unprivileged service user.
-Terminal command/stdin/output payloads are bounded or omitted in Management MCP-call history.
+Terminal command/stdin/output payloads are bounded or omitted in Admin API MCP-call history.
 
 ## Web browser
 
@@ -179,13 +189,13 @@ browser profile. Browser cookies and local session state live in a dedicated per
 volume, while screenshots, uploads and downloads use the shared `/workspace`. Browser
 snapshots return bounded page text plus short-lived interactive element refs so agents can
 click and fill without serializing full page HTML into model context. Browser page content
-and filled values are omitted from Management audit payloads; tool/status metadata remains
+and filled values are omitted from Admin API audit payloads; tool/status metadata remains
 observable.
 
-The standalone management frontend uses the session-authenticated
-`/api/browser/operator/ws` public Gateway surface for the same persistent Chromium profile. It shares
+The standalone Admin UI uses the session-authenticated
+`https://api.mcp.koba-nexus.ru/v1/browser/operator/ws` Admin API surface for the same persistent Chromium profile. It shares
 tabs, input, agent/developer access controls, DevTools, reopen/cleanup operations and browser
-state with the Web runtime. Viewport changes use public `PUT /api/browser/viewport`. The legacy
+state with the Web runtime. Viewport changes use public `PUT /v1/browser/viewport` on the Admin API origin. The legacy
 HTML Browser Operator and ticket-authenticated `/admin/browser/ws` surface have been removed.
 
 
@@ -201,15 +211,15 @@ browser policy; a fresh profile starts with Developer access off.
 The upstream exposes its native console, network, JavaScript evaluation, DOM/CSS, performance,
 memory and extension tools without Koba schema translation. Extension/source filesystem access
 is restricted to `/workspace`; file navigations and CrUX URL uploads are disabled. DevTools MCP
-arguments and results are omitted from Management audit payloads because they may contain
+arguments and results are omitted from Admin API audit payloads because they may contain
 cookies, authorization headers, JavaScript, request bodies or authenticated page data. Tool
 name, status, duration and traces remain observable. The runtime uses normal Chromium
 capabilities; it does not add fingerprint spoofing or site-control bypass logic.
 
 ## OAuth sessions
 
-The authorization runtime reports safe OAuth session metadata to Management without
-copying access or refresh tokens. Management shows client/resource identity, last use,
+The authorization runtime reports safe OAuth session metadata to Admin API without
+copying access or refresh tokens. Admin API shows client/resource identity, last use,
 refresh activity, token expiry, revocation and the latest authentication error. Refresh
 rotation keeps a bounded two-minute idempotency window in the encrypted persistent OAuth
 store. Concurrent requests and retries that cross an auth-container restart reuse the same
@@ -223,7 +233,7 @@ reconstructed and requires one fresh user authorization.
 
 ## Observability
 
-Observability is one unified read-only MCP surface at `/observability/mcp`. Management keeps
+Observability is one unified read-only MCP surface at `/observability/mcp`. Admin API keeps
 SigNoz and Coolify connections as separate account types because their credentials and APIs are
 different, but ChatGPT connects to only this one surface. `observability_sources` lists both
 provider types and their aliases; data tools require an explicit account selector.
@@ -233,8 +243,8 @@ field discovery. Coolify-backed tools provide application and deployment state. 
 logs, environment variables, secrets and all deploy/restart/mutation operations are deliberately
 absent; runtime diagnostics belong to the SigNoz side of the same Observability interface.
 
-Hot-path telemetry distinguishes cache/Management access, backend MCP session reuse, provider
-HTTP latency and connection-pool wait, and Management repository operations. Management audit
+Hot-path telemetry distinguishes cache/Admin API access, backend MCP session reuse, provider
+HTTP latency and connection-pool wait, and Admin API repository operations. Admin API audit
 delivery is batched through a bounded in-memory queue: each MCP call remains an individual audit
 record and metric event, while short batches share one internal HTTP request and one SQL
 transaction. Sensitive arguments, credentials, authorization headers, full request URLs and

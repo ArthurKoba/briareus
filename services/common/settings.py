@@ -138,11 +138,11 @@ class ValkeySettings(ProcessSettings):
         30, ge=1, le=600, validation_alias="VALKEY_ACCOUNT_LIST_TTL_SECONDS"
     )
     policy_ttl_seconds: int = Field(30, ge=1, le=600, validation_alias="VALKEY_POLICY_TTL_SECONDS")
-    management_config_ttl_seconds: int = Field(
+    admin_config_ttl_seconds: int = Field(
         30,
         ge=1,
         le=600,
-        validation_alias="VALKEY_MANAGEMENT_CONFIG_TTL_SECONDS",
+        validation_alias="VALKEY_ADMIN_API_CONFIG_TTL_SECONDS",
     )
 
     @field_validator("url", "namespace", mode="before")
@@ -231,10 +231,18 @@ class BridgeSettings(ProcessSettings):
 
 class ObservabilitySettings(ProcessSettings):
     service_name: str = Field("mcp-bridge", validation_alias="OTEL_SERVICE_NAME")
+    service_namespace: str = Field("", validation_alias="SERVICE_NAMESPACE")
     service_version: str = Field("0.1.0", validation_alias="OTEL_SERVICE_VERSION")
     service_instance_id: str = Field("", validation_alias="OTEL_SERVICE_INSTANCE_ID")
-    environment: str = Field("production", validation_alias="OTEL_ENVIRONMENT")
-    endpoint: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT")
+    environment: str = Field(
+        "production",
+        validation_alias=AliasChoices("DEPLOYMENT_ENVIRONMENT", "OTEL_ENVIRONMENT"),
+    )
+    endpoint: str = Field(
+        "",
+        validation_alias=AliasChoices("OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
+    )
+    bearer_token: str = Field("", validation_alias="OTLP_BEARER_TOKEN")
     logs_endpoint_override: str = Field(
         "",
         validation_alias="OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
@@ -247,7 +255,10 @@ class ObservabilitySettings(ProcessSettings):
         "",
         validation_alias="OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
     )
-    headers: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_HEADERS")
+    legacy_headers: str = Field(
+        "",
+        validation_alias="OTEL_EXPORTER_OTLP_HEADERS",
+    )
     resource_attributes: str = Field("", validation_alias="OTEL_RESOURCE_ATTRIBUTES")
     log_level: str = Field("INFO", validation_alias="OTEL_LOG_LEVEL")
     timeout_ms: int = Field(
@@ -265,14 +276,16 @@ class ObservabilitySettings(ProcessSettings):
 
     @field_validator(
         "service_name",
+        "service_namespace",
         "service_version",
         "service_instance_id",
         "environment",
         "endpoint",
+        "bearer_token",
         "logs_endpoint_override",
         "traces_endpoint_override",
         "metrics_endpoint_override",
-        "headers",
+        "legacy_headers",
         "resource_attributes",
         "log_level",
         mode="before",
@@ -411,14 +424,14 @@ class GatewayAuthSettings(ProcessSettings):
             raise ValueError("missing gateway auth settings: " + ", ".join(missing))
 
 
-class ManagementClientSettings(ProcessSettings):
-    url: str = Field("http://management:8000", validation_alias="MANAGEMENT_URL")
-    service_token: str = Field("", validation_alias="MANAGEMENT_SERVICE_TOKEN")
+class AdminApiClientSettings(ProcessSettings):
+    url: str = Field("http://admin-api:8000", validation_alias="ADMIN_API_URL")
+    service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
     timeout_seconds: float = Field(
         10,
         gt=0,
         le=60,
-        validation_alias="MANAGEMENT_TIMEOUT_SECONDS",
+        validation_alias="ADMIN_API_TIMEOUT_SECONDS",
     )
 
     @field_validator("url", "service_token", mode="before")
@@ -427,27 +440,23 @@ class ManagementClientSettings(ProcessSettings):
         return value.strip() if isinstance(value, str) else value
 
 
-class ManagementSettings(ProcessSettings):
+class AdminApiSettings(ProcessSettings):
     database_path: Path = Field(
-        Path("/management/management.sqlite3"),
-        validation_alias="MANAGEMENT_DATABASE_PATH",
+        Path("/admin-api/admin.sqlite3"),
+        validation_alias="ADMIN_API_DATABASE_PATH",
     )
-    encryption_key: str = Field("", validation_alias="MANAGEMENT_ENCRYPTION_KEY")
-    service_token: str = Field("", validation_alias="MANAGEMENT_SERVICE_TOKEN")
-    admin_username: str = Field("admin", validation_alias="MANAGEMENT_ADMIN_USERNAME")
-    admin_password: str = Field("", validation_alias="MANAGEMENT_ADMIN_PASSWORD")
-    session_secret: str = Field("", validation_alias="MANAGEMENT_SESSION_SECRET")
+    encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
+    service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
+    admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
+    admin_password: str = Field("", validation_alias="ADMIN_API_PASSWORD")
+    session_secret: str = Field("", validation_alias="ADMIN_API_SESSION_SECRET")
     session_https_only: bool = Field(
         True,
-        validation_alias="MANAGEMENT_SESSION_HTTPS_ONLY",
+        validation_alias="ADMIN_API_SESSION_HTTPS_ONLY",
     )
-    frontend_telemetry_upstream_url: str = Field(
-        "https://telemetry.koba-nexus.ru",
-        validation_alias="MANAGEMENT_FRONTEND_TELEMETRY_UPSTREAM_URL",
-    )
-    frontend_telemetry_bearer_token: str = Field(
+    admin_ui_origin: str = Field(
         "",
-        validation_alias="MANAGEMENT_FRONTEND_TELEMETRY_BEARER_TOKEN",
+        validation_alias="ADMIN_UI_ORIGIN",
     )
 
     @field_validator(
@@ -456,8 +465,7 @@ class ManagementSettings(ProcessSettings):
         "admin_username",
         "admin_password",
         "session_secret",
-        "frontend_telemetry_upstream_url",
-        "frontend_telemetry_bearer_token",
+        "admin_ui_origin",
         mode="before",
     )
     @classmethod
@@ -468,7 +476,7 @@ class ManagementSettings(ProcessSettings):
     @classmethod
     def _absolute_database_path(cls, value: Path) -> Path:
         if not value.is_absolute():
-            raise ValueError("MANAGEMENT_DATABASE_PATH must be absolute")
+            raise ValueError("ADMIN_API_DATABASE_PATH must be absolute")
         return value.resolve(strict=False)
 
     @property
@@ -479,16 +487,16 @@ class ManagementSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("MANAGEMENT_ENCRYPTION_KEY", self.encryption_key),
-                ("MANAGEMENT_SERVICE_TOKEN", self.service_token),
-                ("MANAGEMENT_ADMIN_USERNAME", self.admin_username),
-                ("MANAGEMENT_ADMIN_PASSWORD", self.admin_password),
-                ("MANAGEMENT_SESSION_SECRET", self.session_secret),
+                ("ADMIN_API_ENCRYPTION_KEY", self.encryption_key),
+                ("ADMIN_API_SERVICE_TOKEN", self.service_token),
+                ("ADMIN_API_USERNAME", self.admin_username),
+                ("ADMIN_API_PASSWORD", self.admin_password),
+                ("ADMIN_API_SESSION_SECRET", self.session_secret),
             )
             if not value
         ]
         if missing:
-            raise ValueError("missing management bootstrap settings: " + ", ".join(missing))
+            raise ValueError("missing admin_api bootstrap settings: " + ", ".join(missing))
 
 
 class AnalysisSettings(ProcessSettings):

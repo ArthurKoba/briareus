@@ -7,6 +7,11 @@ from datetime import UTC, datetime, timedelta
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 
+from domain.accounts import Account, AccountConflictError, AuthType, Provider
+from domain.configuration import AdminConfig
+from domain.oauth_sessions import OAuthSession
+from domain.snapshots import CachedSnapshot
+from domain.telemetry import Invocation, InvocationPage, InvocationQuery
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from sqlalchemy import and_, delete, func, or_, select, update
@@ -19,13 +24,9 @@ from common.runtime_policy_contracts import (
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
-from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
-from management.domain.configuration import ManagementConfig
-from management.domain.oauth_sessions import OAuthSession
-from management.domain.snapshots import CachedSnapshot
-from management.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 
 from .database import (
+    AdminConfigRecord,
     CachedSnapshotRecord,
     CoolifyAccountRecord,
     GitHubAccountRecord,
@@ -33,7 +34,6 @@ from .database import (
     GitLabAccountRecord,
     GitLabRuntimeSettingsRecord,
     InvocationRecord,
-    ManagementConfigRecord,
     McpRuntimeSettingsRecord,
     OAuthSessionRecord,
     RuntimeSettingsRecord,
@@ -42,7 +42,7 @@ from .database import (
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
-_DB_TRACER = trace.get_tracer("mcp-bridge.management-db")
+_DB_TRACER = trace.get_tracer("mcp-bridge.admin-api-db")
 
 
 def _db_span(operation: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
@@ -50,10 +50,10 @@ def _db_span(operation: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         @wraps(function)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             with _DB_TRACER.start_as_current_span(
-                f"management.db.{operation}",
+                f"admin-api.db.{operation}",
                 kind=SpanKind.INTERNAL,
                 attributes={
-                    "db.namespace": "management",
+                    "db.namespace": "admin-api",
                     "db.operation.name": operation,
                 },
             ):
@@ -394,16 +394,16 @@ class SqlAlchemyInvocationRepository:
         self.sessions = sessions
 
     @staticmethod
-    def _config(session: Session) -> ManagementConfigRecord:
-        config = session.get(ManagementConfigRecord, 1)
+    def _config(session: Session) -> AdminConfigRecord:
+        config = session.get(AdminConfigRecord, 1)
         if config is None:
-            config = ManagementConfigRecord(id=1)
+            config = AdminConfigRecord(id=1)
             session.add(config)
             session.flush()
         return config
 
     @staticmethod
-    def _cleanup_in_session(session: Session, config: ManagementConfigRecord) -> int:
+    def _cleanup_in_session(session: Session, config: AdminConfigRecord) -> int:
         cutoff = datetime.now(UTC) - timedelta(days=max(config.logging_retention_days, 1))
         removed_result = cast(
             CursorResult[object],
@@ -870,13 +870,13 @@ class SqlAlchemySnapshotRepository:
             return self._domain(record)
 
 
-class SqlAlchemyManagementConfigRepository:
+class SqlAlchemyAdminConfigRepository:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self.sessions = sessions
 
     @staticmethod
-    def _domain(record: ManagementConfigRecord) -> ManagementConfig:
-        return ManagementConfig(
+    def _domain(record: AdminConfigRecord) -> AdminConfig:
+        return AdminConfig(
             logging_enabled=record.logging_enabled,
             logging_capture_payloads=record.logging_capture_payloads,
             logging_retention_days=record.logging_retention_days,
@@ -885,21 +885,21 @@ class SqlAlchemyManagementConfigRepository:
         )
 
     @_db_span("config.get")
-    def get(self) -> ManagementConfig:
+    def get(self) -> AdminConfig:
         with self.sessions.begin() as session:
-            record = session.get(ManagementConfigRecord, 1)
+            record = session.get(AdminConfigRecord, 1)
             if record is None:
-                record = ManagementConfigRecord(id=1)
+                record = AdminConfigRecord(id=1)
                 session.add(record)
                 session.flush()
             return self._domain(record)
 
     @_db_span("config.save")
-    def save(self, config: ManagementConfig) -> ManagementConfig:
+    def save(self, config: AdminConfig) -> AdminConfig:
         with self.sessions.begin() as session:
-            record = session.get(ManagementConfigRecord, 1)
+            record = session.get(AdminConfigRecord, 1)
             if record is None:
-                record = ManagementConfigRecord(id=1)
+                record = AdminConfigRecord(id=1)
                 session.add(record)
             for name, value in config.model_dump().items():
                 setattr(record, name, value)

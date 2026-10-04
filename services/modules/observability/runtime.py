@@ -3,11 +3,11 @@ from __future__ import annotations
 import threading
 from typing import Literal
 
-from common.management_client import ManagementClient
+from common.admin_api_client import AdminApiClient
 from common.models import JsonObject, JsonValue
 from common.runtime_annotations import READ_EXTERNAL
-from common.runtime_common import build_private_mcp, management_client, private_http_app
-from common.settings import ManagementClientSettings, PrivateRuntimeSettings
+from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
+from common.settings import AdminApiClientSettings, PrivateRuntimeSettings
 from modules.coolify.client import CoolifyClient
 from modules.signoz.client import SigNozClient
 
@@ -15,18 +15,18 @@ ProviderName = Literal["signoz", "coolify"]
 
 
 class ObservabilityRuntimeContext:
-    def __init__(self, management: ManagementClient) -> None:
-        self.management = management
+    def __init__(self, admin_api: AdminApiClient) -> None:
+        self.admin_api = admin_api
         self._lock = threading.Lock()
         self._signoz: dict[str, tuple[str, SigNozClient]] = {}
         self._coolify: dict[str, tuple[str, CoolifyClient]] = {}
 
     def sources(self, provider: ProviderName | None = None) -> JsonObject:
         if provider is not None:
-            result = self.management.list_accounts(provider=provider).to_json()
+            result = self.admin_api.list_accounts(provider=provider).to_json()
             return {"sources": result["accounts"], "count": result["count"]}
-        signoz = self.management.list_accounts(provider="signoz")
-        coolify = self.management.list_accounts(provider="coolify")
+        signoz = self.admin_api.list_accounts(provider="signoz")
+        coolify = self.admin_api.list_accounts(provider="coolify")
         sources = [*signoz.accounts, *coolify.accounts]
         return {
             "sources": [item.model_dump(mode="json") for item in sources],
@@ -34,7 +34,7 @@ class ObservabilityRuntimeContext:
         }
 
     def signoz(self, account_id: str) -> SigNozClient:
-        account = self.management.resolve_account(account_id, provider="signoz")
+        account = self.admin_api.resolve_account(account_id, provider="signoz")
         with self._lock:
             cached = self._signoz.get(account.id)
             if cached is not None and cached[0] == account.updated_at:
@@ -44,7 +44,7 @@ class ObservabilityRuntimeContext:
             return client
 
     def coolify(self, account_id: str) -> CoolifyClient:
-        account = self.management.resolve_account(account_id, provider="coolify")
+        account = self.admin_api.resolve_account(account_id, provider="coolify")
         with self._lock:
             cached = self._coolify.get(account.id)
             if cached is not None and cached[0] == account.updated_at:
@@ -55,9 +55,9 @@ class ObservabilityRuntimeContext:
 
 
 _private = PrivateRuntimeSettings()
-_management = management_client(ManagementClientSettings())
-_context = ObservabilityRuntimeContext(_management)
-mcp = build_private_mcp("observability", _management, observability_scope="observability")
+_admin_api = admin_api_client(AdminApiClientSettings())
+_context = ObservabilityRuntimeContext(_admin_api)
+mcp = build_private_mcp("observability", _admin_api, observability_scope="observability")
 
 
 @mcp.tool(title="Observability sources", annotations=READ_EXTERNAL)

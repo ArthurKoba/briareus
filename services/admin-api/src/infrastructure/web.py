@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import cast
 
+import httpx
 from fastmcp import Client
 
 from common.mcp_client_pool import PersistentMcpClientPool
@@ -54,8 +55,14 @@ class WebAdminClient:
         self.timeout_seconds = timeout_seconds
         self._pool = PersistentMcpClientPool(
             lambda: Client(self.url, timeout=self.timeout_seconds),
-            name="management-web",
+            name="admin-api-web",
             size=2,
+        )
+        self._http = httpx.AsyncClient(
+            base_url="http://web:8000",
+            follow_redirects=False,
+            timeout=10.0,
+            limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
         )
 
     async def _call(self, tool: str, arguments: JsonObject | None = None) -> JsonObject:
@@ -83,3 +90,26 @@ class WebAdminClient:
 
     async def debug_target(self, page_id: str) -> JsonObject:
         return await self._call("browser_debug_target", {"page_id": page_id})
+
+    async def devtools_asset(
+        self,
+        token: str,
+        target_id: str,
+        asset_path: str,
+        query: str = "",
+    ) -> tuple[int, dict[str, str], bytes]:
+        path = f"/cdp-ui/{token}/page/{target_id}/{asset_path}"
+        if query:
+            path += f"?{query}"
+        response = await self._http.get(path)
+        headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.casefold()
+            not in {"content-length", "content-encoding", "transfer-encoding", "connection"}
+        }
+        return response.status_code, headers, response.content
+
+    async def close(self) -> None:
+        await self._pool.close()
+        await self._http.aclose()

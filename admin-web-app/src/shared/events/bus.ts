@@ -1,10 +1,10 @@
 import { reactive, readonly } from "vue"
 
-import { runtimeConfig } from "@/shared/config/runtime"
+import { adminApiWebSocketUrl, runtimeConfig } from "@/shared/config/runtime"
 import { pageActivity } from "@/shared/lib/page-activity"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 
-export type EventTopic = "mcp.calls" | "system.metrics" | "system.notifications" | "browser.runtime" | "management.events" | string
+export type EventTopic = "mcp.calls" | "system.metrics" | "system.notifications" | "browser.runtime" | "admin.events" | string
 export interface BusEvent<T = unknown> { topic: EventTopic; type: string; occurredAt: string; data: T }
 type Handler = (event: BusEvent) => void
 type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "mock" | "disabled" | "error"
@@ -12,7 +12,7 @@ type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "
 const handlers = new Map<EventTopic, Set<Handler>>()
 const state = reactive({
   status: "idle" as ConnectionStatus,
-  transport: "none" as "none" | "websocket" | "sse" | "mock",
+  transport: "none" as "none" | "websocket" | "mock",
   subscriptions: 0,
   lastEventAt: "",
   lastRemoteEventAt: "",
@@ -25,7 +25,6 @@ let socket: WebSocket | null = null
 let socketGeneration = 0
 let reconnectTimer = 0
 let reconnectAttempt = 0
-const sse = new Map<string, EventSource>()
 
 function dispatch(event: BusEvent, remote = false): void {
   state.lastEventAt = event.occurredAt
@@ -50,46 +49,9 @@ function canConnect(): boolean {
   return state.enabled && state.sessionActive && handlers.size > 0
 }
 
-function closeSse(topic: EventTopic): void {
-  const source = sse.get(topic)
-  if (!source) return
-  source.close()
-  sse.delete(topic)
-  if (!sse.size && state.transport === "sse") state.transport = "none"
-}
-
-function closeAllSse(): void {
-  for (const topic of [...sse.keys()]) closeSse(topic)
-}
-
-function wireSseCompat(topic: EventTopic): void {
-  if (!canConnect() || !state.active || topic !== "mcp.calls" || sse.has(topic) || state.transport === "websocket") return
-  const source = new EventSource("/api/calls/stream")
-  source.onopen = () => {
-    if (!canConnect() || !state.active || state.transport === "websocket") return closeSse(topic)
-    state.status = "connected"
-    state.transport = "sse"
-    frontendTelemetry.websocket("connected", topic, "sse")
-  }
-  source.onerror = () => {
-    if (!canConnect() || !state.active || state.transport === "websocket") return
-    state.status = "reconnecting"
-    frontendTelemetry.websocket("reconnecting", topic, "sse")
-  }
-  source.onmessage = (event) => {
-    try {
-      dispatch({ topic, type: "item", occurredAt: new Date().toISOString(), data: JSON.parse(event.data) }, true)
-    } catch (caught) {
-      frontendTelemetry.error("realtime.sse_decode", caught, { topic })
-    }
-  }
-  sse.set(topic, source)
-}
-
 function closeTransports(resetAttempt = true): void {
   clearTimeout(reconnectTimer)
   reconnectTimer = 0
-  closeAllSse()
   const current = socket
   socket = null
   socketGeneration += 1
@@ -101,12 +63,6 @@ function closeTransports(resetAttempt = true): void {
 
 function sendSubscription(type: "subscribe" | "unsubscribe", topic: EventTopic): void {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type, topic }))
-}
-
-function activateCompatFallback(): void {
-  if (!canConnect() || !state.active || runtimeConfig.events.mode !== "hybrid" || state.transport === "websocket") return
-  for (const topic of handlers.keys()) wireSseCompat(topic)
-  if (!sse.size) state.status = "reconnecting"
 }
 
 function scheduleReconnect(): void {
@@ -123,10 +79,7 @@ function scheduleReconnect(): void {
 function connectWebSocket(): void {
   if (!canConnect() || !state.active || runtimeConfig.events.mode === "mock" || socket) return
   state.status = reconnectAttempt ? "reconnecting" : "connecting"
-  const scheme = location.protocol === "https:" ? "wss:" : "ws:"
-  const url = runtimeConfig.events.url.startsWith("/")
-    ? `${scheme}//${location.host}${runtimeConfig.events.url}`
-    : runtimeConfig.events.url
+  const url = adminApiWebSocketUrl("/realtime")
   const generation = ++socketGeneration
   const current = new WebSocket(url)
   socket = current
@@ -135,7 +88,6 @@ function connectWebSocket(): void {
   current.onopen = () => {
     if (!isCurrent()) return
     if (!canConnect() || !state.active) return closeTransports()
-    closeAllSse()
     state.status = "connected"
     state.transport = "websocket"
     reconnectAttempt = 0
@@ -160,7 +112,7 @@ function connectWebSocket(): void {
       state.sessionActive = false
       state.status = "disabled"
       frontendTelemetry.websocket("authorization_expired", undefined, "websocket")
-      window.dispatchEvent(new CustomEvent("management:auth-expired"))
+      window.dispatchEvent(new CustomEvent("admin:auth-expired"))
       return
     }
     if (event.code === 4403) {
@@ -174,7 +126,6 @@ function connectWebSocket(): void {
     }
     state.status = "reconnecting"
     frontendTelemetry.websocket("reconnecting", undefined, "websocket")
-    activateCompatFallback()
     scheduleReconnect()
   }
   current.onerror = () => {
@@ -221,7 +172,6 @@ function subscribe(topic: EventTopic, handler: Handler): () => void {
     current?.delete(handler)
     if (!current?.size) {
       handlers.delete(topic)
-      closeSse(topic)
       sendSubscription("unsubscribe", topic)
     }
     state.subscriptions = [...handlers.values()].reduce((count, listeners) => count + listeners.size, 0)

@@ -9,7 +9,7 @@ from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.auth.jwt_issuer import JWTIssuer, derive_jwt_key
 from pydantic import AnyHttpUrl
 
-from common.management_client import ManagementClient
+from common.admin_api_client import AdminApiClient
 from common.oauth_session_contracts import OAuthSessionEvent
 from common.settings import GatewayAuthSettings
 
@@ -21,12 +21,12 @@ class LocalAuthTokenVerifier(TokenVerifier):
         self,
         settings: GatewayAuthSettings,
         resource: str,
-        management: ManagementClient | None = None,
+        admin_api: AdminApiClient | None = None,
     ) -> None:
         super().__init__(required_scopes=["read:user"])
         self.resource = resource
         self.allowed_users = frozenset(settings.oauth_allowed_users)
-        self.management = management
+        self.admin_api = admin_api
         self._touches: dict[str, float] = {}
         signing_key = derive_jwt_key(
             low_entropy_material=settings.oauth_jwt_signing_key,
@@ -63,11 +63,11 @@ class LocalAuthTokenVerifier(TokenVerifier):
         now = time.monotonic()
         touch_key = f"{client_id}\0{self.resource}\0{login}\0{jti}"
         previous_touch = self._touches.get(touch_key)
-        if self.management is not None and (previous_touch is None or now - previous_touch >= 60.0):
+        if self.admin_api is not None and (previous_touch is None or now - previous_touch >= 60.0):
             self._touches[touch_key] = now
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(
-                    self.management.record_oauth_session,
+                    self.admin_api.record_oauth_session,
                     OAuthSessionEvent(
                         client_id=client_id,
                         resource=self.resource,

@@ -14,11 +14,37 @@ from hashlib import sha256
 from pathlib import Path
 from time import monotonic
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
 
+from application.services import (
+    AccountService,
+    AdminConfigService,
+    InvocationAuditService,
+    OAuthSessionService,
+    RuntimeSettingsService,
+    SnapshotService,
+)
+from dashboard_state import build_dashboard_state
+from domain.accounts import Account, AccountConflictError, AuthType, Provider
+from domain.configuration import AdminConfig
+from domain.telemetry import InvocationQuery
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from infrastructure.files import FileAdminStore
+from infrastructure.reverse import ReverseAdminClient
+from infrastructure.snapshot_worker import (
+    REVERSE_OVERVIEW_KEY,
+    WORKSPACE_STATS_KEY,
+    SnapshotRefresher,
+    coverage_refresh_seconds,
+    coverage_snapshot_key,
+    snapshot_meta,
+)
+from infrastructure.terminal import TerminalAdminClient
+from infrastructure.web import WebAdminClient
+from origin import origin_allowed
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import FileResponse, StreamingResponse
+from realtime import RealtimeBus
+from starlette.responses import FileResponse, Response, StreamingResponse
+from telemetry_ingest import FrontendTelemetryProxy
 
 from common.browser_remote_debug import (
     BROWSER_REMOTE_DEBUG_TTL_SECONDS,
@@ -31,35 +57,9 @@ from common.runtime_policy_contracts import (
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
-from common.settings import ManagementSettings
-from management.application.services import (
-    AccountService,
-    InvocationAuditService,
-    ManagementConfigService,
-    OAuthSessionService,
-    RuntimeSettingsService,
-    SnapshotService,
-)
-from management.dashboard_state import build_dashboard_state
-from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
-from management.domain.configuration import ManagementConfig
-from management.domain.telemetry import InvocationQuery
-from management.infrastructure.files import FileAdminStore
-from management.infrastructure.reverse import ReverseAdminClient
-from management.infrastructure.snapshot_worker import (
-    REVERSE_OVERVIEW_KEY,
-    WORKSPACE_STATS_KEY,
-    SnapshotRefresher,
-    coverage_refresh_seconds,
-    coverage_snapshot_key,
-    snapshot_meta,
-)
-from management.infrastructure.terminal import TerminalAdminClient
-from management.infrastructure.web import WebAdminClient
-from management.realtime import RealtimeBus
-from management.telemetry_ingest import FrontendTelemetryProxy
+from common.settings import AdminApiSettings
 
-_SESSION_KEY = "management_admin"
+_SESSION_KEY = "admin_api_session"
 
 
 def _encode_call_cursor(occurred_at: datetime, invocation_id: str) -> str:
@@ -95,7 +95,7 @@ class WebApiServices:
     audit: InvocationAuditService
     oauth_sessions: OAuthSessionService
     snapshots: SnapshotService
-    config: ManagementConfigService
+    config: AdminConfigService
     runtime_settings: RuntimeSettingsService
     files: FileAdminStore
     reverse: ReverseAdminClient
@@ -234,9 +234,9 @@ def _account_from_payload(payload: AccountPayload, *, existing: Account | None =
 
 
 def build_admin_api_router(
-    settings: ManagementSettings, services: WebApiServices | None = None
+    settings: AdminApiSettings, services: WebApiServices | None = None
 ) -> APIRouter:
-    router = APIRouter(prefix="/admin/api", tags=["admin"])
+    router = APIRouter(prefix="/v1", tags=["admin"])
     settings_update_lock = asyncio.Lock()
     candidate_verify_slots = asyncio.Semaphore(4)
     candidate_verify_rate_lock = asyncio.Lock()
@@ -262,12 +262,12 @@ def build_admin_api_router(
         if not origin:
             return
         public_host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
-        if urlsplit(origin).netloc.casefold() != public_host.casefold():
+        if not origin_allowed(origin, public_host, settings.admin_ui_origin):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="origin rejected")
 
     def available() -> WebApiServices:
         if services is None:
-            raise HTTPException(status_code=503, detail="management API services unavailable")
+            raise HTTPException(status_code=503, detail="admin API services unavailable")
         return services
 
     def mutation(request: Request) -> WebApiServices:
@@ -275,9 +275,9 @@ def build_admin_api_router(
         same_origin(request)
         return available()
 
-    async def publish_management_event(api: WebApiServices, event_type: str, data: object) -> None:
+    async def publish_admin_event(api: WebApiServices, event_type: str, data: object) -> None:
         if api.realtime is not None:
-            await api.realtime.publish("management.events", event_type, data)
+            await api.realtime.publish("admin.events", event_type, data)
 
     async def enforce_candidate_verify_rate(request: Request) -> None:
         username = authenticated_username(request) or "unknown"
@@ -324,7 +324,7 @@ def build_admin_api_router(
     def bootstrap(request: Request) -> JsonObject:
         require_user(request)
         return {
-            "product": "MCP Management",
+            "product": "MCP Admin API",
             "environment": "runtime",
             "navigation": [
                 {"id": "overview", "label": "Overview", "enabled": True},
@@ -545,7 +545,7 @@ def build_admin_api_router(
         api = mutation(request)
         removed = await asyncio.to_thread(api.audit.clear)
         response: JsonObject = {"deleted": removed}
-        await publish_management_event(api, "calls.cleared", response)
+        await publish_admin_event(api, "calls.cleared", response)
         return response
 
     @router.delete("/calls/{call_id}")
@@ -555,7 +555,7 @@ def build_admin_api_router(
         if not removed:
             raise HTTPException(status_code=404, detail="call not found")
         response: JsonObject = {"deleted": True, "id": call_id}
-        await publish_management_event(api, "calls.deleted", response)
+        await publish_admin_event(api, "calls.deleted", response)
         return response
 
     @router.get("/calls/stream")
@@ -633,7 +633,7 @@ def build_admin_api_router(
             result = await asyncio.to_thread(
                 api.files.upload, file.file, destination=destination, overwrite=overwrite
             )
-            await publish_management_event(api, "files.uploaded", result)
+            await publish_admin_event(api, "files.uploaded", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -650,7 +650,7 @@ def build_admin_api_router(
         destination = posixpath.join(current, clean) if current else clean
         try:
             result = await asyncio.to_thread(api.files.mkdir, destination)
-            await publish_management_event(api, "files.directory_created", result)
+            await publish_admin_event(api, "files.directory_created", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -677,7 +677,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await asyncio.to_thread(api.files.delete, path, recursive=recursive)
-            await publish_management_event(api, "files.deleted", result)
+            await publish_admin_event(api, "files.deleted", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -706,7 +706,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.terminal.cancel_job(job_id)
-            await publish_management_event(api, "terminal.job.cancelled", result)
+            await publish_admin_event(api, "terminal.job.cancelled", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -716,7 +716,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.terminal.delete_job(job_id)
-            await publish_management_event(api, "terminal.job.deleted", result)
+            await publish_admin_event(api, "terminal.job.deleted", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -730,7 +730,7 @@ def build_admin_api_router(
             result = await api.terminal.cleanup_jobs(
                 older_than_hours=older_than_hours, dry_run=False
             )
-            await publish_management_event(api, "terminal.jobs.cleaned", result)
+            await publish_admin_event(api, "terminal.jobs.cleaned", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -740,7 +740,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.terminal.delete_workspace(workspace_id)
-            await publish_management_event(api, "terminal.workspace.deleted", result)
+            await publish_admin_event(api, "terminal.workspace.deleted", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -774,7 +774,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.reverse.create_project(payload.name, payload.parent_dir)
-            await publish_management_event(api, "analysis.project.created", result)
+            await publish_admin_event(api, "analysis.project.created", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -784,7 +784,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.reverse.open_session(project_id)
-            await publish_management_event(api, "analysis.project.opened", result)
+            await publish_admin_event(api, "analysis.project.opened", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -794,7 +794,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.reverse.release_session(project_id)
-            await publish_management_event(api, "analysis.project.released", result)
+            await publish_admin_event(api, "analysis.project.released", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -804,7 +804,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.reverse.delete_project(project_id)
-            await publish_management_event(api, "analysis.project.deleted", result)
+            await publish_admin_event(api, "analysis.project.deleted", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -816,7 +816,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             result = await api.reverse.set_worker_enabled(worker_index, payload.enabled)
-            await publish_management_event(api, "analysis.worker.routing_changed", result)
+            await publish_admin_event(api, "analysis.worker.routing_changed", result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -859,7 +859,7 @@ def build_admin_api_router(
             result = await api.reverse.clear_worker_queue(worker_index)
             state = await worker_state(api, worker_index)
             response: JsonObject = {"operation": "clear_queue", "result": result, "worker": state}
-            await publish_management_event(api, "analysis.worker.clear_queue", response)
+            await publish_admin_event(api, "analysis.worker.clear_queue", response)
             return response
         except HTTPException:
             raise
@@ -877,7 +877,7 @@ def build_admin_api_router(
             )
             state = await worker_state(api, worker_index)
             response: JsonObject = {"operation": "recover", "result": result, "worker": state}
-            await publish_management_event(api, "analysis.worker.recover", response)
+            await publish_admin_event(api, "analysis.worker.recover", response)
             return response
         except HTTPException:
             raise
@@ -943,8 +943,8 @@ def build_admin_api_router(
         websocket_scheme = "wss" if secure else "ws"
         http_scheme = "https" if secure else "http"
         devtools_parameter = "wss" if secure else "ws"
-        remote_path = f"/api/browser/cdp/{token}/page/{target_id}"
-        frontend_path = f"/api/browser/devtools/{token}/page/{target_id}/devtools/inspector.html"
+        remote_path = f"/v1/browser/cdp/{token}/page/{target_id}"
+        frontend_path = f"/v1/browser/devtools/{token}/page/{target_id}/devtools/inspector.html"
         response: JsonObject = {
             **target,
             "expires_in_seconds": BROWSER_REMOTE_DEBUG_TTL_SECONDS,
@@ -965,6 +965,25 @@ def build_admin_api_router(
                 {"page_id": payload.page_id, "target_id": target_id},
             )
         return response
+
+    @router.get("/browser/devtools/{token}/page/{target_id}/{asset_path:path}")
+    async def browser_devtools_asset(
+        token: str,
+        target_id: str,
+        asset_path: str,
+        request: Request,
+    ) -> Response:
+        api = available()
+        try:
+            status_code, headers, body = await api.web.devtools_asset(
+                token,
+                target_id,
+                asset_path,
+                request.url.query,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return Response(content=body, status_code=status_code, headers=headers, media_type=None)
 
     @router.put("/browser/viewport")
     async def browser_set_viewport(payload: ViewportPayload, request: Request) -> JsonObject:
@@ -996,7 +1015,7 @@ def build_admin_api_router(
         idle_raw = analysis.get("idle_timeout_seconds", 900.0)
         idle_timeout = float(idle_raw) if isinstance(idle_raw, (int, float)) else 900.0
         versioned = {
-            "management": snapshot["management"],
+            "admin": snapshot["admin"],
             "terminal": snapshot["terminal"],
             "mcp": snapshot["mcp"],
             "github": snapshot["github"],
@@ -1025,7 +1044,7 @@ def build_admin_api_router(
             }
             reverse_error = str(exc)
         snapshot: JsonObject = {
-            "management": config.model_dump(mode="json"),
+            "admin": config.model_dump(mode="json"),
             "terminal": terminal_policy.model_dump(mode="json"),
             "mcp": mcp_policy.model_dump(mode="json"),
             "github": github_policy.model_dump(mode="json"),
@@ -1062,7 +1081,7 @@ def build_admin_api_router(
                             "current_revision": current["revision"],
                         },
                     )
-            management = ManagementConfig(
+            admin_api = AdminConfig(
                 logging_enabled=payload.logging_enabled,
                 logging_capture_payloads=payload.logging_capture_payloads,
                 logging_retention_days=payload.logging_retention_days,
@@ -1144,9 +1163,9 @@ def build_admin_api_router(
                 reverse_settings = await api.reverse.set_idle_timeout(
                     payload.reverse_idle_timeout_seconds
                 )
-                saved_management, saved_terminal, saved_mcp, saved_github, saved_gitlab = (
+                saved_admin, saved_terminal, saved_mcp, saved_github, saved_gitlab = (
                     await asyncio.gather(
-                        asyncio.to_thread(api.config.update, management),
+                        asyncio.to_thread(api.config.update, admin_api),
                         asyncio.to_thread(
                             api.runtime_settings.update_terminal_policy, terminal_policy
                         ),
@@ -1158,7 +1177,7 @@ def build_admin_api_router(
             except (ValueError, RuntimeError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             response: JsonObject = {
-                "management": saved_management.model_dump(mode="json"),
+                "admin": saved_admin.model_dump(mode="json"),
                 "terminal": saved_terminal.model_dump(mode="json"),
                 "mcp": saved_mcp.model_dump(mode="json"),
                 "github": saved_github.model_dump(mode="json"),
@@ -1167,7 +1186,7 @@ def build_admin_api_router(
                 "analysis_error": "",
             }
             response["revision"] = settings_revision(response)
-            await publish_management_event(api, "settings.updated", response)
+            await publish_admin_event(api, "settings.updated", response)
             return response
 
     @router.post("/settings/cleanup-logs")
@@ -1175,7 +1194,7 @@ def build_admin_api_router(
         api = mutation(request)
         removed = await asyncio.to_thread(api.audit.cleanup)
         response: JsonObject = {"removed": removed}
-        await publish_management_event(api, "calls.retention_applied", response)
+        await publish_admin_event(api, "calls.retention_applied", response)
         return response
 
     return router

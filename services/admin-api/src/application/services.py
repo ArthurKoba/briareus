@@ -3,6 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
+from domain.accounts import Account, Provider
+from domain.configuration import AdminConfig
+from domain.oauth_sessions import OAuthSession
+from domain.snapshots import CachedSnapshot
+from domain.telemetry import Invocation, InvocationPage, InvocationQuery
+
 from common.account_contracts import AccountList, AccountPublic, ResolvedAccount
 from common.audit_payloads import redact_payload
 from common.cache import CacheBackend, CacheKeys
@@ -14,18 +20,13 @@ from common.runtime_policy_contracts import (
     TerminalRuntimePolicy,
 )
 from common.settings import ValkeySettings
-from management.domain.accounts import Account, Provider
-from management.domain.configuration import ManagementConfig
-from management.domain.oauth_sessions import OAuthSession
-from management.domain.snapshots import CachedSnapshot
-from management.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 
 from .ports import (
     AccountRepository,
+    AdminConfigRepository,
     ConnectionVerifier,
     CredentialCipher,
     InvocationRepository,
-    ManagementConfigRepository,
     OAuthSessionRepository,
     RuntimeSettingsRepository,
     SnapshotRepository,
@@ -53,7 +54,7 @@ class AccountService:
 
     def publish(self, event_type: str, data: object) -> None:
         if self.publisher is not None:
-            self.publisher("management.events", event_type, data)
+            self.publisher("admin.events", event_type, data)
 
     def invalidate(self, account: Account) -> None:
         if self.cache is None or self.cache_keys is None:
@@ -208,7 +209,7 @@ class InvocationAuditService:
     def __init__(
         self,
         repository: InvocationRepository,
-        config: ManagementConfigService | None = None,
+        config: AdminConfigService | None = None,
         publisher: Callable[[str, str, object], object] | None = None,
     ) -> None:
         self.repository = repository
@@ -345,10 +346,10 @@ class SnapshotService:
         return self.repository.store_error(key, exc)
 
 
-class ManagementConfigService:
+class AdminConfigService:
     def __init__(
         self,
-        repository: ManagementConfigRepository,
+        repository: AdminConfigRepository,
         *,
         cache: CacheBackend | None = None,
         cache_settings: ValkeySettings | None = None,
@@ -358,27 +359,27 @@ class ManagementConfigService:
         self.cache_settings = cache_settings or ValkeySettings()
         self.cache_keys = CacheKeys(cache) if cache is not None else None
 
-    def get(self) -> ManagementConfig:
+    def get(self) -> AdminConfig:
         if self.cache is not None and self.cache_keys is not None:
-            cached = self.cache.get_json(self.cache_keys.management_config())
+            cached = self.cache.get_json(self.cache_keys.admin_config())
             if isinstance(cached, dict):
-                return ManagementConfig.model_validate(cached)
+                return AdminConfig.model_validate(cached)
         result = self.repository.get()
         if self.cache is not None and self.cache_keys is not None:
             self.cache.set_json(
-                self.cache_keys.management_config(),
+                self.cache_keys.admin_config(),
                 result.model_dump(mode="json"),
-                ttl_seconds=self.cache_settings.management_config_ttl_seconds,
+                ttl_seconds=self.cache_settings.admin_config_ttl_seconds,
             )
         return result
 
-    def update(self, config: ManagementConfig) -> ManagementConfig:
+    def update(self, config: AdminConfig) -> AdminConfig:
         result = self.repository.save(config)
         if self.cache is not None and self.cache_keys is not None:
             self.cache.set_json(
-                self.cache_keys.management_config(),
+                self.cache_keys.admin_config(),
                 result.model_dump(mode="json"),
-                ttl_seconds=self.cache_settings.management_config_ttl_seconds,
+                ttl_seconds=self.cache_settings.admin_config_ttl_seconds,
             )
         return result
 

@@ -23,7 +23,7 @@ Dev must have its own:
 
 - Coolify application/resource identity;
 - generated bootstrap secrets;
-- Management/auth/workspace/terminal-home/browser-profile volumes;
+- Admin API/auth/workspace/terminal-home/browser-profile volumes;
 - Valkey instance;
 - public Dev domain;
 - GitHub OAuth application/callback identity;
@@ -67,7 +67,7 @@ Internal MCP locations normally keep their Compose defaults. They are overrideab
 - all services healthy in the Dev resource;
 - `/mcp` and every dedicated public MCP surface reachable through the Dev gateway;
 - Dev OAuth login/refresh/revoke works independently of production;
-- Dev Management data and browser profile survive a Dev redeploy and are visibly separate from production;
+- Dev Admin API data and browser profile survive a Dev redeploy and are visibly separate from production;
 - Dev Analysis reaches only the isolated Dev Ghidra backend;
 - Dev telemetry is visible in SigNoz with `deployment.environment.name=development`;
 - Coolify inventory tools can list the Dev resource and variable names without exposing values;

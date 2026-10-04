@@ -174,8 +174,8 @@ class CacheKeys:
     def gitlab_policy(self) -> str:
         return self.cache.key("system", "runtime", "gitlab")
 
-    def management_config(self) -> str:
-        return self.cache.key("system", "management", "config")
+    def admin_config(self) -> str:
+        return self.cache.key("system", "admin-api", "config")
 
     def account_invalidation_keys(
         self,

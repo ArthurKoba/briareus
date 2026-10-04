@@ -4,8 +4,8 @@ import { Switch } from "ant-design-vue"
 import { AlertTriangle, GitCommitHorizontal, RotateCcw, Save, ShieldCheck } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi, type VcsPolicyState } from "@/shared/api/management"
-import { ManagementApiError } from "@/shared/api/error"
+import { adminApi, type VcsPolicyState } from "@/shared/api/admin"
+import { AdminApiError } from "@/shared/api/error"
 import { notifications } from "@/shared/notifications/bus"
 import { settingsUpdatePayload, type SettingsUpdatePayload } from "@/shared/settings/payload"
 import { settingsStore } from "@/shared/settings/store"
@@ -73,14 +73,14 @@ async function save(): Promise<void> {
   saving.value = true
   error.value = ""
   try {
-    const saved = await managementApi.updateSettings(
+    const saved = await adminApi.updateSettings(
       settingsUpdatePayload(snapshot, policyOverrides()),
     )
     settingsStore.accept(saved)
     applyPolicy(saved[props.provider])
     notifications.success(String(t("notifications.saved")), providerLabel.value)
   } catch (caught) {
-    if (caught instanceof ManagementApiError && caught.status === 409) {
+    if (caught instanceof AdminApiError && caught.status === 409) {
       error.value = String(t("git.policyConflict"))
       await settingsStore.refresh().catch(() => undefined)
     } else {

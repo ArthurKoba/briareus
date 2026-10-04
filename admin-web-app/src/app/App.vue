@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue"
 import { Activity, AppWindow, Blocks, Bot, ChartNoAxesCombined, Database, FileText, GitBranch, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun, TerminalSquare } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
-import { managementApi, type ManagementBootstrap, type SessionState } from "@/shared/api/management"
+import { adminApi, type AdminBootstrap, type SessionState } from "@/shared/api/admin"
 import { accountStore } from "@/features/accounts/model/account-store"
 import { callStore } from "@/pages/calls/model/call-store"
 import { settingsStore } from "@/shared/settings/store"
@@ -27,7 +27,7 @@ const OAuthPage=defineAsyncComponent(()=>import("@/pages/oauth/OAuthPage.vue"))
 const SettingsPage=defineAsyncComponent(()=>import("@/pages/settings/SettingsPage.vue"))
 
 const {t}=useI18n()
-const session=ref<SessionState|null>(null),bootstrap=ref<ManagementBootstrap|null>(null),loading=ref(true),gatewayUnavailable=ref(false),error=ref(""),username=ref(""),password=ref("")
+const session=ref<SessionState|null>(null),bootstrap=ref<AdminBootstrap|null>(null),loading=ref(true),gatewayUnavailable=ref(false),error=ref(""),username=ref(""),password=ref("")
 const activePage=ref("dashboard")
 let unsubscribeNotifications:undefined|(()=>void)
 const {theme,sidebarCollapsed}=useUiPreferences()
@@ -44,7 +44,7 @@ const nav=computed(()=>[
   {id:"settings",label:t("nav.settings"),icon:Settings,component:SettingsPage},
 ])
 const current=computed(()=>nav.value.find(item=>item.id===activePage.value)??nav.value[0])
-const fallbackBootstrap:ManagementBootstrap={product:"MCP Bridge",environment:"unavailable",navigation:[]}
+const fallbackBootstrap:AdminBootstrap={product:"MCP Bridge",environment:"unavailable",navigation:[]}
 const knownAuth=()=>sessionStorage.getItem("mcp-bridge:known-auth")==="true"
 function rememberSession(value:SessionState){session.value=value;eventBus.setSessionActive(value.authenticated);accountStore.setSessionActive(value.authenticated);callStore.setSessionActive(value.authenticated);settingsStore.setSessionActive(value.authenticated);if(value.authenticated){sessionStorage.setItem("mcp-bridge:known-auth","true");sessionStorage.setItem("mcp-bridge:username",value.username??"")}else{sessionStorage.removeItem("mcp-bridge:known-auth");sessionStorage.removeItem("mcp-bridge:username")}}
 function expireAuth(){rememberSession({authenticated:false,username:null});bootstrap.value=null;gatewayUnavailable.value=false}
@@ -60,13 +60,13 @@ function readHash(){
   const normalized=root==="overview"?"dashboard":root
   if(nav.value.some(item=>item.id===normalized))activePage.value=normalized
 }
-async function load(){loading.value=true;gatewayUnavailable.value=false;error.value="";try{const next=await managementApi.session();rememberSession(next);bootstrap.value=next.authenticated?await managementApi.bootstrap():null}catch(e){error.value=e instanceof Error?e.message:String(t("app.unavailable"));gatewayUnavailable.value=true;if(knownAuth()){session.value={authenticated:true,username:sessionStorage.getItem("mcp-bridge:username")||null};bootstrap.value=fallbackBootstrap}}finally{loading.value=false}}
-async function login(){error.value="";try{const next=await managementApi.login(username.value,password.value);rememberSession(next);password.value="";bootstrap.value=await managementApi.bootstrap();gatewayUnavailable.value=false;frontendTelemetry.event("auth.login_success")}catch(e){frontendTelemetry.error("auth.login_failure",e);error.value=e instanceof Error?e.message:"Invalid username or password"}}
-async function logout(){const next=await managementApi.logout();rememberSession(next);bootstrap.value=null;frontendTelemetry.event("auth.logout")}
+async function load(){loading.value=true;gatewayUnavailable.value=false;error.value="";try{const next=await adminApi.session();rememberSession(next);bootstrap.value=next.authenticated?await adminApi.bootstrap():null}catch(e){error.value=e instanceof Error?e.message:String(t("app.unavailable"));gatewayUnavailable.value=true;if(knownAuth()){session.value={authenticated:true,username:sessionStorage.getItem("mcp-bridge:username")||null};bootstrap.value=fallbackBootstrap}}finally{loading.value=false}}
+async function login(){error.value="";try{const next=await adminApi.login(username.value,password.value);rememberSession(next);password.value="";bootstrap.value=await adminApi.bootstrap();gatewayUnavailable.value=false;frontendTelemetry.event("auth.login_success")}catch(e){frontendTelemetry.error("auth.login_failure",e);error.value=e instanceof Error?e.message:"Invalid username or password"}}
+async function logout(){const next=await adminApi.logout();rememberSession(next);bootstrap.value=null;frontendTelemetry.event("auth.logout")}
 function toggleTheme(){theme.value=theme.value==="dark"?"light":"dark"}
 function systemNotification(event:BusEvent){const data=(event.data??{}) as Record<string,unknown>;const level=(["info","success","warning","error"].includes(String(data.level))?String(data.level):"info") as NotificationLevel;notifications.push({level,title:String(data.title??"System notification"),description:typeof data.description==="string"?data.description:undefined})}
-onMounted(()=>{accountStore.start();callStore.start();settingsStore.start();readHash();window.addEventListener("hashchange",readHash);window.addEventListener("management:auth-expired",expireAuth);unsubscribeNotifications=eventBus.subscribe("system.notifications",systemNotification);load()})
-onBeforeUnmount(()=>{accountStore.stop();callStore.stop();settingsStore.stop();window.removeEventListener("hashchange",readHash);window.removeEventListener("management:auth-expired",expireAuth);unsubscribeNotifications?.()})
+onMounted(()=>{accountStore.start();callStore.start();settingsStore.start();readHash();window.addEventListener("hashchange",readHash);window.addEventListener("admin:auth-expired",expireAuth);unsubscribeNotifications=eventBus.subscribe("system.notifications",systemNotification);load()})
+onBeforeUnmount(()=>{accountStore.stop();callStore.stop();settingsStore.stop();window.removeEventListener("hashchange",readHash);window.removeEventListener("admin:auth-expired",expireAuth);unsubscribeNotifications?.()})
 </script>
 <template>
   <ToastHost />

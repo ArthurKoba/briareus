@@ -1,28 +1,24 @@
 # Coolify deployment
 
-Production uses one Git-backed Docker Compose application named `mcp-bridge`.
-All services are separate containers inside that stack. Coolify builds locally on the
-server and reuses the local Docker build cache.
+Production is being split into independent Git-backed Coolify Applications that use the same
+repository and multi-stage Dockerfile. Each application builds only its own target and keeps
+Auto Deploy/Watch Paths scoped to that runtime. The root Compose file remains for integration
+and migration validation, not as the final production deployment boundary.
 
 ## Runtime model
 
 ```text
-Traefik -> gateway
-             |
-             +-- auth
-             +-- management
-             +-- valkey (private ephemeral cache)
-             +-- github
-             +-- gitlab
-             +-- files
-             +-- web
-             +-- terminal
-             +-- observability (SigNoz + Coolify read-only MCP adapter)
-             +-- analysis -> ghidra
+mcp.koba-nexus.ru       -> gateway
+admin.mcp.koba-nexus.ru -> admin-ui
+api.mcp.koba-nexus.ru   -> admin-api
+
+gateway -> auth / github / gitlab / files / web / terminal / observability / analysis
+admin-api -> valkey / files / web / terminal / analysis
+analysis -> ghidra
 ```
 
-Only gateway is public. All other services communicate over Compose DNS by service name
-and port.
+`admin-ui` and `admin-api` are public only on their dedicated domains. Provider runtimes,
+Valkey and Ghidra remain private.
 
 ## Failure isolation
 
@@ -31,7 +27,7 @@ is a runtime property, not a custom deployment-script property:
 
 - every service has its own `restart: unless-stopped` policy;
 - dependencies are declared only for primary runtime requirements;
-- GitHub and GitLab require healthy Management because account credentials are resolved there;
+- GitHub and GitLab require healthy Admin API because account credentials are resolved there;
 - Analysis requires healthy Ghidra because Ghidra is its native backend;
 - gateway startup does not require provider containers to be healthy;
 - an unavailable provider affects only its MCP surface;
@@ -40,7 +36,7 @@ is a runtime property, not a custom deployment-script property:
 - auth is required only for OAuth registration, login, refresh and revocation;
 - an auth outage therefore does not invalidate already-issued access tokens.
 
-This is the recovery model: a broken Management, GitLab or Analysis container must not
+This is the recovery model: a broken Admin API, GitLab or Analysis container must not
 prevent GitHub or other healthy providers from starting and remaining usable.
 
 ## OAuth
@@ -76,21 +72,21 @@ GITHUB_OAUTH_ALLOWED_USERS=...
 The following values are generated automatically unless explicitly overridden:
 
 ```text
-MANAGEMENT_ENCRYPTION_KEY       <- SERVICE_REALBASE64_32_MANAGEMENT_ENCRYPTION_KEY
-MANAGEMENT_SERVICE_TOKEN        <- SERVICE_REALBASE64_64_MANAGEMENT_SERVICE_TOKEN
-MANAGEMENT_ADMIN_USERNAME       <- admin (overrideable)
-MANAGEMENT_ADMIN_PASSWORD       <- SERVICE_PASSWORD_64_MANAGEMENT_ADMIN
-MANAGEMENT_SESSION_SECRET       <- SERVICE_REALBASE64_64_MANAGEMENT_SESSION_SECRET
+ADMIN_API_ENCRYPTION_KEY       <- SERVICE_REALBASE64_32_ADMIN_API_ENCRYPTION_KEY
+ADMIN_API_SERVICE_TOKEN        <- SERVICE_REALBASE64_64_ADMIN_API_SERVICE_TOKEN
+ADMIN_API_USERNAME       <- admin (overrideable)
+ADMIN_API_PASSWORD       <- SERVICE_PASSWORD_64_ADMIN_API
+ADMIN_API_SESSION_SECRET       <- SERVICE_REALBASE64_64_ADMIN_API_SESSION_SECRET
 GITHUB_OAUTH_JWT_SIGNING_KEY    <- SERVICE_REALBASE64_64_GITHUB_OAUTH_JWT_SIGNING_KEY
 MCP_PUBLIC_BASE_URL             <- SERVICE_URL_GATEWAY_8000
 MCP_ALLOWED_HOSTS               <- SERVICE_FQDN_GATEWAY_8000
 MCP_ALLOWED_ORIGINS             <- SERVICE_URL_GATEWAY_8000
 ```
 
-`SERVICE_REALBASE64_32_*` is suitable for the Management Fernet key because it encodes exactly
+`SERVICE_REALBASE64_32_*` is suitable for the Admin API Fernet key because it encodes exactly
 32 random bytes. Generated secrets are a **new-resource bootstrap** feature, not a migration
-mechanism. When attaching an existing Management volume/database, always set the original
-`MANAGEMENT_ENCRYPTION_KEY` explicitly before deployment; replacing it makes previously encrypted
+mechanism. When attaching an existing Admin API volume/database, always set the original
+`ADMIN_API_ENCRYPTION_KEY` explicitly before deployment; replacing it makes previously encrypted
 provider credentials unreadable. The same stability rule applies to the JWT signing key and
 session secret when continuity of issued tokens/sessions matters.
 
@@ -106,7 +102,7 @@ TZ=UTC
 LANG=C.UTF-8
 LC_ALL=C.UTF-8
 VALKEY_URL=redis://valkey:6379/0
-MANAGEMENT_URL=http://management:8000
+ADMIN_API_URL=http://admin-api:8000
 GITHUB_URL=http://github:8000/mcp
 GITLAB_URL=http://gitlab:8000/mcp
 FILES_URL=http://files:8000/mcp
@@ -155,7 +151,7 @@ process over loopback CDP.
 
 Browser desktop identity is source-owned by `BrowserDesktopProfile`: headful 1440x900,
 `ru-RU`, `ru-RU,ru,en-US,en`, `ru_RU.UTF-8`, 24-bit color and Xvfb on `:99`.
-Those values are not deployment environment inputs, so they can later move behind Management
+Those values are not deployment environment inputs, so they can later move behind Admin API
 runtime settings without requiring container configuration changes.
 
 Timezone is the one deployment-owned browser input. Compose passes only `TZ` into the Web
@@ -185,8 +181,8 @@ exists.
 
 The stack includes a private `valkey/valkey:9.1.2-alpine` service for hot account resolution
 and runtime/system settings. It has no public port and no persistent volume; RDB and AOF are
-disabled deliberately. Management/SQL remains authoritative. Provider runtimes fail open to
-Management if Valkey is unavailable, with a short local backoff to avoid turning a cache outage
+disabled deliberately. Admin API/SQL remains authoritative. Provider runtimes fail open to
+Admin API if Valkey is unavailable, with a short local backoff to avoid turning a cache outage
 into repeated connection timeouts. Account and settings mutations invalidate or refresh their
 shared keys.
 
@@ -195,9 +191,9 @@ shared keys.
 The Compose stack owns four named volumes with minimal logical names:
 
 ```text
-management         -> /management
+admin-api              -> /admin-api
 auth               -> /auth
-terminal-workspace -> /workspace (shared by Terminal, Files, Curl and Management Admin)
+terminal-workspace -> /workspace (shared by Terminal, Files, Curl and Admin API Admin)
 terminal-home      -> /home/agent
 ```
 
@@ -207,7 +203,7 @@ names, so Docker/Coolify keeps them in managed volume storage and they can be ba
 independently of container filesystems.
 
 Production file data lives only in the shared workspace volume. The active project should
-therefore contain `<project>_management`, `<project>_auth` and the Terminal
+therefore contain `<project>_admin-api`, `<project>_auth` and the Terminal
 workspace/home volumes. The former `<project>_files` CAS volume is no longer part of the
 runtime topology after migration.
 
@@ -251,7 +247,7 @@ and preserve that failure-isolation contract instead of adding selective-restart
 ## Public routing
 
 Only gateway receives the deployment's public domain. Provider runtimes, auth and
-management have no public domains. Gateway routes the public MCP surfaces and Admin UI
+provider runtimes have no public domains. Gateway routes only the public MCP surfaces
 to the corresponding private service.
 
 Native Ghidra remains private; ChatGPT uses `/analysis/mcp`.
@@ -259,65 +255,55 @@ Native Ghidra remains private; ChatGPT uses `/analysis/mcp`.
 
 ## OpenTelemetry / OTLP
 
-Every runtime exports the same service name (`mcp-bridge`) and a distinct
-resource scope: `auth`, `gateway`, `management`, `github`, `gitlab`,
-`files`, `web`, `terminal`, `analysis`, or `ghidra`.
+Telemetry configuration is layered by Coolify scope rather than duplicated per service.
 
-The runtime uses the official OpenTelemetry Python SDK and exports all three
-signals over OTLP/HTTP:
+Root Team shared variables:
+
+```text
+OTLP_ENDPOINT=<collector base URL>
+OTLP_BEARER_TOKEN=<raw bearer token>
+```
+
+Project shared variable:
+
+```text
+SERVICE_NAMESPACE=MCP
+```
+
+Environment shared variable:
+
+```text
+DEPLOYMENT_ENVIRONMENT=production
+```
+
+Each backend application references those shared values and sets only its own service name:
+
+```text
+OTLP_ENDPOINT={{team.OTLP_ENDPOINT}}
+OTLP_BEARER_TOKEN={{team.OTLP_BEARER_TOKEN}}
+SERVICE_NAMESPACE={{project.SERVICE_NAMESPACE}}
+DEPLOYMENT_ENVIRONMENT={{environment.DEPLOYMENT_ENVIRONMENT}}
+OTEL_SERVICE_NAME=admin-api
+```
+
+The runtime converts `OTLP_BEARER_TOKEN` into the HTTP `Authorization: Bearer ...` header.
+Do not store a preformatted authorization header in Coolify. The Admin UI never receives
+`OTLP_BEARER_TOKEN`; browser diagnostics are authenticated to Admin API and Admin API exports
+them through the shared OTLP transport with `service.name=admin-ui`.
+
+The Python runtime currently exports OTLP/HTTP protobuf and derives the signal URLs from the
+base endpoint:
 
 - logs -> `/v1/logs`;
-- traces/spans -> `/v1/traces`;
+- traces -> `/v1/traces`;
 - metrics -> `/v1/metrics`.
 
-With no endpoint configured the exporter is disabled and runtime behavior is
-unchanged. A normal Coolify deployment only needs the shared base endpoint and
-authorization header:
+`service.namespace`, `service.name`, `deployment.environment.name`, and
+`service.instance.id` are emitted as resource attributes. `service.instance.id` defaults to
+the container hostname.
 
-```text
-OTEL_SERVICE_NAME=mcp-bridge
-OTEL_EXPORTER_OTLP_ENDPOINT=<otlp-endpoint>
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20<token>
-OTEL_ENVIRONMENT=production
-OTEL_EXPORTER_OTLP_TIMEOUT=10000
-```
-
-Optional signal-specific endpoints override the shared base URL:
-
-```text
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=
-```
-
-Optional resource/runtime tuning:
-
-```text
-OTEL_SERVICE_VERSION=0.1.0
-OTEL_SERVICE_INSTANCE_ID=
-OTEL_RESOURCE_ATTRIBUTES=
-OTEL_METRIC_EXPORT_INTERVAL=30000
-OTEL_LOG_LEVEL=INFO
-```
-
-When `OTEL_SERVICE_INSTANCE_ID` is empty the container hostname is used.
-The exporter records `service.name`, `service.version`,
-`service.instance.id`, `deployment.environment.name`, and `mcp.scope`.
-
-MCP tool calls create spans and application exceptions are emitted as ERROR
-logs while the span is active. Metrics include runtime starts/up state, tool
-call/error counters and tool duration histograms. Diagnostic spans include
-`management.http`, `cache.get`/`cache.set`, `management.db.*`, provider HTTP
-latency/pool wait, and MCP backend session/catalog-cache state. Invocation
-arguments, results, account IDs, credentials, authorization headers, full URLs
-and cache keys are never added to OpenTelemetry attributes.
-
-The Management invocation audit remains a separate redacted operator log under
-MCP Calls. Runtime processes enqueue events into a bounded memory queue and
-flush short batches, preserving individual audit records while sharing one
-internal HTTP request and one SQL transaction per batch. Audit batching is
-best-effort and does not block tool responses.
-
+`OTEL_EXPORTER_OTLP_*` variables remain accepted only as temporary migration fallbacks for the
+legacy monolith. New split applications use the shared contract above.
 
 ## Managed SigNoz and Coolify connections
 
@@ -332,12 +318,12 @@ MCP instead of asking Coolify for a rendered Compose body.
 SigNoz and Coolify instance credentials are **not** Coolify deployment environment variables
 for `mcp-bridge`. Do not add `SIGNOZ_URL`, `SIGNOZ_API_KEY`, `COOLIFY_URL`, or
 `COOLIFY_API_TOKEN` to this Compose application. Multiple instances are configured at runtime
-through Management Admin (`SigNoz Accounts` / `Coolify Accounts`), where credentials are
-encrypted with `MANAGEMENT_ENCRYPTION_KEY`.
+through Admin API Admin (`SigNoz Accounts` / `Coolify Accounts`), where credentials are
+encrypted with `ADMIN_API_ENCRYPTION_KEY`.
 
-The private `observability` container receives only the normal Management service token and
+The private `observability` container receives only the normal Admin API service token and
 OpenTelemetry bootstrap environment. It resolves the explicitly requested SigNoz or Coolify
-account through Management. Coolify accounts should use a token with ordinary `Read` permission;
+account through Admin API. Coolify accounts should use a token with ordinary `Read` permission;
 the unified adapter does not expose sensitive log/environment/secret endpoints or any
 mutation/deployment action.
 ## GitHub agent local-first policy
@@ -347,7 +333,7 @@ the persistent Terminal workspace and ordinary local Git so GitHub API quota is 
 every intermediate file/commit operation. The GitHub MCP publishes this guidance directly in
 source-mutation tool descriptions and results.
 
-These controls live in Management application settings rather than deployment environment:
+These controls live in Admin API application settings rather than deployment environment:
 
 - local-first guidance: enabled by default;
 - experimental local Git transport: disabled by default until live acceptance;

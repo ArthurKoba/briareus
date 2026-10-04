@@ -65,7 +65,7 @@ class ReverseAdminClient:
         self.timeout_seconds = timeout_seconds
         self._pool = PersistentMcpClientPool(
             lambda: Client(self.url, timeout=self.timeout_seconds),
-            name="management-reverse",
+            name="admin-api-reverse",
             size=3,
         )
 
