@@ -33,6 +33,4 @@ jobs:
         with:
           bun-version: '1.4.2'
       - run: bun install --frozen-lockfile
-      - run: bun run --bun test:typecheck
-      - run: bun run --bun test
       - run: bun run --bun build

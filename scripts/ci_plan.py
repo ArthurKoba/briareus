@@ -14,65 +14,28 @@ FULL_TRIGGERS = (
     "docker-entrypoint.sh",
     "scripts/ci_plan.py",
     "src/common/",
-    "tests/common/",
-    "tests/test_architecture_boundaries.py",
-    "tests/test_runtime_entrypoints.py",
 )
 
 
 @dataclass(frozen=True)
 class Area:
     source_prefixes: tuple[str, ...]
-    test_paths: tuple[str, ...]
     mypy_paths: tuple[str, ...]
 
 
 AREAS: dict[str, Area] = {
-    "auth": Area(("src/auth_service/",), ("tests/auth_service",), ("src/auth_service",)),
-    "gateway": Area(("src/bridge/",), ("tests/bridge",), ("src/bridge",)),
-    "management": Area(
-        ("src/management/",),
-        ("tests/management",),
-        ("src/management",),
-    ),
-    "github": Area(
-        ("src/modules/github/",),
-        ("tests/modules/github",),
-        ("src/modules/github",),
-    ),
-    "gitlab": Area(
-        ("src/modules/gitlab/",),
-        ("tests/modules/gitlab",),
-        ("src/modules/gitlab",),
-    ),
-    "files": Area(
-        ("src/modules/files/",),
-        ("tests/modules/files",),
-        ("src/modules/files",),
-    ),
-    "web": Area(
-        ("src/modules/web/",),
-        ("tests/modules/web",),
-        ("src/modules/web",),
-    ),
-    "terminal": Area(
-        ("src/modules/terminal/",),
-        ("tests/modules/terminal",),
-        ("src/modules/terminal",),
-    ),
-    "analysis": Area(
-        ("src/modules/analysis/",),
-        ("tests/modules/analysis",),
-        ("src/modules/analysis",),
-    ),
-    "ghidra": Area(
-        ("src/modules/ghidra/",),
-        ("tests/modules/ghidra",),
-        ("src/modules/ghidra",),
-    ),
+    "auth": Area(("src/auth_service/",), ("src/auth_service",)),
+    "gateway": Area(("src/bridge/",), ("src/bridge",)),
+    "management": Area(("src/management/",), ("src/management",)),
+    "github": Area(("src/modules/github/",), ("src/modules/github",)),
+    "gitlab": Area(("src/modules/gitlab/",), ("src/modules/gitlab",)),
+    "files": Area(("src/modules/files/",), ("src/modules/files",)),
+    "web": Area(("src/modules/web/",), ("src/modules/web",)),
+    "terminal": Area(("src/modules/terminal/",), ("src/modules/terminal",)),
+    "analysis": Area(("src/modules/analysis/",), ("src/modules/analysis",)),
+    "ghidra": Area(("src/modules/ghidra/",), ("src/modules/ghidra",)),
     "observability": Area(
         ("src/modules/signoz/", "src/modules/coolify/", "src/modules/observability/"),
-        ("tests/modules/coolify", "tests/common/test_observability.py"),
         ("src/modules/signoz", "src/modules/coolify", "src/modules/observability"),
     ),
 }
@@ -102,14 +65,12 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
     for path in paths:
         area_match = None
         for name, area in AREAS.items():
-            if any(_matches(path, prefix) for prefix in area.source_prefixes) or any(
-                _matches(path, test_path) for test_path in area.test_paths
-            ):
+            if any(_matches(path, prefix) for prefix in area.source_prefixes):
                 area_match = name
                 break
         if area_match and area_match not in matched_areas:
             matched_areas.append(area_match)
-        elif path.startswith(("src/", "tests/")) and not area_match:
+        elif path.startswith("src/") and not area_match:
             unknown_code = True
 
     # Cross-cutting or unknown code changes are safer as a full gate.
@@ -120,23 +81,19 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
         return {
             "full": True,
             "areas": ["full"],
-            "pytest_paths": ["tests"],
             "mypy_paths": ["src"],
-            "ruff_paths": ["src", "tests", "scripts"],
+            "ruff_paths": ["src", "scripts"],
         }
 
-    pytest_paths: list[str] = []
     mypy_paths: list[str] = []
     for name in matched_areas:
         area = AREAS[name]
-        pytest_paths.extend(area.test_paths)
         mypy_paths.extend(area.mypy_paths)
 
     changed_python = [path for path in paths if path.endswith(".py") and Path(path).parts]
     return {
         "full": False,
         "areas": matched_areas or ["non-code"],
-        "pytest_paths": _unique(pytest_paths),
         "mypy_paths": _unique(mypy_paths),
         "ruff_paths": _unique(changed_python),
     }

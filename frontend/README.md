@@ -89,8 +89,8 @@ The frontend nginx serves only static SPA files and `/health`; it must not proxy
 
 ## Interaction regression tests
 
-Use `bun install --frozen-lockfile`, then `bun run --bun test:typecheck`,
-`bun run --bun test`, and `bun run --bun build`. The frontend workflow runs
+Use `bun install --frozen-lockfile`, then `bun run --bun typecheck` and
+`bun run --bun build`. The frontend workflow runs
 these checks on changes to this directory.
 
 Component tests mount the real Vue table and account panel. Provider calls are

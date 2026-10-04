@@ -19,7 +19,6 @@ mcp-bridge/
 │       ├── web/
 │       ├── analysis/
 │       └── terminal/
-├── tests/
 │   ├── bridge/
 │   ├── common/
 │   ├── management/
