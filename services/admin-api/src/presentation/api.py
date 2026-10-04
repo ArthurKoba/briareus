@@ -48,37 +48,39 @@ def build_internal_router(services: ApiServices) -> APIRouter:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
     @router.get("/accounts")
-    def list_accounts(
+    async def list_accounts(
         provider: Annotated[Provider | None, Query()] = None,
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        accounts = services.accounts.list(provider=provider)
+        accounts = await services.accounts.list(provider=provider)
         return AccountList(accounts=accounts, count=len(accounts)).to_json()
 
     @router.get("/accounts/{selector}/resolve")
-    def resolve_account(
+    async def resolve_account(
         selector: str,
         provider: Provider,
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
         try:
-            return services.accounts.resolve(selector, provider=provider).model_dump(mode="json")
+            return (await services.accounts.resolve(selector, provider=provider)).model_dump(
+                mode="json"
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.put("/accounts/github/authenticated-reader")
-    def sync_github_authenticated_reader(
+    async def sync_github_authenticated_reader(
         payload: GitHubAuthenticatedReaderSync,
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
         try:
-            account = services.accounts.get(
+            account = await services.accounts.get(
                 "authenticated",
                 provider=Provider.GITHUB,
                 enabled_only=False,
             )
         except KeyError:
-            saved = services.accounts.create(
+            saved = await services.accounts.create(
                 Account(
                     alias="authenticated",
                     provider=Provider.GITHUB,
@@ -96,8 +98,8 @@ def build_internal_router(services: ApiServices) -> APIRouter:
             )
         if not account.enabled:
             account.enabled = True
-            account = services.accounts.update(account)
-        services.accounts.set_credential(
+            account = await services.accounts.update(account)
+        await services.accounts.set_credential(
             account.id,
             payload.token,
             provider=Provider.GITHUB,
@@ -105,58 +107,58 @@ def build_internal_router(services: ApiServices) -> APIRouter:
         return {**account.public(), "login": payload.login, "synced": True}
 
     @router.get("/runtime-settings/terminal")
-    def terminal_runtime_settings(
+    async def terminal_runtime_settings(
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        return services.runtime_settings.terminal_policy().to_json()
+        return (await services.runtime_settings.terminal_policy()).to_json()
 
     @router.get("/runtime-settings/mcp")
-    def mcp_runtime_settings(
+    async def mcp_runtime_settings(
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        return services.runtime_settings.mcp_policy().to_json()
+        return (await services.runtime_settings.mcp_policy()).to_json()
 
     @router.get("/runtime-settings/github")
-    def github_runtime_settings(
+    async def github_runtime_settings(
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        return services.runtime_settings.github_policy().to_json()
+        return (await services.runtime_settings.github_policy()).to_json()
 
     @router.get("/runtime-settings/gitlab")
-    def gitlab_runtime_settings(
+    async def gitlab_runtime_settings(
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        return services.runtime_settings.gitlab_policy().to_json()
+        return (await services.runtime_settings.gitlab_policy()).to_json()
 
     @router.post("/events", status_code=204)
-    def record_event(
+    async def record_event(
         event: InvocationEvent,
         _authorized: None = Depends(authorize),
     ) -> None:
-        services.audit.record(Invocation.model_validate(event.model_dump()))
+        await services.audit.record(Invocation.model_validate(event.model_dump()))
 
     @router.post("/events/batch", status_code=204)
-    def record_event_batch(
+    async def record_event_batch(
         batch: InvocationEventBatch,
         _authorized: None = Depends(authorize),
     ) -> None:
-        services.audit.record_many(
+        await services.audit.record_many(
             [Invocation.model_validate(event.model_dump()) for event in batch.events]
         )
 
     @router.post("/oauth-sessions/events", status_code=204)
-    def record_oauth_session(
+    async def record_oauth_session(
         event: OAuthSessionEvent,
         _authorized: None = Depends(authorize),
     ) -> None:
-        services.oauth_sessions.record(event)
+        await services.oauth_sessions.record(event)
 
     @router.get("/oauth-sessions/recent")
-    def recent_oauth_sessions(
+    async def recent_oauth_sessions(
         limit: Annotated[int, Query(ge=1, le=1000)] = 200,
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        sessions = services.oauth_sessions.recent(limit=limit)
+        sessions = await services.oauth_sessions.recent(limit=limit)
         return {
             "sessions": [
                 {
@@ -185,11 +187,11 @@ def build_internal_router(services: ApiServices) -> APIRouter:
         }
 
     @router.get("/events/recent")
-    def recent_events(
+    async def recent_events(
         limit: Annotated[int, Query(ge=1, le=1000)] = 100,
         _authorized: None = Depends(authorize),
     ) -> JsonObject:
-        events = services.audit.recent(limit=limit)
+        events = await services.audit.recent(limit=limit)
         return {
             "events": [event.model_dump(mode="json") for event in events],
             "count": len(events),

@@ -19,10 +19,7 @@ from dashboard_state import build_dashboard_state
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from infrastructure.crypto import FernetCredentialCipher
-from infrastructure.database import (
-    create_database,
-    ensure_zero_state_schema,
-)
+from infrastructure.database import DatabaseManager
 from infrastructure.files import FileAdminStore
 from infrastructure.provider_checks import ProviderConnectionVerifier
 from infrastructure.repositories import (
@@ -56,10 +53,8 @@ settings.validate_bootstrap()
 observability_settings = ObservabilitySettings()
 _observability = build_observability("admin-api", settings=observability_settings)
 announce_runtime_started(_observability, "admin-api")
-settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-engine, sessions = create_database(settings.database_url)
-if ensure_zero_state_schema(engine):
-    logger.info("admin-api schema initialized missing tables")
+database = DatabaseManager(settings.database_url)
+sessions = database.sessions
 
 cache_settings = ValkeySettings()
 shared_cache = SharedCache(cache_settings)
@@ -80,7 +75,6 @@ runtime_settings = RuntimeSettingsService(
 )
 oauth_sessions = OAuthSessionService(oauth_session_repository)
 snapshots = SnapshotService(snapshot_repository)
-config_service.get()
 accounts = AccountService(
     account_repository,
     cipher,
@@ -120,7 +114,7 @@ async def _maintenance_loop() -> None:
     interval_seconds = 3600
     while True:
         try:
-            config = await asyncio.to_thread(config_service.get)
+            config = await config_service.get()
             interval_seconds = config.maintenance_interval_minutes * 60
             logger.info(
                 "admin_api cleanup scan started retention_days=%d "
@@ -129,7 +123,7 @@ async def _maintenance_loop() -> None:
                 config.logging_max_records,
                 config.maintenance_interval_minutes,
             )
-            removed = await asyncio.to_thread(audit.cleanup)
+            removed = await audit.cleanup()
             logger.info(
                 "admin_api cleanup scan completed reason=retention_or_max_records "
                 "removed_records=%d",
@@ -142,6 +136,9 @@ async def _maintenance_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    if await database.ensure_schema():
+        logger.info("admin-api PostgreSQL schema initialized missing tables")
+    await config_service.get()
     realtime.start()
     telemetry.start()
     await snapshot_refresher.ensure_base_snapshots()
@@ -170,6 +167,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await telemetry.close()
         await realtime.close()
         await web_admin.close()
+        await database.dispose()
 
 
 app = FastAPI(

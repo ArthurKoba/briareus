@@ -34,7 +34,7 @@ def build_realtime_router(
 
     async def topic_snapshot(topic: str) -> object | None:
         if topic == "mcp.calls":
-            events = await asyncio.to_thread(audit.recent, limit=100)
+            events = await audit.recent(limit=100)
             return {
                 "events": [item.model_dump(mode="json") for item in events],
                 "count": len(events),

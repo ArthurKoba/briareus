@@ -441,10 +441,7 @@ class AdminApiClientSettings(ProcessSettings):
 
 
 class AdminApiSettings(ProcessSettings):
-    database_path: Path = Field(
-        Path("/admin-api/admin.sqlite3"),
-        validation_alias="ADMIN_API_DATABASE_PATH",
-    )
+    database_url: str = Field("", validation_alias="DATABASE_URL")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
     admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
@@ -460,6 +457,7 @@ class AdminApiSettings(ProcessSettings):
     )
 
     @field_validator(
+        "database_url",
         "encryption_key",
         "service_token",
         "admin_username",
@@ -472,21 +470,23 @@ class AdminApiSettings(ProcessSettings):
     def _strip_secrets(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("database_path")
+    @field_validator("database_url")
     @classmethod
-    def _absolute_database_path(cls, value: Path) -> Path:
-        if not value.is_absolute():
-            raise ValueError("ADMIN_API_DATABASE_PATH must be absolute")
-        return value.resolve(strict=False)
-
-    @property
-    def database_url(self) -> str:
-        return f"sqlite:///{self.database_path}"
+    def _postgres_database_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized.startswith("postgres://"):
+            normalized = "postgresql://" + normalized.removeprefix("postgres://")
+        if normalized.startswith("postgresql://"):
+            normalized = "postgresql+asyncpg://" + normalized.removeprefix("postgresql://")
+        if normalized and not normalized.startswith("postgresql+asyncpg://"):
+            raise ValueError("DATABASE_URL must use PostgreSQL with asyncpg")
+        return normalized
 
     def validate_bootstrap(self) -> None:
         missing = [
             name
             for name, value in (
+                ("DATABASE_URL", self.database_url),
                 ("ADMIN_API_ENCRYPTION_KEY", self.encryption_key),
                 ("ADMIN_API_SERVICE_TOKEN", self.service_token),
                 ("ADMIN_API_USERNAME", self.admin_username),
