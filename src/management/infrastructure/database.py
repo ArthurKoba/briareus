@@ -222,8 +222,17 @@ class GitHubRuntimeSettingsRecord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     local_first_guidance: Mapped[bool] = mapped_column(Boolean, default=True)
-    local_git_transport_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    local_git_transport_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GitLabRuntimeSettingsRecord(Base):
+    __tablename__ = "gitlab_runtime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    local_first_guidance: Mapped[bool] = mapped_column(Boolean, default=True)
+    local_git_transport_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:

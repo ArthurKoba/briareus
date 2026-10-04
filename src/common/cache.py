@@ -171,6 +171,9 @@ class CacheKeys:
     def github_policy(self) -> str:
         return self.cache.key("system", "runtime", "github")
 
+    def gitlab_policy(self) -> str:
+        return self.cache.key("system", "runtime", "gitlab")
+
     def management_config(self) -> str:
         return self.cache.key("system", "management", "config")
 

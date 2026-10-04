@@ -9,6 +9,7 @@ from common.cache import CacheBackend, CacheKeys
 from common.models import JsonObject, json_object
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
+    GitLabRuntimePolicy,
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
@@ -465,6 +466,30 @@ class RuntimeSettingsService:
         if self.cache is not None and self.cache_keys is not None:
             self.cache.set_json(
                 self.cache_keys.github_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
+
+    def gitlab_policy(self) -> GitLabRuntimePolicy:
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.gitlab_policy())
+            if isinstance(cached, dict):
+                return GitLabRuntimePolicy.model_validate(cached)
+        result = self.repository.get_gitlab_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.gitlab_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
+
+    def update_gitlab_policy(self, policy: GitLabRuntimePolicy) -> GitLabRuntimePolicy:
+        result = self.repository.save_gitlab_policy(policy)
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.gitlab_policy(),
                 result.to_json(),
                 ttl_seconds=self.cache_settings.policy_ttl_seconds,
             )

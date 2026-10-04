@@ -13,21 +13,26 @@ export interface SettingsUpdatePayload {
   github_local_first_guidance: boolean
   github_local_git_transport_enabled: boolean
   github_remote_source_mutations_enabled: boolean
+  gitlab_local_first_guidance: boolean
+  gitlab_local_git_transport_enabled: boolean
+  gitlab_remote_source_mutations_enabled: boolean
   reverse_idle_timeout_seconds: number
 }
 
 export class IncompleteSettingsSnapshotError extends Error {
   constructor() {
-    super("A complete GitHub policy snapshot is required before saving settings")
+    super("A complete version-control policy snapshot is required before saving settings")
     this.name = "IncompleteSettingsSnapshotError"
   }
 }
 
 export function settingsUpdatePayload(state: SettingsState, overrides: Partial<SettingsUpdatePayload> = {}): SettingsUpdatePayload {
-  const policy = state.github
-  // The current backend PUT replaces all settings. Missing flags would activate
-  // backend defaults, including re-enabling remote writes. Never invent them.
-  if (!policy || [policy.local_first_guidance, policy.local_git_transport_enabled, policy.remote_source_mutations_enabled].some(value => typeof value !== "boolean")) {
+  const githubPolicy = state.github
+  const gitlabPolicy = state.gitlab
+  // Never invent version-control policy values: unrelated settings saves must round-trip both
+  // provider snapshots exactly as the server returned them.
+  const policies = [githubPolicy, gitlabPolicy]
+  if (policies.some(policy => !policy || [policy.local_first_guidance, policy.local_git_transport_enabled, policy.remote_source_mutations_enabled].some(value => typeof value !== "boolean"))) {
     throw new IncompleteSettingsSnapshotError()
   }
   const payload: SettingsUpdatePayload = {
@@ -40,14 +45,25 @@ export function settingsUpdatePayload(state: SettingsState, overrides: Partial<S
     terminal_max_exec_timeout_seconds: state.terminal.max_exec_timeout_seconds,
     terminal_max_job_runtime_seconds: state.terminal.max_job_runtime_seconds,
     mcp_call_timeout_seconds: state.mcp.call_timeout_seconds,
-    github_local_first_guidance: policy.local_first_guidance,
-    github_local_git_transport_enabled: policy.local_git_transport_enabled,
-    github_remote_source_mutations_enabled: policy.remote_source_mutations_enabled,
+    github_local_first_guidance: githubPolicy.local_first_guidance,
+    github_local_git_transport_enabled: githubPolicy.local_git_transport_enabled,
+    github_remote_source_mutations_enabled: githubPolicy.remote_source_mutations_enabled,
+    gitlab_local_first_guidance: gitlabPolicy.local_first_guidance,
+    gitlab_local_git_transport_enabled: gitlabPolicy.local_git_transport_enabled,
+    gitlab_remote_source_mutations_enabled: gitlabPolicy.remote_source_mutations_enabled,
     reverse_idle_timeout_seconds: Number(state.analysis.idle_timeout_seconds ?? 900),
     ...overrides,
   }
   // Partial<T> permits undefined; do not let a caller erase a required flag.
-  if ([payload.github_local_first_guidance, payload.github_local_git_transport_enabled, payload.github_remote_source_mutations_enabled].some(value => typeof value !== "boolean")) {
+  const requiredPolicyFlags = [
+    payload.github_local_first_guidance,
+    payload.github_local_git_transport_enabled,
+    payload.github_remote_source_mutations_enabled,
+    payload.gitlab_local_first_guidance,
+    payload.gitlab_local_git_transport_enabled,
+    payload.gitlab_remote_source_mutations_enabled,
+  ]
+  if (requiredPolicyFlags.some(value => typeof value !== "boolean")) {
     throw new IncompleteSettingsSnapshotError()
   }
   return payload

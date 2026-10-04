@@ -99,7 +99,7 @@ export interface BrowserRemoteDebug {
   expires_in_seconds: number
 }
 
-export interface GitHubPolicyState {
+export interface VcsPolicyState {
   local_first_guidance: boolean
   local_git_transport_enabled: boolean
   remote_source_mutations_enabled: boolean
@@ -110,7 +110,8 @@ export interface SettingsState {
   management: { logging_enabled: boolean; logging_capture_payloads: boolean; logging_retention_days: number; logging_max_records: number; maintenance_interval_minutes: number }
   terminal: { max_exec_timeout_seconds: number; max_job_runtime_seconds: number }
   mcp: { call_timeout_seconds: number }
-  github: GitHubPolicyState
+  github: VcsPolicyState
+  gitlab: VcsPolicyState
   analysis: { idle_timeout_seconds?: number; auto_release_enabled?: boolean; source?: string }
   analysis_error: string
 }

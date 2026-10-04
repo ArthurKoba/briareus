@@ -27,6 +27,7 @@ from common.browser_remote_debug import (
 from common.models import JsonObject, JsonValue, json_object
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
+    GitLabRuntimePolicy,
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
@@ -188,8 +189,11 @@ class SettingsPayload(BaseModel):
     terminal_max_job_runtime_seconds: int = Field(43_200, ge=1, le=604_800)
     mcp_call_timeout_seconds: int = Field(5, ge=1, le=300)
     github_local_first_guidance: bool = True
-    github_local_git_transport_enabled: bool = False
-    github_remote_source_mutations_enabled: bool = True
+    github_local_git_transport_enabled: bool = True
+    github_remote_source_mutations_enabled: bool = False
+    gitlab_local_first_guidance: bool = True
+    gitlab_local_git_transport_enabled: bool = True
+    gitlab_remote_source_mutations_enabled: bool = False
     reverse_idle_timeout_seconds: float = Field(900.0, ge=0, le=86_400)
 
 
@@ -996,17 +1000,19 @@ def build_admin_api_router(
             "terminal": snapshot["terminal"],
             "mcp": snapshot["mcp"],
             "github": snapshot["github"],
+            "gitlab": snapshot["gitlab"],
             "analysis_idle_timeout_seconds": idle_timeout,
         }
         encoded = json.dumps(versioned, sort_keys=True, separators=(",", ":")).encode()
         return sha256(encoded).hexdigest()
 
     async def settings_snapshot(api: WebApiServices) -> JsonObject:
-        config, terminal_policy, mcp_policy, github_policy = await asyncio.gather(
+        config, terminal_policy, mcp_policy, github_policy, gitlab_policy = await asyncio.gather(
             asyncio.to_thread(api.config.get),
             asyncio.to_thread(api.runtime_settings.terminal_policy),
             asyncio.to_thread(api.runtime_settings.mcp_policy),
             asyncio.to_thread(api.runtime_settings.github_policy),
+            asyncio.to_thread(api.runtime_settings.gitlab_policy),
         )
         try:
             reverse_settings = await api.reverse.session_settings()
@@ -1023,6 +1029,7 @@ def build_admin_api_router(
             "terminal": terminal_policy.model_dump(mode="json"),
             "mcp": mcp_policy.model_dump(mode="json"),
             "github": github_policy.model_dump(mode="json"),
+            "gitlab": gitlab_policy.model_dump(mode="json"),
             "analysis": reverse_settings,
             "analysis_error": reverse_error,
         }
@@ -1101,14 +1108,52 @@ def build_admin_api_router(
                             else current_github.remote_source_mutations_enabled
                         ),
                     )
+                gitlab_fields = {
+                    "gitlab_local_first_guidance",
+                    "gitlab_local_git_transport_enabled",
+                    "gitlab_remote_source_mutations_enabled",
+                }
+                if gitlab_fields.issubset(payload.model_fields_set):
+                    gitlab_policy = GitLabRuntimePolicy(
+                        local_first_guidance=payload.gitlab_local_first_guidance,
+                        local_git_transport_enabled=payload.gitlab_local_git_transport_enabled,
+                        remote_source_mutations_enabled=payload.gitlab_remote_source_mutations_enabled,
+                    )
+                else:
+                    if current is not None:
+                        current_gitlab = GitLabRuntimePolicy.model_validate(current["gitlab"])
+                    else:
+                        current_gitlab = await asyncio.to_thread(api.runtime_settings.gitlab_policy)
+                    gitlab_policy = GitLabRuntimePolicy(
+                        local_first_guidance=(
+                            payload.gitlab_local_first_guidance
+                            if "gitlab_local_first_guidance" in payload.model_fields_set
+                            else current_gitlab.local_first_guidance
+                        ),
+                        local_git_transport_enabled=(
+                            payload.gitlab_local_git_transport_enabled
+                            if "gitlab_local_git_transport_enabled" in payload.model_fields_set
+                            else current_gitlab.local_git_transport_enabled
+                        ),
+                        remote_source_mutations_enabled=(
+                            payload.gitlab_remote_source_mutations_enabled
+                            if "gitlab_remote_source_mutations_enabled" in payload.model_fields_set
+                            else current_gitlab.remote_source_mutations_enabled
+                        ),
+                    )
                 reverse_settings = await api.reverse.set_idle_timeout(
                     payload.reverse_idle_timeout_seconds
                 )
-                saved_management, saved_terminal, saved_mcp, saved_github = await asyncio.gather(
-                    asyncio.to_thread(api.config.update, management),
-                    asyncio.to_thread(api.runtime_settings.update_terminal_policy, terminal_policy),
-                    asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
-                    asyncio.to_thread(api.runtime_settings.update_github_policy, github_policy),
+                saved_management, saved_terminal, saved_mcp, saved_github, saved_gitlab = (
+                    await asyncio.gather(
+                        asyncio.to_thread(api.config.update, management),
+                        asyncio.to_thread(
+                            api.runtime_settings.update_terminal_policy, terminal_policy
+                        ),
+                        asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
+                        asyncio.to_thread(api.runtime_settings.update_github_policy, github_policy),
+                        asyncio.to_thread(api.runtime_settings.update_gitlab_policy, gitlab_policy),
+                    )
                 )
             except (ValueError, RuntimeError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1117,6 +1162,7 @@ def build_admin_api_router(
                 "terminal": saved_terminal.model_dump(mode="json"),
                 "mcp": saved_mcp.model_dump(mode="json"),
                 "github": saved_github.model_dump(mode="json"),
+                "gitlab": saved_gitlab.model_dump(mode="json"),
                 "analysis": reverse_settings,
                 "analysis_error": "",
             }
