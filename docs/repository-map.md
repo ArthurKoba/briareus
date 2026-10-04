@@ -4,7 +4,7 @@
 mcp-bridge/
 ├── .github/
 ├── docs/
-├── src/
+├── services/
 │   ├── bridge/                 # public gateway only
 │   ├── common/                 # shared contracts/settings/runtime primitives
 │   ├── management/

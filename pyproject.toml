@@ -40,14 +40,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
-  "src/auth_service",
-  "src/bridge",
-  "src/common",
-  "src/management",
-  "src/modules",
+  "services/auth_service",
+  "services/bridge",
+  "services/common",
+  "services/management",
+  "services/modules",
 ]
 
 [tool.ruff]
+src = ["services"]
 line-length = 100
 target-version = "py313"
 
@@ -75,9 +76,10 @@ select = [
   "RUF",
 ]
 [tool.ruff.lint.per-file-ignores]
-"src/modules/github/github_workflow.py" = ["E501"]
+"services/modules/github/github_workflow.py" = ["E501"]
 
 [tool.mypy]
+mypy_path = "services"
 python_version = "3.13"
 plugins = ["pydantic.mypy"]
 strict = true

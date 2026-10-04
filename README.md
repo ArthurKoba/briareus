@@ -78,7 +78,7 @@ tokens. GitHub OAuth credentials are never configured on provider runtimes or ma
 ## Repository layout
 
 ```text
-src/
+services/
 ├── auth_service/
 ├── bridge/
 ├── common/
