@@ -13,7 +13,7 @@ FULL_TRIGGERS = (
     "uv.lock",
     "docker-entrypoint.sh",
     "scripts/ci_plan.py",
-    "src/common/",
+    "services/common/",
 )
 
 
@@ -24,19 +24,19 @@ class Area:
 
 
 AREAS: dict[str, Area] = {
-    "auth": Area(("src/auth_service/",), ("src/auth_service",)),
-    "gateway": Area(("src/bridge/",), ("src/bridge",)),
-    "management": Area(("src/management/",), ("src/management",)),
-    "github": Area(("src/modules/github/",), ("src/modules/github",)),
-    "gitlab": Area(("src/modules/gitlab/",), ("src/modules/gitlab",)),
-    "files": Area(("src/modules/files/",), ("src/modules/files",)),
-    "web": Area(("src/modules/web/",), ("src/modules/web",)),
-    "terminal": Area(("src/modules/terminal/",), ("src/modules/terminal",)),
-    "analysis": Area(("src/modules/analysis/",), ("src/modules/analysis",)),
-    "ghidra": Area(("src/modules/ghidra/",), ("src/modules/ghidra",)),
+    "auth": Area(("services/auth_service/",), ("services/auth_service",)),
+    "gateway": Area(("services/bridge/",), ("services/bridge",)),
+    "management": Area(("services/management/",), ("services/management",)),
+    "github": Area(("services/modules/github/",), ("services/modules/github",)),
+    "gitlab": Area(("services/modules/gitlab/",), ("services/modules/gitlab",)),
+    "files": Area(("services/modules/files/",), ("services/modules/files",)),
+    "web": Area(("services/modules/web/",), ("services/modules/web",)),
+    "terminal": Area(("services/modules/terminal/",), ("services/modules/terminal",)),
+    "analysis": Area(("services/modules/analysis/",), ("services/modules/analysis",)),
+    "ghidra": Area(("services/modules/ghidra/",), ("services/modules/ghidra",)),
     "observability": Area(
-        ("src/modules/signoz/", "src/modules/coolify/", "src/modules/observability/"),
-        ("src/modules/signoz", "src/modules/coolify", "src/modules/observability"),
+        ("services/modules/signoz/", "services/modules/coolify/", "services/modules/observability/"),
+        ("services/modules/signoz", "services/modules/coolify", "services/modules/observability"),
     ),
 }
 
@@ -70,7 +70,7 @@ def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, obj
                 break
         if area_match and area_match not in matched_areas:
             matched_areas.append(area_match)
-        elif path.startswith("src/") and not area_match:
+        elif path.startswith("services/") and not area_match:
             unknown_code = True
 
     # Cross-cutting or unknown code changes are safer as a full gate.
