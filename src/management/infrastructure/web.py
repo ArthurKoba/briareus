@@ -77,3 +77,9 @@ class WebAdminClient:
             "browser_set_viewport",
             {"page_id": page_id, "width": width, "height": height},
         )
+
+    async def set_theme(self, color_scheme: str) -> JsonObject:
+        return await self._call("browser_set_theme", {"color_scheme": color_scheme})
+
+    async def debug_target(self, page_id: str) -> JsonObject:
+        return await self._call("browser_debug_target", {"page_id": page_id})

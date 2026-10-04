@@ -29,6 +29,12 @@ class FakeBrowser:
     async def open(self, url, page_id=""):
         return {"page_id": page_id or "page-1", "url": url, "title": "Example"}
 
+    async def set_theme(self, color_scheme):
+        return {"color_scheme": color_scheme}
+
+    async def debug_target(self, page_id):
+        return {"page_id": page_id, "target_id": "TARGET123"}
+
     async def set_viewport(self, page_id, width, height):
         return {"page_id": page_id, "viewport": {"width": width, "height": height}}
 
@@ -93,6 +99,8 @@ async def test_browser_tools_publish_compact_stateful_surface() -> None:
         "browser_restart",
         "browser_pages",
         "browser_open",
+        "browser_set_theme",
+        "browser_debug_target",
         "browser_set_viewport",
         "browser_set_page_label",
         "browser_snapshot",
@@ -226,6 +234,7 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert "--accept-lang=ru,en" in command
     assert "--window-size=1536,912" in command
     assert "--force-device-scale-factor=2" in command
+    assert "--force-dark-mode" in command
     assert browser.screen_width == 3072
     assert browser.screen_height == 1920
     assert process_command[:5] == [
@@ -377,3 +386,82 @@ async def test_browser_restart_preserves_profile_and_extension_registry(tmp_path
     assert result["running"] is True
     assert marker.read_text() == "preserve-me"
     assert browser.dev_extensions() == [{"id": extension_id, "path": str(extension_dir)}]
+
+
+@pytest.mark.asyncio
+async def test_browser_theme_persists_and_applies_to_open_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    browser = BrowserManager(
+        workspace=WorkspaceFileStore(tmp_path / "workspace"),
+        profile_dir=tmp_path / "profile",
+        executable_path="/usr/bin/chromium",
+        headless=True,
+        timeout_ms=30_000,
+        viewport_width=1440,
+        viewport_height=900,
+        max_snapshot_text_chars=30_000,
+        max_snapshot_elements=250,
+    )
+    page = Mock(is_closed=Mock(return_value=False), emulate_media=AsyncMock())
+    context = Mock(pages=[page])
+    monkeypatch.setattr(browser, "_ensure_started", AsyncMock(return_value=context))
+    monkeypatch.setattr(
+        browser,
+        "status",
+        AsyncMock(return_value={"running": True, "color_scheme": "light"}),
+    )
+
+    result = await browser.set_color_scheme("light")
+
+    page.emulate_media.assert_awaited_once_with(color_scheme="light")
+    assert result["updated_pages"] == 1
+    policy = (tmp_path / "profile" / "koba-browser-policy.json").read_text()
+    assert '"color_scheme":"light"' in policy
+
+    with pytest.raises(BrowserError, match="system, light, or dark"):
+        await browser.set_color_scheme("sepia")
+
+
+@pytest.mark.asyncio
+async def test_browser_debug_target_resolves_page_target_without_replacing_agent_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from modules.files.workspace_store import WorkspaceFileStore
+
+    browser = BrowserManager(
+        workspace=WorkspaceFileStore(tmp_path / "workspace"),
+        profile_dir=tmp_path / "profile",
+        executable_path="/usr/bin/chromium",
+        headless=True,
+        timeout_ms=30_000,
+        viewport_width=1440,
+        viewport_height=900,
+        max_snapshot_text_chars=30_000,
+        max_snapshot_elements=250,
+    )
+    page = Mock(
+        url="https://example.test/",
+        title=AsyncMock(return_value="Example"),
+    )
+    session = Mock(
+        send=AsyncMock(return_value={"targetInfo": {"targetId": "TARGET123"}}),
+        detach=AsyncMock(),
+    )
+    context = Mock(new_cdp_session=AsyncMock(return_value=session))
+    monkeypatch.setattr(browser, "_require_agent_access", lambda _page_id: None)
+    monkeypatch.setattr(browser, "_ensure_started", AsyncMock(return_value=context))
+    monkeypatch.setattr(browser, "_page", AsyncMock(return_value=page))
+
+    result = await browser.debug_target("page-1")
+
+    assert result == {
+        "page_id": "page-1",
+        "target_id": "TARGET123",
+        "title": "Example",
+        "url": "https://example.test/",
+    }
+    session.send.assert_awaited_once_with("Target.getTargetInfo")
+    session.detach.assert_awaited_once()

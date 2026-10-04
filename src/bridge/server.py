@@ -427,6 +427,15 @@ async def _api_browser_operator_websocket(websocket: WebSocket) -> None:
     await _management_websocket(websocket, "/admin/api/browser/operator/ws")
 
 
+async def _api_browser_cdp_websocket(websocket: WebSocket) -> None:
+    token = str(websocket.path_params.get("token") or "")
+    target_id = str(websocket.path_params.get("target_id") or "")
+    await _management_websocket(
+        websocket,
+        f"/admin/api/browser/cdp/{token}/page/{target_id}",
+    )
+
+
 async def _removed_admin_api(_request: Request) -> PlainTextResponse:
     return PlainTextResponse("Not Found", status_code=404)
 
@@ -447,6 +456,10 @@ app.router.routes.extend(
     [
         WebSocketRoute("/api/realtime", _api_realtime_websocket),
         WebSocketRoute("/api/browser/operator/ws", _api_browser_operator_websocket),
+        WebSocketRoute(
+            "/api/browser/cdp/{token}/page/{target_id}",
+            _api_browser_cdp_websocket,
+        ),
     ]
 )
 app.add_route("/api", _management_api_proxy.handle, methods=_PROXY_METHODS)

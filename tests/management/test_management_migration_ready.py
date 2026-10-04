@@ -159,7 +159,12 @@ def _build_services(tmp_path: Path, settings: ManagementSettings):
         status=AsyncMock(
             return_value={
                 "running": True,
-                "capabilities": {"set_viewport": True},
+                "capabilities": {
+                    "set_viewport": True,
+                    "set_theme": True,
+                    "remote_devtools": True,
+                },
+                "color_scheme": "dark",
                 "pages": [],
             }
         ),
@@ -168,6 +173,15 @@ def _build_services(tmp_path: Path, settings: ManagementSettings):
                 "page_id": "page-1",
                 "viewport": {"width": 1280, "height": 720},
                 "requested_viewport": {"width": 1280, "height": 720},
+            }
+        ),
+        set_theme=AsyncMock(return_value={"color_scheme": "dark", "updated_pages": 1}),
+        debug_target=AsyncMock(
+            return_value={
+                "page_id": "page-1",
+                "target_id": "TARGET123",
+                "title": "Example",
+                "url": "https://example.test/",
             }
         ),
     )
@@ -259,6 +273,8 @@ def test_admin_api_route_contract_is_explicit_and_complete(tmp_path: Path) -> No
         ("POST", "/admin/api/analysis/workers/{worker_index}/recover"),
         ("GET", "/admin/api/analysis/projects/{project_id:path}/coverage"),
         ("GET", "/admin/api/browser/state"),
+        ("PUT", "/admin/api/browser/theme"),
+        ("POST", "/admin/api/browser/remote-debug"),
         ("PUT", "/admin/api/browser/viewport"),
         ("POST", "/admin/api/telemetry"),
         ("GET", "/admin/api/settings"),
@@ -289,6 +305,38 @@ def test_analysis_clear_queue_recover_and_state_are_structured(tmp_path: Path) -
         assert recovered.json()["operation"] == "recover"
         assert recovered.json()["result"]["recovered"] is True
         reverse.recover_worker.assert_awaited_with(2, timeout_seconds=5.0)
+
+
+def test_browser_theme_and_remote_debug_api_contract(tmp_path: Path) -> None:
+    client, _services, _reverse, web, _telemetry = _client(tmp_path)
+    with client:
+        _login(client)
+        theme = client.put(
+            "/admin/api/browser/theme",
+            json={"color_scheme": "dark"},
+        )
+        assert theme.status_code == 200
+        assert theme.json()["color_scheme"] == "dark"
+        web.set_theme.assert_awaited_once_with("dark")
+
+        remote = client.post(
+            "/admin/api/browser/remote-debug",
+            json={"page_id": "page-1"},
+            headers={
+                "x-forwarded-host": "mcp.koba-nexus.ru",
+                "x-forwarded-proto": "https",
+            },
+        )
+        assert remote.status_code == 200
+        payload = remote.json()
+        assert payload["target_id"] == "TARGET123"
+        assert payload["expires_in_seconds"] == 300
+        assert payload["websocket_url"].startswith("wss://mcp.koba-nexus.ru/api/browser/cdp/")
+        assert payload["devtools_url"].startswith(
+            "devtools://devtools/bundled/inspector.html?wss=mcp.koba-nexus.ru/api/browser/cdp/"
+        )
+        assert payload["devtools_url"].endswith("/page/TARGET123")
+        web.debug_target.assert_awaited_once_with("page-1")
 
 
 def test_browser_viewport_api_returns_effective_state(tmp_path: Path) -> None:

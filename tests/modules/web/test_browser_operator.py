@@ -81,7 +81,11 @@ async def test_operator_sessions_share_control_with_agent(
     first_state = await browser.operator_state(str(first["owner_token"]))
     second_state = await browser.operator_state(str(second["owner_token"]))
     assert first_state["control"] == "shared"
-    assert first_state["capabilities"] == {"set_viewport": True}
+    assert first_state["capabilities"] == {
+        "set_viewport": True,
+        "set_theme": True,
+        "remote_devtools": True,
+    }
     assert first_state["viewport"] == {"width": 1440, "height": 900}
     assert first_state["operator_count"] == 2
     assert second_state["operator_count"] == 2

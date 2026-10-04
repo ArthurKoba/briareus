@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hmac
+import re
+
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket
 
@@ -12,6 +15,7 @@ from common.settings import (
     ManagementClientSettings,
     PrivateRuntimeSettings,
 )
+from common.websocket_proxy import relay_websocket
 from modules.files.workspace_store import WorkspaceFileStore
 
 from .browser import BrowserManager
@@ -76,6 +80,29 @@ mcp.mount(_devtools.server, namespace="devtools")
 app = private_http_app(mcp, _private_settings)
 
 
+def _private_service_authorized(websocket: WebSocket) -> bool:
+    authorization = websocket.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    supplied = token.strip() if scheme.casefold() == "bearer" else ""
+    expected = _management.service_token
+    return bool(supplied and expected and hmac.compare_digest(supplied, expected))
+
+
+async def _cdp_ws(websocket: WebSocket) -> None:
+    if not _private_service_authorized(websocket):
+        await websocket.close(code=4401)
+        return
+    target_id = str(websocket.path_params.get("target_id") or "")
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", target_id) is None:
+        await websocket.close(code=4400)
+        return
+    await relay_websocket(
+        websocket,
+        f"ws://127.0.0.1:9222/devtools/page/{target_id}",
+        origin=None,
+    )
+
+
 async def _operator_ws(websocket: WebSocket) -> None:
     await browser_operator_websocket(
         websocket,
@@ -84,4 +111,9 @@ async def _operator_ws(websocket: WebSocket) -> None:
     )
 
 
-app.router.routes.append(WebSocketRoute("/operator/ws", _operator_ws))
+app.router.routes.extend(
+    [
+        WebSocketRoute("/operator/ws", _operator_ws),
+        WebSocketRoute("/cdp/page/{target_id}", _cdp_ws),
+    ]
+)

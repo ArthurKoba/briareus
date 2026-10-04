@@ -33,6 +33,7 @@ from management.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
+from management.browser_remote_debug import issue_browser_remote_debug_token
 from management.dashboard_state import build_dashboard_state
 from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
 from management.domain.configuration import ManagementConfig
@@ -125,6 +126,16 @@ class ViewportPayload(BaseModel):
     page_id: str = Field(min_length=1, max_length=255)
     width: int = Field(ge=320, le=7680)
     height: int = Field(ge=240, le=4320)
+
+
+class BrowserThemePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    color_scheme: str = Field(pattern="^(system|light|dark)$")
+
+
+class BrowserRemoteDebugPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page_id: str = Field(min_length=1, max_length=255)
 
 
 class FrontendTelemetryBatch(BaseModel):
@@ -827,6 +838,57 @@ def build_admin_api_router(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    @router.put("/browser/theme")
+    async def browser_set_theme(payload: BrowserThemePayload, request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            result = await api.web.set_theme(payload.color_scheme)
+            if api.realtime is not None:
+                await api.realtime.publish("browser.runtime", "theme.changed", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/browser/remote-debug")
+    async def browser_remote_debug(
+        payload: BrowserRemoteDebugPayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        try:
+            target = await api.web.debug_target(payload.page_id)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        target_id = str(target.get("target_id") or "")
+        if not target_id:
+            raise HTTPException(status_code=502, detail="browser target is unavailable")
+        token = issue_browser_remote_debug_token(
+            settings.session_secret, settings.admin_username, target_id
+        )
+        public_host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        if not public_host:
+            raise HTTPException(status_code=500, detail="public host is unavailable")
+        forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme).casefold()
+        secure = forwarded_proto == "https"
+        websocket_scheme = "wss" if secure else "ws"
+        devtools_parameter = "wss" if secure else "ws"
+        remote_path = f"/api/browser/cdp/{token}/page/{target_id}"
+        response: JsonObject = {
+            **target,
+            "expires_in_seconds": 300,
+            "websocket_url": f"{websocket_scheme}://{public_host}{remote_path}",
+            "devtools_url": (
+                "devtools://devtools/bundled/inspector.html?"
+                f"{devtools_parameter}={public_host}{remote_path}"
+            ),
+        }
+        if api.realtime is not None:
+            await api.realtime.publish(
+                "browser.runtime",
+                "remote_debug.issued",
+                {"page_id": payload.page_id, "target_id": target_id},
+            )
+        return response
+
     @router.put("/browser/viewport")
     async def browser_set_viewport(payload: ViewportPayload, request: Request) -> JsonObject:
         api = mutation(request)
@@ -915,8 +977,7 @@ def build_admin_api_router(
                         detail={
                             "code": "settings_conflict",
                             "message": (
-                                "settings changed since they were loaded; "
-                                "reload before saving"
+                                "settings changed since they were loaded; reload before saving"
                             ),
                             "current_revision": current["revision"],
                         },
@@ -989,6 +1050,7 @@ def build_admin_api_router(
             response["revision"] = settings_revision(response)
             await publish_management_event(api, "settings.updated", response)
             return response
+
     @router.post("/settings/cleanup-logs")
     async def settings_cleanup(request: Request) -> JsonObject:
         api = mutation(request)
