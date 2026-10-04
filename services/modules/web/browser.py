@@ -89,6 +89,7 @@ class BrowserManager:
         self._privileged_access_hooks: list[Callable[[bool], Awaitable[None]]] = []
         self._restart_hooks: list[Callable[[], Awaitable[None]]] = []
         self._developer_backend_connected = False
+        self._managed_user_scripts_extension_ids: set[str] = set()
         self._extension_registry = BrowserExtensionRegistry(
             self.profile_dir.parent / "dev-extensions.json",
             self.workspace.root,
@@ -470,30 +471,6 @@ class BrowserManager:
     def dev_extensions(self) -> list[JsonValue]:
         return [{"id": item.id, "path": item.path} for item in self._extension_registry.items()]
 
-    @staticmethod
-    def _extension_requests_user_scripts(path: str) -> bool:
-        manifest_path = Path(path) / "manifest.json"
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return False
-        if not isinstance(manifest, dict):
-            return False
-        for key in ("permissions", "optional_permissions"):
-            values = manifest.get(key)
-            if isinstance(values, list) and "userScripts" in values:
-                return True
-        return False
-
-    def _user_script_extension_ids(self, only_extension_id: str = "") -> list[str]:
-        normalized = only_extension_id.strip()
-        return [
-            item.id
-            for item in self._extension_registry.items()
-            if (not normalized or item.id == normalized)
-            and self._extension_requests_user_scripts(item.path)
-        ]
-
     async def _set_chromium_developer_state(
         self,
         enabled: bool,
@@ -507,8 +484,8 @@ class BrowserManager:
         page_id = self._register_page(page)
         try:
             await page.goto("chrome://extensions/", wait_until="domcontentloaded")
-            ids = (
-                self._user_script_extension_ids()
+            requested_ids = (
+                None
                 if extension_ids is None
                 else [value for value in extension_ids if value]
             )
@@ -527,8 +504,29 @@ class BrowserManager:
                     });
                   }
 
+                  let infos;
+                  if (extensionIds === null) {
+                    infos = await chrome.developerPrivate.getExtensionsInfo({
+                      includeDisabled: true,
+                      includeTerminated: true,
+                    });
+                  } else {
+                    infos = [];
+                    for (const extensionId of extensionIds) {
+                      try {
+                        infos.push(await chrome.developerPrivate.getExtensionInfo(extensionId));
+                      } catch {
+                        // The extension may have disappeared between installation/removal events.
+                      }
+                    }
+                  }
+
+                  const eligible = infos.filter(
+                    info => info?.userScriptsAccess?.isEnabled === true
+                  );
                   const extensions = [];
-                  for (const extensionId of extensionIds) {
+                  for (const info of eligible) {
+                    const extensionId = info.id;
                     try {
                       await chrome.developerPrivate.updateExtensionConfiguration({
                         extensionId,
@@ -558,12 +556,13 @@ class BrowserManager:
                   return {
                     inDeveloperMode: profile?.inDeveloperMode ?? null,
                     extensions,
+                    eligibleExtensionIds: eligible.map(info => info.id),
                   };
                 }
                 """,
                 {
                     "enabled": enabled,
-                    "extensionIds": ids,
+                    "extensionIds": requested_ids,
                     "updateProfileMode": update_profile_mode,
                 },
             )
@@ -579,6 +578,20 @@ class BrowserManager:
         payload = result if isinstance(result, dict) else {}
         extensions = payload.get("extensions")
         extension_items = extensions if isinstance(extensions, list) else []
+        eligible_raw = payload.get("eligibleExtensionIds")
+        eligible_ids = {
+            value
+            for value in eligible_raw if isinstance(value, str)
+        } if isinstance(eligible_raw, list) else set()
+        if extension_ids is None:
+            self._managed_user_scripts_extension_ids = eligible_ids
+        else:
+            for extension_id in extension_ids:
+                if extension_id in eligible_ids:
+                    self._managed_user_scripts_extension_ids.add(extension_id)
+                else:
+                    self._managed_user_scripts_extension_ids.discard(extension_id)
+
         failures = [
             item
             for item in extension_items
@@ -597,27 +610,24 @@ class BrowserManager:
         return {
             "in_developer_mode": payload.get("inDeveloperMode"),
             "user_scripts_enabled": enabled,
-            "user_scripts_extension_count": len(extension_items),
+            "user_scripts_extension_count": len(eligible_ids),
             "extensions": extension_items,
         }
 
     async def sync_dev_extension_user_scripts(self, extension_id: str) -> JsonObject:
-        ids = self._user_script_extension_ids(extension_id)
-        if not ids:
-            return {
-                "extension_id": extension_id,
-                "user_scripts_managed": False,
-                "user_scripts_enabled": False,
-            }
         result = await self._set_chromium_developer_state(
             self._developer_access_enabled,
-            extension_ids=ids,
+            extension_ids=[extension_id],
             update_profile_mode=False,
         )
         return {
             "extension_id": extension_id,
-            "user_scripts_managed": True,
-            "user_scripts_enabled": self._developer_access_enabled,
+            "user_scripts_managed": extension_id in self._managed_user_scripts_extension_ids,
+            "user_scripts_enabled": (
+                self._developer_access_enabled
+                if extension_id in self._managed_user_scripts_extension_ids
+                else False
+            ),
             **result,
         }
 
@@ -885,7 +895,9 @@ class BrowserManager:
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "dev_extensions": self.dev_extensions(),
-            "managed_user_scripts_extension_count": len(self._user_script_extension_ids()),
+            "managed_user_scripts_extension_count": len(
+                self._managed_user_scripts_extension_ids
+            ),
             "user_scripts_follow_developer_access": True,
             "observed": observed,
             "page_count": len(pages),
