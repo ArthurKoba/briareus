@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hmac
 import json
 import posixpath
@@ -11,7 +13,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
@@ -40,6 +42,7 @@ from management.application.services import (
 from management.dashboard_state import build_dashboard_state
 from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
 from management.domain.configuration import ManagementConfig
+from management.domain.telemetry import InvocationQuery
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.reverse import ReverseAdminClient
 from management.infrastructure.snapshot_worker import (
@@ -56,6 +59,33 @@ from management.realtime import RealtimeBus
 from management.telemetry_ingest import FrontendTelemetryProxy
 
 _SESSION_KEY = "management_admin"
+
+
+def _encode_call_cursor(occurred_at: datetime, invocation_id: str) -> str:
+    payload = json.dumps(
+        [occurred_at.astimezone(UTC).isoformat(), invocation_id],
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_call_cursor(value: str) -> tuple[datetime, str]:
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+        if not isinstance(decoded, list) or len(decoded) != 2:
+            raise ValueError("invalid cursor payload")
+        occurred_at = datetime.fromisoformat(str(decoded[0]))
+        invocation_id = str(decoded[1]).strip()
+        if not invocation_id:
+            raise ValueError("invalid cursor id")
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=UTC)
+        else:
+            occurred_at = occurred_at.astimezone(UTC)
+        return occurred_at, invocation_id
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise HTTPException(status_code=400, detail="invalid calls cursor") from exc
 
 
 @dataclass(frozen=True)
@@ -459,10 +489,52 @@ def build_admin_api_router(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @router.get("/calls")
-    async def calls(request: Request, limit: int = Query(100, ge=1, le=1000)) -> JsonObject:
+    async def calls(
+        request: Request,
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        cursor: str = Query("", max_length=512),
+        module: str = Query("", max_length=64),
+        tool: str = Query("", max_length=256),
+        provider: str = Query("", max_length=32),
+        account_id: str = Query("", max_length=128),
+        call_status: Literal["success", "error"] | None = Query(None, alias="status"),
+        search: str = Query("", max_length=256),
+    ) -> JsonObject:
         require_user(request)
-        items = await asyncio.to_thread(available().audit.recent, limit=limit)
-        return {"events": [item.model_dump(mode="json") for item in items], "count": len(items)}
+        cursor_at: datetime | None = None
+        cursor_id = ""
+        if cursor:
+            cursor_at, cursor_id = _decode_call_cursor(cursor)
+        page = await asyncio.to_thread(
+            available().audit.query,
+            InvocationQuery(
+                limit=limit,
+                offset=offset,
+                cursor_at=cursor_at,
+                cursor_id=cursor_id,
+                module=module.strip(),
+                tool=tool.strip(),
+                provider=provider.strip(),
+                account_id=account_id.strip(),
+                status=call_status,
+                search=search.strip(),
+            ),
+        )
+        next_cursor = (
+            _encode_call_cursor(page.next_cursor_at, page.next_cursor_id)
+            if page.next_cursor_at is not None and page.next_cursor_id
+            else ""
+        )
+        return {
+            "events": [item.model_dump(mode="json") for item in page.events],
+            "count": page.count,
+            "total": page.total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": page.has_more,
+            "next_cursor": next_cursor,
+        }
 
     @router.delete("/calls")
     async def clear_calls(request: Request) -> JsonObject:

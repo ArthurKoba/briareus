@@ -17,7 +17,7 @@ from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
 from management.domain.snapshots import CachedSnapshot
-from management.domain.telemetry import Invocation
+from management.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 
 from .ports import (
     AccountRepository,
@@ -244,6 +244,9 @@ class InvocationAuditService:
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
         return self.repository.recent(limit=limit)
+
+    def query(self, query: InvocationQuery) -> InvocationPage:
+        return self.repository.query(query)
 
     def clear(self) -> int:
         return self.repository.clear()

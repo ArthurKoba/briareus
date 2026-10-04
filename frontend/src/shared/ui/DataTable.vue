@@ -13,14 +13,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-vue-next"
 import { uiPreferences } from "@/shared/lib/preferences"
 import { isRowContentClick } from "@/shared/lib/table-interaction"
 
-export interface DataTableColumn {
-  title?: string
-  dataIndex?: string
-  key?: string
-  width?: number
-  sortable?: boolean
-  align?: "left" | "center" | "right"
-}
+import type { DataTableColumn } from "@/shared/ui/table/types"
 
 const props = withDefaults(defineProps<{
   columns: DataTableColumn[]
@@ -31,11 +24,13 @@ const props = withDefaults(defineProps<{
   virtual?: boolean
   scrollY?: number
   clickable?: boolean
+  framed?: boolean
 }>(), {
   loading: false,
   virtual: false,
   scrollY: 560,
   clickable: false,
+  framed: true,
 })
 
 const emit = defineEmits<{ endReached: []; rowClick: [record: any]; scrollPosition: [atTop: boolean] }>()
@@ -121,7 +116,10 @@ function onRowClick(event: MouseEvent, record: any): void {
 </script>
 
 <template>
-  <div class="ts-table overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgb(0_0_0_/_0.03)]">
+  <div
+    class="ts-table overflow-hidden bg-card"
+    :class="framed ? 'rounded-xl border border-border/70 shadow-[0_1px_2px_rgb(0_0_0_/_0.03)]' : ''"
+  >
     <div
       ref="scrollElement"
       class="relative overflow-auto"

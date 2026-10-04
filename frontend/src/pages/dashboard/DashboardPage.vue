@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
+import { CheckCircle2, XCircle } from "lucide-vue-next"
 
 import { managementApi, type DashboardState } from "@/shared/api/management"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatBytes } from "@/shared/lib/format"
+import { callStore } from "@/pages/calls/model/call-store"
+import { RelativeTime } from "@/shared/ui/relative-time"
+import { VirtualInfiniteTable, type DataTableColumn } from "@/shared/ui/table"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 import RefreshAction from "@/shared/ui/RefreshAction.vue"
 import StatCard from "@/shared/ui/StatCard.vue"
@@ -16,6 +20,17 @@ const error = ref("")
 let unsubscribe: undefined | (() => void)
 const synced = ref(false)
 const liveTransport = computed(() => eventBus.state.enabled && eventBus.state.status === "connected")
+const recentCalls = computed(() => callStore.state.recent.slice(0, 10))
+const recentCallColumns = computed<DataTableColumn[]>(() => [
+  { title: t("calls.time"), dataIndex: "occurred_at", key: "occurred_at", width: 128, sortable: false },
+  { title: t("calls.module"), dataIndex: "module", key: "module", width: 120, sortable: false },
+  { title: t("calls.tool"), dataIndex: "tool", key: "tool", sortable: false },
+  { title: t("common.status"), dataIndex: "status", key: "status", width: 100, sortable: false },
+  { title: t("calls.duration"), dataIndex: "duration_ms", key: "duration_ms", width: 105, sortable: false, align: "right" },
+])
+
+function openCalls(): void { location.hash = "calls" }
+
 const staleSources = computed(() => {
   if (!data.value) return [] as string[]
   const items: string[] = []
@@ -132,6 +147,36 @@ onBeforeUnmount(() => unsubscribe?.())
           <div class="mt-1 text-xl font-semibold">{{ value }}</div>
         </div>
       </div>
+    </section>
+
+    <section class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div class="border-b border-border/70 px-4 py-3">
+        <h2 class="text-sm font-semibold">{{ t("nav.calls") }}</h2>
+      </div>
+      <VirtualInfiniteTable
+        :columns="recentCallColumns"
+        :data-source="recentCalls"
+        :loading="callStore.state.recentLoading"
+        :has-more="false"
+        :framed="false"
+        :row-key="(record: any) => record.id"
+        :scroll-y="360"
+      >
+        <template #bodyCell="{ column, record, value }">
+          <template v-if="column.key === 'occurred_at'"><RelativeTime :value="record.occurred_at" :interval-ms="2000" /></template>
+          <template v-else-if="column.key === 'status'">
+            <span class="inline-flex items-center gap-1.5" :class="record.status === 'success' ? 'text-emerald-500' : 'text-destructive'">
+              <CheckCircle2 v-if="record.status === 'success'" class="size-3.5" /><XCircle v-else class="size-3.5" />
+              <span>{{ record.status }}</span>
+            </span>
+          </template>
+          <template v-else-if="column.key === 'duration_ms'"><span class="tabular-nums">{{ Number(record.duration_ms).toFixed(1) }} ms</span></template>
+          <template v-else><span class="truncate">{{ value ?? "—" }}</span></template>
+        </template>
+      </VirtualInfiniteTable>
+      <button type="button" class="flex w-full items-center justify-center border-t border-border/70 px-4 py-3 text-sm font-medium text-primary hover:bg-accent/50" @click="openCalls">
+        {{ t("nav.calls") }} →
+      </button>
     </section>
   </div>
 </template>
