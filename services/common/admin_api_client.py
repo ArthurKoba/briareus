@@ -24,20 +24,20 @@ from .runtime_policy_contracts import (
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
-from .settings import ManagementClientSettings, ValkeySettings
+from .settings import AdminApiClientSettings, ValkeySettings
 
 
-class ManagementClientError(RuntimeError):
+class AdminApiClientError(RuntimeError):
     pass
 
 
-_TRACER = trace.get_tracer("mcp-bridge.management-client")
+_TRACER = trace.get_tracer("mcp-bridge.admin-api-client")
 
 
-class ManagementClient:
+class AdminApiClient:
     def __init__(
         self,
-        settings: ManagementClientSettings,
+        settings: AdminApiClientSettings,
         *,
         cache: CacheBackend | None = None,
         cache_settings: ValkeySettings | None = None,
@@ -46,13 +46,13 @@ class ManagementClient:
         self.service_token = settings.service_token
         self.timeout_seconds = settings.timeout_seconds
         if not self.url:
-            raise ValueError("MANAGEMENT_URL is required")
+            raise ValueError("ADMIN_API_URL is required")
         self.cache_settings = cache_settings or ValkeySettings()
         self.cache = cache or SharedCache(self.cache_settings)
         self.cache_keys = CacheKeys(self.cache)
         parsed = urllib.parse.urlsplit(self.url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("MANAGEMENT_URL must be an absolute HTTP(S) URL")
+            raise ValueError("ADMIN_API_URL must be an absolute HTTP(S) URL")
         self._scheme = parsed.scheme
         self._hostname = parsed.hostname
         self._port = parsed.port
@@ -61,7 +61,7 @@ class ManagementClient:
             self._new_connection,
             max_connections=8,
             acquire_timeout=self.timeout_seconds,
-            span_name="management.http",
+            span_name="admin-api.http",
         )
 
     def _new_connection(self) -> http.client.HTTPConnection:
@@ -80,7 +80,7 @@ class ManagementClient:
 
     def _target(self, path: str, query: dict[str, str] | None = None) -> str:
         if not path.startswith("/"):
-            raise ValueError("management path must start with /")
+            raise ValueError("admin-api path must start with /")
         target = self._base_path + path
         if query:
             target += "?" + urllib.parse.urlencode(query)
@@ -114,15 +114,15 @@ class ManagementClient:
                 reconnect_retries=1 if normalized_method in {"GET", "HEAD"} else 0,
             )
         except HttpTransportError as exc:
-            raise ManagementClientError(f"management transport error: {exc}") from exc
+            raise AdminApiClientError(f"admin-api transport error: {exc}") from exc
         if response.status >= 400:
             detail = response.body[:2048].decode("utf-8", "replace")
-            raise ManagementClientError(f"management HTTP {response.status}: {detail}")
+            raise AdminApiClientError(f"admin-api HTTP {response.status}: {detail}")
         if not expect_body or not response.body:
             return {}
         return json_object(
-            json_loads(response.body, context="management response"),
-            context="management response",
+            json_loads(response.body, context="admin-api response"),
+            context="admin-api response",
         )
 
     def list_accounts(
@@ -167,13 +167,13 @@ class ManagementClient:
         path = "/internal/accounts/" + urllib.parse.quote(value, safe="") + "/resolve"
         try:
             data = self._request("GET", path, query=query)
-        except ManagementClientError as exc:
-            if "management HTTP 404:" not in str(exc):
+        except AdminApiClientError as exc:
+            if "admin-api HTTP 404:" not in str(exc):
                 raise
             accounts = self.list_accounts(provider=provider)
             aliases = sorted(account.alias for account in accounts.accounts if account.alias)
             hint = f"; use stable account alias instead: {', '.join(aliases)}" if aliases else ""
-            raise ManagementClientError(
+            raise AdminApiClientError(
                 f"{provider} account selector not found: {value}{hint}"
             ) from exc
 

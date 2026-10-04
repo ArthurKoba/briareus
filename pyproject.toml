@@ -43,7 +43,7 @@ packages = [
   "services/auth_service",
   "services/bridge",
   "services/common",
-  "services/management",
+  "services/admin_api",
   "services/modules",
 ]
 

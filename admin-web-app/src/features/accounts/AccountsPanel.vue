@@ -15,9 +15,9 @@ import {
 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi, type AccountPayload, type AccountRecord } from "@/shared/api/management"
+import { adminApi, type AccountPayload, type AccountRecord } from "@/shared/api/admin"
 import { accountStore } from "./model/account-store"
-import { ManagementApiError } from "@/shared/api/error"
+import { AdminApiError } from "@/shared/api/error"
 import { formatDate } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
 import { accountConnectionChanged, accountDraftDirty } from "./model/account-draft"
@@ -55,7 +55,7 @@ const discardConfirmOpen = ref(false)
 const accountConflict = ref("")
 let draftHydrating = false
 let modalVerifyRun = 0
-const verification = useAccountVerification(managementApi.verifyAccount)
+const verification = useAccountVerification(adminApi.verifyAccount)
 
 const initialProvider = props.defaultProvider ?? props.providers[0] ?? "github"
 const form = reactive<AccountPayload>({
@@ -300,7 +300,7 @@ async function verifyCurrent(): Promise<void> {
   modalVerifyError.value = ""
   verifiedDraftRevision.value = ""
   try {
-    const result = await managementApi.verifyAccountCandidate({
+    const result = await adminApi.verifyAccountCandidate({
       ...form,
       account_id: editing.value?.id,
       draft_revision: revision,
@@ -323,13 +323,13 @@ async function save(): Promise<void> {
   accountConflict.value = ""
   try {
     const saved = editing.value
-      ? await managementApi.updateAccount(editing.value, currentPayload())
-      : await managementApi.createAccount(currentPayload())
+      ? await adminApi.updateAccount(editing.value, currentPayload())
+      : await adminApi.createAccount(currentPayload())
     accountStore.upsert(saved)
     closeEditor()
     notifications.success(String(t("notifications.saved")))
   } catch (caught) {
-    if (caught instanceof ManagementApiError && caught.status === 409 && caught.code === "account_conflict") {
+    if (caught instanceof AdminApiError && caught.status === 409 && caught.code === "account_conflict") {
       accountConflict.value = String(t("accounts.accountConflict"))
     } else {
       error.value = caught instanceof Error ? caught.message : "Unable to save account"
@@ -341,7 +341,7 @@ async function save(): Promise<void> {
 
 async function remove(record: AccountRecord): Promise<void> {
   if (!window.confirm(String(t("accounts.deleteConfirm", { alias: record.alias })))) return
-  await managementApi.deleteAccount(record)
+  await adminApi.deleteAccount(record)
   accountStore.remove(record.provider, record.id)
   notifications.success(String(t("notifications.deleted")), record.alias)
 }

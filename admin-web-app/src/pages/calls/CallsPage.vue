@@ -4,7 +4,7 @@ import { CheckCircle2, Trash2, XCircle } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 import { Select, Switch } from "ant-design-vue"
 
-import { managementApi, type AccountRecord, type InvocationRecord } from "@/shared/api/management"
+import { adminApi, type AccountRecord, type InvocationRecord } from "@/shared/api/admin"
 import { formatDate } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
 import AppDialog from "@/shared/ui/AppDialog.vue"
@@ -72,13 +72,13 @@ function accountDisplay(item: InvocationRecord): string {
 
 async function clearAll(): Promise<void> {
   if (!window.confirm(String(t("calls.clearConfirm")))) return
-  const result = await managementApi.clearCalls()
+  const result = await adminApi.clearCalls()
   callStore.clear()
   notifications.success(String(t("notifications.deleted")), `${result.deleted} ${t("nav.calls")}`)
 }
 
 async function remove(item: InvocationRecord): Promise<void> {
-  await managementApi.deleteCall(item.id)
+  await adminApi.deleteCall(item.id)
   callStore.remove(item.id)
   notifications.success(String(t("notifications.deleted")))
 }

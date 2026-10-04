@@ -1,4 +1,4 @@
-import type { InvocationRecord } from "@/shared/api/management"
+import type { InvocationRecord } from "@/shared/api/admin"
 
 export const CALL_CHUNK_SIZE = 100
 

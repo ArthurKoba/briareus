@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from common.management_client import ManagementClient
+from common.admin_api_client import AdminApiClient
 from common.models import JsonObject, json_array
 from common.settings import GitLabSettings
 
@@ -13,16 +13,16 @@ from .models import GitLabProfile
 class GitLabRuntimeContext:
     def __init__(
         self,
-        management: ManagementClient,
+        admin_api: AdminApiClient,
         settings: GitLabSettings,
     ) -> None:
-        self.management = management
+        self.admin_api = admin_api
         self.settings = settings
         self._lock = threading.Lock()
         self._client_cache: dict[str, tuple[str, GitLabClient]] = {}
 
     def accounts(self) -> JsonObject:
-        result = self.management.list_accounts(provider="gitlab").to_json()
+        result = self.admin_api.list_accounts(provider="gitlab").to_json()
         accounts = result.get("accounts")
         if isinstance(accounts, list):
             for account in accounts:
@@ -110,7 +110,7 @@ class GitLabRuntimeContext:
                 protected_branches=self.settings.protected_branches,
                 anonymous_only=True,
             )
-        account = self.management.resolve_account(account_id, provider="gitlab")
+        account = self.admin_api.resolve_account(account_id, provider="gitlab")
         with self._lock:
             cached = self._client_cache.get(account.id)
             if cached is not None and cached[0] == account.updated_at:

@@ -1,4 +1,4 @@
-import type { AccountPayload } from "@/shared/api/management"
+import type { AccountPayload } from "@/shared/api/admin"
 
 export interface NormalizedAccountDraft {
   alias: string

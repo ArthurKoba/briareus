@@ -5,11 +5,11 @@ from common.runtime_annotations import (
     READ_EXTERNAL,
     WRITE_EXTERNAL,
 )
-from common.runtime_common import build_private_mcp, management_client, private_http_app
+from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
 from common.runtime_policy_contracts import GitLabRuntimePolicy
 from common.settings import (
+    AdminApiClientSettings,
     GitLabSettings,
-    ManagementClientSettings,
     PrivateRuntimeSettings,
 )
 
@@ -18,15 +18,15 @@ from .tool_context import GitLabRuntimeContext
 from .workflow_guard import GitLabLocalFirstMiddleware
 
 _private_settings = PrivateRuntimeSettings()
-_management = management_client(ManagementClientSettings())
-_context = GitLabRuntimeContext(_management, GitLabSettings())
+_admin_api = admin_api_client(AdminApiClientSettings())
+_context = GitLabRuntimeContext(_admin_api, GitLabSettings())
 
-mcp = build_private_mcp("gitlab", _management)
+mcp = build_private_mcp("gitlab", _admin_api)
 
 
 def _gitlab_runtime_policy() -> GitLabRuntimePolicy:
     try:
-        return _management.gitlab_runtime_policy()
+        return _admin_api.gitlab_runtime_policy()
     except Exception:
         return GitLabRuntimePolicy()
 

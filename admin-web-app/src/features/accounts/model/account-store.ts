@@ -1,6 +1,6 @@
 import { reactive, readonly, watch, type WatchStopHandle } from "vue"
 
-import { managementApi, type AccountRecord } from "@/shared/api/management"
+import { adminApi, type AccountRecord } from "@/shared/api/admin"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 
 const state = reactive({
@@ -75,7 +75,7 @@ async function reconcile(notifyErrors = false): Promise<void> {
   state.loading = true
   state.error = ""
   try {
-    const response = await managementApi.accounts({ notifyErrors })
+    const response = await adminApi.accounts({ notifyErrors })
     if (run !== requestRun) return
     if (startedAtEpoch !== eventEpoch) {
       scheduleReconcile(0)
@@ -112,7 +112,7 @@ function setSessionActive(active: boolean): void {
 function start(): void {
   if (started) return
   started = true
-  unsubscribe = eventBus.subscribe("management.events", handle)
+  unsubscribe = eventBus.subscribe("admin.events", handle)
   stopStatus = watch(
     () => [eventBus.state.status, eventBus.state.enabled, eventBus.state.active] as const,
     ([status], [previousStatus]) => {

@@ -3,24 +3,24 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from starlette.applications import Starlette
 
-from .management_client import ManagementClient
+from .admin_api_client import AdminApiClient
 from .observability import announce_runtime_started, build_observability
-from .settings import ManagementClientSettings, PrivateRuntimeSettings
+from .settings import AdminApiClientSettings, PrivateRuntimeSettings
 from .tool_observability import ToolObservabilityMiddleware
 
 
-def management_client(settings: ManagementClientSettings) -> ManagementClient:
-    return ManagementClient(settings)
+def admin_api_client(settings: AdminApiClientSettings) -> AdminApiClient:
+    return AdminApiClient(settings)
 
 
 def build_private_mcp(
     name: str,
-    management: ManagementClient | None = None,
+    admin_api: AdminApiClient | None = None,
     *,
     observability_scope: str | None = None,
 ) -> FastMCP:
     scope = observability_scope or name
-    sink = build_observability(scope, management=management)
+    sink = build_observability(scope, admin_api=admin_api)
     announce_runtime_started(sink, scope)
     return FastMCP(name, middleware=[ToolObservabilityMiddleware(scope, sink)])
 

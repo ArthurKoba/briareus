@@ -1,6 +1,6 @@
 import { reactive, readonly, watch, type WatchStopHandle } from "vue"
 
-import { managementApi, type InvocationQuery, type InvocationRecord } from "@/shared/api/management"
+import { adminApi, type InvocationQuery, type InvocationRecord } from "@/shared/api/admin"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { CALL_CHUNK_SIZE, enqueueCalls, mergeCallJournal } from "./call-journal"
 
@@ -142,7 +142,7 @@ async function reconcileRecent(): Promise<void> {
   const startedAtEpoch = eventEpoch
   state.recentLoading = true
   try {
-    const page = await managementApi.calls({ limit: RECENT_CACHE_SIZE }, { notifyErrors: false })
+    const page = await adminApi.calls({ limit: RECENT_CACHE_SIZE }, { notifyErrors: false })
     if (run !== recentRun) return
     state.recent = startedAtEpoch === eventEpoch
       ? mergeCallJournal([], page.events, RECENT_CACHE_SIZE)
@@ -162,7 +162,7 @@ async function reconcile(notifyErrors = false): Promise<void> {
   state.loading = true
   state.error = ""
   try {
-    const calls = await managementApi.calls(queryFilters({ limit: CALL_CHUNK_SIZE }), { notifyErrors })
+    const calls = await adminApi.calls(queryFilters({ limit: CALL_CHUNK_SIZE }), { notifyErrors })
     if (run !== requestRun) return
     if (startedAtEpoch !== eventEpoch) {
       scheduleReconcile(0)
@@ -189,7 +189,7 @@ async function loadMore(): Promise<void> {
   if (state.loading || state.loadingMore || !state.hasMore || !state.nextCursor) return
   state.loadingMore = true
   try {
-    const page = await managementApi.calls(queryFilters({ limit: CALL_CHUNK_SIZE, cursor: state.nextCursor }), { notifyErrors: false })
+    const page = await adminApi.calls(queryFilters({ limit: CALL_CHUNK_SIZE, cursor: state.nextCursor }), { notifyErrors: false })
     state.rows = mergeCallJournal(state.rows, page.events)
     state.nextCursor = page.next_cursor
     state.hasMore = page.has_more
@@ -208,7 +208,7 @@ async function loadPage(page = state.page, notifyErrors = false): Promise<void> 
   state.pageLoading = true
   state.error = ""
   try {
-    const result = await managementApi.calls(queryFilters({
+    const result = await adminApi.calls(queryFilters({
       limit: state.pageSize,
       offset: (normalizedPage - 1) * state.pageSize,
     }), { notifyErrors })

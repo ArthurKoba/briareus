@@ -1,6 +1,6 @@
 # Architecture overview
 
-MCP Bridge separates authorization, public routing, management and provider execution.
+MCP Bridge separates authorization, public routing, Admin API and provider execution.
 
 ```mermaid
 flowchart TB
@@ -14,7 +14,7 @@ flowchart TB
     GW --> FI[files]
     GW --> WEB[web]
     GW --> AN[analysis]
-    GW --> CP[management]
+    GW --> CP[admin-api]
 
     GH --> CP
     GL --> CP
@@ -23,7 +23,7 @@ flowchart TB
     AN --> GD[ghidra private runtime]
 
     AU --> OAUTH[(auth state)]
-    CP --> DB[(management SQLite)]
+    CP --> DB[(Admin API SQLite)]
     FI --> WS[(shared workspace)]
     CU --> WS
 ```
@@ -32,13 +32,13 @@ flowchart TB
 
 - `auth_service` — OAuth authorization server, DCR, GitHub login, resource audiences
   and private token verification.
-- `bridge` — public edge, MCP routing, protected-resource metadata, auth/management reverse
+- `bridge` — public edge, MCP routing, protected-resource metadata, auth/admin-api reverse
   proxies.
 - `common` — provider-neutral runtime contracts and typed settings.
-- `management` — provider account registry, encrypted credentials, session/API/realtime control plane and telemetry.
+- `admin-api` — provider account registry, encrypted credentials, session/API/realtime control plane and telemetry.
 - `modules.github` — GitHub repository/review/actions capabilities.
 - `modules.gitlab` — GitLab project/repository/CI capabilities.
-- `modules.files` — path-based shared workspace file management.
+- `modules.files` — path-based shared workspace file administration.
 - `modules.web` — structured HTTP, persistent browser and DevTools operations.
 - `modules.analysis` — public structured-analysis facade.
 - `modules.ghidra` — private native backend adapter.

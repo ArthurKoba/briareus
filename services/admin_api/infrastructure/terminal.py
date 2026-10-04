@@ -60,7 +60,7 @@ class TerminalAdminClient:
         self.timeout_seconds = timeout_seconds
         self._pool = PersistentMcpClientPool(
             lambda: Client(self.url, timeout=self.timeout_seconds),
-            name="management-terminal",
+            name="admin-api-terminal",
             size=3,
         )
 

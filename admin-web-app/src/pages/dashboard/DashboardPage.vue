@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { CheckCircle2, XCircle } from "lucide-vue-next"
 
-import { managementApi, type DashboardState } from "@/shared/api/management"
+import { adminApi, type DashboardState } from "@/shared/api/admin"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatBytes } from "@/shared/lib/format"
 import { callStore } from "@/pages/calls/model/call-store"
@@ -58,7 +58,7 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ""
   try {
-    const snapshot = await managementApi.dashboard()
+    const snapshot = await adminApi.dashboard()
     if (run !== loadRun) return
     // A newer remote snapshot always wins over a slower REST bootstrap/refresh.
     if (startedAtEpoch === eventEpoch) data.value = snapshot

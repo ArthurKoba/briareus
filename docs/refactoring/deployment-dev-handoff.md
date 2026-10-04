@@ -28,14 +28,14 @@ Acceptance:
 
 Before parallel refactor work expands again:
 
-- keep local-first guidance enabled in Management application settings;
+- keep local-first guidance enabled in Admin API application settings;
 - substantial code changes happen in persistent local workspaces;
 - agents may make local commits freely, then squash/reorder before publication when useful;
 - publish the validated branch once through authenticated Git transport;
 - if Git transport is unavailable, use one batched `github_agent_commit_files` fallback instead of repeated file commits;
 - create the PR only after the branch is ready for integration;
 - use GitHub REST tools primarily for PR/review/issues/checks/control-plane work;
-- remote source/history mutations can be disabled from Management application settings after the local Git transport is accepted;
+- remote source/history mutations can be disabled from Admin API application settings after the local Git transport is accepted;
 
 ### P1 — synchronize `main` into `dev`
 
@@ -52,7 +52,7 @@ Create a separate Coolify Git-backed Docker Compose resource on branch `dev`.
 It must not share production mutable state:
 
 - separate named volumes;
-- separate generated Management/auth secrets;
+- separate generated Admin API/auth secrets;
 - separate Valkey;
 - separate browser profile;
 - separate public Dev domain;

@@ -5,11 +5,11 @@ from common.runtime_annotations import (
     READ_EXTERNAL,
     WRITE_EXTERNAL,
 )
-from common.runtime_common import build_private_mcp, management_client, private_http_app
+from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
 from common.runtime_policy_contracts import GitHubRuntimePolicy
 from common.settings import (
+    AdminApiClientSettings,
     GitHubPolicySettings,
-    ManagementClientSettings,
     PrivateRuntimeSettings,
 )
 
@@ -24,16 +24,16 @@ from .tool_context import GitHubRuntimeContext
 from .workflow_guard import GitHubLocalFirstMiddleware
 
 _private_settings = PrivateRuntimeSettings()
-_management = management_client(ManagementClientSettings())
+_admin_api = admin_api_client(AdminApiClientSettings())
 _policy = GitHubPolicySettings()
-_context = GitHubRuntimeContext(_management, _policy)
+_context = GitHubRuntimeContext(_admin_api, _policy)
 
-mcp = build_private_mcp("github", _management)
+mcp = build_private_mcp("github", _admin_api)
 
 
 def _github_runtime_policy() -> GitHubRuntimePolicy:
     try:
-        return _management.github_runtime_policy()
+        return _admin_api.github_runtime_policy()
     except Exception:
         return GitHubRuntimePolicy()
 

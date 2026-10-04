@@ -1,15 +1,15 @@
-export type ManagementApiErrorKind = "http" | "network" | "aborted"
+export type AdminApiErrorKind = "http" | "network" | "aborted"
 
-export class ManagementApiError extends Error {
+export class AdminApiError extends Error {
   constructor(
     message: string,
-    readonly kind: ManagementApiErrorKind,
+    readonly kind: AdminApiErrorKind,
     readonly status: number | null = null,
     readonly code: string = "",
     readonly requestId: string = "",
     options: ErrorOptions = {},
   ) {
     super(message, options)
-    this.name = "ManagementApiError"
+    this.name = "AdminApiError"
   }
 }

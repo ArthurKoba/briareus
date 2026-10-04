@@ -7,7 +7,7 @@ mcp-bridge/
 ├── services/
 │   ├── bridge/                 # public gateway only
 │   ├── common/                 # shared contracts/settings/runtime primitives
-│   ├── management/
+│   ├── admin_api/
 │   │   ├── domain/
 │   │   ├── application/
 │   │   ├── infrastructure/
@@ -21,7 +21,7 @@ mcp-bridge/
 │       └── terminal/
 │   ├── bridge/
 │   ├── common/
-│   ├── management/
+│   ├── admin_api/
 │   └── modules/
 ├── Dockerfile
 ├── docker-compose.yaml
@@ -30,7 +30,7 @@ mcp-bridge/
 └── README.md
 ```
 
-`bridge` owns only OAuth, public MCP surfaces and composition. `management` owns dynamic
+`bridge` owns only OAuth, public MCP surfaces and composition. `admin-api` owns dynamic
 provider account persistence and encrypted credentials. Each provider module owns its API
 semantics and consumes account data only through the common account port/client.
 

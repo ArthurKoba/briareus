@@ -115,7 +115,7 @@ For local capabilities:
 
 Provider replacement should not produce a new hand-written wrapper for every upstream. Introduce one generic application port capable of:
 
-- resolving `account_id` through Management/Valkey;
+- resolving `account_id` through Admin API/Valkey;
 - selecting an upstream URL or process configuration;
 - injecting `Authorization`, provider headers or process environment without exposing secrets to the model;
 - adding an explicit `account_id` parameter to upstream tools when the public surface is multi-account;
@@ -153,7 +153,7 @@ Current GitHub is approximately 6.4k Python LOC and implements repository conten
 
 GitHub now maintains the official `github-mcp-server`. Its HTTP mode is explicitly designed for reverse-proxy/container use and accepts an `Authorization: Bearer ...` credential per request. It supports toolsets, individual tool selection, exclusions, read-only mode, lockdown mode and permission/scope filtering.
 
-That maps well to our multi-account architecture: Management remains the credential authority, while a generic proxy injects the selected account's bearer credential into the upstream HTTP request. We do **not** need the upstream stdio server's own login flow for this deployment model.
+That maps well to our multi-account architecture: Admin API remains the credential authority, while a generic proxy injects the selected account's bearer credential into the upstream HTTP request. We do **not** need the upstream stdio server's own login flow for this deployment model.
 
 Do not delete all Koba GitHub code. Keep extensions whose semantics are ours rather than GitHub's:
 
@@ -162,7 +162,7 @@ Do not delete all Koba GitHub code. Keep extensions whose semantics are ours rat
 - protected/reserved branch policy and expected-head CAS checks;
 - local checkout into the shared workspace;
 - any history identity rewriting / reserved-branch maintenance that is deliberately narrower than ordinary GitHub operations;
-- account/capability inspection specific to Management.
+- account/capability inspection specific to Admin API.
 
 The migration objective is to delete ordinary GitHub API plumbing and preserve policy orchestration.
 
@@ -359,7 +359,7 @@ Adapters:
 ### Presentation
 
 - public MCP resources/endpoints;
-- Management API;
+- Admin API;
 - frontend/admin API;
 - operator WebSockets.
 
@@ -435,7 +435,7 @@ Do these after the high-value provider migrations. They are local privileged inf
 7. **Keep old path during migration.** Run compatibility/shadow tests and delete the legacy provider only after runtime acceptance.
 8. **Security beats standardization.** A reference/community MCP is not automatically safer than our small hardened implementation.
 9. **Prefer upstream resources/prompts as well as tools.** Do not flatten MCP back into tools-only wrappers when the upstream exposes richer protocol primitives.
-10. **Do not couple the frontend to upstream provider schemas.** Management/frontend use Koba control-plane APIs; provider MCP catalogs are agent-facing.
+10. **Do not couple the frontend to upstream provider schemas.** Admin API/frontend use Koba control-plane APIs; provider MCP catalogs are agent-facing.
 
 ## Acceptance metrics for the refactor
 

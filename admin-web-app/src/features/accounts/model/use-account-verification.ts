@@ -1,6 +1,6 @@
 import { reactive } from "vue"
 
-import type { AccountRecord } from "@/shared/api/management"
+import type { AccountRecord } from "@/shared/api/admin"
 
 type VerificationState =
   | { status: "idle" }

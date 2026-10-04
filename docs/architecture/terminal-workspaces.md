@@ -265,7 +265,7 @@ already has authorized repository/infrastructure mutation tools.
 Reuse current OpenTelemetry integration with `mcp.scope=terminal`.
 
 Terminal intentionally does not send command arguments, stdin or job output into the
-Management MCP-call payload audit. Durable job metadata/output is already retained in the
+Admin API MCP-call payload audit. Durable job metadata/output is already retained in the
 terminal workspace, while OpenTelemetry records operational metrics without command bodies.
 
 Useful metrics:
@@ -287,7 +287,7 @@ Do not export command bodies, stdin, credentials or full output as telemetry att
 4. jobs with durable cursor/delta logs;
 5. PTY input/resize on interactive jobs;
 6. shared Files/Curl workspace access;
-7. compact Management/Admin view;
+7. compact Admin API/Admin view;
 8. telemetry/tests;
 9. validate UART by passing one real device and running it as an interactive job.
 

@@ -15,12 +15,12 @@ from common.browser_remote_debug import (
     verify_browser_remote_debug_token,
 )
 from common.runtime_annotations import READ_EXTERNAL, READ_ONLY_LOCAL, WRITE_EXTERNAL
-from common.runtime_common import build_private_mcp, management_client, private_http_app
+from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
 from common.settings import (
+    AdminApiClientSettings,
     BrowserSettings,
     CurlSettings,
     FileSettings,
-    ManagementClientSettings,
     PrivateRuntimeSettings,
 )
 from common.websocket_proxy import relay_websocket
@@ -35,13 +35,13 @@ from .operator import browser_operator_websocket
 from .tools import register_curl_tools
 
 _private_settings = PrivateRuntimeSettings()
-_management = management_client(ManagementClientSettings())
+_admin_api = admin_api_client(AdminApiClientSettings())
 _file_settings = FileSettings()
 _curl_settings = CurlSettings()
 _browser_settings = BrowserSettings()
 _browser_profile = DEFAULT_BROWSER_DESKTOP_PROFILE
 
-mcp = build_private_mcp("web", _management)
+mcp = build_private_mcp("web", _admin_api)
 _workspace = WorkspaceFileStore(_file_settings.workspace_root)
 _curl_binary = resolve_curl_binary(_curl_settings)
 _browser = BrowserManager(
@@ -92,7 +92,7 @@ def _private_service_authorized(websocket: WebSocket) -> bool:
     authorization = websocket.headers.get("authorization", "")
     scheme, _, token = authorization.partition(" ")
     supplied = token.strip() if scheme.casefold() == "bearer" else ""
-    expected = _management.service_token
+    expected = _admin_api.service_token
     return bool(supplied and expected and hmac.compare_digest(supplied, expected))
 
 
@@ -118,7 +118,7 @@ async def _cdp_ui_http(request: Request) -> Response:
     try:
         verify_browser_remote_debug_token(
             token,
-            _management.service_token,
+            _admin_api.service_token,
             None,
             target_id,
             max_age_seconds=BROWSER_REMOTE_DEBUG_TTL_SECONDS,
@@ -143,7 +143,7 @@ async def _cdp_ui_http(request: Request) -> Response:
         except UnicodeDecodeError:
             pass
         else:
-            public_prefix = f"/api/browser/devtools/{token}/page/{target_id}"
+            public_prefix = f"/v1/browser/devtools/{token}/page/{target_id}"
             text = text.replace("/devtools/", f"{public_prefix}/devtools/")
             body = text.encode("utf-8")
     headers = {
@@ -160,7 +160,7 @@ async def _operator_ws(websocket: WebSocket) -> None:
     await browser_operator_websocket(
         websocket,
         browser=_browser,
-        service_token=_management.service_token,
+        service_token=_admin_api.service_token,
     )
 
 

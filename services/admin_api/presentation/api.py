@@ -5,6 +5,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
+from admin_api.application.services import (
+    AccountService,
+    InvocationAuditService,
+    OAuthSessionService,
+    RuntimeSettingsService,
+)
+from admin_api.domain.accounts import Account, AuthType, Provider
+from admin_api.domain.telemetry import Invocation
 from common.account_contracts import (
     AccountList,
     GitHubAuthenticatedReaderSync,
@@ -13,14 +21,6 @@ from common.account_contracts import (
 )
 from common.models import JsonObject
 from common.oauth_session_contracts import OAuthSessionEvent
-from management.application.services import (
-    AccountService,
-    InvocationAuditService,
-    OAuthSessionService,
-    RuntimeSettingsService,
-)
-from management.domain.accounts import Account, AuthType, Provider
-from management.domain.telemetry import Invocation
 
 
 class ApiServices:

@@ -109,7 +109,7 @@ demonstrates a need.
 
 ### Admin and observability
 
-Management/Admin gets a compact Terminal section showing:
+Admin API/Admin gets a compact Terminal section showing:
 
 - workspaces and storage usage;
 - running/recent jobs;

@@ -2,7 +2,7 @@
 
 Status: parity completed and legacy Starlette Admin removed after frontend acceptance.
 
-This audit compares the legacy `services/management/presentation/admin.py` surface with the typed management API and authenticated realtime/browser surfaces. The target is functional parity, not removal of legacy routes in this change.
+This audit compares the legacy `services/admin_api/presentation/admin.py` surface with the typed Admin API and authenticated realtime/browser surfaces. The target is functional parity, not removal of legacy routes in this change.
 
 | Legacy surface | Legacy operation | Replacement surface | Status |
 | --- | --- | --- | --- |
@@ -35,10 +35,10 @@ This audit compares the legacy `services/management/presentation/admin.py` surfa
 
 Additional migration surfaces not present in legacy Admin:
 
-- `WS /admin/api/realtime`: session-authenticated versioned event bus with subscribe/unsubscribe. Topics include `mcp.calls`, `system.metrics`, `system.notifications`, `browser.runtime`, and `management.events`.
+- `WS /admin/api/realtime`: session-authenticated versioned event bus with subscribe/unsubscribe. Topics include `mcp.calls`, `system.metrics`, `system.notifications`, `browser.runtime`, and `admin.events`.
 - Valkey-backed realtime fanout and short-lived snapshots, with process-local fallback when Valkey is unavailable.
 - `POST /admin/api/telemetry`: authenticated frontend telemetry batch ingest with redaction, bounded buffering and server-side upstream forwarding.
-- Normalized JSON error envelope for `/admin/api/*`; 401/403 represent authorization failures, while 502/503 do not clear the management session.
+- Normalized JSON error envelope for `/admin/api/*`; 401/403 represent authorization failures, while 502/503 do not clear the administration session.
 
 ## Parity conclusion
 

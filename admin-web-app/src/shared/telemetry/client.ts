@@ -1,6 +1,6 @@
 import { reactive, readonly } from "vue"
 
-import { runtimeConfig } from "@/shared/config/runtime"
+import { adminApiUrl, runtimeConfig } from "@/shared/config/runtime"
 import { uiPreferences } from "@/shared/lib/preferences"
 
 export type TelemetryLevel = "debug" | "info" | "warn" | "error"
@@ -72,14 +72,8 @@ function safeApiPath(path: string): string {
   }
 }
 
-function telemetryEndpoint(): string | null {
-  try {
-    const endpoint = new URL(runtimeConfig.telemetry.endpoint, location.origin)
-    if (endpoint.origin !== location.origin) return null
-    return `${endpoint.pathname}${endpoint.search}`
-  } catch {
-    return null
-  }
+function telemetryEndpoint(): string {
+  return adminApiUrl("/telemetry")
 }
 
 function sampled(): boolean {
@@ -131,7 +125,7 @@ async function flush(): Promise<void> {
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      credentials: "same-origin",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events }),
       keepalive: true,
@@ -141,7 +135,7 @@ async function flush(): Promise<void> {
       if (response.status === 401 || response.status === 403) {
         delivery.status = "error"
         delivery.lastError = `HTTP ${response.status}`
-        window.dispatchEvent(new CustomEvent("management:auth-expired"))
+        window.dispatchEvent(new CustomEvent("admin:auth-expired"))
       } else {
         markFailure(`HTTP ${response.status}`, response)
       }

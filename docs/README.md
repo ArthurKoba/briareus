@@ -6,7 +6,7 @@ Current documentation map:
 - [Component catalog](architecture/components.md)
 - [Terminal workspace architecture](architecture/terminal-workspaces.md)
 - [Repository map](repository-map.md)
-- [Account management](management.md)
+- [Account administration](admin-api.md)
 - [Roadmap](roadmap.md)
 - [Architecture decisions](decisions/README.md)
 - [GitHub Actions](github-actions.md)

@@ -33,8 +33,8 @@ ENV FASTMCP_HOME=/auth \
 
 COPY docker-entrypoint.sh /usr/local/bin/bridge-entrypoint
 RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
-    && mkdir -p /auth /management /home/bridge \
-    && chown -R 1000:1000 /auth /management /home/bridge
+    && mkdir -p /auth /admin-api /home/bridge \
+    && chown -R 1000:1000 /auth /admin-api /home/bridge
 
 COPY services/common ./services/common
 
@@ -57,11 +57,11 @@ COPY services/bridge ./services/bridge
 ENV ASGI_APP=bridge.server:app
 
 
-FROM runtime-base AS management
-COPY services/management ./services/management
+FROM runtime-base AS admin-api
+COPY services/admin_api ./services/admin_api
 COPY services/modules/__init__.py ./services/modules/__init__.py
 COPY services/modules/files ./services/modules/files
-ENV ASGI_APP=management.runtime:app \
+ENV ASGI_APP=admin_api.runtime:app \
     ASGI_FORWARDED_ALLOW_IPS=* \
     FILE_WORKSPACE_ROOT=/workspace
 

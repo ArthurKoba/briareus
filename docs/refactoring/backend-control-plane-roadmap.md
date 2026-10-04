@@ -67,14 +67,14 @@ SQLAlchemy should make repositories database-agnostic, but a PostgreSQL migratio
 
 SQLite is acceptable while:
 
-- Management is a single writer process;
+- Admin API is a single writer process;
 - write volume remains modest;
 - horizontal scaling is not required;
 - WAL mode and bounded background writes are sufficient.
 
 PostgreSQL becomes justified when we need:
 
-- multiple Management instances/writers;
+- multiple Admin API instances/writers;
 - real multi-user concurrency;
 - stronger locking/transaction behavior;
 - horizontal scale/high availability;
@@ -168,7 +168,7 @@ Payloads are bounded and must never carry secrets, raw authorization headers, te
 
 ## Frontend realtime API
 
-One authenticated WebSocket endpoint should serve the management frontend:
+One authenticated WebSocket endpoint should serve the administration frontend:
 
 ```text
 wss://<host>/api/v1/realtime
@@ -276,7 +276,7 @@ Do not confuse these two classes.
 
 CPU, memory, request latency, errors, frontend Web Vitals, traces and logs go to OTLP/SigNoz.
 
-### Live management state
+### Live administration state
 
 Small derived counters/state required for interactive UI may live in Valkey:
 
@@ -292,7 +292,7 @@ They are disposable, timestamped and rebuildable. Historical charts should norma
 
 ## Settings architecture
 
-Replace the flat management config over time with typed versioned sections:
+Replace the flat administration config over time with typed versioned sections:
 
 ```text
 general
@@ -406,7 +406,7 @@ Do not require every internal service-to-service interaction to become MCP. That
 
 ## OpenAPI/frontend contract
 
-The public management API becomes versioned (`/api/v1`). OpenAPI is the authority for frontend code generation.
+The public Admin API becomes versioned (`/api/v1`). OpenAPI is the authority for frontend code generation.
 
 Rules:
 
@@ -553,7 +553,7 @@ legacy admin compatibility (temporary)
 - roles/capabilities;
 - account/MCP ACLs;
 - per-user provider authorization;
-- device/session management;
+- device/session administration;
 - configurable session limits and revocation.
 
 ## Acceptance criteria

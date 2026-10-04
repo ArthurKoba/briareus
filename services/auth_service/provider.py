@@ -26,7 +26,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 
-from common.management_client import ManagementClient
+from common.admin_api_client import AdminApiClient
 from common.mcp_surfaces import allowed_resource_urls, resource_url
 from common.models import StrictModel
 from common.oauth_session_contracts import OAuthSessionEvent
@@ -59,10 +59,10 @@ class MultiResourceGitHubProvider(GitHubProvider):
     def __init__(
         self,
         settings: AuthServiceSettings,
-        management: ManagementClient | None = None,
+        admin_api: AdminApiClient | None = None,
     ) -> None:
         self.settings = settings
-        self._management = management
+        self._admin_api = admin_api
         self._session_touch_times: dict[str, float] = {}
         self._reader_sync_fingerprints: dict[str, str] = {}
         self._resource_context: ContextVar[str | None] = ContextVar(
@@ -283,7 +283,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
         return await self._session_id_from_jti(jti if isinstance(jti, str) else "")
 
     async def _sync_authenticated_reader_from_jti(self, jti: str, *, login: str) -> None:
-        if self._management is None or not jti or not login:
+        if self._admin_api is None or not jti or not login:
             return
         if login.casefold() not in self.settings.oauth_allowed_users:
             return
@@ -298,7 +298,7 @@ class MultiResourceGitHubProvider(GitHubProvider):
             if self._reader_sync_fingerprints.get(mapping.upstream_token_id) == fingerprint:
                 return
             await asyncio.to_thread(
-                self._management.sync_github_authenticated_reader,
+                self._admin_api.sync_github_authenticated_reader,
                 upstream.access_token,
                 login=login.casefold(),
             )
@@ -311,13 +311,13 @@ class MultiResourceGitHubProvider(GitHubProvider):
             )
 
     async def _record_session(self, event: OAuthSessionEvent) -> None:
-        if self._management is None:
+        if self._admin_api is None:
             return
         try:
-            await asyncio.to_thread(self._management.record_oauth_session, event)
+            await asyncio.to_thread(self._admin_api.record_oauth_session, event)
         except Exception as exc:
             logger.warning(
-                "Management OAuth session event failed event=%s session=%s: %s",
+                "Admin API OAuth session event failed event=%s session=%s: %s",
                 event.event,
                 event.session_id[:16],
                 exc,
@@ -424,10 +424,10 @@ class MultiResourceGitHubProvider(GitHubProvider):
         if not login or login not in self.settings.oauth_allowed_users:
             raise TokenError("invalid_grant", "GitHub user is not allowed")
 
-        if self._management is not None:
+        if self._admin_api is not None:
             try:
                 await asyncio.to_thread(
-                    self._management.sync_github_authenticated_reader,
+                    self._admin_api.sync_github_authenticated_reader,
                     access_token,
                     login=login,
                 )

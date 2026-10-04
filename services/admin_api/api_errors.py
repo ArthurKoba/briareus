@@ -37,13 +37,13 @@ def api_error(status_code: int, message: object) -> JSONResponse:
 def install_admin_api_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def admin_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        if request.url.path.startswith("/admin/api/"):
+        if request.url.path.startswith("/v1/"):
             return api_error(exc.status_code, exc.detail)
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     @app.exception_handler(RequestValidationError)
     async def admin_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-        if request.url.path.startswith("/admin/api/"):
+        if request.url.path.startswith("/v1/"):
             return api_error(422, exc.errors())
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
@@ -54,6 +54,6 @@ def install_admin_api_error_handlers(app: FastAPI) -> None:
         try:
             return await call_next(request)
         except Exception:
-            if request.url.path.startswith("/admin/api/"):
+            if request.url.path.startswith("/v1/"):
                 return api_error(500, "internal server error")
             raise

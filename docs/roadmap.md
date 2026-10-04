@@ -2,7 +2,7 @@
 
 ## Completed
 
-- private SQLite account management service with encrypted GitHub/GitLab credentials;
+- private SQLite account administration service with encrypted GitHub/GitLab credentials;
 - explicit multi-account GitHub/GitLab provider selection;
 - self-hosted GitLab account support through per-account base URLs;
 - independent GitHub, GitLab, Files, HTTP and Analysis runtime services;
@@ -16,7 +16,7 @@
 - Analysis terminology aliases with new names preferred and legacy Ghidra argument names accepted as fallback;
 - architecture tests preventing provider-to-provider imports and provider code from leaking into `bridge`/`common`;
 - one production `docker-compose.yaml` at repository root;
-- persistent management, auth, shared workspace and terminal-home volumes.
+- persistent administration, auth, shared workspace and terminal-home volumes.
 
 ## Remaining
 
@@ -24,7 +24,7 @@
 
 After the modular stack is deployed, verify every dedicated public surface, persistent
 workspace Files reads/uploads, multi-account GitHub operations, self-hosted GitLab
-discovery, management admin/account onboarding, encrypted credential persistence,
+discovery, administration admin/account onboarding, encrypted credential persistence,
 HTTP/Files integration, OAuth persistence and Analysis-to-Ghidra connectivity.
 
 ### Formatting

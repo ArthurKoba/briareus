@@ -2,27 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from common.settings import ManagementSettings
-from management.application.services import (
+from admin_api.application.services import (
     AccountService,
     InvocationAuditService,
     OAuthSessionService,
     SnapshotService,
 )
-from management.dashboard_state import build_dashboard_state
-from management.infrastructure.web import WebAdminClient
-from management.realtime import REALTIME_TOPICS, RealtimeBus, RealtimeEnvelope
+from admin_api.dashboard_state import build_dashboard_state
+from admin_api.infrastructure.web import WebAdminClient
+from admin_api.origin import origin_allowed
+from admin_api.realtime import REALTIME_TOPICS, RealtimeBus, RealtimeEnvelope
+from common.settings import AdminApiSettings
 
-_SESSION_KEY = "management_admin"
+_SESSION_KEY = "admin_api_session"
 
 
 def build_realtime_router(
-    settings: ManagementSettings,
+    settings: AdminApiSettings,
     bus: RealtimeBus,
     accounts: AccountService,
     audit: InvocationAuditService,
@@ -51,11 +51,11 @@ def build_realtime_router(
             return cached.get("data")
         return None
 
-    @router.websocket("/admin/api/realtime")
-    async def management_realtime_socket(websocket: WebSocket) -> None:
+    @router.websocket("/v1/realtime")
+    async def admin_realtime_socket(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin", "")
         public_host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host", "")
-        if origin and urlsplit(origin).netloc.casefold() != public_host.casefold():
+        if not origin_allowed(origin, public_host, settings.admin_ui_origin):
             await websocket.close(code=4403)
             return
         session = websocket.scope.get("session")

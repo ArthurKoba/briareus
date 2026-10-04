@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue"
 import { InputNumber, Modal, Switch, Tag } from "ant-design-vue"
 import { Plus, RefreshCw, Save } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
-import { managementApi, type AnalysisProjectState, type AnalysisState, type SettingsState } from "@/shared/api/management"
+import { adminApi, type AnalysisProjectState, type AnalysisState, type SettingsState } from "@/shared/api/admin"
 import { textValue } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
 import { settingsUpdatePayload } from "@/shared/settings/payload"
@@ -17,17 +17,17 @@ const workerActions=reactive<Record<number,"idle"|"clearing"|"recovering">>({})
 const projects=computed(()=>Array.isArray(state.value?.overview.projects)?state.value!.overview.projects as Array<Record<string,unknown>>:[]),workers=computed(()=>Array.isArray(state.value?.overview.workers)?state.value!.overview.workers as Array<Record<string,unknown>>:[])
 const projectColumns=[{title:t('analysis.name'),dataIndex:'name',key:'name'},{title:t('analysis.group'),dataIndex:'group',key:'group',width:160},{title:t('analysis.session'),dataIndex:'session',key:'session',width:110},{title:t('analysis.worker'),dataIndex:'worker_index',key:'worker_index',width:90},{title:t('analysis.path'),dataIndex:'path',key:'path'},{title:t('common.actions'),key:'actions',width:270}]
 const workerColumns=[{title:t('analysis.worker'),dataIndex:'worker_index',key:'worker_index',width:90},{title:t('common.enabled'),dataIndex:'enabled',key:'enabled',width:110},{title:t('terminal.running'),dataIndex:'running',key:'running',width:100},{title:t('analysis.queued'),dataIndex:'queued',key:'queued',width:90},{title:t('common.project'),dataIndex:'project_id',key:'project_id'},{title:t('common.actions'),key:'actions',width:180}]
-async function load(){loading.value=true;error.value='';try{const [overview,current]=await Promise.all([managementApi.analysis(),managementApi.settings()]);state.value=overview;settings.value=current;idleTimeout.value=Number(current.analysis.idle_timeout_seconds??900)}catch(e){error.value=e instanceof Error?e.message:'Unable to load analysis'}finally{loading.value=false}}
-async function savePolicy(){if(!settings.value)return;savingPolicy.value=true;try{settings.value=await managementApi.updateSettings(settingsUpdatePayload(settings.value,{reverse_idle_timeout_seconds:idleTimeout.value}));notifications.success(String(t('notifications.saved')))}finally{savingPolicy.value=false}}
-async function createProject(){await managementApi.createAnalysisProject(projectName.value,parentDir.value);createOpen.value=false;projectName.value='';parentDir.value='';notifications.success(String(t('notifications.saved')));await load()}
-async function openProject(id:string){await managementApi.openAnalysisProject(id);await load();await inspect(id)}
-async function releaseProject(id:string){await managementApi.releaseAnalysisProject(id);await load();detail.value=null}
-async function deleteProject(id:string){if(!window.confirm(`Delete project ${id}?`))return;await managementApi.deleteAnalysisProject(id);notifications.success(String(t('notifications.deleted')),id);await load();detail.value=null}
-async function setWorker(index:number,enabled:boolean){await managementApi.setAnalysisWorker(index,enabled);await load()}
-async function clearWorkerQueue(index:number){workerActions[index]="clearing";try{await managementApi.clearAnalysisWorkerQueue(index);await load();notifications.success(String(t("analysis.queueCleared")))}catch(e){notifications.error(String(t("notifications.apiError")),e instanceof Error?e.message:String(e))}finally{workerActions[index]="idle"}}
-async function recoverWorker(index:number){workerActions[index]="recovering";try{await managementApi.recoverAnalysisWorker(index);await load();notifications.success(String(t("analysis.workerRecovered")))}catch(e){notifications.error(String(t("notifications.apiError")),e instanceof Error?e.message:String(e))}finally{workerActions[index]="idle"}}
-async function inspect(id:string){detailId.value=id;detail.value=await managementApi.analysisProject(id)}
-async function loadCoverage(program:unknown,full:boolean){if(!detailId.value||typeof program!=="string")return;coverage.value=await managementApi.analysisCoverage(detailId.value,program,full)}
+async function load(){loading.value=true;error.value='';try{const [overview,current]=await Promise.all([adminApi.analysis(),adminApi.settings()]);state.value=overview;settings.value=current;idleTimeout.value=Number(current.analysis.idle_timeout_seconds??900)}catch(e){error.value=e instanceof Error?e.message:'Unable to load analysis'}finally{loading.value=false}}
+async function savePolicy(){if(!settings.value)return;savingPolicy.value=true;try{settings.value=await adminApi.updateSettings(settingsUpdatePayload(settings.value,{reverse_idle_timeout_seconds:idleTimeout.value}));notifications.success(String(t('notifications.saved')))}finally{savingPolicy.value=false}}
+async function createProject(){await adminApi.createAnalysisProject(projectName.value,parentDir.value);createOpen.value=false;projectName.value='';parentDir.value='';notifications.success(String(t('notifications.saved')));await load()}
+async function openProject(id:string){await adminApi.openAnalysisProject(id);await load();await inspect(id)}
+async function releaseProject(id:string){await adminApi.releaseAnalysisProject(id);await load();detail.value=null}
+async function deleteProject(id:string){if(!window.confirm(`Delete project ${id}?`))return;await adminApi.deleteAnalysisProject(id);notifications.success(String(t('notifications.deleted')),id);await load();detail.value=null}
+async function setWorker(index:number,enabled:boolean){await adminApi.setAnalysisWorker(index,enabled);await load()}
+async function clearWorkerQueue(index:number){workerActions[index]="clearing";try{await adminApi.clearAnalysisWorkerQueue(index);await load();notifications.success(String(t("analysis.queueCleared")))}catch(e){notifications.error(String(t("notifications.apiError")),e instanceof Error?e.message:String(e))}finally{workerActions[index]="idle"}}
+async function recoverWorker(index:number){workerActions[index]="recovering";try{await adminApi.recoverAnalysisWorker(index);await load();notifications.success(String(t("analysis.workerRecovered")))}catch(e){notifications.error(String(t("notifications.apiError")),e instanceof Error?e.message:String(e))}finally{workerActions[index]="idle"}}
+async function inspect(id:string){detailId.value=id;detail.value=await adminApi.analysisProject(id)}
+async function loadCoverage(program:unknown,full:boolean){if(!detailId.value||typeof program!=="string")return;coverage.value=await adminApi.analysisCoverage(detailId.value,program,full)}
 onMounted(load)
 </script>
 <template><div class="space-y-6"><PageHeader :title="t('nav.analysis')" :description="t('analysis.description')"><Button variant="outline" size="sm" @click="load"><RefreshCw class="mr-2 size-4"/>{{t('common.refresh')}}</Button><Button size="sm" @click="createOpen=true"><Plus class="mr-2 size-4"/>{{t('analysis.newProject')}}</Button></PageHeader><p v-if="error" class="text-sm text-destructive">{{error}}</p>

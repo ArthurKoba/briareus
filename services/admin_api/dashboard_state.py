@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import asyncio
 
-from common.models import JsonObject, json_object
-from management.application.services import (
+from admin_api.application.services import (
     AccountService,
     InvocationAuditService,
     OAuthSessionService,
     SnapshotService,
 )
-from management.domain.accounts import Provider
-from management.infrastructure.snapshot_worker import (
+from admin_api.domain.accounts import Provider
+from admin_api.infrastructure.snapshot_worker import (
     REVERSE_OVERVIEW_KEY,
     WORKSPACE_STATS_KEY,
     snapshot_meta,
 )
+from common.models import JsonObject, json_object
 
 
 async def build_dashboard_state(

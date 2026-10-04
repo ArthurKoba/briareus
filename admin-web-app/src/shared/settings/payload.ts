@@ -1,4 +1,4 @@
-import type { SettingsState } from "@/shared/api/management"
+import type { SettingsState } from "@/shared/api/admin"
 
 export interface SettingsUpdatePayload {
   expected_revision: string
@@ -37,11 +37,11 @@ export function settingsUpdatePayload(state: SettingsState, overrides: Partial<S
   }
   const payload: SettingsUpdatePayload = {
     expected_revision: state.revision,
-    logging_enabled: state.management.logging_enabled,
-    logging_capture_payloads: state.management.logging_capture_payloads,
-    logging_retention_days: state.management.logging_retention_days,
-    logging_max_records: state.management.logging_max_records,
-    maintenance_interval_minutes: state.management.maintenance_interval_minutes,
+    logging_enabled: state.admin.logging_enabled,
+    logging_capture_payloads: state.admin.logging_capture_payloads,
+    logging_retention_days: state.admin.logging_retention_days,
+    logging_max_records: state.admin.logging_max_records,
+    maintenance_interval_minutes: state.admin.maintenance_interval_minutes,
     terminal_max_exec_timeout_seconds: state.terminal.max_exec_timeout_seconds,
     terminal_max_job_runtime_seconds: state.terminal.max_job_runtime_seconds,
     mcp_call_timeout_seconds: state.mcp.call_timeout_seconds,

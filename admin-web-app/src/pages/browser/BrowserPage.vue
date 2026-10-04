@@ -22,7 +22,8 @@ import {
 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi } from "@/shared/api/management"
+import { adminApi } from "@/shared/api/admin"
+import { adminApiWebSocketUrl } from "@/shared/config/runtime"
 import { eventBus } from "@/shared/events/bus"
 import { pageActivity } from "@/shared/lib/page-activity"
 import { notifications } from "@/shared/notifications/bus"
@@ -118,9 +119,8 @@ async function connect(): Promise<void> {
   status.value = "connecting"
   message.value = String(t("browser.connecting"))
   try {
-    const scheme = location.protocol === "https:" ? "wss:" : "ws:"
     const generation = ++wsGeneration
-    const current = new WebSocket(`${scheme}//${location.host}/api/browser/operator/ws`)
+    const current = new WebSocket(adminApiWebSocketUrl("/browser/operator/ws"))
     ws = current
     const isCurrent = () => ws === current && generation === wsGeneration
 
@@ -136,7 +136,7 @@ async function connect(): Promise<void> {
       frontendTelemetry.websocket("disconnected", "browser.operator", "websocket")
       if (event.code === 4401) {
         message.value = String(t("browser.authorizationExpired"))
-        window.dispatchEvent(new CustomEvent("management:auth-expired"))
+        window.dispatchEvent(new CustomEvent("admin:auth-expired"))
         return
       }
       if (event.code === 4403) {
@@ -225,7 +225,7 @@ async function setViewport(value: string): Promise<void> {
   const [width, height] = value.split("x").map(Number)
   if (!width || !height) return
   try {
-    await managementApi.setBrowserViewport(selectedId.value, width, height)
+    await adminApi.setBrowserViewport(selectedId.value, width, height)
     dims.value = { w: width, h: height }
     send({ type: "refresh_state" })
     frontendTelemetry.event("browser.viewport_change", { page_id: selectedId.value, width, height })
@@ -237,7 +237,7 @@ async function setTheme(value: string): Promise<void> {
   if (!canSetTheme.value || !["system", "light", "dark"].includes(value)) return
   const scheme = value as "system" | "light" | "dark"
   try {
-    const result = await managementApi.setBrowserTheme(scheme)
+    const result = await adminApi.setBrowserTheme(scheme)
     themePreset.value = result.color_scheme ?? scheme
     send({ type: "refresh_state" })
     frontendTelemetry.event("browser.theme_change", { color_scheme: scheme })
@@ -249,7 +249,7 @@ async function openRemoteDevtools(pageId = selectedId.value): Promise<void> {
   if (!pageId || !canRemoteDevtools.value) return
   const popup = window.open("about:blank", "_blank")
   try {
-    const remote = await managementApi.browserRemoteDebug(pageId)
+    const remote = await adminApi.browserRemoteDebug(pageId)
     if (popup) popup.location.href = remote.frontend_url
     else {
       await navigator.clipboard?.writeText(remote.frontend_url)
