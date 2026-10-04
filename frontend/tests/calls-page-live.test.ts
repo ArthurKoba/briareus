@@ -2,12 +2,13 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import CallsPage from "@/pages/calls/CallsPage.vue"
+import { callStore } from "@/pages/calls/model/call-store"
 import DataTable from "@/shared/ui/DataTable.vue"
 import type { InvocationRecord } from "@/shared/api/management"
 import type { BusEvent } from "@/shared/events/bus"
 
 const api = vi.hoisted(() => ({ calls: vi.fn(), accounts: vi.fn(), clearCalls: vi.fn(), deleteCall: vi.fn() }))
-const bus = vi.hoisted(() => ({ handler: undefined as undefined | ((event: BusEvent) => void), state: { status: "connected" } }))
+const bus = vi.hoisted(() => ({ handler: undefined as undefined | ((event: BusEvent) => void), state: { status: "connected", enabled: true, active: true } }))
 vi.mock("@/shared/api/management", () => ({ managementApi: api }))
 vi.mock("@/shared/events/bus", () => ({
   eventBus: { state: bus.state, subscribe: vi.fn((_topic: string, handler: (event: BusEvent) => void) => { bus.handler = handler; return vi.fn() }) },
@@ -30,13 +31,25 @@ function call(id: string, second: number): InvocationRecord {
 }
 
 const mounted: ReturnType<typeof mount>[] = []
-beforeEach(() => {
+beforeEach(async () => {
+  callStore.stop()
+  callStore.setSessionActive(false)
+  api.calls.mockReset()
   api.calls.mockResolvedValue({ events: [call("old", 1)], count: 1 })
   api.accounts.mockResolvedValue({ accounts: [] })
   bus.handler = undefined
   bus.state.status = "connected"
+  bus.state.enabled = true
+  bus.state.active = true
+  callStore.start()
+  callStore.setSessionActive(true)
+  await flushPromises()
 })
-afterEach(() => { for (const wrapper of mounted.splice(0)) wrapper.unmount() })
+afterEach(() => {
+  for (const wrapper of mounted.splice(0)) wrapper.unmount()
+  callStore.stop()
+  callStore.setSessionActive(false)
+})
 
 async function page() {
   const wrapper = mount(CallsPage, { attachTo: document.body })
@@ -57,9 +70,10 @@ describe("MCP calls live window", () => {
     expect(api.calls).toHaveBeenCalledTimes(1)
   })
 
-  it("does not show a page-local live-updates control or refresh while connected", async () => {
+  it("does not show a page-local live control and hides refresh after domain reconciliation", async () => {
     const wrapper = await page()
     expect(wrapper.text()).not.toContain("calls.liveControl")
+    expect(callStore.state.synced).toBe(true)
     expect(wrapper.text()).not.toContain("common.refresh")
   })
 

@@ -4,6 +4,8 @@ import { Activity, AppWindow, Blocks, Bot, ChartNoAxesCombined, Database, FileTe
 import { useI18n } from "vue-i18n"
 import { managementApi, type ManagementBootstrap, type SessionState } from "@/shared/api/management"
 import { accountStore } from "@/features/accounts/model/account-store"
+import { callStore } from "@/pages/calls/model/call-store"
+import { settingsStore } from "@/shared/settings/store"
 import { useUiPreferences } from "@/shared/lib/preferences"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
@@ -44,7 +46,7 @@ const nav=computed(()=>[
 const current=computed(()=>nav.value.find(item=>item.id===activePage.value)??nav.value[0])
 const fallbackBootstrap:ManagementBootstrap={product:"MCP Bridge",environment:"unavailable",navigation:[]}
 const knownAuth=()=>sessionStorage.getItem("mcp-bridge:known-auth")==="true"
-function rememberSession(value:SessionState){session.value=value;eventBus.setSessionActive(value.authenticated);accountStore.setSessionActive(value.authenticated);if(value.authenticated){sessionStorage.setItem("mcp-bridge:known-auth","true");sessionStorage.setItem("mcp-bridge:username",value.username??"")}else{sessionStorage.removeItem("mcp-bridge:known-auth");sessionStorage.removeItem("mcp-bridge:username")}}
+function rememberSession(value:SessionState){session.value=value;eventBus.setSessionActive(value.authenticated);accountStore.setSessionActive(value.authenticated);callStore.setSessionActive(value.authenticated);settingsStore.setSessionActive(value.authenticated);if(value.authenticated){sessionStorage.setItem("mcp-bridge:known-auth","true");sessionStorage.setItem("mcp-bridge:username",value.username??"")}else{sessionStorage.removeItem("mcp-bridge:known-auth");sessionStorage.removeItem("mcp-bridge:username")}}
 function expireAuth(){rememberSession({authenticated:false,username:null});bootstrap.value=null;gatewayUnavailable.value=false}
 function select(id:string){
   activePage.value=id
@@ -63,8 +65,8 @@ async function login(){error.value="";try{const next=await managementApi.login(u
 async function logout(){const next=await managementApi.logout();rememberSession(next);bootstrap.value=null;frontendTelemetry.event("auth.logout")}
 function toggleTheme(){theme.value=theme.value==="dark"?"light":"dark"}
 function systemNotification(event:BusEvent){const data=(event.data??{}) as Record<string,unknown>;const level=(["info","success","warning","error"].includes(String(data.level))?String(data.level):"info") as NotificationLevel;notifications.push({level,title:String(data.title??"System notification"),description:typeof data.description==="string"?data.description:undefined})}
-onMounted(()=>{accountStore.start();readHash();window.addEventListener("hashchange",readHash);window.addEventListener("management:auth-expired",expireAuth);unsubscribeNotifications=eventBus.subscribe("system.notifications",systemNotification);load()})
-onBeforeUnmount(()=>{accountStore.stop();window.removeEventListener("hashchange",readHash);window.removeEventListener("management:auth-expired",expireAuth);unsubscribeNotifications?.()})
+onMounted(()=>{accountStore.start();callStore.start();settingsStore.start();readHash();window.addEventListener("hashchange",readHash);window.addEventListener("management:auth-expired",expireAuth);unsubscribeNotifications=eventBus.subscribe("system.notifications",systemNotification);load()})
+onBeforeUnmount(()=>{accountStore.stop();callStore.stop();settingsStore.stop();window.removeEventListener("hashchange",readHash);window.removeEventListener("management:auth-expired",expireAuth);unsubscribeNotifications?.()})
 </script>
 <template>
   <ToastHost />

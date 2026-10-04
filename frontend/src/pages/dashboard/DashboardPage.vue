@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue"
-import { RefreshCw } from "lucide-vue-next"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type DashboardState } from "@/shared/api/management"
 import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatBytes } from "@/shared/lib/format"
-import Button from "@/shared/ui/Button.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
+import RefreshAction from "@/shared/ui/RefreshAction.vue"
 import StatCard from "@/shared/ui/StatCard.vue"
 
 const { t } = useI18n()
@@ -15,6 +14,8 @@ const data = ref<DashboardState | null>(null)
 const loading = ref(false)
 const error = ref("")
 let unsubscribe: undefined | (() => void)
+const synced = ref(false)
+const liveTransport = computed(() => eventBus.state.enabled && eventBus.state.status === "connected")
 
 function accept(event: BusEvent): void {
   if (!data.value || event.type !== "snapshot") return
@@ -43,6 +44,7 @@ function accept(event: BusEvent): void {
     ...(next.workspace ? { workspace: next.workspace } : {}),
     analysis: analysisSummary,
   }
+  synced.value = liveTransport.value
 }
 
 async function load(): Promise<void> {
@@ -51,13 +53,14 @@ async function load(): Promise<void> {
   try {
     const snapshot = await managementApi.dashboard()
     data.value = snapshot
-    eventBus.publishMock("system.metrics", "snapshot", snapshot)
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to load dashboard"
   } finally {
     loading.value = false
   }
 }
+
+watch(liveTransport, (live) => { if (!live) synced.value = false })
 
 onMounted(async () => {
   await load()
@@ -69,12 +72,7 @@ onBeforeUnmount(() => unsubscribe?.())
 <template>
   <div class="space-y-6">
     <PageHeader :title="t('nav.dashboard')" :description="t('dashboard.description')">
-      <span class="rounded-md bg-muted px-2 py-1 text-[10px] uppercase text-muted-foreground">
-        {{ eventBus.state.status }}
-      </span>
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
-      </Button>
+      <RefreshAction :synced="synced" :loading="loading" @refresh="load" />
     </PageHeader>
 
     <p v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">

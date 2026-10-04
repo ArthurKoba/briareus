@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   Pencil,
   Plus,
-  RefreshCw,
   Trash2,
   X,
 } from "lucide-vue-next"
@@ -27,6 +26,7 @@ import AppDialog from "@/shared/ui/AppDialog.vue"
 import Button from "@/shared/ui/Button.vue"
 import DataTable from "@/shared/ui/DataTable.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
+import RefreshAction from "@/shared/ui/RefreshAction.vue"
 
 const props = defineProps<{
   title: string
@@ -369,9 +369,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEditorKeydown)
 <template>
   <div class="space-y-5">
     <PageHeader :title="title" :description="description">
-      <Button v-if="!liveSync" variant="outline" size="sm" @click="load">
-        <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
-      </Button>
+      <RefreshAction :synced="liveSync" :loading="loading" @refresh="load" />
       <Button size="sm" @click="newAccount">
         <Plus class="mr-2 size-4" />{{ t("accounts.add") }}
       </Button>

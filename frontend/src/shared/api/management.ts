@@ -5,6 +5,7 @@ import { notifications } from "@/shared/notifications/bus"
 import { i18n } from "@/shared/i18n"
 import type { SettingsUpdatePayload } from "@/shared/settings/payload"
 
+export interface RequestOptions { notifyErrors?: boolean }
 export interface SessionState { authenticated: boolean; username: string | null }
 export interface NavigationItem { id: string; label: string; enabled: boolean }
 export interface ManagementBootstrap { product: string; environment: string; navigation: NavigationItem[] }
@@ -82,7 +83,7 @@ const previewBootstrap: ManagementBootstrap = {
   ],
 }
 
-async function request<T>(path: string, init: RequestInit = {}, options: { notifyErrors?: boolean } = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json")
   const method = init.method ?? "GET"
@@ -139,14 +140,14 @@ export const managementApi = {
   login: (username: string, password: string): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: true, username: username || "preview" }) : request("/api/login", { method: "POST", body: jsonBody({ username, password }) }),
   logout: (): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: false, username: null }) : request("/api/logout", { method: "POST", body: "{}" }),
   bootstrap: (): Promise<ManagementBootstrap> => runtimeConfig.preview ? Promise.resolve(previewBootstrap) : request("/api/bootstrap"),
-  dashboard: (): Promise<DashboardState> => request("/api/dashboard"),
-  accounts: (): Promise<{ accounts: AccountRecord[]; count: number }> => request("/api/accounts"),
+  dashboard: (options: RequestOptions = {}): Promise<DashboardState> => request("/api/dashboard", {}, options),
+  accounts: (options: RequestOptions = {}): Promise<{ accounts: AccountRecord[]; count: number }> => request("/api/accounts", {}, options),
   createAccount: (payload: AccountPayload): Promise<AccountRecord> => request("/api/accounts", { method: "POST", body: jsonBody(payload) }),
   updateAccount: (record: AccountRecord, payload: AccountPayload): Promise<AccountRecord> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "PUT", body: jsonBody({ ...payload, expected_updated_at: record.updated_at }) }),
   deleteAccount: (record: AccountRecord): Promise<unknown> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "DELETE" }),
   verifyAccount: (record: AccountRecord): Promise<Record<string, unknown>> => request(`/api/accounts/${record.provider}/${record.id}/verify`, { method: "POST", body: "{}" }, { notifyErrors: false }),
   verifyAccountCandidate: (payload: AccountCandidatePayload): Promise<AccountCandidateResult> => request("/api/accounts/verify-candidate", { method: "POST", body: jsonBody(payload) }, { notifyErrors: false }),
-  calls: (limit = 250): Promise<{ events: InvocationRecord[]; count: number }> => request(`/api/calls?limit=${limit}`),
+  calls: (limit = 250, options: RequestOptions = {}): Promise<{ events: InvocationRecord[]; count: number }> => request(`/api/calls?limit=${limit}`, {}, options),
   clearCalls: (): Promise<{ deleted: number }> => request("/api/calls", { method: "DELETE" }),
   deleteCall: (id: string): Promise<unknown> => request(`/api/calls/${id}`, { method: "DELETE" }),
   callsStreamUrl: "/api/calls/stream",
@@ -173,7 +174,7 @@ export const managementApi = {
   recoverAnalysisWorker: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/recover`, { method: "POST", body: "{}" }),
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
   setBrowserViewport: (pageId: string, width: number, height: number): Promise<Record<string, unknown>> => request("/api/browser/viewport", { method: "PUT", body: jsonBody({ page_id: pageId, width, height }) }),
-  settings: (): Promise<SettingsState> => request("/api/settings"),
+  settings: (options: RequestOptions = {}): Promise<SettingsState> => request("/api/settings", {}, options),
   updateSettings: (payload: SettingsUpdatePayload): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
   cleanupLogs: (): Promise<{ removed: number }> => request("/api/settings/cleanup-logs", { method: "POST", body: "{}" }),
 }
