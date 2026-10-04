@@ -17,6 +17,7 @@ from .database import Base, DatabaseManager
 
 _BATCH_SIZE = 500
 _SQLITE_INTERNAL_PREFIX = "sqlite_"
+_LEGACY_TABLES: dict[str, str] = {"admin_config": "management_config"}
 
 
 @dataclass(frozen=True)
@@ -145,12 +146,13 @@ def _iter_source_batches(
     table: Table,
     imported_columns: Sequence[str],
     *,
+    source_table: str | None = None,
     batch_size: int,
 ) -> Iterable[list[dict[str, object]]]:
     if not imported_columns:
         return
 
-    quoted_table = table.name.replace('"', '""')
+    quoted_table = (source_table or table.name).replace('"', '""')
     quoted_columns = ", ".join(
         f'"{name.replace(chr(34), chr(34) * 2)}"' for name in imported_columns
     )
@@ -180,7 +182,7 @@ def _nonempty_unknown_tables(
     source: sqlite3.Connection,
     source_tables: Sequence[str],
 ) -> tuple[list[str], list[str]]:
-    known = set(Base.metadata.tables)
+    known = set(Base.metadata.tables) | set(_LEGACY_TABLES.values())
     nonempty: list[str] = []
     empty: list[str] = []
     for table_name in source_tables:
@@ -227,7 +229,12 @@ async def migrate_sqlite_to_postgres(
         finalized: list[TableMigration] = []
         async with manager.engine.begin() as target:
             for table_name, table in Base.metadata.tables.items():
-                if table_name not in source_tables:
+                source_table = table_name
+                legacy_table = _LEGACY_TABLES.get(table_name, "")
+                if source_table not in source_tables and legacy_table in source_tables:
+                    source_table = legacy_table
+
+                if source_table not in source_tables:
                     migrations.append(
                         TableMigration(
                             table=table_name,
@@ -240,14 +247,15 @@ async def migrate_sqlite_to_postgres(
                     )
                     continue
 
-                source_columns = _source_columns(source, table_name)
+                source_columns = _source_columns(source, source_table)
                 imported, skipped, defaulted = _prepare_columns(table, source_columns)
-                source_count = _table_count(source, table_name)
+                source_count = _table_count(source, source_table)
 
                 for batch in _iter_source_batches(
                     source,
                     table,
                     imported,
+                    source_table=source_table,
                     batch_size=batch_size,
                 ):
                     if batch:
