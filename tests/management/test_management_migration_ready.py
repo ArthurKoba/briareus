@@ -330,8 +330,13 @@ def test_browser_theme_and_remote_debug_api_contract(tmp_path: Path) -> None:
         assert remote.status_code == 200
         payload = remote.json()
         assert payload["target_id"] == "TARGET123"
-        assert payload["expires_in_seconds"] == 300
+        assert payload["expires_in_seconds"] == 3600
         assert payload["websocket_url"].startswith("wss://mcp.koba-nexus.ru/api/browser/cdp/")
+        assert payload["frontend_url"].startswith("https://mcp.koba-nexus.ru/api/browser/devtools/")
+        assert (
+            "/devtools/inspector.html?wss=mcp.koba-nexus.ru/api/browser/cdp/"
+            in payload["frontend_url"]
+        )
         assert payload["devtools_url"].startswith(
             "devtools://devtools/bundled/inspector.html?wss=mcp.koba-nexus.ru/api/browser/cdp/"
         )

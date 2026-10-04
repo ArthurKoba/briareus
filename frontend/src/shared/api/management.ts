@@ -56,6 +56,20 @@ export interface TerminalJobState { job: Record<string, unknown>; tail: Record<s
 export interface AnalysisState { overview: Record<string, unknown>; meta: Record<string, unknown> }
 export interface AnalysisProjectState { session: Record<string, unknown>; files: Record<string, unknown>; programs: unknown[]; folder: string }
 
+export interface BrowserState {
+  running?: boolean
+  color_scheme?: "system" | "light" | "dark"
+  capabilities?: Record<string, boolean>
+  viewport?: { width?: number; height?: number }
+}
+export interface BrowserRemoteDebug {
+  page_id: string
+  target_id: string
+  frontend_url: string
+  websocket_url: string
+  expires_in_seconds: number
+}
+
 export interface GitHubPolicyState {
   local_first_guidance: boolean
   local_git_transport_enabled: boolean
@@ -173,6 +187,9 @@ export const managementApi = {
   clearAnalysisWorkerQueue: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/clear-queue`, { method: "POST", body: "{}" }),
   recoverAnalysisWorker: (index: number): Promise<Record<string, unknown>> => request(`/api/analysis/workers/${index}/recover`, { method: "POST", body: "{}" }),
   analysisCoverage: (id: string, program: string, full = false): Promise<Record<string, unknown>> => request(`/api/analysis/projects/${encodeURIComponent(id)}/coverage?program=${encodeURIComponent(program)}&full=${full}`),
+  browserState: (): Promise<BrowserState> => request("/api/browser/state"),
+  setBrowserTheme: (colorScheme: "system" | "light" | "dark"): Promise<BrowserState> => request("/api/browser/theme", { method: "PUT", body: jsonBody({ color_scheme: colorScheme }) }),
+  browserRemoteDebug: (pageId: string): Promise<BrowserRemoteDebug> => request("/api/browser/remote-debug", { method: "POST", body: jsonBody({ page_id: pageId }) }),
   setBrowserViewport: (pageId: string, width: number, height: number): Promise<Record<string, unknown>> => request("/api/browser/viewport", { method: "PUT", body: jsonBody({ page_id: pageId, width, height }) }),
   settings: (options: RequestOptions = {}): Promise<SettingsState> => request("/api/settings", {}, options),
   updateSettings: (payload: SettingsUpdatePayload): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),

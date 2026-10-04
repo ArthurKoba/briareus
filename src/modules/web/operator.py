@@ -40,9 +40,7 @@ async def browser_operator_websocket(
 
     owner_token = str(owner["owner_token"])
     selected_page_id = str(owner.get("selected_page_id") or "")
-    docked_devtools_page_id = ""
     stream_task: asyncio.Task[None] | None = None
-    devtools_stream_task: asyncio.Task[None] | None = None
 
     async def send_state() -> None:
         state = await browser.operator_state(owner_token)
@@ -101,20 +99,8 @@ async def browser_operator_websocket(
             with contextlib.suppress(Exception):
                 await session.detach()
 
-    async def stop_docked_devtools() -> None:
-        nonlocal docked_devtools_page_id, devtools_stream_task
-        if devtools_stream_task is not None:
-            devtools_stream_task.cancel()
-            await asyncio.gather(devtools_stream_task, return_exceptions=True)
-            devtools_stream_task = None
-        if docked_devtools_page_id:
-            await browser.operator_close_docked_devtools(owner_token)
-            docked_devtools_page_id = ""
-
     async def select_page(page_id: str) -> None:
         nonlocal selected_page_id, stream_task
-        if page_id != selected_page_id:
-            await stop_docked_devtools()
         await browser.operator_select_page(owner_token, page_id)
         selected_page_id = page_id
         if stream_task is not None:
@@ -126,8 +112,6 @@ async def browser_operator_websocket(
     def input_page_id(message: dict[str, Any]) -> str:
         requested = str(message.get("page_id") or selected_page_id)
         allowed = {selected_page_id}
-        if docked_devtools_page_id:
-            allowed.add(docked_devtools_page_id)
         if not requested or requested not in allowed:
             raise BrowserError("browser input target is not active for this operator")
         return requested
@@ -169,9 +153,7 @@ async def browser_operator_websocket(
                     allowed = message.get("allowed")
                     if not isinstance(allowed, bool):
                         raise BrowserError("allowed must be a boolean")
-                    await browser.operator_set_page_agent_access(
-                        owner_token, page_id, allowed
-                    )
+                    await browser.operator_set_page_agent_access(owner_token, page_id, allowed)
                     await send_state()
                 elif kind == "set_agent_access":
                     allowed = message.get("allowed")
@@ -203,45 +185,12 @@ async def browser_operator_websocket(
                 elif kind == "reopen_closed_page":
                     result = await browser.operator_reopen_closed_page(owner_token)
                     await select_page(str(result["page_id"]))
-                elif kind == "open_docked_devtools":
-                    if not selected_page_id:
-                        raise BrowserError("no browser page selected")
-                    await stop_docked_devtools()
-                    result = await browser.operator_open_docked_devtools(
-                        owner_token,
-                        selected_page_id,
-                        panel=str(message.get("panel") or "elements"),
-                    )
-                    docked_devtools_page_id = str(result.get("page_id") or "")
-                    if docked_devtools_page_id:
-                        devtools_stream_task = asyncio.create_task(
-                            stream(docked_devtools_page_id),
-                            name="browser-operator-devtools-stream",
-                        )
-                    await send_state()
-                elif kind == "close_docked_devtools":
-                    await stop_docked_devtools()
-                    await send_state()
-                elif kind == "open_devtools":
-                    if not selected_page_id:
-                        raise BrowserError("no browser page selected")
-                    result = await browser.operator_open_devtools(
-                        owner_token,
-                        selected_page_id,
-                        panel=str(message.get("panel") or "elements"),
-                    )
-                    new_page_id = str(result.get("page_id") or "")
-                    if new_page_id and new_page_id != selected_page_id:
-                        await select_page(new_page_id)
-                    else:
-                        await send_state()
                 elif kind == "clean_app":
                     if not selected_page_id:
                         raise BrowserError("no browser page selected")
                     await browser.operator_clean_app(owner_token, selected_page_id)
                     await send_state()
                 elif kind == "clean_browser":
-                    await stop_docked_devtools()
                     if stream_task is not None:
                         stream_task.cancel()
                         await asyncio.gather(stream_task, return_exceptions=True)
@@ -261,7 +210,6 @@ async def browser_operator_websocket(
                     await browser.operator_reload(owner_token, selected_page_id)
                     await send_state()
                 elif kind == "close_page":
-                    await stop_docked_devtools()
                     await browser.operator_close_page(owner_token, selected_page_id)
                     state = await browser.operator_state(owner_token)
                     next_page = str(state.get("selected_page_id") or "")
@@ -308,9 +256,6 @@ async def browser_operator_websocket(
         if stream_task is not None:
             stream_task.cancel()
             await asyncio.gather(stream_task, return_exceptions=True)
-        if devtools_stream_task is not None:
-            devtools_stream_task.cancel()
-            await asyncio.gather(devtools_stream_task, return_exceptions=True)
         await browser.operator_release(owner_token)
         with contextlib.suppress(RuntimeError):
             await websocket.close()

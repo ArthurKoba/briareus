@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Circle,
   Code2,
+  Settings,
   Ellipsis,
   ExternalLink,
   List,
@@ -36,7 +37,6 @@ type Page = {
 }
 type State = {
   selected_page_id?: string
-  docked_devtools_page_id?: string
   pages?: Page[]
   agent_access_enabled?: boolean
   developer_access_enabled?: boolean
@@ -44,6 +44,7 @@ type State = {
   can_reopen_closed_tab?: boolean
   capabilities?: Record<string, boolean> | string[]
   viewport?: { width?: number; height?: number }
+  color_scheme?: "system" | "light" | "dark"
 }
 
 const { t } = useI18n()
@@ -52,11 +53,10 @@ const status = ref<"connecting" | "live" | "disconnected" | "error">("connecting
 const message = ref("")
 const addressDraft = ref("")
 const addressFocused = ref(false)
-const viewportPreset = ref("auto")
+const viewportPreset = ref("1280x720")
+const themePreset = ref<"system" | "light" | "dark">("dark")
 const screen = ref<HTMLImageElement | null>(null)
-const devtools = ref<HTMLImageElement | null>(null)
-const dims = ref({ w: 1440, h: 900 })
-const devDims = ref({ w: 1440, h: 900 })
+const dims = ref({ w: 1280, h: 720 })
 let ws: WebSocket | null = null
 let wsGeneration = 0
 let reconnect = 0
@@ -64,12 +64,10 @@ let activityUnsubscribe: undefined | (() => void)
 let disconnectNotified = false
 let refresh = 0
 let lastMove = 0
-let devLastMove = 0
 let lastSelected = ""
 
 const pages = computed(() => state.value.pages ?? [])
 const selectedId = computed(() => state.value.selected_page_id ?? "")
-const devId = computed(() => state.value.docked_devtools_page_id ?? "")
 const selectedPage = computed(() => pages.value.find((page) => page.page_id === selectedId.value) ?? null)
 const live = computed(() => status.value === "live")
 function capabilityEnabled(name: string): boolean {
@@ -79,8 +77,9 @@ function capabilityEnabled(name: string): boolean {
   return false
 }
 const canSetViewport = computed(() => capabilityEnabled("set_viewport"))
+const canSetTheme = computed(() => capabilityEnabled("set_theme"))
+const canRemoteDevtools = computed(() => capabilityEnabled("remote_devtools"))
 const viewportOptions = computed(() => [
-  { label: t("browser.automatic"), value: "auto" },
   { label: "1280 × 720", value: "1280x720" },
   { label: "1440 × 900", value: "1440x900" },
   { label: "1920 × 1080", value: "1920x1080" },
@@ -162,7 +161,12 @@ async function connect(): Promise<void> {
       const payload = JSON.parse(event.data)
       if (payload.type === "state") {
         state.value = payload
-        if (payload.viewport?.width && payload.viewport?.height) dims.value = { w: payload.viewport.width, h: payload.viewport.height }
+        if (payload.viewport?.width && payload.viewport?.height) {
+          dims.value = { w: payload.viewport.width, h: payload.viewport.height }
+          const preset = `${payload.viewport.width}x${payload.viewport.height}`
+          if (viewportOptions.value.some((option) => option.value === preset)) viewportPreset.value = preset
+        }
+        if (payload.color_scheme === "system" || payload.color_scheme === "light" || payload.color_scheme === "dark") themePreset.value = payload.color_scheme
         status.value = "live"
         message.value = ""
         disconnectNotified = false
@@ -173,10 +177,10 @@ async function connect(): Promise<void> {
         await nextTick()
         syncAddress()
       } else if (payload.type === "frame") {
-        const target = payload.page_id === selectedId.value ? screen.value : payload.page_id === devId.value ? devtools.value : null
+        const target = payload.page_id === selectedId.value ? screen.value : null
         if (target) target.src = `data:image/jpeg;base64,${payload.data}`
-        const dimension = payload.page_id === selectedId.value ? dims : devDims
-        if (payload.metadata) dimension.value = {
+        const dimension = dims
+        if (payload.metadata && payload.page_id === selectedId.value) dimension.value = {
           w: payload.metadata.deviceWidth ?? dimension.value.w,
           h: payload.metadata.deviceHeight ?? dimension.value.h,
         }
@@ -217,7 +221,7 @@ function developer(): void {
 }
 async function setViewport(value: string): Promise<void> {
   viewportPreset.value = value
-  if (!canSetViewport.value || value === "auto" || !selectedId.value) return
+  if (!canSetViewport.value || !selectedId.value) return
   const [width, height] = value.split("x").map(Number)
   if (!width || !height) return
   try {
@@ -229,6 +233,36 @@ async function setViewport(value: string): Promise<void> {
     frontendTelemetry.error("browser.viewport_change_failed", caught, { page_id: selectedId.value, width, height })
   }
 }
+async function setTheme(value: string): Promise<void> {
+  if (!canSetTheme.value || !["system", "light", "dark"].includes(value)) return
+  const scheme = value as "system" | "light" | "dark"
+  try {
+    const result = await managementApi.setBrowserTheme(scheme)
+    themePreset.value = result.color_scheme ?? scheme
+    send({ type: "refresh_state" })
+    frontendTelemetry.event("browser.theme_change", { color_scheme: scheme })
+  } catch (caught) {
+    frontendTelemetry.error("browser.theme_change_failed", caught, { color_scheme: scheme })
+  }
+}
+async function openRemoteDevtools(pageId = selectedId.value): Promise<void> {
+  if (!pageId || !canRemoteDevtools.value) return
+  const popup = window.open("about:blank", "_blank")
+  try {
+    const remote = await managementApi.browserRemoteDebug(pageId)
+    if (popup) popup.location.href = remote.frontend_url
+    else {
+      await navigator.clipboard?.writeText(remote.frontend_url)
+      notifications.error(String(t("browser.popupBlocked")), String(t("browser.remoteCopied")))
+    }
+    frontendTelemetry.event("browser.remote_devtools", { page_id: pageId })
+  } catch (caught) {
+    popup?.close()
+    frontendTelemetry.error("browser.remote_devtools_failed", caught, { page_id: pageId })
+  }
+}
+function openBrowserSettings(): void { send({ type: "new_page", url: "chrome://settings/" }) }
+
 function cleanApp(): void {
   if (confirm(String(t("browser.cleanAppConfirm")))) send({ type: "clean_app" })
 }
@@ -321,6 +355,7 @@ onBeforeUnmount(() => {
           @click="selectPage(page.page_id)"
         >
           <span class="min-w-0 flex-1 truncate">{{ page.title || page.label || t("browser.untitled") }}</span>
+          <span v-if="canRemoteDevtools" class="grid size-5 shrink-0 place-items-center rounded hover:bg-muted" :title="String(t('browser.remoteDevtools'))" @click.stop="openRemoteDevtools(page.page_id)"><Code2 class="size-3" /></span>
           <span class="grid size-5 shrink-0 place-items-center rounded hover:bg-muted" @click.stop="closePage(page.page_id)"><X class="size-3" /></span>
         </button>
       </div>
@@ -342,18 +377,21 @@ onBeforeUnmount(() => {
         <button type="submit" class="grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" :title="String(t('browser.go'))"><ExternalLink class="size-3.5" /></button>
       </form>
       <button class="browser-tool" :disabled="!live" :title="String(t('browser.extensions'))" @click="send({type:'new_page',url:'chrome://extensions/'})"><Puzzle class="size-4" /></button>
-      <button class="browser-tool" :disabled="!live" title="DevTools" @click="send({type:'open_docked_devtools',panel:'elements'})"><Code2 class="size-4" /></button>
+      <button class="browser-tool" :disabled="!live || !selectedId || !canRemoteDevtools" :title="String(t('browser.remoteDevtools'))" @click="openRemoteDevtools()"><Code2 class="size-4" /></button>
       <span class="mx-1 h-5 w-px bg-border" />
       <span class="inline-flex items-center gap-1 text-[10px]" :class="live ? 'text-emerald-500' : status === 'error' ? 'text-destructive' : 'text-amber-500'" :title="message || status"><Circle class="size-2.5 fill-current" /></span>
       <details class="relative">
         <summary class="browser-tool cursor-pointer list-none [&::-webkit-details-marker]:hidden" :title="String(t('browser.more'))"><Ellipsis class="size-4" /></summary>
         <div class="absolute right-0 top-9 z-50 w-72 rounded-xl border border-border bg-popover p-2 text-xs shadow-xl">
           <button class="browser-menu-row" @click="send({type:'reopen_closed_page'})"><RotateCcw class="size-4" />{{ t("browser.reopen") }}</button>
-          <button class="browser-menu-row" @click="send({type:'open_devtools',panel:'elements'})"><Code2 class="size-4" />{{ t("browser.devtoolsTab") }}</button>
+          <button class="browser-menu-row" :disabled="!selectedId || !canRemoteDevtools" @click="openRemoteDevtools()"><Code2 class="size-4" />{{ t("browser.remoteDevtools") }}</button>
+          <button class="browser-menu-row" @click="send({type:'new_page',url:'chrome://extensions/'})"><Puzzle class="size-4" />{{ t("browser.extensions") }}</button>
+          <button class="browser-menu-row" @click="openBrowserSettings"><Settings class="size-4" />{{ t("browser.browserSettings") }}</button>
           <button class="browser-menu-row" @click="send({type:'set_agent_access',allowed:state.agent_access_enabled===false})"><ShieldCheck class="size-4" />{{ t("browser.agents") }}: {{ state.agent_access_enabled === false ? t("browser.blocked") : t("browser.on") }}</button>
           <button class="browser-menu-row" @click="developer"><Code2 class="size-4" />{{ t("browser.developer") }}: {{ state.developer_access_effective ? t("browser.on") : state.developer_access_enabled ? t("browser.armed") : t("browser.off") }}</button>
           <div class="my-1 border-t border-border" />
           <div class="flex items-center justify-between gap-2 px-2 py-1.5"><span class="inline-flex items-center gap-2"><Monitor class="size-4" />{{ t("browser.viewport") }}</span><Select :value="viewportPreset" :options="viewportOptions" class="w-32" size="small" :disabled="!live || !canSetViewport" @change="setViewport(String($event))" /></div>
+          <div class="flex items-center justify-between gap-2 px-2 py-1.5"><span class="inline-flex items-center gap-2"><Circle class="size-4" />{{ t("browser.browserTheme") }}</span><Select :value="themePreset" :options="[{label:t('common.system'),value:'system'},{label:t('common.dark'),value:'dark'},{label:t('common.light'),value:'light'}]" class="w-32" size="small" :disabled="!live || !canSetTheme" @change="setTheme(String($event))" /></div>
           <div class="my-1 border-t border-border" />
           <button class="browser-menu-row" @click="cleanApp"><Trash2 class="size-4" />{{ t("browser.cleanApp") }}</button>
           <button class="browser-menu-row text-destructive" @click="cleanBrowser"><Trash2 class="size-4" />{{ t("browser.cleanBrowser") }}</button>
@@ -361,7 +399,7 @@ onBeforeUnmount(() => {
       </details>
     </div>
 
-    <div class="grid" :class="devId ? 'xl:grid-cols-[minmax(0,1fr)_minmax(360px,.65fr)]' : ''">
+    <div class="grid">
       <div class="browser-screen relative min-h-[560px] border-0">
         <img
           ref="screen"
@@ -375,22 +413,6 @@ onBeforeUnmount(() => {
           @contextmenu.prevent
         />
         <span class="pointer-events-none absolute bottom-2 right-2 rounded bg-black/65 px-2 py-1 text-[10px] text-white/70">{{ dims.w }}×{{ dims.h }}</span>
-      </div>
-      <div v-if="devId" class="relative border-l border-border/70 bg-[#090909]">
-        <button class="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded bg-black/60 text-white/70 hover:text-white" @click="send({type:'close_docked_devtools'})"><X class="size-4" /></button>
-        <div class="browser-screen min-h-[560px] border-0">
-          <img
-            ref="devtools"
-            tabindex="0"
-            alt="Docked DevTools"
-            @mousedown="pointer(devtools, devId, devDims, $event, 'mousePressed', mouseButton($event), 1)"
-            @mouseup="pointer(devtools, devId, devDims, $event, 'mouseReleased', mouseButton($event), 1)"
-            @mousemove="event => { const n=now(); if(n-devLastMove>33){ devLastMove=n; pointer(devtools, devId, devDims, event, 'mouseMoved') } }"
-            @wheel="wheel(devtools, devId, devDims, $event)"
-            @keydown="key(devId, $event)"
-            @contextmenu.prevent
-          />
-        </div>
       </div>
     </div>
   </div>
