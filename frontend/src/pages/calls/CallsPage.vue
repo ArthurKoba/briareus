@@ -1,29 +1,29 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
-import { CheckCircle2, RefreshCw, Trash2, XCircle } from "lucide-vue-next"
+import { CheckCircle2, Trash2, XCircle } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type AccountRecord, type InvocationRecord } from "@/shared/api/management"
-import { eventBus, type BusEvent } from "@/shared/events/bus"
 import { formatDate } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
 import AppDialog from "@/shared/ui/AppDialog.vue"
 import Button from "@/shared/ui/Button.vue"
 import DataTable from "@/shared/ui/DataTable.vue"
 import JsonView from "@/shared/ui/JsonView.vue"
-import { CALL_JOURNAL_LIMIT, enqueueCalls, mergeCallJournal } from "./model/call-journal"
+import { accountStore } from "@/features/accounts/model/account-store"
+import { CALL_JOURNAL_LIMIT } from "./model/call-journal"
+import { callStore } from "./model/call-store"
 import PageHeader from "@/shared/ui/PageHeader.vue"
+import RefreshAction from "@/shared/ui/RefreshAction.vue"
 
 const { t } = useI18n()
-const rows = ref<InvocationRecord[]>([])
-const loading = ref(false)
-const error = ref("")
+const rows = computed(() => callStore.state.rows)
+const loading = computed(() => callStore.state.loading)
+const error = computed(() => callStore.state.error)
 const selected = ref<InvocationRecord | null>(null)
-const pending = ref<InvocationRecord[]>([])
-const accountsById = ref<Record<string, AccountRecord>>({})
-const atLiveEdge = ref(true)
+const pending = computed(() => callStore.state.pending)
+const accountsById = computed<Record<string, AccountRecord>>(() => Object.fromEntries(accountStore.state.accounts.map(account => [account.id, account])))
 const tableRef = ref<{ scrollToTop: () => void } | null>(null)
-let unsubscribe: undefined | (() => void)
 
 const columns = computed(() => [
   { title: t("calls.time"), dataIndex: "occurred_at", key: "occurred_at", width: 180 },
@@ -36,43 +36,16 @@ const columns = computed(() => [
 ])
 
 const errorCount = computed(() => rows.value.filter((item) => item.status === "error").length)
-const live = computed(() => eventBus.state.status === "connected")
-
-function acceptIncoming(items: InvocationRecord[]): void {
-  if (!items.length) return
-  if (atLiveEdge.value) rows.value = mergeCallJournal(rows.value, items)
-  else pending.value = enqueueCalls(pending.value, items, rows.value)
-}
-
-function handle(event: BusEvent): void {
-  if (event.type === "snapshot" || event.type === "batch") {
-    const payload = event.data as { events?: InvocationRecord[] }
-    acceptIncoming(payload.events ?? [])
-    return
-  }
-  if (event.type === "item") acceptIncoming([event.data as InvocationRecord])
-}
 
 function applyPending(): void {
-  rows.value = mergeCallJournal(rows.value, pending.value)
-  pending.value = []
-  atLiveEdge.value = true
+  callStore.applyPending()
   tableRef.value?.scrollToTop()
 }
 
 async function load(): Promise<void> {
-  loading.value = true
-  error.value = ""
   try {
-    const [calls, accounts] = await Promise.all([managementApi.calls(CALL_JOURNAL_LIMIT), managementApi.accounts()])
-    // Merge instead of replace: a REST response must never roll back newer realtime deltas.
-    rows.value = mergeCallJournal(rows.value, calls.events)
-    accountsById.value = Object.fromEntries(accounts.accounts.map((account) => [account.id, account]))
-  } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Unable to load calls"
-  } finally {
-    loading.value = false
-  }
+    await callStore.refresh()
+  } catch { /* store owns the local error state */ }
 }
 
 function inspect(item: unknown): void {
@@ -87,30 +60,28 @@ function accountDisplay(item: InvocationRecord): string {
 async function clearAll(): Promise<void> {
   if (!window.confirm(String(t("calls.clearConfirm")))) return
   const result = await managementApi.clearCalls()
-  rows.value = []
-  pending.value = []
+  callStore.clear()
   notifications.success(String(t("notifications.deleted")), `${result.deleted} ${t("nav.calls")}`)
 }
 
 async function remove(item: InvocationRecord): Promise<void> {
   await managementApi.deleteCall(item.id)
-  rows.value = rows.value.filter((row) => row.id !== item.id)
+  callStore.remove(item.id)
   notifications.success(String(t("notifications.deleted")))
 }
 
-onMounted(async () => {
-  await load()
-  unsubscribe = eventBus.subscribe("mcp.calls", handle)
+
+onMounted(() => {
+  callStore.setFollowingLive(true)
+  if (!callStore.state.hydrated) void callStore.ensure().catch(() => undefined)
 })
-onBeforeUnmount(() => unsubscribe?.())
+onBeforeUnmount(() => callStore.leaveView())
 </script>
 
 <template>
   <div class="space-y-6">
     <PageHeader :title="t('nav.calls')" :description="t('calls.description')">
-      <Button v-if="!live" variant="outline" size="sm" @click="load()">
-        <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
-      </Button>
+      <RefreshAction :synced="callStore.state.synced" :loading="loading" @refresh="load" />
       <Button v-if="pending.length" size="sm" @click="applyPending">{{ pending.length }} {{ t("calls.new") }}</Button>
       <Button variant="destructive" size="sm" @click="clearAll">
         <Trash2 class="mr-2 size-4" />{{ t("calls.clear") }}
@@ -135,7 +106,7 @@ onBeforeUnmount(() => unsubscribe?.())
       :scroll-y="620"
       clickable
       @row-click="inspect"
-      @scroll-position="atLiveEdge = $event"
+      @scroll-position="callStore.setFollowingLive($event)"
     >
       <template #bodyCell="{ column, record, value }">
         <template v-if="column.key === 'occurred_at'">{{ formatDate(record.occurred_at) }}</template>

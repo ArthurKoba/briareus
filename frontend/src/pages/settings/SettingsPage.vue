@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { InputNumber, Select, Switch } from "ant-design-vue"
-import { RefreshCw, Save, Trash2 } from "lucide-vue-next"
+import { Save, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type BrowserState, type SettingsState } from "@/shared/api/management"
@@ -12,9 +12,11 @@ import { setLocale } from "@/shared/i18n"
 import { uiPreferences } from "@/shared/lib/preferences"
 import { notifications } from "@/shared/notifications/bus"
 import { IncompleteSettingsSnapshotError, settingsUpdatePayload } from "@/shared/settings/payload"
+import { settingsStore } from "@/shared/settings/store"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 import Button from "@/shared/ui/Button.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
+import RefreshAction from "@/shared/ui/RefreshAction.vue"
 import SectionTabs from "@/shared/ui/SectionTabs.vue"
 
 const { t } = useI18n()
@@ -25,6 +27,10 @@ const browserTheme = ref<"system" | "light" | "dark">("dark")
 const loading = ref(false)
 const saving = ref(false)
 const error = ref("")
+const liveTransport = computed(() => eventBus.state.enabled && eventBus.state.status === "connected")
+const pageSynced = computed(() => settingsStore.state.synced
+  && Boolean(state.value)
+  && state.value?.revision === settingsStore.state.value?.revision)
 const form = reactive({
   logging_enabled: true,
   logging_capture_payloads: true,
@@ -67,18 +73,32 @@ function setSection(value: string): void {
   history.replaceState(null, "", `#settings/${value}`)
 }
 
+function formFromState(value: SettingsState) {
+  return {
+    ...value.management,
+    terminal_max_exec_timeout_seconds: value.terminal.max_exec_timeout_seconds,
+    terminal_max_job_runtime_seconds: value.terminal.max_job_runtime_seconds,
+    mcp_call_timeout_seconds: value.mcp.call_timeout_seconds,
+    reverse_idle_timeout_seconds: Number(value.analysis.idle_timeout_seconds ?? 900),
+  }
+}
+
+const dirty = computed(() => state.value
+  ? JSON.stringify({ ...form }) !== JSON.stringify(formFromState(state.value))
+  : false)
+
+function applyState(value: SettingsState): void {
+  state.value = value
+  Object.assign(form, formFromState(value))
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ""
   try {
-    state.value = await managementApi.settings()
-    Object.assign(form, {
-      ...state.value.management,
-      terminal_max_exec_timeout_seconds: state.value.terminal.max_exec_timeout_seconds,
-      terminal_max_job_runtime_seconds: state.value.terminal.max_job_runtime_seconds,
-      mcp_call_timeout_seconds: state.value.mcp.call_timeout_seconds,
-      reverse_idle_timeout_seconds: Number(state.value.analysis.idle_timeout_seconds ?? 900),
-    })
+    const fresh = await settingsStore.refresh()
+    if (!state.value || !dirty.value) applyState(fresh)
+    else if (fresh.revision !== state.value.revision) error.value = String(t("settings.conflict"))
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to load settings"
   } finally {
@@ -112,7 +132,10 @@ async function save(): Promise<void> {
   saving.value = true
   error.value = ""
   try {
-    state.value = await managementApi.updateSettings(settingsUpdatePayload(state.value, { ...form }))
+    const saved = await managementApi.updateSettings(settingsUpdatePayload(state.value, { ...form }))
+    settingsStore.accept(saved)
+    applyState(saved)
+    error.value = ""
     notifications.success(String(t("notifications.saved")))
   } catch (caught) {
     error.value = caught instanceof IncompleteSettingsSnapshotError
@@ -134,10 +157,23 @@ function changeLocale(value: string): void {
   if (value === "en" || value === "ru") setLocale(value)
 }
 
+watch(() => settingsStore.state.value, (value) => {
+  if (!value) return
+  if (!state.value || !dirty.value) {
+    applyState(value)
+    error.value = ""
+  } else if (value.revision !== state.value.revision) {
+    error.value = String(t("settings.conflict"))
+  }
+})
+
 onMounted(() => {
   readHash()
   window.addEventListener("hashchange", readHash)
-  void load()
+  if (settingsStore.state.value) applyState(settingsStore.state.value)
+  else void settingsStore.ensure().then(applyState).catch((caught) => {
+    error.value = caught instanceof Error ? caught.message : "Unable to load settings"
+  })
   void loadBrowser()
 })
 onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
@@ -146,9 +182,7 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
 <template>
   <div class="space-y-5">
     <PageHeader :title="t('settings.title')" :description="t('settings.description')">
-      <Button variant="outline" size="sm" @click="load">
-        <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
-      </Button>
+      <RefreshAction :synced="pageSynced" :loading="loading || settingsStore.state.loading" @refresh="load" />
       <Button size="sm" :disabled="saving || loading || !state" @click="save">
         <Save class="mr-2 size-4" />{{ t("common.save") }}
       </Button>
@@ -189,10 +223,9 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
       <h2>{{ t("settings.realtime") }}</h2>
       <label class="setting-row">
         <span><b>{{ t("settings.eventBus") }}</b><small>{{ t("settings.eventBusHint") }}</small></span>
-        <div class="flex items-center gap-3">
-          <span class="rounded-md bg-muted px-2 py-1 font-mono text-xs">{{ eventBus.state.status }} · {{ eventBus.state.transport }} · {{ eventBus.state.subscriptions }}</span>
-          <Switch :checked="eventBus.state.enabled" @change="eventBus.setEnabled(Boolean($event))" />
-        </div>
+        <span class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {{ liveTransport ? t("common.connected") : t("common.disconnected") }}
+        </span>
       </label>
       <label class="setting-row">
         <span><b>{{ t("settings.telemetry") }}</b><small>{{ t("settings.telemetryHint") }}</small></span>
