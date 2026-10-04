@@ -231,10 +231,18 @@ class BridgeSettings(ProcessSettings):
 
 class ObservabilitySettings(ProcessSettings):
     service_name: str = Field("mcp-bridge", validation_alias="OTEL_SERVICE_NAME")
+    service_namespace: str = Field("", validation_alias="SERVICE_NAMESPACE")
     service_version: str = Field("0.1.0", validation_alias="OTEL_SERVICE_VERSION")
     service_instance_id: str = Field("", validation_alias="OTEL_SERVICE_INSTANCE_ID")
-    environment: str = Field("production", validation_alias="OTEL_ENVIRONMENT")
-    endpoint: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT")
+    environment: str = Field(
+        "production",
+        validation_alias=AliasChoices("DEPLOYMENT_ENVIRONMENT", "OTEL_ENVIRONMENT"),
+    )
+    endpoint: str = Field(
+        "",
+        validation_alias=AliasChoices("OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
+    )
+    bearer_token: str = Field("", validation_alias="OTLP_BEARER_TOKEN")
     logs_endpoint_override: str = Field(
         "",
         validation_alias="OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
@@ -247,7 +255,10 @@ class ObservabilitySettings(ProcessSettings):
         "",
         validation_alias="OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
     )
-    headers: str = Field("", validation_alias="OTEL_EXPORTER_OTLP_HEADERS")
+    legacy_headers: str = Field(
+        "",
+        validation_alias="OTEL_EXPORTER_OTLP_HEADERS",
+    )
     resource_attributes: str = Field("", validation_alias="OTEL_RESOURCE_ATTRIBUTES")
     log_level: str = Field("INFO", validation_alias="OTEL_LOG_LEVEL")
     timeout_ms: int = Field(
@@ -265,14 +276,16 @@ class ObservabilitySettings(ProcessSettings):
 
     @field_validator(
         "service_name",
+        "service_namespace",
         "service_version",
         "service_instance_id",
         "environment",
         "endpoint",
+        "bearer_token",
         "logs_endpoint_override",
         "traces_endpoint_override",
         "metrics_endpoint_override",
-        "headers",
+        "legacy_headers",
         "resource_attributes",
         "log_level",
         mode="before",
@@ -441,14 +454,6 @@ class AdminApiSettings(ProcessSettings):
         True,
         validation_alias="ADMIN_API_SESSION_HTTPS_ONLY",
     )
-    frontend_telemetry_upstream_url: str = Field(
-        "https://telemetry.koba-nexus.ru",
-        validation_alias="ADMIN_API_TELEMETRY_UPSTREAM_URL",
-    )
-    frontend_telemetry_bearer_token: str = Field(
-        "",
-        validation_alias="ADMIN_API_TELEMETRY_BEARER_TOKEN",
-    )
     admin_ui_origin: str = Field(
         "",
         validation_alias="ADMIN_UI_ORIGIN",
@@ -460,8 +465,6 @@ class AdminApiSettings(ProcessSettings):
         "admin_username",
         "admin_password",
         "session_secret",
-        "frontend_telemetry_upstream_url",
-        "frontend_telemetry_bearer_token",
         "admin_ui_origin",
         mode="before",
     )

@@ -28,6 +28,7 @@ Cross-origin Admin API requests use `credentials: include`. The Admin API must a
 configured `ADMIN_UI_ORIGIN` and keep the session cookie HttpOnly.
 
 The browser never receives the upstream OTLP bearer credential.
+`admin-ui` does not reference `OTLP_ENDPOINT` or `OTLP_BEARER_TOKEN`; Admin API owns OTLP export.
 
 ## Local preview
 

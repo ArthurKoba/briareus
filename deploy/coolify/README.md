@@ -255,65 +255,55 @@ Native Ghidra remains private; ChatGPT uses `/analysis/mcp`.
 
 ## OpenTelemetry / OTLP
 
-Every runtime exports the same service name (`mcp-bridge`) and a distinct
-resource scope: `auth`, `gateway`, `admin-api`, `github`, `gitlab`,
-`files`, `web`, `terminal`, `analysis`, or `ghidra`.
+Telemetry configuration is layered by Coolify scope rather than duplicated per service.
 
-The runtime uses the official OpenTelemetry Python SDK and exports all three
-signals over OTLP/HTTP:
+Root Team shared variables:
+
+```text
+OTLP_ENDPOINT=<collector base URL>
+OTLP_BEARER_TOKEN=<raw bearer token>
+```
+
+Project shared variable:
+
+```text
+SERVICE_NAMESPACE=MCP
+```
+
+Environment shared variable:
+
+```text
+DEPLOYMENT_ENVIRONMENT=production
+```
+
+Each backend application references those shared values and sets only its own service name:
+
+```text
+OTLP_ENDPOINT={{team.OTLP_ENDPOINT}}
+OTLP_BEARER_TOKEN={{team.OTLP_BEARER_TOKEN}}
+SERVICE_NAMESPACE={{project.SERVICE_NAMESPACE}}
+DEPLOYMENT_ENVIRONMENT={{environment.DEPLOYMENT_ENVIRONMENT}}
+OTEL_SERVICE_NAME=admin-api
+```
+
+The runtime converts `OTLP_BEARER_TOKEN` into the HTTP `Authorization: Bearer ...` header.
+Do not store a preformatted authorization header in Coolify. The Admin UI never receives
+`OTLP_BEARER_TOKEN`; browser diagnostics are authenticated to Admin API and Admin API exports
+them through the shared OTLP transport with `service.name=admin-ui`.
+
+The Python runtime currently exports OTLP/HTTP protobuf and derives the signal URLs from the
+base endpoint:
 
 - logs -> `/v1/logs`;
-- traces/spans -> `/v1/traces`;
+- traces -> `/v1/traces`;
 - metrics -> `/v1/metrics`.
 
-With no endpoint configured the exporter is disabled and runtime behavior is
-unchanged. A normal Coolify deployment only needs the shared base endpoint and
-authorization header:
+`service.namespace`, `service.name`, `deployment.environment.name`, and
+`service.instance.id` are emitted as resource attributes. `service.instance.id` defaults to
+the container hostname.
 
-```text
-OTEL_SERVICE_NAME=mcp-bridge
-OTEL_EXPORTER_OTLP_ENDPOINT=<otlp-endpoint>
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20<token>
-OTEL_ENVIRONMENT=production
-OTEL_EXPORTER_OTLP_TIMEOUT=10000
-```
-
-Optional signal-specific endpoints override the shared base URL:
-
-```text
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=
-```
-
-Optional resource/runtime tuning:
-
-```text
-OTEL_SERVICE_VERSION=0.1.0
-OTEL_SERVICE_INSTANCE_ID=
-OTEL_RESOURCE_ATTRIBUTES=
-OTEL_METRIC_EXPORT_INTERVAL=30000
-OTEL_LOG_LEVEL=INFO
-```
-
-When `OTEL_SERVICE_INSTANCE_ID` is empty the container hostname is used.
-The exporter records `service.name`, `service.version`,
-`service.instance.id`, `deployment.environment.name`, and `mcp.scope`.
-
-MCP tool calls create spans and application exceptions are emitted as ERROR
-logs while the span is active. Metrics include runtime starts/up state, tool
-call/error counters and tool duration histograms. Diagnostic spans include
-`admin-api.http`, `cache.get`/`cache.set`, `admin-api.db.*`, provider HTTP
-latency/pool wait, and MCP backend session/catalog-cache state. Invocation
-arguments, results, account IDs, credentials, authorization headers, full URLs
-and cache keys are never added to OpenTelemetry attributes.
-
-The Admin API invocation audit remains a separate redacted operator log under
-MCP Calls. Runtime processes enqueue events into a bounded memory queue and
-flush short batches, preserving individual audit records while sharing one
-internal HTTP request and one SQL transaction per batch. Audit batching is
-best-effort and does not block tool responses.
-
+`OTEL_EXPORTER_OTLP_*` variables remain accepted only as temporary migration fallbacks for the
+legacy monolith. New split applications use the shared contract above.
 
 ## Managed SigNoz and Coolify connections
 

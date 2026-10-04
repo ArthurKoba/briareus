@@ -232,21 +232,43 @@ def _parse_key_values(value: str) -> dict[str, str]:
     return result
 
 
-def _resource_attributes(
+def resource_attributes(
     settings: ObservabilitySettings,
     scope: str,
+    *,
+    service_name: str | None = None,
 ) -> dict[str, object]:
     attributes: dict[str, object] = dict(_parse_key_values(settings.resource_attributes))
     attributes.update(
         {
-            "service.name": settings.service_name,
+            "service.name": service_name or settings.service_name,
             "service.version": settings.service_version,
             "service.instance.id": settings.resolved_instance_id,
             "deployment.environment.name": settings.environment,
             "mcp.scope": scope,
         }
     )
+    if settings.service_namespace:
+        attributes["service.namespace"] = settings.service_namespace
     return attributes
+
+
+def otlp_headers(settings: ObservabilitySettings) -> dict[str, str] | None:
+    headers = _parse_key_values(settings.legacy_headers)
+    if settings.bearer_token:
+        headers["Authorization"] = f"Bearer {settings.bearer_token}"
+    return headers or None
+
+
+def telemetry_resource(
+    settings: ObservabilitySettings,
+    scope: str,
+    *,
+    service_name: str | None = None,
+) -> Resource:
+    return Resource.create(
+        resource_attributes(settings, scope, service_name=service_name)
+    )
 
 
 def _logging_level(value: str) -> int:
@@ -263,8 +285,8 @@ class OpenTelemetrySink(ObservabilitySink):
         self._shutdown = False
         self._attached_loggers: list[logging.Logger] = []
 
-        headers = _parse_key_values(settings.headers) or None
-        resource = Resource.create(_resource_attributes(settings, scope))
+        headers = otlp_headers(settings)
+        resource = telemetry_resource(settings, scope)
 
         self.logger_provider = LoggerProvider(resource=resource)
         self.logger_provider.add_log_record_processor(

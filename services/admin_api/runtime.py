@@ -44,16 +44,17 @@ from admin_api.presentation.api import ApiServices, build_internal_router
 from admin_api.presentation.web_api import WebApiServices, build_admin_api_router
 from admin_api.realtime import RealtimeBus
 from admin_api.realtime_api import build_realtime_router
-from admin_api.telemetry_ingest import FrontendTelemetryProxy, TelemetryUpstream
+from admin_api.telemetry_ingest import FrontendTelemetryProxy
 from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
-from common.settings import AdminApiSettings, FileSettings, ValkeySettings
+from common.settings import AdminApiSettings, FileSettings, ObservabilitySettings, ValkeySettings
 
 logger = logging.getLogger(__name__)
 
 settings = AdminApiSettings()
 settings.validate_bootstrap()
-_observability = build_observability("admin-api")
+observability_settings = ObservabilitySettings()
+_observability = build_observability("admin-api", settings=observability_settings)
 announce_runtime_started(_observability, "admin-api")
 settings.database_path.parent.mkdir(parents=True, exist_ok=True)
 engine, sessions = create_database(settings.database_url)
@@ -63,12 +64,7 @@ if ensure_zero_state_schema(engine):
 cache_settings = ValkeySettings()
 shared_cache = SharedCache(cache_settings)
 realtime = RealtimeBus(shared_cache, cache_settings)
-telemetry = FrontendTelemetryProxy(
-    TelemetryUpstream(
-        url=settings.frontend_telemetry_upstream_url,
-        bearer_token=settings.frontend_telemetry_bearer_token,
-    )
-)
+telemetry = FrontendTelemetryProxy(observability_settings)
 cipher = FernetCredentialCipher(settings.encryption_key)
 account_repository = SqlAlchemyAccountRepository(sessions)
 invocation_repository = SqlAlchemyInvocationRepository(sessions)
