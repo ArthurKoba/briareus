@@ -6,7 +6,7 @@ import AppDialog from "@/shared/ui/AppDialog.vue"
 
 const notify = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 const api = vi.hoisted(() => ({
-  accounts: vi.fn(), verifyAccount: vi.fn(), deleteAccount: vi.fn(),
+  accounts: vi.fn(), verifyAccount: vi.fn(), verifyAccountCandidate: vi.fn(), createAccount: vi.fn(), updateAccount: vi.fn(), deleteAccount: vi.fn(),
 }))
 vi.mock("@/shared/api/management", () => ({ managementApi: api }))
 vi.mock("@/shared/notifications/bus", () => ({

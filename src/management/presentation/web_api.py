@@ -4,10 +4,12 @@ import asyncio
 import hmac
 import json
 import posixpath
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from time import monotonic
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -85,6 +87,16 @@ class AccountPayload(BaseModel):
     ca_cert_pem: str = ""
     enabled: bool = True
     credential: str = ""
+
+
+class AccountCandidatePayload(AccountPayload):
+    alias: str = Field(min_length=1, max_length=128)
+    base_url: str = Field("", max_length=2048)
+    external_id: str = Field("", max_length=512)
+    ca_cert_pem: str = Field("", max_length=65_536)
+    credential: str = Field("", max_length=131_072)
+    account_id: str = Field("", max_length=36)
+    draft_revision: str = Field(min_length=1, max_length=128)
 
 
 class ProjectCreatePayload(BaseModel):
@@ -173,6 +185,9 @@ def build_admin_api_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/admin/api", tags=["admin"])
     settings_update_lock = asyncio.Lock()
+    candidate_verify_slots = asyncio.Semaphore(4)
+    candidate_verify_rate_lock = asyncio.Lock()
+    candidate_verify_attempts: dict[str, deque[float]] = {}
 
     def authenticated_username(request: Request) -> str | None:
         username = request.session.get(_SESSION_KEY)
@@ -210,6 +225,24 @@ def build_admin_api_router(
     async def publish_management_event(api: WebApiServices, event_type: str, data: object) -> None:
         if api.realtime is not None:
             await api.realtime.publish("management.events", event_type, data)
+
+    async def enforce_candidate_verify_rate(request: Request) -> None:
+        username = authenticated_username(request) or "unknown"
+        client_host = request.client.host if request.client is not None else "unknown"
+        key = f"{username}:{client_host}"
+        now = monotonic()
+        cutoff = now - 60.0
+        async with candidate_verify_rate_lock:
+            bucket = candidate_verify_attempts.setdefault(key, deque())
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+            if len(bucket) >= 20:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="candidate verification rate limit exceeded",
+                    headers={"Retry-After": "60"},
+                )
+            bucket.append(now)
 
     @router.get("/session")
     def session_state(request: Request) -> JsonObject:
@@ -317,6 +350,62 @@ def build_admin_api_router(
         response: JsonObject = {"deleted": True, "id": account_id}
         await publish_management_event(api, "account.deleted", response)
         return response
+
+    @router.post("/accounts/verify-candidate")
+    async def verify_account_candidate(
+        payload: AccountCandidatePayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        await enforce_candidate_verify_rate(request)
+        existing: Account | None = None
+        try:
+            if payload.account_id:
+                existing = await asyncio.to_thread(
+                    api.accounts.get,
+                    payload.account_id,
+                    provider=payload.provider,
+                    enabled_only=False,
+                )
+            account = _account_from_payload(payload, existing=existing)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="account not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if not payload.credential.strip() and existing is None:
+            raise HTTPException(status_code=400, detail="credential is required for a new account")
+
+        try:
+            async with candidate_verify_slots:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        api.accounts.verify_candidate,
+                        account,
+                        credential=payload.credential,
+                        credential_account_id=existing.id if existing is not None else "",
+                    ),
+                    timeout=20.0,
+                )
+        except TimeoutError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="candidate verification timed out",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="candidate verification failed",
+            ) from exc
+        if result.get("ok") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="candidate verification failed",
+            )
+        return {
+            "ok": True,
+            "provider": payload.provider.value,
+            "draft_revision": payload.draft_revision,
+        }
 
     @router.post("/accounts/{provider}/{account_id}/verify")
     async def verify_account(provider: Provider, account_id: str, request: Request) -> JsonObject:

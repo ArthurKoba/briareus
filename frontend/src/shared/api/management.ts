@@ -28,6 +28,8 @@ export interface AccountPayload {
   alias: string; provider: AccountRecord["provider"]; auth_type: string; base_url?: string; external_id?: string
   verify_tls?: boolean; ca_cert_pem?: string; enabled?: boolean; credential?: string
 }
+export interface AccountCandidatePayload extends AccountPayload { account_id?: string; draft_revision: string }
+export interface AccountCandidateResult { ok: true; provider: AccountRecord["provider"]; draft_revision: string }
 
 export interface InvocationRecord {
   id: string; request_id: string; module: string; tool: string; account_id: string; provider: string
@@ -143,6 +145,7 @@ export const managementApi = {
   updateAccount: (record: AccountRecord, payload: AccountPayload): Promise<AccountRecord> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "PUT", body: jsonBody(payload) }),
   deleteAccount: (record: AccountRecord): Promise<unknown> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "DELETE" }),
   verifyAccount: (record: AccountRecord): Promise<Record<string, unknown>> => request(`/api/accounts/${record.provider}/${record.id}/verify`, { method: "POST", body: "{}" }, { notifyErrors: false }),
+  verifyAccountCandidate: (payload: AccountCandidatePayload): Promise<AccountCandidateResult> => request("/api/accounts/verify-candidate", { method: "POST", body: jsonBody(payload) }, { notifyErrors: false }),
   calls: (limit = 250): Promise<{ events: InvocationRecord[]; count: number }> => request(`/api/calls?limit=${limit}`),
   clearCalls: (): Promise<{ deleted: number }> => request("/api/calls", { method: "DELETE" }),
   deleteCall: (id: string): Promise<unknown> => request(`/api/calls/${id}`, { method: "DELETE" }),

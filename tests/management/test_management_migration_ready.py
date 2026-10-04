@@ -226,6 +226,7 @@ def test_admin_api_route_contract_is_explicit_and_complete(tmp_path: Path) -> No
         ("GET", "/admin/api/dashboard"),
         ("GET", "/admin/api/accounts"),
         ("POST", "/admin/api/accounts"),
+        ("POST", "/admin/api/accounts/verify-candidate"),
         ("PUT", "/admin/api/accounts/{provider}/{account_id}"),
         ("DELETE", "/admin/api/accounts/{provider}/{account_id}"),
         ("POST", "/admin/api/accounts/{provider}/{account_id}/verify"),
