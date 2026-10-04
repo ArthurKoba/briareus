@@ -1,0 +1,41 @@
+services:
+  analysis:
+    restart: unless-stopped
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: analysis
+    healthcheck:
+      test: ["CMD", "nc", "-z", "-w", "1", "127.0.0.1", "8000"]
+      interval: 2s
+      timeout: 1s
+      start_period: 2s
+      retries: 10
+    environment:
+      TZ: ${TZ:-UTC}
+      LANG: ${LANG:-C.UTF-8}
+      LC_ALL: ${LC_ALL:-C.UTF-8}
+      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
+      ADMIN_API_URL: ${ADMIN_API_URL:-http://admin-api:8000}
+      ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:?}
+      SERVICE_NAMESPACE: ${SERVICE_NAMESPACE:-MCP}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-production}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAME: analysis
+      GHIDRA_URL: ${GHIDRA_URL:-http://ghidra:8000/mcp}
+    volumes:
+      - workspace:/workspace
+    networks:
+      mcp:
+        aliases: [analysis]
+
+volumes:
+  workspace:
+    external: true
+    name: ${MCP_WORKSPACE_VOLUME:?}
+
+networks:
+  mcp:
+    external: true
+    name: ${MCP_NETWORK_NAME:-mcp}
