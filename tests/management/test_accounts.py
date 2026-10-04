@@ -64,7 +64,7 @@ class _Verifier:
         }
 
 
-def _services(tmp_path: Path):
+def _services(tmp_path: Path, *, publisher=None):
     database = tmp_path / "management.sqlite3"
     engine, sessions = create_database(f"sqlite:///{database}")
     Base.metadata.create_all(engine)
@@ -75,7 +75,7 @@ def _services(tmp_path: Path):
     return (
         engine,
         sessions,
-        AccountService(account_repository, cipher, _Verifier()),
+        AccountService(account_repository, cipher, _Verifier(), publisher=publisher),
         InvocationAuditService(invocation_repository, config_service),
     )
 
@@ -184,6 +184,45 @@ def test_replace_credential_invalidates_old_value(tmp_path: Path) -> None:
     assert accounts.resolve(account.id, provider=Provider.GITLAB).credential == "new-token"
     engine.dispose()
 
+
+
+def test_account_service_publishes_safe_events_for_all_mutations(tmp_path: Path) -> None:
+    published: list[tuple[str, str, object]] = []
+
+    def publish(topic: str, event_type: str, data: object) -> None:
+        published.append((topic, event_type, data))
+
+    engine, _sessions, accounts, _audit = _services(tmp_path, publisher=publish)
+    created = accounts.create(
+        Account(alias="event-account", provider=Provider.GITHUB, auth_type=AuthType.GITHUB_TOKEN),
+        credential="super-secret",
+    )
+    created.alias = "event-account-renamed"
+    updated = accounts.update(created)
+    accounts.set_credential(updated.id, "new-super-secret", provider=Provider.GITHUB)
+    accounts.verify(updated.id, provider=Provider.GITHUB)
+    accounts.delete(updated.id, provider=Provider.GITHUB)
+
+    assert [item[1] for item in published] == [
+        "account.created",
+        "account.updated",
+        "account.updated",
+        "account.verified",
+        "account.deleted",
+    ]
+    assert all(topic == "management.events" for topic, _kind, _data in published)
+    rendered = repr(published)
+    assert "super-secret" not in rendered
+    assert "new-super-secret" not in rendered
+    created_event = published[0][2]
+    assert isinstance(created_event, dict)
+    assert created_event["id"] == created.id
+    assert created_event["provider"] == "github"
+    verified_event = published[-2][2]
+    assert verified_event == {"id": created.id, "provider": "github", "ok": True}
+    deleted_event = published[-1][2]
+    assert deleted_event == {"id": created.id, "provider": "github"}
+    engine.dispose()
 
 def test_invocation_audit_captures_payloads_and_can_be_disabled(tmp_path: Path) -> None:
     engine, sessions, _accounts, audit = _services(tmp_path)

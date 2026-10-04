@@ -17,6 +17,7 @@ import {
 import { useI18n } from "vue-i18n"
 
 import { managementApi, type AccountPayload, type AccountRecord } from "@/shared/api/management"
+import { accountStore } from "./model/account-store"
 import { ManagementApiError } from "@/shared/api/error"
 import { formatDate } from "@/shared/lib/format"
 import { notifications } from "@/shared/notifications/bus"
@@ -35,9 +36,11 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const rows = ref<AccountRecord[]>([])
-const loading = ref(false)
 const error = ref("")
+const rows = computed(() => accountStore.state.accounts.filter(item => props.providers.includes(item.provider)))
+const loading = computed(() => accountStore.state.loading)
+const liveSync = computed(() => accountStore.state.synced)
+const displayError = computed(() => error.value || accountStore.state.error)
 const modalOpen = ref(false)
 const editing = ref<AccountRecord | null>(null)
 const saving = ref(false)
@@ -268,15 +271,11 @@ function handleEditorKeydown(event: KeyboardEvent): void {
 }
 
 async function load(): Promise<void> {
-  loading.value = true
   error.value = ""
   try {
-    const all = (await managementApi.accounts()).accounts
-    rows.value = all.filter((item) => props.providers.includes(item.provider))
+    await accountStore.refresh()
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to load accounts"
-  } finally {
-    loading.value = false
   }
 }
 
@@ -323,11 +322,12 @@ async function save(): Promise<void> {
   saving.value = true
   accountConflict.value = ""
   try {
-    if (editing.value) await managementApi.updateAccount(editing.value, currentPayload())
-    else await managementApi.createAccount(currentPayload())
+    const saved = editing.value
+      ? await managementApi.updateAccount(editing.value, currentPayload())
+      : await managementApi.createAccount(currentPayload())
+    accountStore.upsert(saved)
     closeEditor()
     notifications.success(String(t("notifications.saved")))
-    await load()
   } catch (caught) {
     if (caught instanceof ManagementApiError && caught.status === 409 && caught.code === "account_conflict") {
       accountConflict.value = String(t("accounts.accountConflict"))
@@ -342,9 +342,25 @@ async function save(): Promise<void> {
 async function remove(record: AccountRecord): Promise<void> {
   if (!window.confirm(String(t("accounts.deleteConfirm", { alias: record.alias })))) return
   await managementApi.deleteAccount(record)
+  accountStore.remove(record.provider, record.id)
   notifications.success(String(t("notifications.deleted")), record.alias)
-  await load()
 }
+
+watch(() => accountStore.state.accounts, (accounts) => {
+  const current = editing.value
+  if (!modalOpen.value || !current) return
+  const fresh = accounts.find(item => item.id === current.id && item.provider === current.provider)
+  if (!fresh) {
+    accountConflict.value = String(t("accounts.accountMissing"))
+    return
+  }
+  if (fresh.updated_at === current.updated_at) return
+  if (dirty.value) {
+    accountConflict.value = String(t("accounts.accountConflict"))
+    return
+  }
+  editAccount(fresh)
+})
 
 onMounted(() => { void load(); window.addEventListener("keydown", handleEditorKeydown) })
 onBeforeUnmount(() => window.removeEventListener("keydown", handleEditorKeydown))
@@ -353,7 +369,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEditorKeydown)
 <template>
   <div class="space-y-5">
     <PageHeader :title="title" :description="description">
-      <Button variant="outline" size="sm" @click="load">
+      <Button v-if="!liveSync" variant="outline" size="sm" @click="load">
         <RefreshCw class="mr-2 size-4" />{{ t("common.refresh") }}
       </Button>
       <Button size="sm" @click="newAccount">
@@ -361,7 +377,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEditorKeydown)
       </Button>
     </PageHeader>
 
-    <p v-if="error" class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{{ error }}</p>
+    <p v-if="displayError" class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{{ displayError }}</p>
 
     <DataTable :columns="columns" :data-source="rows" :loading="loading" clickable @row-click="editAccount">
       <template #bodyCell="{ column, record, value }">
