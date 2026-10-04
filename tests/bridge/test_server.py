@@ -76,6 +76,7 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
         "/api/{path:path}",
         "/api/realtime",
         "/api/browser/operator/ws",
+        "/api/browser/cdp/{token}/page/{target_id}",
         "/admin/api",
         "/admin/api/{path:path}",
     } <= paths
@@ -174,9 +175,20 @@ async def test_public_management_websockets_target_internal_management_paths(
     await bridge_server._api_realtime_websocket(marker)  # type: ignore[arg-type]
     await bridge_server._api_browser_operator_websocket(marker)  # type: ignore[arg-type]
 
+    class FakeCdpWebSocket:
+        def __init__(self) -> None:
+            self.path_params = {"token": "signed-token", "target_id": "TARGET123"}
+
+    cdp = FakeCdpWebSocket()
+    await bridge_server._api_browser_cdp_websocket(cdp)  # type: ignore[arg-type]
+
     assert calls == [
         (marker, "/admin/api/realtime"),
         (marker, "/admin/api/browser/operator/ws"),
+        (
+            cdp,
+            "/admin/api/browser/cdp/signed-token/page/TARGET123",
+        ),
     ]
 
 
@@ -184,6 +196,9 @@ def test_management_route_priority_is_explicit() -> None:
     paths = [getattr(route, "path", "") for route in app.routes]
     assert paths.index("/api/realtime") < paths.index("/api/{path:path}")
     assert paths.index("/api/browser/operator/ws") < paths.index("/api/{path:path}")
+    assert paths.index("/api/browser/cdp/{token}/page/{target_id}") < paths.index(
+        "/api/{path:path}"
+    )
     assert paths.index("/api/{path:path}") < paths.index("/admin/{path:path}")
     assert paths.index("/admin/api/{path:path}") < paths.index("/admin/{path:path}")
 

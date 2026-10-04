@@ -9,6 +9,10 @@ from starlette.websockets import WebSocket
 
 from common.settings import ManagementSettings
 from common.websocket_proxy import relay_websocket
+from management.browser_remote_debug import (
+    BrowserRemoteDebugAuthError,
+    verify_browser_remote_debug_token,
+)
 
 _SESSION_KEY = "management_admin"
 Relay = Callable[..., Awaitable[None]]
@@ -20,6 +24,25 @@ def build_browser_operator_api_router(
     relay: Relay = relay_websocket,
 ) -> APIRouter:
     router = APIRouter()
+
+    @router.websocket("/admin/api/browser/cdp/{token}/page/{target_id}")
+    async def browser_remote_debug_socket(websocket: WebSocket, token: str, target_id: str) -> None:
+        try:
+            verify_browser_remote_debug_token(
+                token,
+                settings.session_secret,
+                settings.admin_username,
+                target_id,
+                max_age_seconds=300,
+            )
+        except BrowserRemoteDebugAuthError:
+            await websocket.close(code=4401)
+            return
+        await relay(
+            websocket,
+            f"ws://web:8000/cdp/page/{target_id}",
+            headers={"Authorization": f"Bearer {settings.service_token}"},
+        )
 
     @router.websocket("/admin/api/browser/operator/ws")
     async def browser_operator_api_socket(websocket: WebSocket) -> None:

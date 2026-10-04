@@ -40,6 +40,16 @@ def register_browser_tools(
         """Open a URL in a new page, or navigate an existing page_id."""
         return await browser.open(url, page_id)
 
+    @mcp.tool(title="Browser set theme", annotations=write_annotations)
+    async def browser_set_theme(color_scheme: str) -> JsonObject:
+        """Set persistent browser color scheme: dark, light, or system."""
+        return await browser.set_color_scheme(color_scheme)
+
+    @mcp.tool(title="Browser remote debug target", annotations=read_annotations)
+    async def browser_debug_target(page_id: str) -> JsonObject:
+        """Resolve the CDP target for one application page without exposing the raw debug port."""
+        return await browser.debug_target(page_id)
+
     @mcp.tool(title="Browser set viewport", annotations=write_annotations)
     async def browser_set_viewport(page_id: str, width: int, height: int) -> JsonObject:
         """Set one browser page viewport and return the effective measured viewport."""

@@ -87,6 +87,7 @@ class BrowserManager:
         self._policy_path = self.profile_dir / "koba-browser-policy.json"
         self._agent_access_enabled = True
         self._developer_access_enabled = False
+        self._color_scheme: Literal["system", "light", "dark"] = "dark"
         self._privileged_access_hooks: list[Callable[[bool], Awaitable[None]]] = []
         self._restart_hooks: list[Callable[[], Awaitable[None]]] = []
         self._developer_backend_connected = False
@@ -110,6 +111,9 @@ class BrowserManager:
             self._agent_access_enabled = payload["agent_access_enabled"]
         if isinstance(payload.get("developer_access_enabled"), bool):
             self._developer_access_enabled = payload["developer_access_enabled"]
+        color_scheme = payload.get("color_scheme")
+        if color_scheme in {"system", "light", "dark"}:
+            self._color_scheme = cast(Literal["system", "light", "dark"], color_scheme)
 
     def _persist_policy(self) -> None:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -119,6 +123,7 @@ class BrowserManager:
                 {
                     "agent_access_enabled": self._agent_access_enabled,
                     "developer_access_enabled": self._developer_access_enabled,
+                    "color_scheme": self._color_scheme,
                 },
                 separators=(",", ":"),
                 sort_keys=True,
@@ -278,6 +283,8 @@ class BrowserManager:
             f"--window-size={self.viewport_width},{self.viewport_height}",
         ]
         command.extend(self.chromium_args)
+        if self._color_scheme == "dark" and "--force-dark-mode" not in command:
+            command.append("--force-dark-mode")
         extension_paths = self._extension_registry.load_paths()
         if extension_paths:
             command.append(f"--load-extension={','.join(extension_paths)}")
@@ -382,6 +389,8 @@ class BrowserManager:
         self._context = context
         for page in context.pages:
             self._register_page(page)
+            await self._apply_color_scheme(page)
+        context.on("page", self._on_context_page)
 
     async def _ensure_started(self) -> BrowserContext:
         if self._context is not None and await self._context_usable():
@@ -460,6 +469,60 @@ class BrowserManager:
 
     def dev_extensions(self) -> list[JsonValue]:
         return [{"id": item.id, "path": item.path} for item in self._extension_registry.items()]
+
+    async def _apply_color_scheme(self, page: Page) -> None:
+        scheme = None if self._color_scheme == "system" else self._color_scheme
+        try:
+            await page.emulate_media(color_scheme=scheme)
+        except Exception as exc:
+            raise BrowserError(f"browser color scheme update failed: {exc}") from exc
+
+    def _on_context_page(self, page: Page) -> None:
+        self._register_page(page)
+        task = asyncio.create_task(
+            self._apply_color_scheme(page), name="browser-apply-color-scheme"
+        )
+        task.add_done_callback(lambda item: item.exception() if not item.cancelled() else None)
+
+    async def set_color_scheme(self, color_scheme: str) -> JsonObject:
+        normalized = color_scheme.strip().casefold()
+        if normalized not in {"system", "light", "dark"}:
+            raise BrowserError("browser color scheme must be system, light, or dark")
+        self._color_scheme = cast(Literal["system", "light", "dark"], normalized)
+        await asyncio.to_thread(self._persist_policy)
+        context = await self._ensure_started()
+        updated = 0
+        for page in list(context.pages):
+            if page.is_closed():
+                continue
+            await self._apply_color_scheme(page)
+            updated += 1
+        result = await self.status()
+        result["updated_pages"] = updated
+        result["native_ui_restart_required"] = True
+        return result
+
+    async def debug_target(self, page_id: str) -> JsonObject:
+        self._require_agent_access(page_id)
+        context = await self._ensure_started()
+        page = await self._page(page_id)
+        if page.url.startswith("devtools://"):
+            raise BrowserError("select an application tab for remote debugging")
+        session = await context.new_cdp_session(page)
+        try:
+            info = await session.send("Target.getTargetInfo")
+        finally:
+            await session.detach()
+        target_info = info.get("targetInfo") if isinstance(info, dict) else None
+        target_id = str(target_info.get("targetId") or "") if isinstance(target_info, dict) else ""
+        if not target_id:
+            raise BrowserError("selected browser tab has no remote debugging target")
+        return {
+            "page_id": page_id,
+            "target_id": target_id,
+            "title": await page.title(),
+            "url": page.url,
+        }
 
     def _register_page(self, page: Page) -> str:
         key = id(page)
@@ -661,7 +724,12 @@ class BrowserManager:
             "developer_backend_connected": self._developer_backend_connected,
             "headless": self.headless,
             "browser": "chromium",
-            "capabilities": {"set_viewport": True},
+            "capabilities": {
+                "set_viewport": True,
+                "set_theme": True,
+                "remote_devtools": True,
+            },
+            "color_scheme": self._color_scheme,
             "locale": self.locale,
             "accept_language": self.accept_language,
             "display": "" if self.headless else self.display,
@@ -1062,7 +1130,12 @@ class BrowserManager:
             "developer_backend": "chrome-devtools-mcp",
             "docked_devtools_page_id": self._operator_devtools_pages.get(owner_token, ""),
             "can_reopen_closed_tab": bool(self._closed_pages),
-            "capabilities": {"set_viewport": True},
+            "capabilities": {
+                "set_viewport": True,
+                "set_theme": True,
+                "remote_devtools": True,
+            },
+            "color_scheme": self._color_scheme,
             "viewport": {"width": self.viewport_width, "height": self.viewport_height},
             "screen": {"width": self.screen_width, "height": self.screen_height},
         }
