@@ -9,7 +9,7 @@ from typing import Any, Literal, ParamSpec, TypeVar, cast
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,7 +22,7 @@ from management.domain.accounts import Account, AccountConflictError, AuthType, 
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
 from management.domain.snapshots import CachedSnapshot
-from management.domain.telemetry import Invocation
+from management.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 
 from .database import (
     CachedSnapshotRecord,
@@ -462,30 +462,85 @@ class SqlAlchemyInvocationRepository:
                 ]
             )
 
-    def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
-        size = max(1, min(limit, 1000))
-        with self.sessions() as session:
-            rows = session.scalars(
-                select(InvocationRecord).order_by(InvocationRecord.occurred_at.desc()).limit(size)
-            ).all()
-            return [
-                Invocation(
-                    id=row.id,
-                    request_id=row.request_id,
-                    module=row.module,
-                    tool=row.tool,
-                    account_id=row.account_id,
-                    provider=row.provider,
-                    status=cast(Literal["success", "error"], row.status),
-                    duration_ms=row.duration_ms,
-                    error_type=row.error_type,
-                    arguments_json=row.arguments_json,
-                    result_json=row.result_json,
-                    error_message=row.error_message,
-                    occurred_at=row.occurred_at,
+    @staticmethod
+    def _invocation(row: InvocationRecord) -> Invocation:
+        return Invocation(
+            id=row.id,
+            request_id=row.request_id,
+            module=row.module,
+            tool=row.tool,
+            account_id=row.account_id,
+            provider=row.provider,
+            status=cast(Literal["success", "error"], row.status),
+            duration_ms=row.duration_ms,
+            error_type=row.error_type,
+            arguments_json=row.arguments_json,
+            result_json=row.result_json,
+            error_message=row.error_message,
+            occurred_at=row.occurred_at,
+        )
+
+    def query(self, query: InvocationQuery) -> InvocationPage:
+        filters: list[Any] = []
+        if query.module:
+            filters.append(InvocationRecord.module == query.module)
+        if query.tool:
+            filters.append(InvocationRecord.tool == query.tool)
+        if query.provider:
+            filters.append(InvocationRecord.provider == query.provider)
+        if query.account_id:
+            filters.append(InvocationRecord.account_id == query.account_id)
+        if query.status is not None:
+            filters.append(InvocationRecord.status == query.status)
+        if query.search:
+            pattern = f"%{query.search.strip()}%"
+            filters.append(
+                or_(
+                    InvocationRecord.module.ilike(pattern),
+                    InvocationRecord.tool.ilike(pattern),
+                    InvocationRecord.request_id.ilike(pattern),
+                    InvocationRecord.provider.ilike(pattern),
+                    InvocationRecord.account_id.ilike(pattern),
                 )
-                for row in rows
-            ]
+            )
+
+        with self.sessions() as session:
+            total = session.scalar(
+                select(func.count()).select_from(InvocationRecord).where(*filters)
+            ) or 0
+            stmt = select(InvocationRecord).where(*filters)
+            if query.cursor_at is not None and query.cursor_id:
+                stmt = stmt.where(
+                    or_(
+                        InvocationRecord.occurred_at < query.cursor_at,
+                        and_(
+                            InvocationRecord.occurred_at == query.cursor_at,
+                            InvocationRecord.id < query.cursor_id,
+                        ),
+                    )
+                )
+            elif query.offset:
+                stmt = stmt.offset(query.offset)
+            rows = session.scalars(
+                stmt.order_by(InvocationRecord.occurred_at.desc(), InvocationRecord.id.desc())
+                .limit(query.limit + 1)
+            ).all()
+
+        has_more = len(rows) > query.limit
+        visible = rows[: query.limit]
+        events = [self._invocation(row) for row in visible]
+        tail = visible[-1] if visible and has_more else None
+        return InvocationPage(
+            events=events,
+            total=int(total),
+            count=len(events),
+            has_more=has_more,
+            next_cursor_at=tail.occurred_at if tail is not None else None,
+            next_cursor_id=tail.id if tail is not None else "",
+        )
+
+    def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
+        return self.query(InvocationQuery(limit=max(1, min(limit, 500)))).events
 
     def clear(self) -> int:
         with self.sessions.begin() as session:

@@ -46,6 +46,26 @@ export interface InvocationRecord {
   status: "success" | "error"; duration_ms: number; error_type: string; arguments_json: string
   result_json: string; error_message: string; occurred_at: string
 }
+export interface InvocationQuery {
+  limit?: number
+  offset?: number
+  cursor?: string
+  module?: string
+  tool?: string
+  provider?: string
+  account_id?: string
+  status?: "success" | "error"
+  search?: string
+}
+export interface InvocationPage {
+  events: InvocationRecord[]
+  count: number
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+  next_cursor: string
+}
 
 export interface OAuthRecord {
   id: string; client_id: string; client_name: string; resource: string; login: string; subject: string
@@ -170,7 +190,14 @@ export const managementApi = {
   deleteAccount: (record: AccountRecord): Promise<unknown> => request(`/api/accounts/${record.provider}/${record.id}`, { method: "DELETE" }),
   verifyAccount: (record: AccountRecord): Promise<Record<string, unknown>> => request(`/api/accounts/${record.provider}/${record.id}/verify`, { method: "POST", body: "{}" }, { notifyErrors: false }),
   verifyAccountCandidate: (payload: AccountCandidatePayload): Promise<AccountCandidateResult> => request("/api/accounts/verify-candidate", { method: "POST", body: jsonBody(payload) }, { notifyErrors: false }),
-  calls: (limit = 250, options: RequestOptions = {}): Promise<{ events: InvocationRecord[]; count: number }> => request(`/api/calls?limit=${limit}`, {}, options),
+  calls: (query: number | InvocationQuery = 100, options: RequestOptions = {}): Promise<InvocationPage> => {
+    const normalized: InvocationQuery = typeof query === "number" ? { limit: query } : query
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(normalized)) {
+      if (value !== undefined && value !== "") params.set(key, String(value))
+    }
+    return request(`/api/calls?${params.toString()}`, {}, options)
+  },
   clearCalls: (): Promise<{ deleted: number }> => request("/api/calls", { method: "DELETE" }),
   deleteCall: (id: string): Promise<unknown> => request(`/api/calls/${id}`, { method: "DELETE" }),
   callsStreamUrl: "/api/calls/stream",

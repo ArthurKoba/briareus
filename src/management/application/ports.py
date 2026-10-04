@@ -13,7 +13,7 @@ from management.domain.accounts import Account, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
 from management.domain.snapshots import CachedSnapshot
-from management.domain.telemetry import Invocation
+from management.domain.telemetry import Invocation, InvocationPage, InvocationQuery
 
 
 class AccountRepository(Protocol):
@@ -64,6 +64,8 @@ class InvocationRepository(Protocol):
     ) -> None: ...
 
     def recent(self, *, limit: int = 100) -> Sequence[Invocation]: ...
+
+    def query(self, query: InvocationQuery) -> InvocationPage: ...
 
     def clear(self) -> int: ...
 
