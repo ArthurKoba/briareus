@@ -9,6 +9,7 @@ from starlette.testclient import TestClient
 from bridge import server as bridge_server
 from bridge.server import (
     _MANAGEMENT_UI_URL,
+    _browser_devtools_ui_proxy,
     _build_auth_reverse_proxy,
     _management_api_proxy,
     _management_ui_proxy,
@@ -77,6 +78,7 @@ def test_http_app_mounts_expected_public_surfaces() -> None:
         "/api/realtime",
         "/api/browser/operator/ws",
         "/api/browser/cdp/{token}/page/{target_id}",
+        "/api/browser/devtools/{path:path}",
         "/admin/api",
         "/admin/api/{path:path}",
     } <= paths
@@ -93,6 +95,14 @@ def test_management_public_routing_contract() -> None:
     assert _management_api_proxy._upstream_path("/api/dashboard") == "/admin/api/dashboard"
     assert _management_api_proxy._upstream_path("/api/accounts/github") == (
         "/admin/api/accounts/github"
+    )
+
+    assert _browser_devtools_ui_proxy.base_url == "http://web:8000"
+    assert (
+        _browser_devtools_ui_proxy._upstream_path(
+            "/api/browser/devtools/token/page/TARGET/devtools/inspector.html"
+        )
+        == "/cdp-ui/token/page/TARGET/devtools/inspector.html"
     )
 
     assert _MANAGEMENT_UI_URL == "http://management-ui:8080"
@@ -199,6 +209,7 @@ def test_management_route_priority_is_explicit() -> None:
     assert paths.index("/api/browser/cdp/{token}/page/{target_id}") < paths.index(
         "/api/{path:path}"
     )
+    assert paths.index("/api/browser/devtools/{path:path}") < paths.index("/api/{path:path}")
     assert paths.index("/api/{path:path}") < paths.index("/admin/{path:path}")
     assert paths.index("/admin/api/{path:path}") < paths.index("/admin/{path:path}")
 

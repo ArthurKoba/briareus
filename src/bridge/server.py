@@ -451,7 +451,13 @@ _management_ui_proxy = ReverseProxy(
     backend_name="management-ui",
     public_prefix="/admin",
 )
-_REVERSE_PROXIES.extend([_management_api_proxy, _management_ui_proxy])
+_browser_devtools_ui_proxy = ReverseProxy(
+    "http://web:8000",
+    backend_name="web-devtools",
+    public_prefix="/api/browser/devtools",
+    upstream_prefix="/cdp-ui",
+)
+_REVERSE_PROXIES.extend([_management_api_proxy, _management_ui_proxy, _browser_devtools_ui_proxy])
 app.router.routes.extend(
     [
         WebSocketRoute("/api/realtime", _api_realtime_websocket),
@@ -461,6 +467,11 @@ app.router.routes.extend(
             _api_browser_cdp_websocket,
         ),
     ]
+)
+app.add_route(
+    "/api/browser/devtools/{path:path}",
+    _browser_devtools_ui_proxy.handle,
+    methods=_PROXY_METHODS,
 )
 app.add_route("/api", _management_api_proxy.handle, methods=_PROXY_METHODS)
 app.add_route("/api/{path:path}", _management_api_proxy.handle, methods=_PROXY_METHODS)

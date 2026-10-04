@@ -5,13 +5,13 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from common.settings import ManagementSettings
-from management.browser_api import build_browser_operator_api_router
-from management.browser_remote_debug import (
+from common.browser_remote_debug import (
     BrowserRemoteDebugAuthError,
     issue_browser_remote_debug_token,
     verify_browser_remote_debug_token,
 )
+from common.settings import ManagementSettings
+from management.browser_api import build_browser_operator_api_router
 
 
 def _settings() -> ManagementSettings:
@@ -50,7 +50,7 @@ def test_browser_remote_debug_websocket_requires_valid_target_token() -> None:
     app = FastAPI()
     app.include_router(build_browser_operator_api_router(settings, relay=relay))
     token = issue_browser_remote_debug_token(
-        settings.session_secret, settings.admin_username, "TARGET123"
+        settings.service_token, settings.admin_username, "TARGET123"
     )
 
     with TestClient(app) as client:

@@ -5,7 +5,12 @@ import BrowserPage from "@/pages/browser/BrowserPage.vue"
 
 const activity = vi.hoisted(() => ({ active: true, listeners: new Set<(active: boolean) => void>() }))
 const notify = vi.hoisted(() => ({ error: vi.fn() }))
-const telemetry = vi.hoisted(() => ({ websocket: vi.fn(), error: vi.fn() }))
+const telemetry = vi.hoisted(() => ({ websocket: vi.fn(), error: vi.fn(), event: vi.fn() }))
+const api = vi.hoisted(() => ({
+  setBrowserViewport: vi.fn(),
+  setBrowserTheme: vi.fn(),
+  browserRemoteDebug: vi.fn(),
+}))
 vi.mock("@/shared/lib/page-activity", () => ({
   pageActivity: {
     isActive: () => activity.active,
@@ -15,7 +20,7 @@ vi.mock("@/shared/lib/page-activity", () => ({
 vi.mock("@/shared/notifications/bus", () => ({ notifications: notify }))
 vi.mock("@/shared/telemetry/client", () => ({ frontendTelemetry: telemetry }))
 vi.mock("@/shared/events/bus", () => ({ eventBus: { publishMock: vi.fn() } }))
-vi.mock("@/shared/api/management", () => ({ managementApi: { setBrowserViewport: vi.fn() } }))
+vi.mock("@/shared/api/management", () => ({ managementApi: api }))
 vi.mock("vue-i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock("ant-design-vue", () => ({ Select: { template: "<div />" } }))
 
@@ -54,6 +59,17 @@ beforeEach(() => {
   notify.error.mockReset()
   telemetry.websocket.mockReset()
   telemetry.error.mockReset()
+  telemetry.event.mockReset()
+  api.setBrowserViewport.mockReset()
+  api.setBrowserTheme.mockReset()
+  api.browserRemoteDebug.mockReset()
+  api.browserRemoteDebug.mockResolvedValue({
+    page_id: "page-1",
+    target_id: "TARGET123",
+    frontend_url: "https://mcp.koba-nexus.ru/api/browser/devtools/token/page/TARGET123/devtools/inspector.html?wss=example",
+    websocket_url: "wss://mcp.koba-nexus.ru/api/browser/cdp/token/page/TARGET123",
+    expires_in_seconds: 3600,
+  })
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -97,6 +113,32 @@ describe("Browser operator connection lifecycle", () => {
     first.closeWith(1006)
     await vi.advanceTimersByTimeAsync(10_000)
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it("opens the graphical remote DevTools frontend for the selected tab", async () => {
+    const popup = { location: { href: "about:blank" }, close: vi.fn() }
+    vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window)
+    const wrapper = mount(BrowserPage, { attachTo: document.body })
+    const socket = FakeWebSocket.instances[0]!
+    socket.open()
+    await socket.message({
+      type: "state",
+      selected_page_id: "page-1",
+      pages: [{ page_id: "page-1", title: "MCP Bridge", url: "https://mcp.koba-nexus.ru/admin/" }],
+      capabilities: { set_viewport: true, set_theme: true, remote_devtools: true },
+      color_scheme: "dark",
+      viewport: { width: 1280, height: 720 },
+    })
+    await flushPromises()
+
+    const button = wrapper.find('button[title="browser.remoteDevtools"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger("click")
+    await flushPromises()
+
+    expect(api.browserRemoteDebug).toHaveBeenCalledWith("page-1")
+    expect(popup.location.href).toContain("/api/browser/devtools/")
+    wrapper.unmount()
   })
 
   it("still surfaces explicit protocol/command errors while the tab is backgrounded", async () => {

@@ -18,6 +18,10 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import FileResponse, StreamingResponse
 
+from common.browser_remote_debug import (
+    BROWSER_REMOTE_DEBUG_TTL_SECONDS,
+    issue_browser_remote_debug_token,
+)
 from common.models import JsonObject, JsonValue, json_object
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
@@ -33,7 +37,6 @@ from management.application.services import (
     RuntimeSettingsService,
     SnapshotService,
 )
-from management.browser_remote_debug import issue_browser_remote_debug_token
 from management.dashboard_state import build_dashboard_state
 from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
 from management.domain.configuration import ManagementConfig
@@ -854,7 +857,7 @@ def build_admin_api_router(
         if not target_id:
             raise HTTPException(status_code=502, detail="browser target is unavailable")
         token = issue_browser_remote_debug_token(
-            settings.session_secret, settings.admin_username, target_id
+            settings.service_token, settings.admin_username, target_id
         )
         public_host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
         if not public_host:
@@ -862,12 +865,18 @@ def build_admin_api_router(
         forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme).casefold()
         secure = forwarded_proto == "https"
         websocket_scheme = "wss" if secure else "ws"
+        http_scheme = "https" if secure else "http"
         devtools_parameter = "wss" if secure else "ws"
         remote_path = f"/api/browser/cdp/{token}/page/{target_id}"
+        frontend_path = f"/api/browser/devtools/{token}/page/{target_id}/devtools/inspector.html"
         response: JsonObject = {
             **target,
-            "expires_in_seconds": 300,
+            "expires_in_seconds": BROWSER_REMOTE_DEBUG_TTL_SECONDS,
             "websocket_url": f"{websocket_scheme}://{public_host}{remote_path}",
+            "frontend_url": (
+                f"{http_scheme}://{public_host}{frontend_path}?"
+                f"{devtools_parameter}={public_host}{remote_path}"
+            ),
             "devtools_url": (
                 "devtools://devtools/bundled/inspector.html?"
                 f"{devtools_parameter}={public_host}{remote_path}"

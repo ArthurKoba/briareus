@@ -24,10 +24,10 @@ class BrowserDesktopProfile:
     """Browser-visible desktop identity kept inside the Web runtime."""
 
     headless: bool = False
-    viewport_width: int = 1536
-    viewport_height: int = 912
-    screen_width: int = 3072
-    screen_height: int = 1920
+    viewport_width: int = 1280
+    viewport_height: int = 720
+    screen_width: int = 2560
+    screen_height: int = 1440
     locale: str = "ru"
     posix_locale: str = "ru_RU.UTF-8"
     accept_language: str = "ru,en"

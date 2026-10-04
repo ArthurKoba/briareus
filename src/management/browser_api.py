@@ -7,12 +7,13 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter
 from starlette.websockets import WebSocket
 
-from common.settings import ManagementSettings
-from common.websocket_proxy import relay_websocket
-from management.browser_remote_debug import (
+from common.browser_remote_debug import (
+    BROWSER_REMOTE_DEBUG_TTL_SECONDS,
     BrowserRemoteDebugAuthError,
     verify_browser_remote_debug_token,
 )
+from common.settings import ManagementSettings
+from common.websocket_proxy import relay_websocket
 
 _SESSION_KEY = "management_admin"
 Relay = Callable[..., Awaitable[None]]
@@ -30,10 +31,10 @@ def build_browser_operator_api_router(
         try:
             verify_browser_remote_debug_token(
                 token,
-                settings.session_secret,
+                settings.service_token,
                 settings.admin_username,
                 target_id,
-                max_age_seconds=300,
+                max_age_seconds=BROWSER_REMOTE_DEBUG_TTL_SECONDS,
             )
         except BrowserRemoteDebugAuthError:
             await websocket.close(code=4401)

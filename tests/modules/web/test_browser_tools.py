@@ -232,11 +232,11 @@ def test_browser_headful_identity_configuration(tmp_path: Path) -> None:
     assert "--headless=new" not in command
     assert "--lang=ru" in command
     assert "--accept-lang=ru,en" in command
-    assert "--window-size=1536,912" in command
+    assert "--window-size=1280,720" in command
     assert "--force-device-scale-factor=2" in command
     assert "--force-dark-mode" in command
-    assert browser.screen_width == 3072
-    assert browser.screen_height == 1920
+    assert browser.screen_width == 2560
+    assert browser.screen_height == 1440
     assert process_command[:5] == [
         "/usr/bin/env",
         "DISPLAY=:99",
