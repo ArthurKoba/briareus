@@ -6,20 +6,19 @@ import { defineConfig, loadEnv } from "vite"
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "")
-  const backend = env.VITE_MANAGEMENT_DEV_BACKEND || "http://localhost:8000"
+  const backend = env.VITE_ADMIN_API_DEV_BACKEND || "http://localhost:8000"
 
   return {
-    base: "/admin/",
+    base: "/",
     plugins: [vue(), tailwindcss()],
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     },
     server: {
       proxy: {
-        "/api": {
+        "/v1": {
           target: backend,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api/, "/admin/api"),
         },
       },
     },
