@@ -10,14 +10,23 @@ export interface SessionState { authenticated: boolean; username: string | null 
 export interface NavigationItem { id: string; label: string; enabled: boolean }
 export interface ManagementBootstrap { product: string; environment: string; navigation: NavigationItem[] }
 
+export interface DashboardSnapshotMeta {
+  status?: string
+  updated_at?: string | null
+  attempted_at?: string | null
+  age_seconds?: number | null
+  stale?: boolean
+  error_type?: string
+  error_message?: string
+}
 export interface DashboardState {
   accounts: { total: number; enabled: number; by_provider: Record<string, number> }
   calls: { total: number; errors: number; error_rate: number; average_duration_ms: number }
   oauth: { tracked: number; active: number }
   workspace: Record<string, unknown>
-  workspace_meta: Record<string, unknown>
+  workspace_meta: DashboardSnapshotMeta
   analysis: { projects: number; active_sessions: number; workers: number; running_workers: number }
-  analysis_meta: Record<string, unknown>
+  analysis_meta: DashboardSnapshotMeta
 }
 
 export interface AccountRecord {

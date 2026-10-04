@@ -16,55 +16,50 @@ const error = ref("")
 let unsubscribe: undefined | (() => void)
 const synced = ref(false)
 const liveTransport = computed(() => eventBus.state.enabled && eventBus.state.status === "connected")
+const staleSources = computed(() => {
+  if (!data.value) return [] as string[]
+  const items: string[] = []
+  if (data.value.workspace_meta?.stale === true || data.value.workspace_meta?.status === "error") items.push(String(t("dashboard.workspace")))
+  if (data.value.analysis_meta?.stale === true || data.value.analysis_meta?.status === "error") items.push(String(t("dashboard.analysis")))
+  return items
+})
+
+let eventEpoch = 0
+let loadRun = 0
 
 function accept(event: BusEvent): void {
-  if (!data.value || event.type !== "snapshot") return
-  const next = event.data as Partial<DashboardState> & { analysis?: unknown }
-  const analysis = next.analysis
-  let analysisSummary = data.value.analysis
-  if (analysis && typeof analysis === "object") {
-    const raw = analysis as Record<string, unknown>
-    if (typeof raw.projects === "number") analysisSummary = raw as unknown as DashboardState["analysis"]
-    else {
-      const projects = Array.isArray(raw.projects) ? raw.projects as Array<Record<string, unknown>> : []
-      const workers = Array.isArray(raw.workers) ? raw.workers as Array<Record<string, unknown>> : []
-      if (projects.length || workers.length) analysisSummary = {
-        projects: projects.length,
-        active_sessions: projects.filter((item) => item.session === "active").length,
-        workers: workers.length,
-        running_workers: workers.filter((item) => Boolean(item.running)).length,
-      }
-    }
-  }
-  data.value = {
-    ...data.value,
-    ...(next.accounts ? { accounts: next.accounts } : {}),
-    ...(next.calls ? { calls: next.calls } : {}),
-    ...(next.oauth ? { oauth: next.oauth } : {}),
-    ...(next.workspace ? { workspace: next.workspace } : {}),
-    analysis: analysisSummary,
-  }
+  if (event.type !== "snapshot") return
+  const next = event.data as DashboardState
+  if (!next.accounts || !next.calls || !next.oauth || !next.workspace || !next.analysis) return
+  eventEpoch += 1
+  data.value = next
   synced.value = liveTransport.value
+  error.value = ""
 }
 
 async function load(): Promise<void> {
+  const run = ++loadRun
+  const startedAtEpoch = eventEpoch
   loading.value = true
   error.value = ""
   try {
     const snapshot = await managementApi.dashboard()
-    data.value = snapshot
+    if (run !== loadRun) return
+    // A newer remote snapshot always wins over a slower REST bootstrap/refresh.
+    if (startedAtEpoch === eventEpoch) data.value = snapshot
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Unable to load dashboard"
+    if (run === loadRun) error.value = caught instanceof Error ? caught.message : "Unable to load dashboard"
   } finally {
-    loading.value = false
+    if (run === loadRun) loading.value = false
   }
 }
 
 watch(liveTransport, (live) => { if (!live) synced.value = false })
 
-onMounted(async () => {
-  await load()
+onMounted(() => {
+  // Subscribe before bootstrap so a fresh remote snapshot cannot be missed.
   unsubscribe = eventBus.subscribe("system.metrics", accept)
+  void load()
 })
 onBeforeUnmount(() => unsubscribe?.())
 </script>
@@ -77,6 +72,9 @@ onBeforeUnmount(() => unsubscribe?.())
 
     <p v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
       {{ error }}
+    </p>
+    <p v-if="staleSources.length" class="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
+      {{ t("dashboard.staleData") }}: {{ staleSources.join(", ") }}
     </p>
 
     <div v-if="data" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
