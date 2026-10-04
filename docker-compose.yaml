@@ -109,7 +109,7 @@ services:
   management-ui:
     restart: unless-stopped
     build:
-      context: ./frontend
+      context: ./admin-web-app
       dockerfile: Dockerfile
     expose:
       - "8080"
