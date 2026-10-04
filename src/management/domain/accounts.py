@@ -10,6 +10,10 @@ from pydantic import Field, field_validator, model_validator
 from common.models import JsonObject, StrictModel
 
 
+class AccountConflictError(RuntimeError):
+    """Raised when an account update targets a stale persisted revision."""
+
+
 class Provider(StrEnum):
     GITHUB = "github"
     GITLAB = "gitlab"
@@ -100,6 +104,12 @@ class Account(StrictModel):
         return self
 
     def public(self) -> JsonObject:
+        def utc_iso(value: datetime) -> str:
+            normalized = (
+                value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+            )
+            return normalized.isoformat()
+
         return {
             "id": self.id,
             "alias": self.alias,
@@ -110,6 +120,6 @@ class Account(StrictModel):
             "verify_tls": self.verify_tls,
             "ca_cert_pem": self.ca_cert_pem or None,
             "enabled": self.enabled,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "created_at": utc_iso(self.created_at),
+            "updated_at": utc_iso(self.updated_at),
         }

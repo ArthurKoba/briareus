@@ -9,7 +9,7 @@ from typing import Any, Literal, ParamSpec, TypeVar, cast
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -18,7 +18,7 @@ from common.runtime_policy_contracts import (
     McpRuntimePolicy,
     TerminalRuntimePolicy,
 )
-from management.domain.accounts import Account, AuthType, Provider
+from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.domain.oauth_sessions import OAuthSession
 from management.domain.snapshots import CachedSnapshot
@@ -232,7 +232,65 @@ class SqlAlchemyAccountRepository:
             return self._coolify_domain(record)
 
     @_db_span("accounts.save")
-    def save(self, account: Account, *, encrypted_credential: str | None = None) -> Account:
+    def save(
+        self,
+        account: Account,
+        *,
+        encrypted_credential: str | None = None,
+        expected_updated_at: datetime | None = None,
+    ) -> Account:
+        if expected_updated_at is not None:
+            model: (
+                type[GitHubAccountRecord]
+                | type[GitLabAccountRecord]
+                | type[SigNozAccountRecord]
+                | type[CoolifyAccountRecord]
+            )
+            values: dict[str, object] = {
+                "alias": account.alias,
+                "auth_type": account.auth_type.value,
+                "enabled": account.enabled,
+                "updated_at": account.updated_at,
+            }
+            if account.provider is Provider.GITHUB:
+                model = GitHubAccountRecord
+                values["app_id"] = account.external_id
+            elif account.provider is Provider.GITLAB:
+                model = GitLabAccountRecord
+                values.update(
+                    base_url=account.base_url,
+                    verify_tls=account.verify_tls,
+                    ca_cert_pem=account.ca_cert_pem,
+                )
+            elif account.provider is Provider.SIGNOZ:
+                model = SigNozAccountRecord
+                values.update(
+                    base_url=account.base_url,
+                    verify_tls=account.verify_tls,
+                    ca_cert_pem=account.ca_cert_pem,
+                )
+            else:
+                model = CoolifyAccountRecord
+                values.update(
+                    base_url=account.base_url,
+                    verify_tls=account.verify_tls,
+                    ca_cert_pem=account.ca_cert_pem,
+                )
+            if encrypted_credential is not None:
+                values["encrypted_credential"] = encrypted_credential
+            with self.sessions.begin() as session:
+                result = cast(
+                    CursorResult[object],
+                    session.execute(
+                        update(model)
+                        .where(model.id == account.id, model.updated_at == expected_updated_at)
+                        .values(**values)
+                    ),
+                )
+                if result.rowcount != 1:
+                    raise AccountConflictError("account changed since it was loaded")
+            return account
+
         with self.sessions.begin() as session:
             record: Any
             if account.provider is Provider.GITHUB:

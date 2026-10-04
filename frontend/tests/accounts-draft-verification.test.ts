@@ -3,6 +3,8 @@ import { nextTick } from "vue"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import AccountsPanel from "@/features/accounts/AccountsPanel.vue"
+import { ManagementApiError } from "@/shared/api/error"
+import AppDialog from "@/shared/ui/AppDialog.vue"
 
 const notify = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 const api = vi.hoisted(() => ({
@@ -142,7 +144,7 @@ describe("account draft verification", () => {
     const wrapper = await panel([record], "gitlab")
     await wrapper.get(".ts-table-row .font-medium").trigger("click")
     await setInput(modalInput('input.field:not([type="password"])'), "renamed")
-    const save = modalButton("common.confirm")
+    const save = modalButton("common.save")
     expect(save.disabled).toBe(false)
     save.click()
     await flushPromises()
@@ -150,12 +152,76 @@ describe("account draft verification", () => {
     expect(api.updateAccount).toHaveBeenCalledTimes(1)
   })
 
+
+
+  it("shows Exit for an unchanged existing account and does not require verification", async () => {
+    const wrapper = await panel([record], "gitlab")
+    await wrapper.get(".ts-table-row .font-medium").trigger("click")
+    expect(dialogElement().textContent).toContain("common.exit")
+    expect(dialogElement().textContent).not.toContain("common.save")
+    expect(dialogElement().textContent).not.toContain("common.test")
+    expect(api.verifyAccountCandidate).not.toHaveBeenCalled()
+  })
+
+  it("shows Save and Discard only while dirty, then returns to Exit after reset", async () => {
+    const wrapper = await panel([record], "gitlab")
+    await wrapper.get(".ts-table-row .font-medium").trigger("click")
+    const alias = modalInput('input.field:not([type="password"])')
+    await setInput(alias, "renamed")
+    expect(dialogElement().textContent).toContain("common.save")
+    expect(dialogElement().textContent).toContain("accounts.discardChanges")
+    expect(dialogElement().textContent).not.toContain("common.exit")
+    modalButton("accounts.discardChanges").click()
+    await nextTick()
+    expect(alias.value).toBe("existing")
+    expect(dialogElement().textContent).toContain("common.exit")
+    expect(dialogElement().textContent).not.toContain("common.save")
+  })
+
+  it("does not treat a blank edit credential as a dirty secret change", async () => {
+    const wrapper = await panel([record], "gitlab")
+    await wrapper.get(".ts-table-row .font-medium").trigger("click")
+    const secret = modalInput('input[type="password"]')
+    await setInput(secret, "   ")
+    expect(dialogElement().textContent).toContain("common.exit")
+    expect(dialogElement().textContent).not.toContain("common.save")
+  })
+
+  it("asks with a styled dialog before closing a dirty form and Escape does not discard silently", async () => {
+    const wrapper = await panel([record], "gitlab")
+    await wrapper.get(".ts-table-row .font-medium").trigger("click")
+    await setInput(modalInput('input.field:not([type="password"])'), "renamed")
+    const dialogs = wrapper.findAllComponents(AppDialog)
+    expect(dialogs[0].props("open")).toBe(true)
+    expect(dialogs[1].props("open")).toBe(false)
+    dialogs[0].vm.$emit("close")
+    await nextTick()
+    expect(dialogs[0].props("open")).toBe(true)
+    expect(dialogs[1].props("open")).toBe(true)
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+    await nextTick()
+    expect(dialogs[0].props("open")).toBe(true)
+    expect(dialogs[1].props("open")).toBe(false)
+  })
+
+  it("keeps a stale draft open and offers reload on account conflict", async () => {
+    api.updateAccount.mockRejectedValueOnce(new ManagementApiError("changed", "http", 409, "account_conflict"))
+    const wrapper = await panel([record], "gitlab")
+    await wrapper.get(".ts-table-row .font-medium").trigger("click")
+    await setInput(modalInput('input.field:not([type="password"])'), "renamed")
+    modalButton("common.save").click()
+    await flushPromises()
+    expect(wrapper.getComponent(AppDialog).props("open")).toBe(true)
+    expect(dialogElement().textContent).toContain("accounts.accountConflict")
+    expect(dialogElement().textContent).toContain("accounts.reloadAccount")
+  })
+
   it("requires candidate verification for a changed edit and reuses the stored credential", async () => {
     const wrapper = await panel([record], "gitlab")
     await wrapper.get(".ts-table-row .font-medium").trigger("click")
     const baseUrl = modalInput('input[placeholder="https://…"]')
     await setInput(baseUrl, "https://gitlab.new.test")
-    const save = modalButton("common.confirm")
+    const save = modalButton("common.save")
     expect(save.disabled).toBe(true)
     modalButton("common.test").click()
     await flushPromises()

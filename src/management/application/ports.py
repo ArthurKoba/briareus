@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from common.runtime_policy_contracts import (
@@ -31,7 +32,13 @@ class AccountRepository(Protocol):
         enabled_only: bool = True,
     ) -> Account: ...
 
-    def save(self, account: Account, *, encrypted_credential: str | None = None) -> Account: ...
+    def save(
+        self,
+        account: Account,
+        *,
+        encrypted_credential: str | None = None,
+        expected_updated_at: datetime | None = None,
+    ) -> Account: ...
 
     def delete(self, account_id: str, *, provider: Provider) -> None: ...
 

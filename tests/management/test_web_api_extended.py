@@ -473,3 +473,66 @@ def test_account_candidate_verify_rate_limit(tmp_path: Path) -> None:
         assert limited.status_code == 429
         assert limited.headers["retry-after"] == "60"
         assert len(verifier.calls) == 20
+
+
+def test_account_update_rejects_stale_revision_and_keeps_current_credential(tmp_path: Path) -> None:
+    verifier = _CandidateVerifier()
+    with _client(tmp_path, verifier=verifier) as client:
+        _login(client)
+        created = client.post(
+            "/admin/api/accounts",
+            json={
+                "alias": "stale-check",
+                "provider": "github",
+                "auth_type": "github_token",
+                "credential": "original-secret",
+            },
+        )
+        assert created.status_code == 201
+        account_id = created.json()["id"]
+        original_updated_at = created.json()["updated_at"]
+
+        first = client.put(
+            f"/admin/api/accounts/github/{account_id}",
+            json={
+                "alias": "first-writer",
+                "provider": "github",
+                "auth_type": "github_token",
+                "credential": "first-secret",
+                "expected_updated_at": original_updated_at,
+            },
+        )
+        assert first.status_code == 200
+        assert first.json()["alias"] == "first-writer"
+        assert first.json()["updated_at"] != original_updated_at
+
+        stale = client.put(
+            f"/admin/api/accounts/github/{account_id}",
+            json={
+                "alias": "stale-writer",
+                "provider": "github",
+                "auth_type": "github_token",
+                "credential": "stale-secret",
+                "expected_updated_at": original_updated_at,
+            },
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["code"] == "account_conflict"
+
+        current = client.get("/admin/api/accounts").json()["accounts"][0]
+        assert current["alias"] == "first-writer"
+        assert current["updated_at"] == first.json()["updated_at"]
+
+        verified = client.post(
+            "/admin/api/accounts/verify-candidate",
+            json={
+                "account_id": account_id,
+                "alias": "first-writer",
+                "provider": "github",
+                "auth_type": "github_token",
+                "credential": "",
+                "draft_revision": "after-conflict",
+            },
+        )
+        assert verified.status_code == 200
+        assert verifier.calls[-1][1] == "first-secret"

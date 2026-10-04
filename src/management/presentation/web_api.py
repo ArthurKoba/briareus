@@ -7,6 +7,7 @@ import posixpath
 from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from time import monotonic
@@ -33,7 +34,7 @@ from management.application.services import (
     SnapshotService,
 )
 from management.dashboard_state import build_dashboard_state
-from management.domain.accounts import Account, AuthType, Provider
+from management.domain.accounts import Account, AccountConflictError, AuthType, Provider
 from management.domain.configuration import ManagementConfig
 from management.infrastructure.files import FileAdminStore
 from management.infrastructure.reverse import ReverseAdminClient
@@ -87,6 +88,10 @@ class AccountPayload(BaseModel):
     ca_cert_pem: str = ""
     enabled: bool = True
     credential: str = ""
+
+
+class AccountUpdatePayload(AccountPayload):
+    expected_updated_at: datetime | None = None
 
 
 class AccountCandidatePayload(AccountPayload):
@@ -316,7 +321,7 @@ def build_admin_api_router(
 
     @router.put("/accounts/{provider}/{account_id}")
     async def update_account(
-        provider: Provider, account_id: str, payload: AccountPayload, request: Request
+        provider: Provider, account_id: str, payload: AccountUpdatePayload, request: Request
     ) -> JsonObject:
         api = mutation(request)
         if payload.provider is not provider:
@@ -325,15 +330,43 @@ def build_admin_api_router(
             existing = await asyncio.to_thread(
                 api.accounts.get, account_id, provider=provider, enabled_only=False
             )
+            if payload.expected_updated_at is not None:
+                expected = payload.expected_updated_at
+                if expected.tzinfo is None:
+                    expected = expected.replace(tzinfo=UTC)
+                else:
+                    expected = expected.astimezone(UTC)
+                persisted = existing.updated_at
+                if persisted.tzinfo is None:
+                    persisted = persisted.replace(tzinfo=UTC)
+                else:
+                    persisted = persisted.astimezone(UTC)
+                if expected != persisted:
+                    raise AccountConflictError("account changed since it was loaded")
             saved = await asyncio.to_thread(
-                api.accounts.update, _account_from_payload(payload, existing=existing)
+                api.accounts.update,
+                _account_from_payload(payload, existing=existing),
+                credential=payload.credential,
+                expected_updated_at=existing.updated_at if payload.expected_updated_at else None,
             )
-            if payload.credential.strip():
-                await asyncio.to_thread(
-                    api.accounts.set_credential, saved.id, payload.credential, provider=provider
-                )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AccountConflictError as exc:
+            try:
+                current = await asyncio.to_thread(
+                    api.accounts.get, account_id, provider=provider, enabled_only=False
+                )
+                current_updated_at: str | None = str(current.public()["updated_at"])
+            except KeyError:
+                current_updated_at = None
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "account_conflict",
+                    "message": "account changed since it was loaded; reload before saving",
+                    "current_updated_at": current_updated_at,
+                },
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         response = saved.public()

@@ -118,10 +118,21 @@ class AccountService:
         self.invalidate(saved)
         return saved
 
-    def update(self, account: Account) -> Account:
+    def update(
+        self,
+        account: Account,
+        *,
+        credential: str = "",
+        expected_updated_at: datetime | None = None,
+    ) -> Account:
         previous = self.repository.get(account.id, provider=account.provider, enabled_only=False)
         account.updated_at = datetime.now(UTC)
-        saved = self.repository.save(account)
+        secret = credential.strip()
+        saved = self.repository.save(
+            account,
+            encrypted_credential=self.cipher.encrypt(secret) if secret else None,
+            expected_updated_at=expected_updated_at,
+        )
         self.invalidate(previous)
         self.invalidate(saved)
         return saved
