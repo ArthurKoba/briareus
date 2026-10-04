@@ -11,7 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  # Legacy required-check identifier. This job runs static quality only; no tests.
+  test:
     runs-on: ubuntu-latest
     env:
       MANAGEMENT_ENCRYPTION_KEY: ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=
