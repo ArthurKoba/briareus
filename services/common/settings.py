@@ -346,13 +346,10 @@ class AuthServiceSettings(ProcessSettings):
     bootstrap_password: str = Field("", validation_alias="AUTH_BOOTSTRAP_PASSWORD")
     jwt_private_key_pem: str = Field("", validation_alias="AUTH_JWT_PRIVATE_KEY_PEM")
     jwt_key_id: str = Field("auth-1", validation_alias="AUTH_JWT_KEY_ID")
-    access_service_token: str = Field("", validation_alias="AUTH_ACCESS_SERVICE_TOKEN")
+    gateway_service_token: str = Field("", validation_alias="AUTH_GATEWAY_SERVICE_TOKEN")
     admin_service_token: str = Field("", validation_alias="AUTH_ADMIN_SERVICE_TOKEN")
     access_token_ttl_seconds: int = Field(
-        900,
-        ge=60,
-        le=86_400,
-        validation_alias="AUTH_ACCESS_TOKEN_TTL_SECONDS",
+        900, ge=60, le=86_400, validation_alias="AUTH_ACCESS_TOKEN_TTL_SECONDS"
     )
     refresh_token_ttl_seconds: int = Field(
         30 * 24 * 60 * 60,
@@ -364,20 +361,34 @@ class AuthServiceSettings(ProcessSettings):
         ("https://chatgpt.com/connector_platform_oauth_redirect",),
         validation_alias="AUTH_ALLOWED_REDIRECT_URIS",
     )
+    default_session_ttl_seconds: int = Field(
+        3600, ge=60, le=30 * 24 * 60 * 60, validation_alias="AUTH_SESSION_DEFAULT_TTL_SECONDS"
+    )
+    session_cache_ttl_seconds: int = Field(
+        300, ge=5, le=3600, validation_alias="AUTH_SESSION_CACHE_TTL_SECONDS"
+    )
+    invalid_attempt_soft_limit: int = Field(
+        5, ge=1, le=100, validation_alias="AUTH_INVALID_SESSION_SOFT_LIMIT"
+    )
+    invalid_attempt_oauth_revoke_limit: int = Field(
+        50, ge=5, le=10_000, validation_alias="AUTH_INVALID_SESSION_OAUTH_REVOKE_LIMIT"
+    )
+    invalid_attempt_window_seconds: int = Field(
+        600, ge=30, le=86_400, validation_alias="AUTH_INVALID_SESSION_WINDOW_SECONDS"
+    )
+    invalid_attempt_backoff_seconds: int = Field(
+        30, ge=1, le=3600, validation_alias="AUTH_INVALID_SESSION_BACKOFF_SECONDS"
+    )
+
+    @property
+    def cache_ttl_seconds(self) -> int:
+        return self.session_cache_ttl_seconds
 
     @field_validator(
-        "public_base_url",
-        "postgres_host",
-        "postgres_db",
-        "postgres_user",
-        "postgres_password",
-        "bootstrap_username",
-        "bootstrap_password",
-        "jwt_private_key_pem",
-        "jwt_key_id",
-        "access_service_token",
-        "admin_service_token",
-        mode="before",
+        "public_base_url", "postgres_host", "postgres_db", "postgres_user",
+        "postgres_password", "bootstrap_username", "bootstrap_password",
+        "jwt_private_key_pem", "jwt_key_id", "gateway_service_token",
+        "admin_service_token", mode="before",
     )
     @classmethod
     def _strip_strings(cls, value: object) -> object:
@@ -398,7 +409,7 @@ class AuthServiceSettings(ProcessSettings):
                 ("AUTH_BOOTSTRAP_USERNAME", self.bootstrap_username),
                 ("AUTH_BOOTSTRAP_PASSWORD", self.bootstrap_password),
                 ("AUTH_JWT_PRIVATE_KEY_PEM", self.jwt_private_key_pem),
-                ("AUTH_ACCESS_SERVICE_TOKEN", self.access_service_token),
+                ("AUTH_GATEWAY_SERVICE_TOKEN", self.gateway_service_token),
                 ("AUTH_ADMIN_SERVICE_TOKEN", self.admin_service_token),
             )
             if not value
@@ -432,69 +443,16 @@ class GatewayAuthSettings(ProcessSettings):
             raise ValueError("missing gateway auth settings: " + ", ".join(missing))
 
 
-class AccessServiceSettings(ProcessSettings):
-    postgres_host: str = Field("postgres", validation_alias="ACCESS_POSTGRES_HOST")
-    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="ACCESS_POSTGRES_PORT")
-    postgres_db: str = Field("access", validation_alias="ACCESS_POSTGRES_DB")
-    postgres_user: str = Field("", validation_alias="ACCESS_POSTGRES_USER")
-    postgres_password: str = Field("", validation_alias="ACCESS_POSTGRES_PASSWORD")
-    gateway_service_token: str = Field("", validation_alias="ACCESS_GATEWAY_SERVICE_TOKEN")
-    admin_service_token: str = Field("", validation_alias="ACCESS_ADMIN_SERVICE_TOKEN")
-    auth_url: str = Field("http://auth:8000", validation_alias="AUTH_INTERNAL_URL")
-    auth_service_token: str = Field("", validation_alias="AUTH_ACCESS_SERVICE_TOKEN")
-    default_session_ttl_seconds: int = Field(
-        3600, ge=60, le=30 * 24 * 60 * 60, validation_alias="ACCESS_DEFAULT_SESSION_TTL_SECONDS"
+class AuthAccessClientSettings(ProcessSettings):
+    enabled: bool = Field(False, validation_alias="AUTH_ACCESS_ENABLED")
+    url: str = Field(
+        "http://auth:8000/internal/access",
+        validation_alias="AUTH_ACCESS_URL",
     )
-    cache_ttl_seconds: int = Field(300, ge=5, le=3600, validation_alias="ACCESS_CACHE_TTL_SECONDS")
-    invalid_attempt_soft_limit: int = Field(
-        5, ge=1, le=100, validation_alias="ACCESS_INVALID_ATTEMPT_SOFT_LIMIT"
+    service_token: str = Field("", validation_alias="AUTH_GATEWAY_SERVICE_TOKEN")
+    timeout_seconds: float = Field(
+        2.0, gt=0, le=30, validation_alias="AUTH_ACCESS_TIMEOUT_SECONDS"
     )
-    invalid_attempt_oauth_revoke_limit: int = Field(
-        50, ge=5, le=10_000, validation_alias="ACCESS_INVALID_ATTEMPT_OAUTH_REVOKE_LIMIT"
-    )
-    invalid_attempt_window_seconds: int = Field(
-        600, ge=30, le=86_400, validation_alias="ACCESS_INVALID_ATTEMPT_WINDOW_SECONDS"
-    )
-    invalid_attempt_backoff_seconds: int = Field(
-        30, ge=1, le=3600, validation_alias="ACCESS_INVALID_ATTEMPT_BACKOFF_SECONDS"
-    )
-
-    @field_validator(
-        "postgres_host",
-        "postgres_db",
-        "postgres_user",
-        "postgres_password",
-        "gateway_service_token",
-        "admin_service_token",
-        "auth_url",
-        "auth_service_token",
-        mode="before",
-    )
-    @classmethod
-    def _strip_strings(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-    def validate_bootstrap(self) -> None:
-        missing = [
-            name
-            for name, value in (
-                ("ACCESS_POSTGRES_USER", self.postgres_user),
-                ("ACCESS_POSTGRES_PASSWORD", self.postgres_password),
-                ("ACCESS_GATEWAY_SERVICE_TOKEN", self.gateway_service_token),
-                ("ACCESS_ADMIN_SERVICE_TOKEN", self.admin_service_token),
-                ("AUTH_ACCESS_SERVICE_TOKEN", self.auth_service_token),
-            )
-            if not value
-        ]
-        if missing:
-            raise ValueError("missing access bootstrap settings: " + ", ".join(missing))
-
-
-class AccessClientSettings(ProcessSettings):
-    enabled: bool = Field(False, validation_alias="ACCESS_ENABLED")
-    url: str = Field("http://access:8000", validation_alias="ACCESS_SERVICE_URL")
-    service_token: str = Field("", validation_alias="ACCESS_GATEWAY_SERVICE_TOKEN")
-    timeout_seconds: float = Field(2.0, gt=0, le=30, validation_alias="ACCESS_TIMEOUT_SECONDS")
 
     @field_validator("url", "service_token", mode="before")
     @classmethod
@@ -503,7 +461,7 @@ class AccessClientSettings(ProcessSettings):
 
     def validate_bootstrap(self) -> None:
         if self.enabled and not self.service_token:
-            raise ValueError("ACCESS_GATEWAY_SERVICE_TOKEN is required when ACCESS_ENABLED=true")
+            raise ValueError("AUTH_GATEWAY_SERVICE_TOKEN is required when AUTH_ACCESS_ENABLED=true")
 
 
 class AdminApiClientSettings(ProcessSettings):
@@ -530,10 +488,6 @@ class AdminApiSettings(ProcessSettings):
     postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
-    access_url: str = Field("http://access:8000", validation_alias="ACCESS_SERVICE_URL")
-    access_admin_service_token: str = Field(
-        "", validation_alias="ACCESS_ADMIN_SERVICE_TOKEN"
-    )
     auth_internal_url: str = Field("http://auth:8000", validation_alias="AUTH_INTERNAL_URL")
     auth_admin_service_token: str = Field(
         "", validation_alias="AUTH_ADMIN_SERVICE_TOKEN"
@@ -556,8 +510,6 @@ class AdminApiSettings(ProcessSettings):
         "postgres_user",
         "encryption_key",
         "service_token",
-        "access_url",
-        "access_admin_service_token",
         "auth_internal_url",
         "auth_admin_service_token",
         "admin_username",

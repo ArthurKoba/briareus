@@ -87,18 +87,10 @@ async def main() -> None:
     admin_user = _env("POSTGRES_USER")
     admin_password = _env("POSTGRES_PASSWORD")
 
-    services = (
-        (
-            _env("AUTH_POSTGRES_DB", "auth"),
-            _env("AUTH_POSTGRES_USER"),
-            _env("AUTH_POSTGRES_PASSWORD"),
-        ),
-        (
-            _env("ACCESS_POSTGRES_DB", "access"),
-            _env("ACCESS_POSTGRES_USER"),
-            _env("ACCESS_POSTGRES_PASSWORD"),
-        ),
-    )
+    auth_database = _env("AUTH_POSTGRES_DB", "auth")
+    auth_user = _env("AUTH_POSTGRES_USER")
+    auth_password = _env("AUTH_POSTGRES_PASSWORD")
+
 
     connection = await asyncpg.connect(
         host=admin_host,
@@ -108,10 +100,9 @@ async def main() -> None:
         password=admin_password,
     )
     try:
-        for database, role, password in services:
-            await _ensure_role(connection, role=role, password=password)
-            await _ensure_database(connection, database=database, owner=role)
-            print(f"ready database={database} role={role}")
+        await _ensure_role(connection, role=auth_user, password=auth_password)
+        await _ensure_database(connection, database=auth_database, owner=auth_user)
+        print(f"ready database={auth_database} role={auth_user}")
     finally:
         await connection.close()
 

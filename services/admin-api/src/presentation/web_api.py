@@ -323,9 +323,9 @@ def build_admin_api_router(
             raise HTTPException(status_code=403, detail="local user disabled")
         return identity
 
-    def access_service(api: WebApiServices) -> AccessAdminClient:
+    def access_control(api: WebApiServices) -> AccessAdminClient:
         if api.access is None:
-            raise HTTPException(status_code=503, detail="access service unavailable")
+            raise HTTPException(status_code=503, detail="authorization controls unavailable")
         return api.access
 
     async def publish_admin_event(api: WebApiServices, event_type: str, data: object) -> None:
@@ -400,7 +400,7 @@ def build_admin_api_router(
         return json_object(
             {
                 "user": identity.model_dump(mode="json"),
-                "sessions": await access_service(api).sessions(identity.id),
+                "sessions": await access_control(api).sessions(identity.id),
             }
         )
 
@@ -411,7 +411,7 @@ def build_admin_api_router(
         return json_object(
             {
                 "user": identity.model_dump(mode="json"),
-                "requests": await access_service(api).requests(identity.id),
+                "requests": await access_control(api).requests(identity.id),
             }
         )
 
@@ -422,7 +422,7 @@ def build_admin_api_router(
         return json_object(
             {
                 "user": identity.model_dump(mode="json"),
-                "controls": await access_service(api).controls(identity.id),
+                "controls": await access_control(api).controls(identity.id),
             }
         )
 
@@ -432,7 +432,7 @@ def build_admin_api_router(
     ) -> JsonObject:
         api = mutation(request)
         identity = await local_user(request)
-        result = await access_service(api).resolve_request(
+        result = await access_control(api).resolve_request(
             request_id,
             admin_user_id=identity.id,
             approve=payload.approve,
@@ -450,7 +450,7 @@ def build_admin_api_router(
     ) -> JsonObject:
         api = mutation(request)
         identity = await local_user(request)
-        result = await access_service(api).update_session(
+        result = await access_control(api).update_session(
             session_id,
             admin_user_id=identity.id,
             access_level=payload.access_level,
@@ -467,7 +467,7 @@ def build_admin_api_router(
     async def revoke_access_session(session_id: str, request: Request) -> Response:
         api = mutation(request)
         identity = await local_user(request)
-        await access_service(api).revoke_session(
+        await access_control(api).revoke_session(
             session_id, admin_user_id=identity.id
         )
         if api.realtime is not None:
@@ -482,7 +482,7 @@ def build_admin_api_router(
     ) -> JsonObject:
         api = mutation(request)
         identity = await local_user(request)
-        controls = await access_service(api).set_controls(
+        controls = await access_control(api).set_controls(
             user_id=identity.id,
             items=[(item.surface_id, item.mode) for item in payload.items],
         )

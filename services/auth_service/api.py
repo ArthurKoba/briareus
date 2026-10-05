@@ -78,14 +78,6 @@ def build_auth_app(provider: LocalOAuthProvider) -> Starlette:
             headers={"Cache-Control": "no-store"},
         )
 
-    async def revoke_internal(request: Request) -> Response:
-        expected = f"Bearer {provider.settings.access_service_token}"
-        authorization = request.headers.get("authorization")
-        if authorization is None or not hmac.compare_digest(authorization, expected):
-            return Response(status_code=401)
-        session_id = request.path_params["session_id"]
-        await provider.repository.revoke_oauth_session(session_id)
-        return Response(status_code=204)
 
     async def login_get(request: Request) -> Response:
         transaction_id = request.query_params.get("transaction", "")
@@ -137,11 +129,6 @@ def build_auth_app(provider: LocalOAuthProvider) -> Starlette:
                 "/internal/v1/users/by-username/{username}",
                 user_by_username_internal,
                 methods=["GET"],
-            ),
-            Route(
-                "/internal/v1/oauth-sessions/{session_id}/revoke",
-                revoke_internal,
-                methods=["POST"],
             ),
             Route("/health", health, methods=["GET"]),
         ]

@@ -6,6 +6,7 @@ mcp-bridge/
 ├── docs/
 ├── services/
 │   ├── auth_service/
+│   │   └── access/            # internal agent-session/access module
 │   ├── bridge/                 # public gateway only
 │   ├── common/                 # shared contracts/settings/runtime primitives
 │   ├── admin-api/

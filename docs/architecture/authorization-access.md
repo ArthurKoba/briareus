@@ -5,14 +5,14 @@ Date: 2026-10-05
 
 ## Goal
 
-The platform separates identity, agent access, provider integrations and MCP invocation history instead of rebuilding one generic backend service.
+The platform separates authorization, provider integrations and MCP invocation history instead of rebuilding one generic backend service.
 
-The two security layers are different:
+The `auth` service owns two internal security layers:
 
 - OAuth answers which local user/client is connected to a public MCP surface.
 - Agent access answers whether this concrete agent session may use this concrete MCP surface now.
 
-The administration layer displays and controls these domains but is not their source of truth.
+They are separate modules and data models inside one service because they share the same security boundary, user identity and revocation lifecycle. The administration layer displays and controls them but is not their source of truth.
 
 ## Service boundaries
 
@@ -20,38 +20,20 @@ The administration layer displays and controls these domains but is not their so
 
 Owns:
 
-- local users;
-- password authentication;
-- OAuth authorization server;
-- OAuth clients;
-- authorization codes;
-- auth sessions;
-- refresh-token lifecycle;
-- revocation;
-- signing keys and JWKS.
+- local users and password authentication;
+- OAuth authorization server, clients, codes, auth sessions and refresh-token lifecycle;
+- signing keys and JWKS;
+- agent sessions and their lifecycle;
+- read-only/full-access elevation requests;
+- session/account scope and per-user/per-MCP enforcement mode;
+- session abuse protection and security history;
+- later: granular capabilities, grants and policies.
 
 Database: `auth`.
 
-The platform login is local. GitHub, GitLab and other providers are not identity providers for the platform.
+OAuth and agent-session tables share this database and service role. The code keeps OAuth and access logic in separate internal modules, but there is no independent `access` runtime, database or deployment unit.
 
-FastMCP/MCP SDK OAuth protocol machinery should be reused where practical. GitHub-backed identity and GitHub-backed OAuth token state are removed.
-
-### access
-
-Owns:
-
-- agent sessions;
-- session lifecycle;
-- full-access elevation requests;
-- session/account scope;
-- per-user/per-MCP enforcement mode;
-- session abuse protection;
-- session security history;
-- later: granular capabilities, grants and policies.
-
-Database: `access`.
-
-A valid OAuth session does not automatically mean that an agent may perform mutating actions.
+The platform login is local. GitHub, GitLab and other providers are not identity providers for the platform. FastMCP/MCP SDK OAuth protocol machinery should be reused where practical. A valid OAuth session does not automatically mean that an agent may perform mutating actions.
 
 ### integrations
 
@@ -94,7 +76,7 @@ It provides views and controls for:
 - MCP calls;
 - later: users, teams, sharing and granular policies.
 
-It does not become the source of truth for `auth`, `access`, `integrations` or `invocations`.
+It does not become the source of truth for `auth` (including agent access), `integrations` or `invocations`.
 
 ### gateway
 
@@ -120,17 +102,16 @@ Provider/account credentials are resolved through platform services and are neve
 
 One PostgreSQL server is acceptable.
 
-Use separate databases and roles:
+Use separate databases and roles by deployable bounded context:
 
 ```text
-auth
-access
+auth         # OAuth identity + agent sessions/access state
 integrations
 invocations
 admin        # only if genuinely admin-specific durable state appears later
 ```
 
-Each service receives credentials only for its own database.
+Each deployable service receives credentials only for its own database.
 
 Cross-domain access happens through typed APIs/events, not cross-database queries.
 
@@ -401,7 +382,7 @@ access_session_close
 access_session_reissue
 ```
 
-These operations belong to `access`, not `auth`.
+These operations belong to the agent-access module inside `auth`, not to the OAuth protocol module.
 
 Rules for MVP:
 
@@ -487,7 +468,7 @@ PostgreSQL keeps durable lifecycle and security history.
 
 Valkey/Redis is a cache, not the authority.
 
-On a cache hit, validation is served from Redis. On a cache miss, the access service reads the durable session from PostgreSQL, validates it, repopulates Redis and continues the same request if the session is valid.
+On a cache hit, validation is served from Redis. On a cache miss, the auth access module reads the durable session from PostgreSQL, validates it, repopulates Redis and continues the same request if the session is valid.
 
 A Redis restart or eviction must not force a valid session to be reissued.
 
@@ -545,7 +526,7 @@ When requesting full access, the agent may request:
 
 The administration UI may approve the requested scope or replace it with another valid scope.
 
-Changing an approved account scope (`all`, `selected`, `none`) takes effect on the next call. The access service commits the new scope to PostgreSQL and invalidates/refreshes the Redis session projection; the agent does not need to reissue the session.
+Changing an approved account scope (`all`, `selected`, `none`) takes effect on the next call. The auth service commits the new scope to PostgreSQL and invalidates/refreshes the Redis session projection; the agent does not need to reissue the session.
 
 Provider credentials remain inside `integrations`.
 
@@ -780,19 +761,11 @@ This may later evolve to stronger workload identity or mTLS without changing dom
 
 ### auth unavailable
 
-No new OAuth login/refresh can proceed.
-
-Already-issued OAuth tokens may continue only while their normal local verification remains valid.
-
-### access unavailable
-
-For a surface in `session_enforced`, protected execution fails closed.
-
-Do not silently fall back to unrestricted behavior.
+No new OAuth login/refresh or agent-session decision can proceed. Already-issued OAuth tokens may continue local JWT verification while valid, but a surface in `session_enforced` fails closed when the auth service cannot validate its agent session. Do not silently fall back to unrestricted behavior.
 
 ### Redis/Valkey unavailable
 
-Redis/Valkey is only the cache. If it is unavailable, the access service validates sessions directly against PostgreSQL and continues operating at reduced performance.
+Redis/Valkey is only the cache. If it is unavailable, the auth service validates sessions directly against PostgreSQL and continues operating at reduced performance.
 
 No valid session is revoked or reissued solely because Redis is unavailable.
 
@@ -935,7 +908,7 @@ Explicitly deferred:
 - advanced RBAC/ABAC;
 - MFA/passkeys;
 - distributed/high-availability cache coordination beyond the MVP read-through cache;
-- distributed/high-availability access service;
+- distributed/high-availability auth service;
 - KMS/HSM key storage;
 - advanced abuse scoring.
 

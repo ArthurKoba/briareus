@@ -253,7 +253,7 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
             bootstrap_password="admin",
             jwt_private_key_pem=private_key_pem(),
             jwt_key_id="test-key",
-            access_service_token="access-service",
+            gateway_service_token="gateway-service",
             admin_service_token="admin-service",
             access_token_ttl_seconds=300,
             refresh_token_ttl_seconds=3600,

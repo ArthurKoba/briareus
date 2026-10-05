@@ -2,7 +2,7 @@
 
 | Source module | Runtime service | Responsibility |
 | --- | --- | --- |
-| `auth_service` | `auth` | central OAuth/DCR, GitHub login, exact resource audiences, token state |
+| `auth_service` | `auth` | local identity/OAuth, exact resource audiences, token state, agent sessions and access control |
 | `bridge` | `gateway` | public edge, MCP routing, protected-resource metadata, reverse proxying |
 | `common` | — | shared typed runtime/config contracts |
 | `admin-api` | `admin-api` | provider accounts, encrypted credentials, session/API/realtime backend and telemetry |

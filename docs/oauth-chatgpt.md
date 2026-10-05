@@ -11,7 +11,7 @@ The source target uses the local `auth` service as the OAuth authorization serve
 - Gateway verifies tokens locally with the public key/JWKS and cannot mint tokens.
 - Refresh tokens and OAuth session state are durable in the `auth` PostgreSQL database.
 
-After OAuth succeeds, agent access sessions are a second independent authorization layer owned by `access`. When session enforcement is enabled for an MCP surface, normal tool calls require the agent session UID in addition to the OAuth bearer token.
+After OAuth succeeds, agent access sessions are a second independent authorization layer inside `auth`. When session enforcement is enabled for an MCP surface, normal tool calls require the agent session UID in addition to the OAuth bearer token.
 
 The local login form is served at:
 

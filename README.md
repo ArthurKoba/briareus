@@ -16,7 +16,7 @@ gateway
   |                                 |
   |                                 +-- local users / OAuth / token state
   |
-  |   \-- agent access -----------> access (PostgreSQL + Valkey cache)
+  |   \-- agent access -----------> auth (PostgreSQL + Valkey cache)
   |
   +-- /github/mcp   -------------> github
   +-- /gitlab/mcp   -------------> gitlab
@@ -66,7 +66,7 @@ https://mcp.koba-nexus.ru
 
 Every MCP endpoint is an independent RFC 8707 resource audience under that issuer. The `auth` runtime owns local users, OAuth clients/codes/sessions, refresh tokens and the private ES256 signing key. Gateway owns public routing and verifies already-issued tokens with the public key/JWKS.
 
-Agent access is a second authorization layer owned by the separate `access` service. In `session_enforced` mode each normal MCP call carries an agent session UID; sessions start read-only and may receive temporary/full access through administration approval. PostgreSQL is durable authority and Valkey is a read-through cache.
+Agent access is a second authorization layer inside the same `auth` service. In `session_enforced` mode each normal MCP call carries an agent session UID; sessions start read-only and may receive temporary/full access through administration approval. PostgreSQL is durable authority and Valkey is a read-through cache.
 
 Provider accounts remain integrations and are not platform login identities.
 
@@ -75,7 +75,7 @@ Provider accounts remain integrations and are not platform login identities.
 ```text
 services/
 ├── auth_service/
-├── access_service/
+│   └── access/
 ├── bridge/
 ├── common/
 ├── admin-api/

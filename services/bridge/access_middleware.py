@@ -13,7 +13,7 @@ from mcp.types import TextContent
 from common.access_contracts import OAuthContext, SessionSnapshot
 from common.mcp_surfaces import surface_id
 
-from .access_client import AccessServiceClient
+from .access_client import AuthAccessClient
 
 _ACCESS_TOOL_PREFIX = "access_session_"
 _SAFE_ACCOUNT_DISCOVERY: dict[str, frozenset[str]] = {
@@ -82,7 +82,7 @@ class AccessSessionMiddleware(Middleware):
         self,
         *,
         surface: str,
-        client: AccessServiceClient,
+        client: AuthAccessClient,
     ) -> None:
         self.surface = surface
         self.surface_id = int(surface_id(surface))
@@ -125,7 +125,7 @@ class AccessSessionMiddleware(Middleware):
             )
         except (httpx.HTTPError, ValueError, RuntimeError) as exc:
             return self._error(
-                "access_service_unavailable",
+                "auth_access_unavailable",
                 "Access validation is temporarily unavailable.",
                 detail=type(exc).__name__,
             )
