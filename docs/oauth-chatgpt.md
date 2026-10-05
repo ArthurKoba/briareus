@@ -8,7 +8,7 @@ The source target uses `https://authorization.mcp.koba-nexus.ru` as the local OA
 - Platform identity is a local `authorization` user; GitHub/GitLab/provider accounts are integrations, not identity providers.
 - Each public MCP URL is a separate RFC 8707 resource/audience.
 - Access tokens are short-lived ES256 JWTs signed only by `authorization`.
-- Gateway verifies tokens locally with the public key/JWKS and cannot mint tokens.
+- Gateway fetches public JWKS from authorization over the private network, caches it, verifies tokens locally and cannot mint tokens.
 - Refresh tokens and OAuth session state are durable in the `authorization` PostgreSQL database.
 
 After OAuth succeeds, agent access sessions are a second independent authorization layer inside `authorization`. When session enforcement is enabled for an MCP surface, normal tool calls require the agent session UID in addition to the OAuth bearer token.

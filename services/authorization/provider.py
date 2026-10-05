@@ -26,9 +26,10 @@ from common.settings import AuthorizationServiceSettings
 from .repository import AuthorizationRepository
 from .security import (
     issue_access_token,
-    load_private_key,
+    load_signing_key,
     public_jwk,
     random_token,
+    signing_key_id,
     verify_access_token,
 )
 
@@ -48,8 +49,9 @@ class LocalOAuthProvider(OAuthProvider):
         self._allowed_resources = allowed_resource_urls(self._resource_base_url)
         self._root_resource = resource_url(self._resource_base_url, "root")
         self._allowed_redirect_uris = frozenset(settings.allowed_redirect_uris)
-        self._private_key = load_private_key(settings.jwt_private_key_pem)
+        self._private_key = load_signing_key(settings.jwt_signing_key)
         self._public_key = self._private_key.public_key()
+        self._key_id = signing_key_id(self._public_key)
 
         super().__init__(
             base_url=self.issuer,
@@ -65,7 +67,7 @@ class LocalOAuthProvider(OAuthProvider):
 
     @property
     def jwks(self) -> dict[str, object]:
-        return {"keys": [public_jwk(self._public_key, kid=self.settings.jwt_key_id)]}
+        return {"keys": [public_jwk(self._public_key)]}
 
     def canonical_resource(self, value: str | None) -> str:
         if not value:
@@ -286,7 +288,7 @@ class LocalOAuthProvider(OAuthProvider):
     ) -> OAuthToken:
         access_token, _expires_at = issue_access_token(
             private_key=self._private_key,
-            kid=self.settings.jwt_key_id,
+            kid=self._key_id,
             issuer=self.issuer,
             audience=resource,
             subject=user_id,

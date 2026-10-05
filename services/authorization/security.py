@@ -46,25 +46,34 @@ def random_token(bytes_count: int = 32) -> str:
     return secrets.token_urlsafe(bytes_count)
 
 
-def load_private_key(pem: str) -> ec.EllipticCurvePrivateKey:
-    key = serialization.load_pem_private_key(pem.encode(), password=None)
+def load_signing_key(encoded: str) -> ec.EllipticCurvePrivateKey:
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        key = serialization.load_der_private_key(raw, password=None)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            "AUTHORIZATION_JWT_SIGNING_KEY must be base64-encoded P-256 PKCS8 DER"
+        ) from exc
     if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(
         key.curve, ec.SECP256R1
     ):
-        raise ValueError("AUTHORIZATION_JWT_PRIVATE_KEY_PEM must contain a P-256 EC private key")
+        raise ValueError(
+            "AUTHORIZATION_JWT_SIGNING_KEY must be base64-encoded P-256 PKCS8 DER"
+        )
     return key
 
 
-def load_public_key(pem: str) -> ec.EllipticCurvePublicKey:
-    key = serialization.load_pem_public_key(pem.encode())
-    if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(
-        key.curve, ec.SECP256R1
-    ):
-        raise ValueError("AUTHORIZATION_JWT_PUBLIC_KEY_PEM must contain a P-256 EC public key")
-    return key
+def signing_key_id(public_key: ec.EllipticCurvePublicKey) -> str:
+    der = public_key.public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    digest = hashlib.sha256(der).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
 
-def public_jwk(public_key: ec.EllipticCurvePublicKey, *, kid: str) -> dict[str, str]:
+def public_jwk(public_key: ec.EllipticCurvePublicKey) -> dict[str, str]:
+    kid = signing_key_id(public_key)
     numbers = public_key.public_numbers()
 
     def encoded(value: int) -> str:

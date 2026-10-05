@@ -221,9 +221,9 @@ Argon2id is the intended password-hashing algorithm.
 
 Use asymmetric signing.
 
-`authorization` owns the private signing key.
+`authorization` owns the only signing secret (`AUTHORIZATION_JWT_SIGNING_KEY`). It derives the public key and stable `kid` from that secret and publishes JWKS.
 
-Gateway and other verifiers receive public keys/JWKS only.
+Gateway and other verifiers never receive the signing secret. Gateway fetches JWKS over the private authorization endpoint and caches public verification keys.
 
 A verifier should not be able to mint a valid OAuth token.
 

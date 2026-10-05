@@ -231,13 +231,14 @@ class FakeAuthorizationRepository:
             await self.revoke_oauth_session(record.session_id)
 
 
-def private_key_pem() -> str:
+def signing_key_value() -> str:
     key = ec.generate_private_key(ec.SECP256R1())
-    return key.private_bytes(
-        serialization.Encoding.PEM,
+    der = key.private_bytes(
+        serialization.Encoding.DER,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
-    ).decode()
+    )
+    return base64.b64encode(der).decode()
 
 
 class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
@@ -253,8 +254,7 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
             postgres_password="secret",
             bootstrap_username="admin",
             bootstrap_password="admin",
-            jwt_private_key_pem=private_key_pem(),
-            jwt_key_id="test-key",
+            jwt_signing_key=signing_key_value(),
             gateway_service_token="gateway-service",
             admin_service_token="admin-service",
             access_token_ttl_seconds=300,
