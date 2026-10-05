@@ -28,6 +28,11 @@ class CiPlanTest(unittest.TestCase):
         result = plan(["tests/test_postgres_authorization_access.py"])
         self.assertTrue(result["run_authorization_integration"])
 
+
+    def test_jenkinsfile_change_runs_all_integration_suites(self) -> None:
+        result = plan(["Jenkinsfile"])
+        self.assertEqual(result["integration_suites"], ["authorization"])
+
     def test_force_full_runs_all_integration_suites(self) -> None:
         result = plan([], force_full=True)
         self.assertEqual(result["integration_suites"], ["authorization"])

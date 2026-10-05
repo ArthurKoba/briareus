@@ -120,6 +120,12 @@ network and process/cache memory.
 
 See `docs/deployment.md` for production deployment configuration.
 
+## Continuous integration
+
+CI validation is owned by Jenkins; Coolify remains the production build/deployment authority.
+Jenkins runs full static/unit validation and only the integration suites selected by the changed
+paths. See `docs/ci.md`.
+
 ## Locked Python dependencies
 
 Production and CI install dependencies from committed `uv.lock`:

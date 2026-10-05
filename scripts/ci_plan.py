@@ -18,6 +18,7 @@ INTEGRATION_SUITES: dict[str, tuple[str, ...]] = {
 # These inputs can affect every integration suite regardless of service owner.
 CROSS_CUTTING_INTEGRATION_TRIGGERS = (
     ".github/workflows/mvp-backend.yaml",
+    "Jenkinsfile",
     "pyproject.toml",
     "uv.lock",
     "scripts/ci_plan.py",
@@ -75,10 +76,14 @@ def _emit_github_output(result: dict[str, object], output_file: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*")
+    parser.add_argument("--paths-file", type=Path)
     parser.add_argument("--force-full", action="store_true")
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
-    result = plan(args.paths, force_full=args.force_full)
+    paths = list(args.paths)
+    if args.paths_file:
+        paths.extend(args.paths_file.read_text(encoding="utf-8").splitlines())
+    result = plan(paths, force_full=args.force_full)
     if args.github_output:
         _emit_github_output(result, args.github_output)
     print(json.dumps(result, indent=2, sort_keys=True))
