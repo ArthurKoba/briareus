@@ -26,7 +26,7 @@ def build_access_app(
     service: AccessService,
     settings: AuthServiceSettings,
 ) -> FastAPI:
-    app = FastAPI(title="Auth Access", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Auth Access", docs_url=None, redoc_url=None, openapi_url=None)
 
     def _require(expected: str, authorization: str | None) -> None:
         candidate = f"Bearer {expected}"

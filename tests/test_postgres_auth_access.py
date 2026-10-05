@@ -11,6 +11,8 @@ from uuid import uuid4
 import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 from auth_service.access.api import build_access_app
 from auth_service.access.database import AccessDatabase
@@ -298,7 +300,8 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(item.id == pending.id for item in still_pending))
 
     async def test_auth_access_http_contract(self) -> None:
-        app = build_access_app(self.access_control, self.auth_access_settings)
+        access_app = build_access_app(self.access_control, self.auth_access_settings)
+        app = Starlette(routes=[Mount("/internal/access", app=access_app)])
         terminal_surface = int(surface_id("terminal"))
         context = {
             "user_id": self.user.id,
@@ -310,10 +313,10 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
-            base_url="http://auth.test/internal/access",
+            base_url="http://auth.test",
         ) as client:
             opened_response = await client.post(
-                "/v1/session/open",
+                "/internal/access/v1/session/open",
                 headers=gateway_headers,
                 json={**context, "surface_id": terminal_surface, "label": "http"},
             )
@@ -322,7 +325,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(opened["access_level"], "read_only")
 
             validated = await client.post(
-                "/v1/session/validate",
+                "/internal/access/v1/session/validate",
                 headers=gateway_headers,
                 json={
                     **context,
@@ -337,7 +340,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(validated.json()["allowed"])
 
             listed = await client.get(
-                f"/v1/admin/users/{self.user.id}/sessions",
+                f"/internal/access/v1/admin/users/{self.user.id}/sessions",
                 headers=admin_headers,
             )
             self.assertEqual(listed.status_code, 200, listed.text)
@@ -346,7 +349,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             )
 
             elevated = await client.patch(
-                f"/v1/admin/sessions/{opened['id']}",
+                f"/internal/access/v1/admin/sessions/{opened['id']}",
                 headers=admin_headers,
                 json={
                     "admin_user_id": self.user.id,
@@ -358,7 +361,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(elevated.json()["access_level"], "full_access")
 
             controls = await client.get(
-                f"/v1/admin/users/{self.user.id}/controls",
+                f"/internal/access/v1/admin/users/{self.user.id}/controls",
                 headers=admin_headers,
             )
             self.assertEqual(controls.status_code, 200, controls.text)
