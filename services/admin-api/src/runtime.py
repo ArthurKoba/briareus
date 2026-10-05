@@ -152,6 +152,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             database=settings.postgres_db,
             username=settings.postgres_user,
             password=settings.postgres_password,
+            encryption_key=settings.encryption_key,
+            legacy_encryption_key=settings.legacy_encryption_key,
         )
         if report.already_migrated:
             logger.info("admin-api legacy SQLite import already completed")

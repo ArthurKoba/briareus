@@ -80,6 +80,7 @@ POSTGRES_DB=mcp-bridge
 POSTGRES_USER=<user>
 POSTGRES_PASSWORD=<password>
 ADMIN_API_SQLITE_IMPORT_PATH=/legacy-management/management.sqlite3  # cutover only
+MANAGEMENT_ENCRYPTION_KEY=<legacy Fernet key>  # cutover only when different
 ADMIN_API_ENCRYPTION_KEY=<Fernet key>
 ADMIN_API_SERVICE_TOKEN=<random internal token>
 ADMIN_API_USERNAME=admin
@@ -92,7 +93,7 @@ Gateway OAuth remains deployment configuration (`GITHUB_OAUTH_*`). Provider acco
 
 ## Legacy SQLite cutover
 
-SQLite is supported only as a one-time migration source. The importer refuses to write into a non-empty PostgreSQL target, refuses to silently drop unknown non-empty SQLite tables, preserves primary identifiers and encrypted credentials, and validates row counts after the copy.
+SQLite is supported only as a one-time migration source. The importer refuses to write into a non-empty PostgreSQL target, refuses to silently drop unknown non-empty SQLite tables, preserves primary identifiers, validates and re-wraps encrypted credentials under the current ADMIN_API_ENCRYPTION_KEY, and validates row counts after the copy.
 
 Run it from an Admin API image/environment that can reach PostgreSQL:
 
@@ -102,4 +103,4 @@ python -m infrastructure.sqlite_to_postgres /path/to/legacy.sqlite3
 
 `POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB` default to `postgres`, `5432` and `mcp-bridge`; `POSTGRES_USER` and `POSTGRES_PASSWORD` supply credentials. The `postgresql+asyncpg` driver is selected internally by Admin API. Keep the original SQLite file as a read-only backup until production acceptance is complete.
 
-During cutover, set `ADMIN_API_SQLITE_IMPORT_PATH` only when the legacy SQLite file is mounted read-only into the Admin API container. The import runs before normal Admin API bootstrap, records `legacy_sqlite_import_v1` in `admin_migration_state` in the same transaction as the copied data, and becomes restart-safe/idempotent after that marker exists. Remove the cutover path after acceptance.
+During cutover, set `ADMIN_API_SQLITE_IMPORT_PATH` only when the legacy SQLite file is mounted read-only into the Admin API container. The import runs before normal Admin API bootstrap, records `legacy_sqlite_import_v1` in `admin_migration_state` in the same transaction as the copied data, and becomes restart-safe/idempotent after that marker exists. If the legacy and current Fernet keys differ, also set MANAGEMENT_ENCRYPTION_KEY; otherwise the current key is used to validate the legacy ciphertext. Remove both cutover-only variables after acceptance.

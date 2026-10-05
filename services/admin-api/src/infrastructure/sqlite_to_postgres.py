@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import Boolean, DateTime, func, insert, select, text
 from sqlalchemy.sql.schema import Column, Table
 
+from .crypto import FernetCredentialCipher
 from .database import Base, DatabaseManager
 
 _BATCH_SIZE = 500
@@ -133,6 +134,21 @@ def _prepare_columns(
     return imported, skipped, defaulted
 
 
+def _rewrap_encrypted_credentials(
+    batch: list[dict[str, object]],
+    *,
+    source_cipher: FernetCredentialCipher,
+    target_cipher: FernetCredentialCipher,
+) -> list[dict[str, object]]:
+    for row in batch:
+        value = row.get("encrypted_credential")
+        if not isinstance(value, str) or not value:
+            continue
+        plaintext = source_cipher.decrypt(value)
+        row["encrypted_credential"] = target_cipher.encrypt(plaintext)
+    return batch
+
+
 def _iter_source_batches(
     connection: sqlite3.Connection,
     table: Table,
@@ -225,6 +241,8 @@ async def migrate_sqlite_to_postgres(
     database: str = "mcp-bridge",
     username: str,
     password: str,
+    encryption_key: str,
+    legacy_encryption_key: str = "",
     batch_size: int = _BATCH_SIZE,
 ) -> MigrationReport:
     if batch_size < 1:
@@ -237,6 +255,15 @@ async def migrate_sqlite_to_postgres(
         username=username,
         password=password,
     )
+    target_cipher = FernetCredentialCipher(encryption_key)
+    if legacy_encryption_key.strip():
+        try:
+            source_cipher = FernetCredentialCipher(legacy_encryption_key)
+        except ValueError as exc:
+            raise ValueError("MANAGEMENT_ENCRYPTION_KEY must be a Fernet key") from exc
+    else:
+        source_cipher = target_cipher
+
     source: sqlite3.Connection | None = None
     source_path = sqlite_path
     try:
@@ -302,7 +329,12 @@ async def migrate_sqlite_to_postgres(
                     batch_size=batch_size,
                 ):
                     if batch:
-                        await target.execute(insert(table), batch)
+                        prepared_batch = _rewrap_encrypted_credentials(
+                            batch,
+                            source_cipher=source_cipher,
+                            target_cipher=target_cipher,
+                        )
+                        await target.execute(insert(table), prepared_batch)
 
                 migrations.append(
                     TableMigration(
@@ -403,6 +435,14 @@ def _parser() -> argparse.ArgumentParser:
         "--postgres-password",
         default=os.environ.get("POSTGRES_PASSWORD", ""),
     )
+    parser.add_argument(
+        "--encryption-key",
+        default=os.environ.get("ADMIN_API_ENCRYPTION_KEY", ""),
+    )
+    parser.add_argument(
+        "--legacy-encryption-key",
+        default=os.environ.get("MANAGEMENT_ENCRYPTION_KEY", ""),
+    )
     parser.add_argument("--batch-size", type=int, default=_BATCH_SIZE)
     return parser
 
@@ -414,6 +454,7 @@ async def _main() -> None:
         for name, value in (
             ("POSTGRES_USER", args.postgres_user),
             ("POSTGRES_PASSWORD", args.postgres_password),
+            ("ADMIN_API_ENCRYPTION_KEY", args.encryption_key),
         )
         if not value
     ]
@@ -426,6 +467,8 @@ async def _main() -> None:
         database=args.postgres_db,
         username=args.postgres_user,
         password=args.postgres_password,
+        encryption_key=args.encryption_key,
+        legacy_encryption_key=args.legacy_encryption_key,
         batch_size=args.batch_size,
     )
     _print_report(report)

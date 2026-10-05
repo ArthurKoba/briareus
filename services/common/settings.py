@@ -447,6 +447,7 @@ class AdminApiSettings(ProcessSettings):
     postgres_user: str = Field(validation_alias="POSTGRES_USER")
     postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     sqlite_import_path: str = Field("", validation_alias="ADMIN_API_SQLITE_IMPORT_PATH")
+    legacy_encryption_key: str = Field("", validation_alias="MANAGEMENT_ENCRYPTION_KEY")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
     admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
@@ -466,6 +467,7 @@ class AdminApiSettings(ProcessSettings):
         "postgres_db",
         "postgres_user",
         "sqlite_import_path",
+        "legacy_encryption_key",
         "encryption_key",
         "service_token",
         "admin_username",
