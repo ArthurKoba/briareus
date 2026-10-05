@@ -52,6 +52,11 @@ COPY services/auth_service ./services/auth_service
 ENV ASGI_APP=auth_service.runtime:app
 
 
+FROM runtime-base AS access
+COPY services/access_service ./services/access_service
+ENV ASGI_APP=access_service.runtime:app
+
+
 FROM runtime-base AS gateway
 COPY services/bridge ./services/bridge
 ENV ASGI_APP=bridge.server:app

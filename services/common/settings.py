@@ -20,6 +20,7 @@ _DEFAULT_PRIVATE_HOSTS = (
     "terminal:*",
     "observability:*",
     "auth:*",
+    "access:*",
 )
 _DEFAULT_PRIVATE_ORIGINS = (
     "http://localhost:*",
@@ -334,48 +335,66 @@ class ObservabilitySettings(ProcessSettings):
 
 class AuthServiceSettings(ProcessSettings):
     public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
-    oauth_client_id: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_ID")
-    oauth_client_secret: str = Field("", validation_alias="GITHUB_OAUTH_CLIENT_SECRET")
-    oauth_jwt_signing_key: str = Field("", validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY")
-    oauth_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(
-        (),
-        validation_alias="GITHUB_OAUTH_ALLOWED_USERS",
+    postgres_host: str = Field("postgres", validation_alias="AUTH_POSTGRES_HOST")
+    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="AUTH_POSTGRES_PORT")
+    postgres_db: str = Field("auth", validation_alias="AUTH_POSTGRES_DB")
+    postgres_user: str = Field("", validation_alias="AUTH_POSTGRES_USER")
+    postgres_password: str = Field("", validation_alias="AUTH_POSTGRES_PASSWORD")
+    bootstrap_username: str = Field("", validation_alias="AUTH_BOOTSTRAP_USERNAME")
+    bootstrap_password: str = Field("", validation_alias="AUTH_BOOTSTRAP_PASSWORD")
+    jwt_private_key_pem: str = Field("", validation_alias="AUTH_JWT_PRIVATE_KEY_PEM")
+    jwt_key_id: str = Field("auth-1", validation_alias="AUTH_JWT_KEY_ID")
+    access_service_token: str = Field("", validation_alias="AUTH_ACCESS_SERVICE_TOKEN")
+    access_token_ttl_seconds: int = Field(
+        900,
+        ge=60,
+        le=86_400,
+        validation_alias="AUTH_ACCESS_TOKEN_TTL_SECONDS",
     )
-    github_token_cache_ttl_seconds: int = Field(
-        300,
-        ge=0,
-        le=3600,
-        validation_alias="AUTH_GITHUB_TOKEN_CACHE_TTL_SECONDS",
+    refresh_token_ttl_seconds: int = Field(
+        30 * 24 * 60 * 60,
+        ge=3600,
+        le=365 * 24 * 60 * 60,
+        validation_alias="AUTH_REFRESH_TOKEN_TTL_SECONDS",
+    )
+    allowed_redirect_uris: Annotated[tuple[str, ...], NoDecode] = Field(
+        ("https://chatgpt.com/connector_platform_oauth_redirect",),
+        validation_alias="AUTH_ALLOWED_REDIRECT_URIS",
     )
 
     @field_validator(
         "public_base_url",
-        "oauth_client_id",
-        "oauth_client_secret",
-        "oauth_jwt_signing_key",
+        "postgres_host",
+        "postgres_db",
+        "postgres_user",
+        "postgres_password",
+        "bootstrap_username",
+        "bootstrap_password",
+        "jwt_private_key_pem",
+        "jwt_key_id",
+        "access_service_token",
         mode="before",
     )
     @classmethod
     def _strip_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("oauth_allowed_users", mode="before")
+    @field_validator("allowed_redirect_uris", mode="before")
     @classmethod
-    def _parse_oauth_users(cls, value: object) -> object:
-        parsed = _tuple_value(value)
-        if isinstance(parsed, tuple):
-            return tuple(item.casefold() for item in parsed)
-        return parsed
+    def _parse_redirect_uris(cls, value: object) -> object:
+        return _tuple_value(value)
 
     def validate_bootstrap(self) -> None:
         missing = [
             name
             for name, value in (
                 ("MCP_PUBLIC_BASE_URL", self.public_base_url),
-                ("GITHUB_OAUTH_CLIENT_ID", self.oauth_client_id),
-                ("GITHUB_OAUTH_CLIENT_SECRET", self.oauth_client_secret),
-                ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
-                ("GITHUB_OAUTH_ALLOWED_USERS", self.oauth_allowed_users),
+                ("AUTH_POSTGRES_USER", self.postgres_user),
+                ("AUTH_POSTGRES_PASSWORD", self.postgres_password),
+                ("AUTH_BOOTSTRAP_USERNAME", self.bootstrap_username),
+                ("AUTH_BOOTSTRAP_PASSWORD", self.bootstrap_password),
+                ("AUTH_JWT_PRIVATE_KEY_PEM", self.jwt_private_key_pem),
+                ("AUTH_ACCESS_SERVICE_TOKEN", self.access_service_token),
             )
             if not value
         ]
@@ -386,27 +405,12 @@ class AuthServiceSettings(ProcessSettings):
 class GatewayAuthSettings(ProcessSettings):
     enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
     public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
-    oauth_jwt_signing_key: str = Field(
-        "",
-        validation_alias="GITHUB_OAUTH_JWT_SIGNING_KEY",
-    )
-    oauth_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(
-        (),
-        validation_alias="GITHUB_OAUTH_ALLOWED_USERS",
-    )
+    jwt_public_key_pem: str = Field("", validation_alias="AUTH_JWT_PUBLIC_KEY_PEM")
 
-    @field_validator("public_base_url", "oauth_jwt_signing_key", mode="before")
+    @field_validator("public_base_url", "jwt_public_key_pem", mode="before")
     @classmethod
     def _strip_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
-
-    @field_validator("oauth_allowed_users", mode="before")
-    @classmethod
-    def _parse_oauth_users(cls, value: object) -> object:
-        parsed = _tuple_value(value)
-        if isinstance(parsed, tuple):
-            return tuple(item.casefold() for item in parsed)
-        return parsed
 
     def validate_bootstrap(self) -> None:
         if not self.enabled:
@@ -414,14 +418,87 @@ class GatewayAuthSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("GITHUB_OAUTH_JWT_SIGNING_KEY", self.oauth_jwt_signing_key),
-                ("GITHUB_OAUTH_ALLOWED_USERS", self.oauth_allowed_users),
                 ("MCP_PUBLIC_BASE_URL", self.public_base_url),
+                ("AUTH_JWT_PUBLIC_KEY_PEM", self.jwt_public_key_pem),
             )
             if not value
         ]
         if missing:
             raise ValueError("missing gateway auth settings: " + ", ".join(missing))
+
+
+class AccessServiceSettings(ProcessSettings):
+    postgres_host: str = Field("postgres", validation_alias="ACCESS_POSTGRES_HOST")
+    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="ACCESS_POSTGRES_PORT")
+    postgres_db: str = Field("access", validation_alias="ACCESS_POSTGRES_DB")
+    postgres_user: str = Field("", validation_alias="ACCESS_POSTGRES_USER")
+    postgres_password: str = Field("", validation_alias="ACCESS_POSTGRES_PASSWORD")
+    gateway_service_token: str = Field("", validation_alias="ACCESS_GATEWAY_SERVICE_TOKEN")
+    admin_service_token: str = Field("", validation_alias="ACCESS_ADMIN_SERVICE_TOKEN")
+    auth_url: str = Field("http://auth:8000", validation_alias="AUTH_INTERNAL_URL")
+    auth_service_token: str = Field("", validation_alias="AUTH_ACCESS_SERVICE_TOKEN")
+    default_session_ttl_seconds: int = Field(
+        3600, ge=60, le=30 * 24 * 60 * 60, validation_alias="ACCESS_DEFAULT_SESSION_TTL_SECONDS"
+    )
+    cache_ttl_seconds: int = Field(300, ge=5, le=3600, validation_alias="ACCESS_CACHE_TTL_SECONDS")
+    invalid_attempt_soft_limit: int = Field(
+        5, ge=1, le=100, validation_alias="ACCESS_INVALID_ATTEMPT_SOFT_LIMIT"
+    )
+    invalid_attempt_oauth_revoke_limit: int = Field(
+        50, ge=5, le=10_000, validation_alias="ACCESS_INVALID_ATTEMPT_OAUTH_REVOKE_LIMIT"
+    )
+    invalid_attempt_window_seconds: int = Field(
+        600, ge=30, le=86_400, validation_alias="ACCESS_INVALID_ATTEMPT_WINDOW_SECONDS"
+    )
+    invalid_attempt_backoff_seconds: int = Field(
+        30, ge=1, le=3600, validation_alias="ACCESS_INVALID_ATTEMPT_BACKOFF_SECONDS"
+    )
+
+    @field_validator(
+        "postgres_host",
+        "postgres_db",
+        "postgres_user",
+        "postgres_password",
+        "gateway_service_token",
+        "admin_service_token",
+        "auth_url",
+        "auth_service_token",
+        mode="before",
+    )
+    @classmethod
+    def _strip_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    def validate_bootstrap(self) -> None:
+        missing = [
+            name
+            for name, value in (
+                ("ACCESS_POSTGRES_USER", self.postgres_user),
+                ("ACCESS_POSTGRES_PASSWORD", self.postgres_password),
+                ("ACCESS_GATEWAY_SERVICE_TOKEN", self.gateway_service_token),
+                ("ACCESS_ADMIN_SERVICE_TOKEN", self.admin_service_token),
+                ("AUTH_ACCESS_SERVICE_TOKEN", self.auth_service_token),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError("missing access bootstrap settings: " + ", ".join(missing))
+
+
+class AccessClientSettings(ProcessSettings):
+    enabled: bool = Field(False, validation_alias="ACCESS_ENABLED")
+    url: str = Field("http://access:8000", validation_alias="ACCESS_SERVICE_URL")
+    service_token: str = Field("", validation_alias="ACCESS_GATEWAY_SERVICE_TOKEN")
+    timeout_seconds: float = Field(2.0, gt=0, le=30, validation_alias="ACCESS_TIMEOUT_SECONDS")
+
+    @field_validator("url", "service_token", mode="before")
+    @classmethod
+    def _strip_values(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    def validate_bootstrap(self) -> None:
+        if self.enabled and not self.service_token:
+            raise ValueError("ACCESS_GATEWAY_SERVICE_TOKEN is required when ACCESS_ENABLED=true")
 
 
 class AdminApiClientSettings(ProcessSettings):
