@@ -12,7 +12,7 @@ from sqlalchemy import (
     Text,
     inspect,
 )
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -269,9 +269,23 @@ class GitLabRuntimeSettingsRecord(Base):
 class DatabaseManager:
     """Own the PostgreSQL async engine and session factory for Admin API."""
 
-    def __init__(self, database_url: str) -> None:
-        if not database_url.startswith("postgresql+asyncpg://"):
-            raise ValueError("Admin API requires a postgresql+asyncpg DATABASE_URL")
+    def __init__(
+        self,
+        *,
+        host: str,
+        port: int,
+        database: str,
+        username: str,
+        password: str,
+    ) -> None:
+        database_url = URL.create(
+            "postgresql+asyncpg",
+            username=username,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
+        )
         self.engine: AsyncEngine = create_async_engine(
             database_url,
             pool_pre_ping=True,

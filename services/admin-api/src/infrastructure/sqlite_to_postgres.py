@@ -45,17 +45,6 @@ class MigrationReport:
         return sum(item.target_rows for item in self.tables)
 
 
-def _normalize_database_url(value: str) -> str:
-    url = value.strip()
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url.removeprefix("postgres://")
-    if url.startswith("postgresql://"):
-        url = "postgresql+asyncpg://" + url.removeprefix("postgresql://")
-    if not url.startswith("postgresql+asyncpg://"):
-        raise ValueError("target DATABASE_URL must use PostgreSQL with asyncpg")
-    return url
-
-
 def _open_source(path: Path) -> sqlite3.Connection:
     if not path.is_file():
         raise ValueError(f"SQLite source is not a file: {path}")
@@ -197,8 +186,12 @@ def _nonempty_unknown_tables(
 
 async def migrate_sqlite_to_postgres(
     sqlite_path: Path,
-    database_url: str,
     *,
+    host: str,
+    port: int,
+    database: str,
+    username: str,
+    password: str,
     batch_size: int = _BATCH_SIZE,
 ) -> MigrationReport:
     if batch_size < 1:
@@ -206,7 +199,13 @@ async def migrate_sqlite_to_postgres(
 
     source_path = await asyncio.to_thread(lambda: sqlite_path.expanduser().resolve(strict=True))
     source = _open_source(source_path)
-    manager = DatabaseManager(_normalize_database_url(database_url))
+    manager = DatabaseManager(
+        host=host,
+        port=port,
+        database=database,
+        username=username,
+        password=password,
+    )
     try:
         source_tables = _source_tables(source)
         unknown_nonempty, ignored_empty = _nonempty_unknown_tables(source, source_tables)
@@ -324,10 +323,17 @@ def _parser() -> argparse.ArgumentParser:
         description="Migrate the legacy Admin SQLite database into empty PostgreSQL."
     )
     parser.add_argument("sqlite_path", type=Path)
+    parser.add_argument("--postgres-host", default=os.environ.get("POSTGRES_HOST", ""))
     parser.add_argument(
-        "--database-url",
-        default=os.environ.get("DATABASE_URL", ""),
-        help="PostgreSQL URL; defaults to DATABASE_URL.",
+        "--postgres-port",
+        type=int,
+        default=int(os.environ.get("POSTGRES_PORT", "5432")),
+    )
+    parser.add_argument("--postgres-db", default=os.environ.get("POSTGRES_DB", ""))
+    parser.add_argument("--postgres-user", default=os.environ.get("POSTGRES_USER", ""))
+    parser.add_argument(
+        "--postgres-password",
+        default=os.environ.get("POSTGRES_PASSWORD", ""),
     )
     parser.add_argument("--batch-size", type=int, default=_BATCH_SIZE)
     return parser
@@ -335,11 +341,25 @@ def _parser() -> argparse.ArgumentParser:
 
 async def _main() -> None:
     args = _parser().parse_args()
-    if not args.database_url:
-        raise SystemExit("DATABASE_URL or --database-url is required")
+    missing = [
+        name
+        for name, value in (
+            ("POSTGRES_HOST", args.postgres_host),
+            ("POSTGRES_DB", args.postgres_db),
+            ("POSTGRES_USER", args.postgres_user),
+            ("POSTGRES_PASSWORD", args.postgres_password),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit("missing PostgreSQL settings: " + ", ".join(missing))
     report = await migrate_sqlite_to_postgres(
         args.sqlite_path,
-        args.database_url,
+        host=args.postgres_host,
+        port=args.postgres_port,
+        database=args.postgres_db,
+        username=args.postgres_user,
+        password=args.postgres_password,
         batch_size=args.batch_size,
     )
     _print_report(report)

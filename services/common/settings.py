@@ -441,7 +441,11 @@ class AdminApiClientSettings(ProcessSettings):
 
 
 class AdminApiSettings(ProcessSettings):
-    database_url: str = Field("", validation_alias="DATABASE_URL")
+    postgres_host: str = Field(validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(ge=1, le=65535, validation_alias="POSTGRES_PORT")
+    postgres_db: str = Field(validation_alias="POSTGRES_DB")
+    postgres_user: str = Field(validation_alias="POSTGRES_USER")
+    postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
     admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
@@ -457,7 +461,9 @@ class AdminApiSettings(ProcessSettings):
     )
 
     @field_validator(
-        "database_url",
+        "postgres_host",
+        "postgres_db",
+        "postgres_user",
         "encryption_key",
         "service_token",
         "admin_username",
@@ -470,23 +476,14 @@ class AdminApiSettings(ProcessSettings):
     def _strip_secrets(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("database_url")
-    @classmethod
-    def _postgres_database_url(cls, value: str) -> str:
-        normalized = value.strip()
-        if normalized.startswith("postgres://"):
-            normalized = "postgresql://" + normalized.removeprefix("postgres://")
-        if normalized.startswith("postgresql://"):
-            normalized = "postgresql+asyncpg://" + normalized.removeprefix("postgresql://")
-        if normalized and not normalized.startswith("postgresql+asyncpg://"):
-            raise ValueError("DATABASE_URL must use PostgreSQL with asyncpg")
-        return normalized
-
     def validate_bootstrap(self) -> None:
         missing = [
             name
             for name, value in (
-                ("DATABASE_URL", self.database_url),
+                ("POSTGRES_HOST", self.postgres_host),
+                ("POSTGRES_DB", self.postgres_db),
+                ("POSTGRES_USER", self.postgres_user),
+                ("POSTGRES_PASSWORD", self.postgres_password),
                 ("ADMIN_API_ENCRYPTION_KEY", self.encryption_key),
                 ("ADMIN_API_SERVICE_TOKEN", self.service_token),
                 ("ADMIN_API_USERNAME", self.admin_username),

@@ -29,7 +29,7 @@ The root `docker-compose.yaml` contains only long-lived external infrastructure 
 
 Application source changes must not rebuild the infrastructure resource.
 
-Admin API uses PostgreSQL through `DATABASE_URL` and SQLAlchemy's async `asyncpg` dialect. The legacy SQLite database is a one-time migration source only; use `infrastructure.sqlite_to_postgres` during cutover and retain the original file until acceptance is complete.
+Admin API receives discrete `POSTGRES_*` connection settings and builds the SQLAlchemy `postgresql+asyncpg` URL internally. The legacy SQLite database is a one-time migration source only; use `infrastructure.sqlite_to_postgres` during cutover and retain the original file until acceptance is complete.
 
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
 
