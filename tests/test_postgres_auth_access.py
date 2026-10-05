@@ -12,6 +12,7 @@ import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from access_service.api import build_access_app
 from access_service.database import AccessDatabase
 from access_service.repository import AccessRepository
 from access_service.service import AccessService
@@ -296,6 +297,78 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             self.user.id
         )
         self.assertTrue(any(item.id == pending.id for item in still_pending))
+
+    async def test_access_http_contract_uses_service_boundaries(self) -> None:
+        app = build_access_app(self.access_service, self.access_settings)
+        terminal_surface = int(surface_id("terminal"))
+        context = {
+            "user_id": self.user.id,
+            "client_id": "http-client",
+            "oauth_session_id": "http-oauth",
+        }
+        gateway_headers = {"Authorization": "Bearer gateway-test"}
+        admin_headers = {"Authorization": "Bearer admin-test"}
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://access.test",
+        ) as client:
+            opened_response = await client.post(
+                "/v1/session/open",
+                headers=gateway_headers,
+                json={**context, "surface_id": terminal_surface, "label": "http"},
+            )
+            self.assertEqual(opened_response.status_code, 200, opened_response.text)
+            opened = opened_response.json()
+            self.assertEqual(opened["access_level"], "read_only")
+
+            validated = await client.post(
+                "/v1/session/validate",
+                headers=gateway_headers,
+                json={
+                    **context,
+                    "surface_id": terminal_surface,
+                    "session_uid": opened["uid"],
+                    "tool_name": "terminal_status",
+                    "requires_full_access": False,
+                    "account_id": "",
+                },
+            )
+            self.assertEqual(validated.status_code, 200, validated.text)
+            self.assertTrue(validated.json()["allowed"])
+
+            listed = await client.get(
+                f"/v1/admin/users/{self.user.id}/sessions",
+                headers=admin_headers,
+            )
+            self.assertEqual(listed.status_code, 200, listed.text)
+            self.assertTrue(
+                any(item["id"] == opened["id"] for item in listed.json()["sessions"])
+            )
+
+            elevated = await client.patch(
+                f"/v1/admin/sessions/{opened['id']}",
+                headers=admin_headers,
+                json={
+                    "admin_user_id": self.user.id,
+                    "access_level": "full_access",
+                    "account_scope": "none",
+                },
+            )
+            self.assertEqual(elevated.status_code, 200, elevated.text)
+            self.assertEqual(elevated.json()["access_level"], "full_access")
+
+            controls = await client.get(
+                f"/v1/admin/users/{self.user.id}/controls",
+                headers=admin_headers,
+            )
+            self.assertEqual(controls.status_code, 200, controls.text)
+            terminal = next(
+                item
+                for item in controls.json()["controls"]
+                if item["surface_id"] == terminal_surface
+            )
+            self.assertEqual(terminal["mode"], "session_enforced")
 
     async def test_access_session_persists_and_recovers_after_cache_eviction(self) -> None:
         terminal_surface = int(surface_id("terminal"))
