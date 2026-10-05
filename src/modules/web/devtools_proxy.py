@@ -91,7 +91,9 @@ class DeveloperAccessMiddleware(Middleware):
                 path_value = arguments.get("path")
                 match = self._EXTENSION_ID.search(self._result_text(result))
                 if isinstance(path_value, str) and match is not None:
-                    self.browser.record_dev_extension(match.group(1), path_value)
+                    extension_id = match.group(1)
+                    self.browser.record_dev_extension(extension_id, path_value)
+                    await self.browser.sync_dev_extension_user_scripts(extension_id)
             elif tool_name == "uninstall_extension":
                 extension_id = arguments.get("id")
                 if isinstance(extension_id, str):
