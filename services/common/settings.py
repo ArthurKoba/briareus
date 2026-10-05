@@ -152,9 +152,6 @@ class ValkeySettings(ProcessSettings):
 
 
 class BridgeSettings(ProcessSettings):
-    authorization_url: str = Field(
-        "http://authorization:8000", validation_alias="AUTHORIZATION_SERVICE_URL"
-    )
     github_url: str = Field("http://github:8000/mcp", validation_alias="GITHUB_URL")
     gitlab_url: str = Field("http://gitlab:8000/mcp", validation_alias="GITLAB_URL")
     files_url: str = Field("http://files:8000/mcp", validation_alias="FILES_URL")
@@ -190,7 +187,6 @@ class BridgeSettings(ProcessSettings):
     )
 
     @field_validator(
-        "authorization_url",
         "github_url",
         "gitlab_url",
         "files_url",
@@ -337,7 +333,8 @@ class ObservabilitySettings(ProcessSettings):
 
 
 class AuthorizationServiceSettings(ProcessSettings):
-    public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
+    public_base_url: str = Field("", validation_alias="AUTHORIZATION_PUBLIC_BASE_URL")
+    mcp_public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
     postgres_host: str = Field("postgres", validation_alias="AUTHORIZATION_POSTGRES_HOST")
     postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="AUTHORIZATION_POSTGRES_PORT")
     postgres_db: str = Field("authorization", validation_alias="AUTHORIZATION_POSTGRES_DB")
@@ -389,7 +386,7 @@ class AuthorizationServiceSettings(ProcessSettings):
         return self.session_cache_ttl_seconds
 
     @field_validator(
-        "public_base_url", "postgres_host", "postgres_db", "postgres_user",
+        "public_base_url", "mcp_public_base_url", "postgres_host", "postgres_db", "postgres_user",
         "postgres_password", "bootstrap_username", "bootstrap_password",
         "jwt_private_key_pem", "jwt_key_id", "gateway_service_token",
         "admin_service_token", mode="before",
@@ -407,7 +404,8 @@ class AuthorizationServiceSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("MCP_PUBLIC_BASE_URL", self.public_base_url),
+                ("AUTHORIZATION_PUBLIC_BASE_URL", self.public_base_url),
+                ("MCP_PUBLIC_BASE_URL", self.mcp_public_base_url),
                 ("AUTHORIZATION_POSTGRES_USER", self.postgres_user),
                 ("AUTHORIZATION_POSTGRES_PASSWORD", self.postgres_password),
                 ("AUTHORIZATION_BOOTSTRAP_USERNAME", self.bootstrap_username),
@@ -424,10 +422,11 @@ class AuthorizationServiceSettings(ProcessSettings):
 
 class GatewayAuthorizationSettings(ProcessSettings):
     enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
-    public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
+    public_base_url: str = Field("", validation_alias="AUTHORIZATION_PUBLIC_BASE_URL")
+    mcp_public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
     jwt_public_key_pem: str = Field("", validation_alias="AUTHORIZATION_JWT_PUBLIC_KEY_PEM")
 
-    @field_validator("public_base_url", "jwt_public_key_pem", mode="before")
+    @field_validator("public_base_url", "mcp_public_base_url", "jwt_public_key_pem", mode="before")
     @classmethod
     def _strip_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
@@ -438,7 +437,8 @@ class GatewayAuthorizationSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("MCP_PUBLIC_BASE_URL", self.public_base_url),
+                ("AUTHORIZATION_PUBLIC_BASE_URL", self.public_base_url),
+                ("MCP_PUBLIC_BASE_URL", self.mcp_public_base_url),
                 ("AUTHORIZATION_JWT_PUBLIC_KEY_PEM", self.jwt_public_key_pem),
             )
             if not value
@@ -501,8 +501,8 @@ class AdminApiSettings(ProcessSettings):
     authorization_admin_service_token: str = Field(
         "", validation_alias="AUTHORIZATION_ADMIN_SERVICE_TOKEN"
     )
-    admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
-    admin_password: str = Field("", validation_alias="ADMIN_API_PASSWORD")
+    legacy_admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
+    legacy_admin_password: str = Field("", validation_alias="ADMIN_API_PASSWORD")
     session_secret: str = Field("", validation_alias="ADMIN_API_SESSION_SECRET")
     session_https_only: bool = Field(
         True,
@@ -521,8 +521,8 @@ class AdminApiSettings(ProcessSettings):
         "service_token",
         "authorization_internal_url",
         "authorization_admin_service_token",
-        "admin_username",
-        "admin_password",
+        "legacy_admin_username",
+        "legacy_admin_password",
         "session_secret",
         "admin_ui_origin",
         mode="before",
@@ -539,12 +539,19 @@ class AdminApiSettings(ProcessSettings):
                 ("POSTGRES_PASSWORD", self.postgres_password),
                 ("ADMIN_API_ENCRYPTION_KEY", self.encryption_key),
                 ("ADMIN_API_SERVICE_TOKEN", self.service_token),
-                ("ADMIN_API_USERNAME", self.admin_username),
-                ("ADMIN_API_PASSWORD", self.admin_password),
                 ("ADMIN_API_SESSION_SECRET", self.session_secret),
             )
             if not value
         ]
+        if not self.authorization_admin_service_token:
+            missing.extend(
+                name
+                for name, value in (
+                    ("ADMIN_API_USERNAME", self.legacy_admin_username),
+                    ("ADMIN_API_PASSWORD", self.legacy_admin_password),
+                )
+                if not value
+            )
         if missing:
             raise ValueError("missing admin_api bootstrap settings: " + ", ".join(missing))
 

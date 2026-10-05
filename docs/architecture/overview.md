@@ -5,8 +5,8 @@ The source architecture separates external OAuth identity, agent access, public 
 ```mermaid
 flowchart TB
     Client[ChatGPT / MCP clients] --> GW[gateway]
+    Client -->|OAuth| AU[authorization]
 
-    GW -->|OAuth routes| AU[authorization]
     AU --> ADB[(authorization DB)]
 
     GW -->|agent-session validation| AU
@@ -37,7 +37,7 @@ flowchart TB
 
 ## OAuth model
 
-The `authorization` runtime is one authorization server at `https://mcp.koba-nexus.ru`. Every public MCP URL is an exact protected resource and access-token audience. Gateway publishes protected-resource metadata; authorization publishes authorization-server metadata and OAuth operational endpoints.
+The `authorization` runtime is the authorization server at `https://authorization.mcp.koba-nexus.ru`. Public MCP URLs remain under `https://mcp.koba-nexus.ru` and are exact protected resources/access-token audiences. Gateway publishes protected-resource metadata that points clients to the separate authorization-server URL; OAuth operational endpoints are served directly by authorization.
 
 Authorization issues ES256 tokens. The private signing key remains in authorization; gateway verifies with the public key/JWKS.
 

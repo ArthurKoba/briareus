@@ -31,6 +31,8 @@ Owns:
 
 Database: `authorization`.
 
+Public authorization-server issuer: `https://authorization.mcp.koba-nexus.ru`. Public MCP protected resources remain under `https://mcp.koba-nexus.ru`; issuer and resource/audience are intentionally different URLs.
+
 OAuth and agent-session tables share this database and service role. The code keeps OAuth and access logic in separate internal modules, but there is no independent `access` runtime, database or deployment unit.
 
 The platform login is local. GitHub, GitLab and other providers are not identity providers for the platform. FastMCP/MCP SDK OAuth protocol machinery should be reused where practical. A valid OAuth session does not automatically mean that an agent may perform mutating actions.
@@ -694,7 +696,7 @@ The user who logs into the administration UI is a local `authorization` user.
 
 That identity manages sessions belonging to that user's OAuth-connected MCP contexts.
 
-The current standalone admin credential is transitional/bootstrap behavior, not the target user model.
+The bootstrap authorization user has the `superadmin` role and is the initial full-access administration identity. Admin API delegates credential verification to authorization; it does not own a second administrator password after cutover. Additional users may be added later with narrower roles and policies.
 
 A future service user may authenticate through `authorization` under a distinct identity type and policy.
 

@@ -63,6 +63,7 @@ class FakeAuthorizationRepository:
         self.user = SimpleNamespace(
             id="user-1",
             username="admin",
+            role="superadmin",
             enabled=True,
         )
 
@@ -243,7 +244,8 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_authorization_code_pkce_and_refresh_rotation(self) -> None:
         repository = FakeAuthorizationRepository()
         settings = AuthorizationServiceSettings.model_construct(
-            public_base_url="https://mcp.example.test",
+            public_base_url="https://authorization.example.test",
+            mcp_public_base_url="https://mcp.example.test",
             postgres_host="postgres",
             postgres_port=5432,
             postgres_db="authorization",
@@ -267,9 +269,23 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
             transport=transport,
-            base_url="https://mcp.example.test",
+            base_url="https://authorization.example.test",
             follow_redirects=False,
         ) as client:
+            authenticated = await client.post(
+                "/internal/v1/authenticate",
+                headers={"Authorization": "Bearer admin-service"},
+                json={"username": "admin", "password": "admin"},
+            )
+            self.assertEqual(authenticated.status_code, 200, authenticated.text)
+            self.assertEqual(authenticated.json()["role"], "superadmin")
+            denied = await client.post(
+                "/internal/v1/authenticate",
+                headers={"Authorization": "Bearer admin-service"},
+                json={"username": "admin", "password": "wrong"},
+            )
+            self.assertEqual(denied.status_code, 401, denied.text)
+
             registration = await client.post(
                 "/register",
                 json={
@@ -320,6 +336,9 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(authorize.status_code, 302, authorize.text)
             login_url = authorize.headers["location"]
+            self.assertTrue(
+                login_url.startswith("https://authorization.example.test/authorization/login?")
+            )
             transaction = parse_qs(urlsplit(login_url).query)["transaction"][0]
 
             login = await client.post(

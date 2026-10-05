@@ -279,9 +279,6 @@ def build_admin_api_router(
         username = request.session.get(_SESSION_KEY)
         if not isinstance(username, str) or not username:
             return None
-        if not hmac.compare_digest(username, settings.admin_username):
-            request.session.clear()
-            return None
         return username
 
     def require_user(request: Request) -> str:
@@ -323,6 +320,8 @@ def build_admin_api_router(
             ) from exc
         if not identity.enabled:
             raise HTTPException(status_code=403, detail="local user disabled")
+        if identity.role != "superadmin":
+            raise HTTPException(status_code=403, detail="superadmin required")
         return identity
 
     def authorization_access_control(api: WebApiServices) -> AuthorizationAccessAdminClient:
@@ -358,16 +357,45 @@ def build_admin_api_router(
         return {"authenticated": username is not None, "username": username}
 
     @router.post("/login")
-    def login(payload: LoginRequest, request: Request) -> JsonObject:
+    async def login(payload: LoginRequest, request: Request) -> JsonObject:
         same_origin(request)
-        valid_user = hmac.compare_digest(payload.username, settings.admin_username)
-        valid_password = hmac.compare_digest(payload.password, settings.admin_password)
-        if not (valid_user and valid_password):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
+        api = available()
+        if settings.authorization_admin_service_token:
+            if api.authorization_identity is None:
+                raise HTTPException(
+                    status_code=503, detail="authorization identity service unavailable"
+                )
+            try:
+                identity = await api.authorization_identity.authenticate(
+                    payload.username, payload.password
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503, detail="authorization identity service unavailable"
+                ) from exc
+            if identity is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
+                )
+            if not identity.enabled or identity.role != "superadmin":
+                raise HTTPException(status_code=403, detail="superadmin required")
+            username = identity.username
+        else:
+            # Transitional fallback during authorization cutover. Remove after production
+            # authorization login is accepted.
+            valid_user = hmac.compare_digest(
+                payload.username, settings.legacy_admin_username
             )
-        request.session[_SESSION_KEY] = settings.admin_username
-        return {"authenticated": True, "username": settings.admin_username}
+            valid_password = hmac.compare_digest(
+                payload.password, settings.legacy_admin_password
+            )
+            if not (valid_user and valid_password):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
+                )
+            username = settings.legacy_admin_username
+        request.session[_SESSION_KEY] = username
+        return {"authenticated": True, "username": username}
 
     @router.post("/logout")
     def logout(request: Request) -> JsonObject:
@@ -1073,6 +1101,7 @@ def build_admin_api_router(
         payload: BrowserRemoteDebugPayload, request: Request
     ) -> JsonObject:
         api = mutation(request)
+        username = require_user(request)
         try:
             target = await api.web.debug_target(payload.page_id)
         except Exception as exc:
@@ -1081,7 +1110,7 @@ def build_admin_api_router(
         if not target_id:
             raise HTTPException(status_code=502, detail="browser target is unavailable")
         token = issue_browser_remote_debug_token(
-            settings.service_token, settings.admin_username, target_id
+            settings.service_token, username, target_id
         )
         public_host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
         if not public_host:

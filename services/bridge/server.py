@@ -43,23 +43,11 @@ from .authorization_client import LocalAuthorizationTokenVerifier
 from .backend_router import BackendDescriptor, BackendRouter
 from .backend_sessions import ProxyClientPool
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
-from .reverse_proxy import ReverseProxy
 
 _STARTED_AT = datetime.now(UTC).isoformat()
 _observability = build_observability("gateway")
 announce_runtime_started(_observability, "gateway")
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-_AUTHORIZATION_PROXY_PATHS = (
-    "/.well-known/oauth-authorization-server",
-    "/.well-known/openid-configuration",
-    "/authorize",
-    "/token",
-    "/register",
-    "/revoke",
-    "/authorization/login",
-    "/.well-known/jwks.json",
-)
-
 
 async def _backend_timeout_seconds() -> float:
     try:
@@ -90,10 +78,6 @@ def _proxy(name: str, url: str) -> FastMCP:
     return _proxy_target(name, url)
 
 
-def _build_authorization_reverse_proxy(settings: BridgeSettings) -> ReverseProxy:
-    return ReverseProxy(settings.authorization_url, backend_name="authorization")
-
-
 def _build_surface_authorization(
     settings: GatewayAuthorizationSettings,
 ) -> dict[str, RemoteAuthProvider]:
@@ -104,12 +88,12 @@ def _build_surface_authorization(
     authorization_server = AnyHttpUrl(settings.public_base_url)
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
-        resource = resource_url(settings.public_base_url, surface)
+        resource = resource_url(settings.mcp_public_base_url, surface)
         verifier = LocalAuthorizationTokenVerifier(settings, resource)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
-            base_url=surface_base_url(settings.public_base_url, surface),
+            base_url=surface_base_url(settings.mcp_public_base_url, surface),
             scopes_supported=["read:user"],
             resource_name=f"Koba {surface.title()}",
         )
@@ -382,7 +366,6 @@ _MCP_HTTP_APPS = (
     _observability_http_app,
 )
 _MCP_LIFESPANS = tuple(mcp_app.router.lifespan_context for mcp_app in _MCP_HTTP_APPS)
-_REVERSE_PROXIES: list[ReverseProxy] = []
 
 
 @asynccontextmanager
@@ -395,23 +378,12 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
         finally:
             await _backend_router.close()
             await _authorization_access.close()
-            await asyncio.gather(
-                *(proxy.close() for proxy in _REVERSE_PROXIES),
-                return_exceptions=True,
-            )
 
 
 app = Starlette(lifespan=_gateway_lifespan)
 
 for _route in _resource_discovery_routes():
     app.router.routes.append(_route)
-
-if _authorization_settings.enabled:
-    _authorization_proxy = _build_authorization_reverse_proxy(_settings)
-    _REVERSE_PROXIES.append(_authorization_proxy)
-    for _path in _AUTHORIZATION_PROXY_PATHS:
-        app.add_route(_path, _authorization_proxy.handle, methods=_PROXY_METHODS)
-
 
 
 app.mount("/github", _github_http_app)

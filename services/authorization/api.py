@@ -73,11 +73,39 @@ def build_authorization_app(provider: LocalOAuthProvider) -> Starlette:
             {
                 "id": user.id,
                 "username": user.username,
+                "role": user.role,
                 "enabled": user.enabled,
             },
             headers={"Cache-Control": "no-store"},
         )
 
+
+
+    async def authenticate_internal(request: Request) -> Response:
+        expected = f"Bearer {provider.settings.admin_service_token}"
+        authorization = request.headers.get("authorization")
+        if authorization is None or not hmac.compare_digest(authorization, expected):
+            return Response(status_code=401)
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"detail": "invalid request"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "invalid request"}, status_code=400)
+        username = str(payload.get("username") or "")
+        password = str(payload.get("password") or "")
+        user = await provider.repository.authenticate_user(username, password)
+        if user is None:
+            return Response(status_code=401)
+        return JSONResponse(
+            {
+                "id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "enabled": user.enabled,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def login_get(request: Request) -> Response:
         transaction_id = request.query_params.get("transaction", "")
@@ -125,6 +153,11 @@ def build_authorization_app(provider: LocalOAuthProvider) -> Starlette:
             Route("/authorization/login", login_get, methods=["GET"]),
             Route("/authorization/login", login_post, methods=["POST"]),
             Route("/.well-known/jwks.json", jwks, methods=["GET"]),
+            Route(
+                "/internal/v1/authenticate",
+                authenticate_internal,
+                methods=["POST"],
+            ),
             Route(
                 "/internal/v1/users/by-username/{username}",
                 user_by_username_internal,

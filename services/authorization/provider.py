@@ -44,8 +44,9 @@ class LocalOAuthProvider(OAuthProvider):
         self.settings = settings
         self.repository = repository
         self.issuer = canonical_public_base_url(settings.public_base_url)
-        self._allowed_resources = allowed_resource_urls(self.issuer)
-        self._root_resource = resource_url(self.issuer, "root")
+        self._resource_base_url = canonical_public_base_url(settings.mcp_public_base_url)
+        self._allowed_resources = allowed_resource_urls(self._resource_base_url)
+        self._root_resource = resource_url(self._resource_base_url, "root")
         self._allowed_redirect_uris = frozenset(settings.allowed_redirect_uris)
         self._private_key = load_private_key(settings.jwt_private_key_pem)
         self._public_key = self._private_key.public_key()

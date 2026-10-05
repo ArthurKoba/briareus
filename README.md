@@ -7,16 +7,14 @@ and isolated private provider runtimes managed as one Docker Compose stack.
 
 ```text
 ChatGPT / MCP clients
-        |
-        | HTTPS
-        v
-gateway
-  |  \
-  |   \-- OAuth routes ----------> authorization
-  |                                 |
-  |                                 +-- local users / OAuth / token state
+   |                    |
+   | MCP                | OAuth
+   v                    v
+gateway             authorization
+  |                    |
+  |                    +-- local users / OAuth / token state
   |
-  |   \-- agent access -----------> authorization (PostgreSQL + Valkey cache)
+  |-- agent access ---> authorization (PostgreSQL + Valkey cache)
   |
   +-- /github/mcp   -------------> github
   +-- /gitlab/mcp   -------------> gitlab
@@ -27,8 +25,8 @@ gateway
   +-- /observability/mcp -------> observability (SigNoz + Coolify, read-only)
   ```
 
-The public domain is `mcp.koba-nexus.ru`. Gateway is the only process assigned that
-public domain. Auth and all provider runtimes remain private on the Compose network.
+Gateway owns `mcp.koba-nexus.ru`. The authorization runtime is independently public at
+`authorization.mcp.koba-nexus.ru`. Provider runtimes remain private.
 
 ## Public MCP surfaces
 
@@ -61,10 +59,10 @@ WebSocket routes.
 There is one local OAuth authorization server:
 
 ```text
-https://mcp.koba-nexus.ru
+https://authorization.mcp.koba-nexus.ru
 ```
 
-Every MCP endpoint is an independent RFC 8707 resource audience under that issuer. The `authorization` runtime owns local users, OAuth clients/codes/sessions, refresh tokens and the private ES256 signing key. Gateway owns public routing and verifies already-issued tokens with the public key/JWKS.
+Every MCP endpoint under `https://mcp.koba-nexus.ru` is an independent RFC 8707 resource audience. The authorization-server issuer is separate from those MCP resource URLs. The `authorization` runtime owns local users, OAuth clients/codes/sessions, refresh tokens and the private ES256 signing key. Gateway owns public routing and verifies already-issued tokens with the public key/JWKS.
 
 Agent access is a second authorization layer inside the same `authorization` service. In `session_enforced` mode each normal MCP call carries an agent session UID; sessions start read-only and may receive temporary/full access through administration approval. PostgreSQL is durable authority and Valkey is a read-through cache.
 

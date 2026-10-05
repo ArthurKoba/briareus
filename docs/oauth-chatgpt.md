@@ -1,6 +1,6 @@
 # ChatGPT OAuth flow
 
-The source target uses the local `authorization` service as the OAuth authorization server.
+The source target uses `https://authorization.mcp.koba-nexus.ru` as the local OAuth authorization server. MCP protected resources remain under `https://mcp.koba-nexus.ru`.
 
 - OAuth Authorization Code + PKCE is provided through FastMCP/MCP SDK protocol routes.
 - Dynamic Client Registration (DCR) remains available for compatible clients.
@@ -16,13 +16,13 @@ After OAuth succeeds, agent access sessions are a second independent authorizati
 The local login form is served at:
 
 ```text
-https://mcp.koba-nexus.ru/authorization/login
+https://authorization.mcp.koba-nexus.ru/authorization/login
 ```
 
 The authorization server exposes its public signing keys at:
 
 ```text
-https://mcp.koba-nexus.ru/.well-known/jwks.json
+https://authorization.mcp.koba-nexus.ru/.well-known/jwks.json
 ```
 
 See `docs/architecture/authorization-access.md` for the MVP and post-MVP access model.

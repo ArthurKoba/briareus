@@ -81,13 +81,13 @@ POSTGRES_USER=<user>
 POSTGRES_PASSWORD=<password>
 ADMIN_API_ENCRYPTION_KEY=<Fernet key>
 ADMIN_API_SERVICE_TOKEN=<random internal token>
-ADMIN_API_USERNAME=admin
-ADMIN_API_PASSWORD=<strong password>
 ADMIN_API_SESSION_SECRET=<random session secret>
+AUTHORIZATION_INTERNAL_URL=http://authorization:8000
+AUTHORIZATION_ADMIN_SERVICE_TOKEN=<same admin service token configured on authorization>
 ADMIN_API_SESSION_HTTPS_ONLY=true
 ```
 
-Local OAuth is owned by the separate `authorization` service and uses the `AUTHORIZATION_*` deployment contract. Provider accounts remain separate integration data exposed through the administration surface.
+Local OAuth and administration identity are owned by `authorization`. The bootstrap authorization user is created as `superadmin` and is the account used to sign in to Admin UI. `ADMIN_API_USERNAME` / `ADMIN_API_PASSWORD` remain only as a temporary fallback during cutover and may be removed after `AUTHORIZATION_ADMIN_SERVICE_TOKEN` is configured and authorization-backed login is accepted. Provider accounts remain separate integration data exposed through the administration surface.
 
 ## Legacy SQLite cutover
 
