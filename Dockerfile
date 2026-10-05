@@ -37,6 +37,7 @@ RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
     && chown -R 1000:1000 /auth /admin-api /home/bridge
 
 COPY services/common ./services/common
+COPY scripts/provision_auth_access_databases.py ./scripts/provision_auth_access_databases.py
 
 EXPOSE 8000
 
@@ -50,6 +51,11 @@ CMD ["/app/.venv/bin/python", "-m", "common.asgi"]
 FROM runtime-base AS auth
 COPY services/auth_service ./services/auth_service
 ENV ASGI_APP=auth_service.runtime:app
+
+
+FROM runtime-base AS access
+COPY services/access_service ./services/access_service
+ENV ASGI_APP=access_service.runtime:app
 
 
 FROM runtime-base AS gateway

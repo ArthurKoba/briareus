@@ -9,7 +9,7 @@ import type { DataTableColumn } from "./types"
 
 const props = withDefaults(defineProps<{
   columns: DataTableColumn[]
-  dataSource: unknown[]
+  dataSource: readonly unknown[]
   page: number
   pageSize: number
   totalRows: number

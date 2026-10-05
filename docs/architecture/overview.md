@@ -1,56 +1,56 @@
 # Architecture overview
 
-MCP Bridge separates authorization, public routing, Admin API and provider execution.
+The source architecture separates external OAuth identity, agent access, public routing, administration and provider execution.
 
 ```mermaid
 flowchart TB
     Client[ChatGPT / MCP clients] --> GW[gateway]
 
     GW -->|OAuth routes| AU[auth]
-    AU --> GHID[GitHub OAuth]
+    AU --> ADB[(auth DB)]
+
+    GW -->|agent-session validation| AC[access]
+    AC --> XDB[(access DB)]
+    AC --> VK[(Valkey cache)]
 
     GW --> GH[github]
     GW --> GL[gitlab]
     GW --> FI[files]
     GW --> WEB[web]
     GW --> AN[analysis]
-    GW --> CP[admin-api]
+    GW --> TERM[terminal]
+    GW --> OBS[observability]
 
-    GH --> CP
-    GL --> CP
-    FI --> CP
-    CU --> CP
     AN --> GD[ghidra private runtime]
 
-    AU --> OAUTH[(auth state)]
-    CP --> DB[(Admin API SQLite)]
-    FI --> WS[(shared workspace)]
-    CU --> WS
+    UI[admin-ui] --> API[admin-api]
+    API --> AU
+    API --> AC
 ```
 
 ## Source ownership
 
-- `auth_service` — OAuth authorization server, DCR, GitHub login, resource audiences
-  and private token verification.
-- `bridge` — public edge, MCP routing, protected-resource metadata, auth/admin-api reverse
-  proxies.
-- `common` — provider-neutral runtime contracts and typed settings.
-- `admin-api` — provider account registry, encrypted credentials, session/API/realtime control plane and telemetry.
-- `modules.github` — GitHub repository/review/actions capabilities.
-- `modules.gitlab` — GitLab project/repository/CI capabilities.
-- `modules.files` — path-based shared workspace file administration.
-- `modules.web` — structured HTTP, persistent browser and DevTools operations.
-- `modules.analysis` — public structured-analysis facade.
-- `modules.ghidra` — private native backend adapter.
+- `auth_service` — local users, password verification, OAuth server, clients/codes/sessions/refresh state and JWT signing.
+- `access_service` — agent sessions, read-only/full-access elevation, per-MCP controls, account scopes, abuse protection and access security history.
+- `bridge` — public gateway, MCP routing, protected-resource metadata, local OAuth token verification and access enforcement middleware.
+- `common` — provider-neutral contracts, stable MCP surface IDs and typed settings.
+- `admin-api` — administration BFF/realtime surface; it does not own auth/access persistence.
+- `modules.github`, `modules.gitlab`, `modules.files`, `modules.web`, `modules.analysis`, `modules.terminal`, `modules.observability` — provider/domain runtimes.
+- `modules.ghidra` — private native analysis backend adapter.
 
 ## OAuth model
 
-Auth is one authorization server at `https://mcp.koba-nexus.ru`. Each public MCP URL is
-an exact protected resource and access-token audience. Gateway publishes the RFC 9728
-resource documents; auth publishes RFC 8414 metadata and OAuth operational endpoints.
+Auth is one authorization server at `https://mcp.koba-nexus.ru`. Every public MCP URL is an exact protected resource and access-token audience. Gateway publishes protected-resource metadata; auth publishes authorization-server metadata and OAuth operational endpoints.
 
-Only auth stores GitHub OAuth credentials and FastMCP OAuth state. Gateway delegates
-bearer verification to auth through an authenticated private API.
+Auth issues ES256 tokens. The private signing key remains in auth; gateway verifies with the public key/JWKS.
+
+## Agent access model
+
+OAuth identifies the local user/client. Agent sessions independently decide whether a concrete agent context may execute against a concrete MCP surface.
+
+The MVP has automatic read-only sessions and one elevated `full_access` level. Session state is durable in PostgreSQL, with Valkey as a read-through cache. Per-user/per-surface enforcement can be `unrestricted` or `session_enforced`.
+
+See `docs/architecture/authorization-access.md`.
 
 ## Public surfaces
 
@@ -61,15 +61,14 @@ bearer verification to auth through an authenticated private API.
 /files/mcp
 /web/mcp
 /analysis/mcp
-/admin
+/terminal/mcp
+/observability/mcp
 ```
 
 Raw Ghidra is private.
 
 ## Deployment isolation
 
-Production uses one Coolify application per Docker target. Provider-only changes do not
-restart auth, gateway or unrelated providers. Shared runtime/dependency changes may
-intentionally redeploy multiple applications.
+Production uses one Coolify application per Docker target. The legacy monolith stays pinned until split-runtime acceptance. Provider-only changes do not require auth/access/gateway restarts unless their shared contract changes.
 
 See `docs/deployment.md`.

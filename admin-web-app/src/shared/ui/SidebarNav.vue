@@ -11,6 +11,7 @@ import {
   FileText,
   GitBranch,
   Settings,
+  ShieldCheck,
   TerminalSquare,
 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
@@ -34,6 +35,7 @@ const items = computed(() => [
   { id: "terminal", label: t("nav.terminal"), icon: TerminalSquare },
   { id: "browser", label: t("nav.browser"), icon: AppWindow },
   { id: "analysis", label: t("nav.analysis"), icon: Database },
+  { id: "access", label: t("nav.access"), icon: ShieldCheck },
   { id: "oauth", label: t("nav.oauth"), icon: Bot },
   { id: "settings", label: t("nav.settings"), icon: Settings, children: [
     { path: "settings/interface", label: t("settings.interface") },

@@ -26,6 +26,7 @@ REALTIME_TOPICS: Final[frozenset[str]] = frozenset(
         "system.notifications",
         "browser.runtime",
         "admin.events",
+        "access.sessions",
     }
 )
 

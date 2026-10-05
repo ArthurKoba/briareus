@@ -29,12 +29,16 @@ from common.runtime_annotations import (
 )
 from common.runtime_policy_contracts import McpRuntimePolicy
 from common.settings import (
+    AccessClientSettings,
     AdminApiClientSettings,
     BridgeSettings,
     GatewayAuthSettings,
 )
 
 from . import __version__
+from .access_client import AccessServiceClient
+from .access_middleware import AccessSessionMiddleware
+from .access_tools import register_access_session_tools
 from .auth_client import LocalAuthTokenVerifier
 from .backend_router import BackendDescriptor, BackendRouter
 from .backend_sessions import ProxyClientPool
@@ -53,8 +57,8 @@ _AUTH_PROXY_PATHS = (
     "/token",
     "/register",
     "/revoke",
-    "/auth/callback",
-    "/consent",
+    "/auth/login",
+    "/.well-known/jwks.json",
 )
 
 
@@ -93,7 +97,6 @@ def _build_auth_reverse_proxy() -> ReverseProxy:
 
 def _build_surface_auth(
     settings: GatewayAuthSettings,
-    admin_api: AdminApiClient | None,
 ) -> dict[str, RemoteAuthProvider]:
     if not settings.enabled:
         return {}
@@ -103,7 +106,7 @@ def _build_surface_auth(
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
         resource = resource_url(settings.public_base_url, surface)
-        verifier = LocalAuthTokenVerifier(settings, resource, admin_api)
+        verifier = LocalAuthTokenVerifier(settings, resource)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
@@ -120,21 +123,32 @@ def _public_facade(
     backend_url: str,
     auth_by_surface: dict[str, RemoteAuthProvider],
 ) -> FastMCP:
+    middleware = (
+        [AccessSessionMiddleware(surface=name, client=_access_service)]
+        if _access_settings.enabled
+        else []
+    )
     surface = FastMCP(
         name,
         version=__version__,
         auth=auth_by_surface.get(name),
+        middleware=middleware,
     )
+    if _access_settings.enabled:
+        register_access_session_tools(surface, surface=name, client=_access_service)
     surface.mount(server=_proxy(backend_name, backend_url))
     return surface
 
 
 _settings = BridgeSettings()
 _auth_settings = GatewayAuthSettings()
+_access_settings = AccessClientSettings()
+_access_settings.validate_bootstrap()
 _admin_api_settings = AdminApiClientSettings()
 _BACKENDS = _settings.backends
 _admin_api = AdminApiClient(_admin_api_settings)
-_auth_by_surface = _build_surface_auth(_auth_settings, _admin_api)
+_access_service = AccessServiceClient(_access_settings)
+_auth_by_surface = _build_surface_auth(_auth_settings)
 
 _backend_router = BackendRouter(
     (
@@ -193,6 +207,11 @@ _backend_router = BackendRouter(
 mcp = FastMCP(
     "mcp-bridge",
     version=__version__,
+    middleware=(
+        [AccessSessionMiddleware(surface="root", client=_access_service)]
+        if _access_settings.enabled
+        else []
+    ),
     instructions=(
         "Universal MCP map and bridge. Dedicated backends are not automatically "
         "published on this root surface. Use bridge_backends to inspect availability, "
@@ -244,6 +263,10 @@ observability_surface = _public_facade(
     _BACKENDS["observability"],
     _auth_by_surface,
 )
+
+
+if _access_settings.enabled:
+    register_access_session_tools(mcp, surface="root", client=_access_service)
 
 
 @mcp.tool(title="Bridge ping", annotations=READ_ONLY_LOCAL)
@@ -372,6 +395,7 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
             yield
         finally:
             await _backend_router.close()
+            await _access_service.close()
             await asyncio.gather(
                 *(proxy.close() for proxy in _REVERSE_PROXIES),
                 return_exceptions=True,

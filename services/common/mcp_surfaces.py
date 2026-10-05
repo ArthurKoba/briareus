@@ -1,6 +1,59 @@
 from __future__ import annotations
 
+from enum import IntEnum
 from urllib.parse import urlsplit, urlunsplit
+
+
+class McpSurface(IntEnum):
+    BRIDGE = 0
+    GITHUB = 1
+    GITLAB = 2
+    FILES = 3
+    WEB = 4
+    ANALYSIS = 5
+    TERMINAL = 6
+    OBSERVABILITY = 7
+
+
+ACCOUNT_BACKED_SURFACES: frozenset[McpSurface] = frozenset(
+    {
+        McpSurface.GITHUB,
+        McpSurface.GITLAB,
+        McpSurface.OBSERVABILITY,
+    }
+)
+
+
+def is_account_backed_surface(value: int | McpSurface) -> bool:
+    try:
+        resolved = McpSurface(value)
+    except ValueError:
+        return False
+    return resolved in ACCOUNT_BACKED_SURFACES
+
+
+MCP_SURFACE_IDS: dict[str, McpSurface] = {
+    "root": McpSurface.BRIDGE,
+    "github": McpSurface.GITHUB,
+    "gitlab": McpSurface.GITLAB,
+    "files": McpSurface.FILES,
+    "web": McpSurface.WEB,
+    "analysis": McpSurface.ANALYSIS,
+    "terminal": McpSurface.TERMINAL,
+    "observability": McpSurface.OBSERVABILITY,
+}
+
+
+def surface_id(surface: str) -> McpSurface:
+    try:
+        return MCP_SURFACE_IDS[surface]
+    except KeyError as exc:
+        raise ValueError(f"unknown MCP surface: {surface}") from exc
+
+
+def surface_name(value: int | McpSurface) -> str:
+    resolved = McpSurface(value)
+    return resolved.name.casefold()
 
 MCP_SURFACE_PATHS: dict[str, str] = {
     "root": "/mcp",

@@ -7,6 +7,7 @@ Application Docker targets:
 
 - `admin-api`
 - `auth`
+- `access`
 - `gateway`
 - `github`
 - `gitlab`
@@ -31,6 +32,16 @@ Application source changes must not rebuild the infrastructure resource.
 
 Admin API accepts `POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB` with defaults `postgres`, `5432` and `mcp-bridge`, plus shared `POSTGRES_USER` and `POSTGRES_PASSWORD`; it selects the SQLAlchemy `postgresql+asyncpg` driver internally. The legacy SQLite database is a one-time migration source only; use `infrastructure.sqlite_to_postgres` during cutover and retain the original file until acceptance is complete.
 
+Auth and access use separate PostgreSQL databases and roles on the same cluster. Provision them idempotently against an existing cluster with:
+
+```text
+python scripts/provision_auth_access_databases.py
+```
+
+The provisioner uses the cluster-admin `POSTGRES_*` connection and the service-specific `AUTH_POSTGRES_*` / `ACCESS_POSTGRES_*` credentials. Auth/access runtimes receive only their own database credentials.
+
+Auth additionally requires local bootstrap credentials, an ES256 private signing key, and distinct service tokens for access/admin internal calls. Gateway receives only `AUTH_JWT_PUBLIC_KEY_PEM`. Access requires distinct gateway/admin service tokens and uses Valkey as a read-through cache; Redis loss falls back to the durable access database.
+
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
 
 The static infrastructure Compose stack attaches `postgres` and `valkey` directly to the pre-existing external Docker network `mcp`; it does not rely on a Compose-generated default network or manual `docker network connect`.
@@ -45,4 +56,4 @@ POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}
 
 `POSTGRES_DB` remains optional at the Compose level and defaults to `mcp-bridge`. `POSTGRES_USER` and `POSTGRES_PASSWORD` are required. The PostgreSQL healthcheck reads the resolved container environment instead of re-interpolating Compose inputs.
 
-Run the SQLite -> PostgreSQL migration as a one-shot process/container outside the Admin API runtime. Mount the legacy `management` volume read-only, attach the process to Docker network `mcp`, and invoke `python -m infrastructure.sqlite_to_postgres /management/management.sqlite3`. The target PostgreSQL database must be empty. Remove the temporary migration container after row-count validation succeeds.
+The completed legacy SQLite -> PostgreSQL migration was performed as a one-shot process outside the Admin API runtime. Any future recovery/import operation must mount its legacy SQLite source read-only and keep the PostgreSQL target/row-count validation rules from the importer.

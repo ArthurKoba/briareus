@@ -28,6 +28,8 @@ from domain.accounts import Account, AccountConflictError, AuthType, Provider
 from domain.configuration import AdminConfig
 from domain.telemetry import InvocationQuery
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from infrastructure.access import AccessAdminClient
+from infrastructure.auth_identity import AuthIdentityClient, LocalUserIdentity
 from infrastructure.files import FileAdminStore
 from infrastructure.reverse import ReverseAdminClient
 from infrastructure.snapshot_worker import (
@@ -46,6 +48,7 @@ from realtime import RealtimeBus
 from starlette.responses import FileResponse, Response, StreamingResponse
 from telemetry_ingest import FrontendTelemetryProxy
 
+from common.access_contracts import AccessLevel, AccountScope, EnforcementMode
 from common.browser_remote_debug import (
     BROWSER_REMOTE_DEBUG_TTL_SECONDS,
     issue_browser_remote_debug_token,
@@ -104,12 +107,42 @@ class WebApiServices:
     snapshot_refresher: SnapshotRefresher
     realtime: RealtimeBus | None = None
     telemetry: FrontendTelemetryProxy | None = None
+    access: AccessAdminClient | None = None
+    auth_identity: AuthIdentityClient | None = None
 
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str
     password: str
+
+
+class AccessResolvePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    approve: bool
+    account_scope: AccountScope | None = None
+    account_ids: list[str] | None = None
+    expires_at: int | None = Field(default=None, ge=0)
+
+
+class AccessSessionUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    access_level: AccessLevel | None = None
+    account_scope: AccountScope | None = None
+    account_ids: list[str] | None = None
+    expires_at: int | None = Field(default=None, ge=0)
+    label: str | None = Field(default=None, max_length=256)
+
+
+class AccessControlItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_id: int
+    mode: EnforcementMode
+
+
+class AccessControlBatchPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[AccessControlItem] = Field(min_length=1, max_length=100)
 
 
 class AccountPayload(BaseModel):
@@ -275,6 +308,26 @@ def build_admin_api_router(
         same_origin(request)
         return available()
 
+    async def local_user(request: Request) -> LocalUserIdentity:
+        username = require_user(request)
+        api = available()
+        if api.auth_identity is None:
+            raise HTTPException(status_code=503, detail="auth identity service unavailable")
+        try:
+            identity = await api.auth_identity.by_username(username)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="auth identity service unavailable"
+            ) from exc
+        if not identity.enabled:
+            raise HTTPException(status_code=403, detail="local user disabled")
+        return identity
+
+    def access_service(api: WebApiServices) -> AccessAdminClient:
+        if api.access is None:
+            raise HTTPException(status_code=503, detail="access service unavailable")
+        return api.access
+
     async def publish_admin_event(api: WebApiServices, event_type: str, data: object) -> None:
         if api.realtime is not None:
             await api.realtime.publish("admin.events", event_type, data)
@@ -334,10 +387,114 @@ def build_admin_api_router(
                 {"id": "terminal", "label": "Terminal", "enabled": True},
                 {"id": "browser", "label": "Browser", "enabled": True},
                 {"id": "analysis", "label": "Analysis", "enabled": True},
+                {"id": "access", "label": "Access", "enabled": True},
                 {"id": "oauth", "label": "OAuth Sessions", "enabled": True},
                 {"id": "settings", "label": "Settings", "enabled": True},
             ],
         }
+
+    @router.get("/access/sessions")
+    async def access_sessions(request: Request) -> JsonObject:
+        identity = await local_user(request)
+        api = available()
+        return json_object(
+            {
+                "user": identity.model_dump(mode="json"),
+                "sessions": await access_service(api).sessions(identity.id),
+            }
+        )
+
+    @router.get("/access/requests")
+    async def access_requests(request: Request) -> JsonObject:
+        identity = await local_user(request)
+        api = available()
+        return json_object(
+            {
+                "user": identity.model_dump(mode="json"),
+                "requests": await access_service(api).requests(identity.id),
+            }
+        )
+
+    @router.get("/access/controls")
+    async def access_controls(request: Request) -> JsonObject:
+        identity = await local_user(request)
+        api = available()
+        return json_object(
+            {
+                "user": identity.model_dump(mode="json"),
+                "controls": await access_service(api).controls(identity.id),
+            }
+        )
+
+    @router.post("/access/requests/{request_id}/resolve")
+    async def resolve_access_request(
+        request_id: str, payload: AccessResolvePayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        identity = await local_user(request)
+        result = await access_service(api).resolve_request(
+            request_id,
+            admin_user_id=identity.id,
+            approve=payload.approve,
+            account_scope=payload.account_scope,
+            account_ids=payload.account_ids,
+            expires_at=payload.expires_at,
+        )
+        if api.realtime is not None:
+            await api.realtime.publish("access.sessions", "request_resolved", result)
+        return json_object(result)
+
+    @router.patch("/access/sessions/{session_id}")
+    async def update_access_session(
+        session_id: str, payload: AccessSessionUpdatePayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        identity = await local_user(request)
+        result = await access_service(api).update_session(
+            session_id,
+            admin_user_id=identity.id,
+            access_level=payload.access_level,
+            account_scope=payload.account_scope,
+            account_ids=payload.account_ids,
+            expires_at=payload.expires_at,
+            label=payload.label,
+        )
+        if api.realtime is not None:
+            await api.realtime.publish("access.sessions", "session_updated", result)
+        return result
+
+    @router.post("/access/sessions/{session_id}/revoke", status_code=204)
+    async def revoke_access_session(session_id: str, request: Request) -> Response:
+        api = mutation(request)
+        identity = await local_user(request)
+        await access_service(api).revoke_session(
+            session_id, admin_user_id=identity.id
+        )
+        if api.realtime is not None:
+            await api.realtime.publish(
+                "access.sessions", "session_revoked", {"session_id": session_id}
+            )
+        return Response(status_code=204)
+
+    @router.put("/access/controls")
+    async def update_access_controls(
+        payload: AccessControlBatchPayload, request: Request
+    ) -> JsonObject:
+        api = mutation(request)
+        identity = await local_user(request)
+        controls = await access_service(api).set_controls(
+            user_id=identity.id,
+            items=[(item.surface_id, item.mode) for item in payload.items],
+        )
+        result = json_object(
+            {
+                "user": identity.model_dump(mode="json"),
+                "controls": controls,
+            }
+        )
+        if api.realtime is not None:
+            await api.realtime.publish("access.sessions", "controls_changed", result)
+        return result
 
     @router.get("/dashboard")
     async def dashboard(request: Request) -> JsonObject:
