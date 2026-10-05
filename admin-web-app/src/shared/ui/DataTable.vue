@@ -17,7 +17,7 @@ import type { DataTableColumn } from "@/shared/ui/table/types"
 
 const props = withDefaults(defineProps<{
   columns: DataTableColumn[]
-  dataSource: unknown[]
+  dataSource: readonly unknown[]
   loading?: boolean
   rowKey?: string | ((record: any) => string)
   pagination?: false | Record<string, unknown>
@@ -53,7 +53,7 @@ const tableColumns = computed(() =>
   })),
 )
 
-const data = computed<any[]>(() => props.dataSource as any[])
+const data = computed<any[]>(() => [...props.dataSource] as any[])
 const table = useTable({ features, columns: tableColumns, data } as any) as any
 const rows = computed<any[]>(() => table.getRowModel().rows as any[])
 const rowHeight = computed(() => uiPreferences.density.value === "compact" ? 32 : 40)

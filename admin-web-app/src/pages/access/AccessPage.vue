@@ -177,7 +177,7 @@ onBeforeUnmount(() => unsubscribe?.())
   <div class="space-y-6">
     <PageHeader :title="t('access.title')" :description="t('access.description')">
       <template #actions>
-        <RefreshAction :loading="loading" @click="load" />
+        <RefreshAction :synced="false" :loading="loading" @refresh="load" />
       </template>
     </PageHeader>
 
