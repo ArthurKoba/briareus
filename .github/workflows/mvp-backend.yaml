@@ -25,8 +25,8 @@ jobs:
           version: "0.8.22"
           enable-cache: true
       - run: uv sync --frozen --dev --no-install-project
-      - run: .venv/bin/ruff check services tests scripts/provision_auth_access_databases.py
-      - run: .venv/bin/mypy services/auth_service services/access_service services/bridge services/common services/admin-api/src scripts/provision_auth_access_databases.py
+      - run: .venv/bin/ruff check services tests scripts/provision_auth_database.py
+      - run: .venv/bin/mypy services/auth_service services/bridge services/common services/admin-api/src scripts/provision_auth_database.py
       - run: PYTHONPATH=services .venv/bin/python -m unittest discover -s tests -v
 
   integration:
@@ -61,7 +61,7 @@ jobs:
           version: "0.8.22"
           enable-cache: true
       - run: uv sync --frozen --dev --no-install-project
-      - name: Provision auth/access databases
+      - name: Provision auth database
         env:
           POSTGRES_HOST: 127.0.0.1
           POSTGRES_PORT: "5432"
@@ -71,10 +71,7 @@ jobs:
           AUTH_POSTGRES_DB: auth_mvp
           AUTH_POSTGRES_USER: auth_mvp
           AUTH_POSTGRES_PASSWORD: auth_mvp_secret
-          ACCESS_POSTGRES_DB: access_mvp
-          ACCESS_POSTGRES_USER: access_mvp
-          ACCESS_POSTGRES_PASSWORD: access_mvp_secret
-        run: .venv/bin/python scripts/provision_auth_access_databases.py
+        run: .venv/bin/python scripts/provision_auth_database.py
       - name: Run PostgreSQL and Valkey integration tests
         env:
           TEST_POSTGRES_HOST: 127.0.0.1
@@ -82,9 +79,6 @@ jobs:
           TEST_AUTH_POSTGRES_DB: auth_mvp
           TEST_AUTH_POSTGRES_USER: auth_mvp
           TEST_AUTH_POSTGRES_PASSWORD: auth_mvp_secret
-          TEST_ACCESS_POSTGRES_DB: access_mvp
-          TEST_ACCESS_POSTGRES_USER: access_mvp
-          TEST_ACCESS_POSTGRES_PASSWORD: access_mvp_secret
           TEST_VALKEY_URL: redis://127.0.0.1:6379/15
         run: PYTHONPATH=services .venv/bin/python -m unittest tests.test_postgres_auth_access -v
 
@@ -93,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [auth, access, gateway, admin-api]
+        target: [auth, gateway, admin-api]
     steps:
       - uses: actions/checkout@v4
       - run: docker build --target "${{ matrix.target }}" -t "mcp-bridge:${{ matrix.target }}" .

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from access_service.service import AccessService
+from auth_service.access.service import AccessService
 from common.access_contracts import SessionOpenRequest, SessionSnapshot, SessionValidateRequest
-from common.settings import AccessServiceSettings, ValkeySettings
+from common.settings import AuthServiceSettings, ValkeySettings
 
 
 class FakeCache:
@@ -52,19 +52,17 @@ class FakeRepository:
         return self.blocked
 
 
-def settings() -> AccessServiceSettings:
-    return AccessServiceSettings.model_construct(
+def settings() -> AuthServiceSettings:
+    return AuthServiceSettings.model_construct(
         postgres_host="postgres",
         postgres_port=5432,
-        postgres_db="access",
+        postgres_db="auth",
         postgres_user="user",
         postgres_password="pass",
         gateway_service_token="gateway",
         admin_service_token="admin",
-        auth_url="http://auth:8000",
-        auth_service_token="auth-access",
-        default_session_ttl_seconds=3600,
-        cache_ttl_seconds=300,
+                default_session_ttl_seconds=3600,
+        session_cache_ttl_seconds=300,
         invalid_attempt_soft_limit=5,
         invalid_attempt_oauth_revoke_limit=50,
         invalid_attempt_window_seconds=600,

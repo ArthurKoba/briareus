@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-import httpx
 import valkey
 
 from common.access_contracts import (
@@ -23,7 +23,7 @@ from common.access_contracts import (
 )
 from common.cache import SharedCache
 from common.mcp_surfaces import is_account_backed_surface
-from common.settings import AccessServiceSettings, ValkeySettings
+from common.settings import AuthServiceSettings, ValkeySettings
 
 from .events import AccessEventPublisher
 from .repository import AccessRepository
@@ -39,7 +39,7 @@ class AbuseResult:
 class AbuseGuard:
     def __init__(
         self,
-        settings: AccessServiceSettings,
+        settings: AuthServiceSettings,
         cache_settings: ValkeySettings,
     ) -> None:
         self.settings = settings
@@ -81,24 +81,21 @@ class AccessService:
     def __init__(
         self,
         *,
-        settings: AccessServiceSettings,
+        settings: AuthServiceSettings,
         repository: AccessRepository,
         cache: SharedCache,
         cache_settings: ValkeySettings,
         events: AccessEventPublisher | None = None,
+        revoke_oauth_session: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.cache = cache
         self.events = events
         self.abuse = AbuseGuard(settings, cache_settings)
-        self._auth = httpx.AsyncClient(
-            base_url=settings.auth_url.rstrip("/"),
-            timeout=5.0,
-        )
+        self._revoke_oauth_session_callback = revoke_oauth_session
 
     async def close(self) -> None:
-        await self._auth.aclose()
         if self.events is not None:
             await self.events.close()
 
@@ -383,16 +380,10 @@ class AccessService:
         )
 
     async def _revoke_oauth_session(self, oauth_session_id: str) -> bool:
-        try:
-            response = await self._auth.post(
-                f"/internal/v1/oauth-sessions/{oauth_session_id}/revoke",
-                headers={
-                    "Authorization": f"Bearer {self.settings.auth_service_token}",
-                },
-            )
-        except httpx.HTTPError:
+        if self._revoke_oauth_session_callback is None:
             return False
-        return response.status_code == 204
+        await self._revoke_oauth_session_callback(oauth_session_id)
+        return True
 
     async def status(
         self,

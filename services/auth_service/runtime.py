@@ -4,10 +4,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from starlette.applications import Starlette
+from starlette.routing import Mount
 
+from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
-from common.settings import AuthServiceSettings
+from common.settings import AuthServiceSettings, ValkeySettings
 
+from .access.api import build_access_app
+from .access.database import AccessDatabase
+from .access.events import AccessEventPublisher
+from .access.repository import AccessRepository
+from .access.service import AccessService
 from .api import build_auth_app
 from .database import AuthDatabase
 from .provider import LocalOAuthProvider
@@ -15,9 +22,13 @@ from .repository import AuthRepository
 
 settings = AuthServiceSettings()
 settings.validate_bootstrap()
+cache_settings = ValkeySettings()
 _observability = build_observability("auth")
 announce_runtime_started(_observability, "auth")
 
+# OAuth identity and agent-access state are one auth bounded context and use the
+# same PostgreSQL database/role. Separate metadata modules keep the code clear
+# without creating a second deployable service.
 database = AuthDatabase(
     host=settings.postgres_host,
     port=settings.postgres_port,
@@ -27,12 +38,34 @@ database = AuthDatabase(
 )
 repository = AuthRepository(database)
 provider = LocalOAuthProvider(settings, repository)
+
+access_database = AccessDatabase(
+    host=settings.postgres_host,
+    port=settings.postgres_port,
+    database=settings.postgres_db,
+    username=settings.postgres_user,
+    password=settings.postgres_password,
+)
+access_repository = AccessRepository(access_database)
+cache = SharedCache(cache_settings)
+access_events = AccessEventPublisher(cache, cache_settings)
+access_control = AccessService(
+    settings=settings,
+    repository=access_repository,
+    cache=cache,
+    cache_settings=cache_settings,
+    events=access_events,
+    revoke_oauth_session=repository.revoke_oauth_session,
+)
+
 _oauth_app = build_auth_app(provider)
+_access_app = build_access_app(access_control, settings)
 
 
 @asynccontextmanager
 async def lifespan(_app: Starlette) -> AsyncIterator[None]:
     await database.ensure_schema()
+    await access_database.ensure_schema()
     await repository.ensure_bootstrap_user(
         settings.bootstrap_username,
         settings.bootstrap_password,
@@ -40,7 +73,15 @@ async def lifespan(_app: Starlette) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await access_control.close()
+        await access_database.dispose()
         await database.dispose()
 
 
-app = Starlette(routes=list(_oauth_app.routes), lifespan=lifespan)
+app = Starlette(
+    routes=[
+        *_oauth_app.routes,
+        Mount("/internal/access", app=_access_app),
+    ],
+    lifespan=lifespan,
+)

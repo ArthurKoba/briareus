@@ -32,7 +32,7 @@ class AccessAdminClient:
             return {}
         value = response.json()
         if not isinstance(value, dict):
-            raise ValueError("access service returned non-object response")
+            raise ValueError("auth access API returned non-object response")
         return value
 
     @staticmethod

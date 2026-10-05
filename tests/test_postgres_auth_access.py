@@ -12,10 +12,10 @@ import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from access_service.api import build_access_app
-from access_service.database import AccessDatabase
-from access_service.repository import AccessRepository
-from access_service.service import AccessService
+from auth_service.access.api import build_access_app
+from auth_service.access.database import AccessDatabase
+from auth_service.access.repository import AccessRepository
+from auth_service.access.service import AccessService
 from auth_service.api import build_auth_app
 from auth_service.database import AuthDatabase
 from auth_service.provider import LocalOAuthProvider
@@ -30,7 +30,7 @@ from common.access_contracts import (
 )
 from common.cache import SharedCache
 from common.mcp_surfaces import surface_id
-from common.settings import AccessServiceSettings, AuthServiceSettings, ValkeySettings
+from common.settings import AuthServiceSettings, ValkeySettings
 
 _POSTGRES_HOST = os.getenv("TEST_POSTGRES_HOST", "")
 _RUN = bool(_POSTGRES_HOST)
@@ -60,9 +60,9 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.access_db = AccessDatabase(
             host=host,
             port=port,
-            database=os.environ["TEST_ACCESS_POSTGRES_DB"],
-            username=os.environ["TEST_ACCESS_POSTGRES_USER"],
-            password=os.environ["TEST_ACCESS_POSTGRES_PASSWORD"],
+            database=os.environ["TEST_AUTH_POSTGRES_DB"],
+            username=os.environ["TEST_AUTH_POSTGRES_USER"],
+            password=os.environ["TEST_AUTH_POSTGRES_PASSWORD"],
         )
         await self.auth_db.ensure_schema()
         await self.access_db.ensure_schema()
@@ -80,32 +80,31 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             namespace=namespace,
         )
         self.cache = SharedCache(self.cache_settings)
-        self.access_settings = AccessServiceSettings.model_construct(
+        self.auth_access_settings = AuthServiceSettings.model_construct(
             postgres_host=host,
             postgres_port=port,
-            postgres_db=os.environ["TEST_ACCESS_POSTGRES_DB"],
-            postgres_user=os.environ["TEST_ACCESS_POSTGRES_USER"],
-            postgres_password=os.environ["TEST_ACCESS_POSTGRES_PASSWORD"],
+            postgres_db=os.environ["TEST_AUTH_POSTGRES_DB"],
+            postgres_user=os.environ["TEST_AUTH_POSTGRES_USER"],
+            postgres_password=os.environ["TEST_AUTH_POSTGRES_PASSWORD"],
             gateway_service_token="gateway-test",
             admin_service_token="admin-test",
-            auth_url="http://127.0.0.1:1",
-            auth_service_token="auth-test",
             default_session_ttl_seconds=3600,
-            cache_ttl_seconds=300,
+            session_cache_ttl_seconds=300,
             invalid_attempt_soft_limit=5,
             invalid_attempt_oauth_revoke_limit=50,
             invalid_attempt_window_seconds=600,
             invalid_attempt_backoff_seconds=30,
         )
-        self.access_service = AccessService(
-            settings=self.access_settings,
+        self.access_control = AccessService(
+            settings=self.auth_access_settings,
             repository=self.access_repository,
             cache=self.cache,
             cache_settings=self.cache_settings,
+            revoke_oauth_session=self.auth_repository.revoke_oauth_session,
         )
 
     async def asyncTearDown(self) -> None:
-        await self.access_service.close()
+        await self.access_control.close()
         await self.access_db.dispose()
         await self.auth_db.dispose()
 
@@ -127,7 +126,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             bootstrap_password="admin",
             jwt_private_key_pem=_private_key_pem(),
             jwt_key_id="integration-key",
-            access_service_token="access-test",
+            gateway_service_token="gateway-test",
             admin_service_token="admin-test",
             access_token_ttl_seconds=300,
             refresh_token_ttl_seconds=3600,
@@ -218,14 +217,14 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             client_id="client-expiry",
             oauth_session_id="oauth-expiry",
         )
-        opened = await self.access_service.open_session(
+        opened = await self.access_control.open_session(
             SessionOpenRequest(
                 **context.model_dump(),
                 surface_id=terminal_surface,
                 label="expiry",
             )
         )
-        await self.access_service.admin_update(
+        await self.access_control.admin_update(
             opened.id,
             AdminSessionUpdate(
                 admin_user_id=self.user.id,
@@ -233,7 +232,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        status = await self.access_service.status(
+        status = await self.access_control.status(
             context=context,
             surface_id=terminal_surface,
             uid=opened.uid,
@@ -250,7 +249,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             client_id="client-selected",
             oauth_session_id="oauth-selected",
         )
-        opened = await self.access_service.open_session(
+        opened = await self.access_control.open_session(
             SessionOpenRequest(
                 **context.model_dump(),
                 surface_id=github_surface,
@@ -261,7 +260,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(
             ValueError, "selected account scope requires account_ids"
         ):
-            await self.access_service.admin_update(
+            await self.access_control.admin_update(
                 opened.id,
                 AdminSessionUpdate(
                     admin_user_id=self.user.id,
@@ -271,7 +270,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        pending = await self.access_service.request_full_access(
+        pending = await self.access_control.request_full_access(
             FullAccessRequest(
                 **context.model_dump(),
                 surface_id=github_surface,
@@ -283,7 +282,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(
             ValueError, "selected account scope requires account_ids"
         ):
-            await self.access_service.resolve_request(
+            await self.access_control.resolve_request(
                 pending.id,
                 AdminResolveRequest(
                     admin_user_id=self.user.id,
@@ -298,8 +297,8 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(any(item.id == pending.id for item in still_pending))
 
-    async def test_access_http_contract_uses_service_boundaries(self) -> None:
-        app = build_access_app(self.access_service, self.access_settings)
+    async def test_auth_access_http_contract(self) -> None:
+        app = build_access_app(self.access_control, self.auth_access_settings)
         terminal_surface = int(surface_id("terminal"))
         context = {
             "user_id": self.user.id,
@@ -311,7 +310,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
-            base_url="http://access.test",
+            base_url="http://auth.test/internal/access",
         ) as client:
             opened_response = await client.post(
                 "/v1/session/open",
@@ -377,7 +376,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             client_id="client-1",
             oauth_session_id="oauth-session-1",
         )
-        opened = await self.access_service.open_session(
+        opened = await self.access_control.open_session(
             SessionOpenRequest(
                 **context.model_dump(),
                 surface_id=terminal_surface,
@@ -385,7 +384,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        first = await self.access_service.validate(
+        first = await self.access_control.validate(
             SessionValidateRequest(
                 **context.model_dump(),
                 surface_id=terminal_surface,
@@ -397,9 +396,9 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first.allowed)
 
         self.assertTrue(
-            self.cache.delete(self.access_service._session_key(opened.uid))
+            self.cache.delete(self.access_control._session_key(opened.uid))
         )
-        recovered = await self.access_service.validate(
+        recovered = await self.access_control.validate(
             SessionValidateRequest(
                 **context.model_dump(),
                 surface_id=terminal_surface,
@@ -411,7 +410,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(recovered.allowed)
         self.assertEqual(recovered.session, opened)
 
-        elevated = await self.access_service.admin_update(
+        elevated = await self.access_control.admin_update(
             opened.id,
             AdminSessionUpdate(
                 admin_user_id=self.user.id,
@@ -421,7 +420,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(elevated.access_level, "full_access")
 
-        mutation = await self.access_service.validate(
+        mutation = await self.access_control.validate(
             SessionValidateRequest(
                 **context.model_dump(),
                 surface_id=terminal_surface,
@@ -432,11 +431,11 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(mutation.allowed)
 
-        await self.access_service.admin_revoke(
+        await self.access_control.admin_revoke(
             opened.id,
             admin_user_id=self.user.id,
         )
-        denied = await self.access_service.validate(
+        denied = await self.access_control.validate(
             SessionValidateRequest(
                 **context.model_dump(),
                 surface_id=terminal_surface,

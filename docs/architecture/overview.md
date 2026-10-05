@@ -9,9 +9,8 @@ flowchart TB
     GW -->|OAuth routes| AU[auth]
     AU --> ADB[(auth DB)]
 
-    GW -->|agent-session validation| AC[access]
-    AC --> XDB[(access DB)]
-    AC --> VK[(Valkey cache)]
+    GW -->|agent-session validation| AU
+    AU --> VK[(Valkey cache)]
 
     GW --> GH[github]
     GW --> GL[gitlab]
@@ -25,16 +24,14 @@ flowchart TB
 
     UI[admin-ui] --> API[admin-api]
     API --> AU
-    API --> AC
 ```
 
 ## Source ownership
 
-- `auth_service` — local users, password verification, OAuth server, clients/codes/sessions/refresh state and JWT signing.
-- `access_service` — agent sessions, read-only/full-access elevation, per-MCP controls, account scopes, abuse protection and access security history.
+- `auth_service` — local users, OAuth/token state, JWT signing, agent sessions, access elevation, per-MCP controls, account scopes and access security history.
 - `bridge` — public gateway, MCP routing, protected-resource metadata, local OAuth token verification and access enforcement middleware.
 - `common` — provider-neutral contracts, stable MCP surface IDs and typed settings.
-- `admin-api` — administration BFF/realtime surface; it does not own auth/access persistence.
+- `admin-api` — administration BFF/realtime surface; it does not own auth persistence.
 - `modules.github`, `modules.gitlab`, `modules.files`, `modules.web`, `modules.analysis`, `modules.terminal`, `modules.observability` — provider/domain runtimes.
 - `modules.ghidra` — private native analysis backend adapter.
 
@@ -69,6 +66,6 @@ Raw Ghidra is private.
 
 ## Deployment isolation
 
-Production uses one Coolify application per Docker target. The legacy monolith stays pinned until split-runtime acceptance. Provider-only changes do not require auth/access/gateway restarts unless their shared contract changes.
+Production uses one Coolify application per Docker target. The legacy monolith stays pinned until split-runtime acceptance. Provider-only changes do not require auth/gateway restarts unless their shared contract changes.
 
 See `docs/deployment.md`.

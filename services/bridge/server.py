@@ -29,14 +29,14 @@ from common.runtime_annotations import (
 )
 from common.runtime_policy_contracts import McpRuntimePolicy
 from common.settings import (
-    AccessClientSettings,
     AdminApiClientSettings,
+    AuthAccessClientSettings,
     BridgeSettings,
     GatewayAuthSettings,
 )
 
 from . import __version__
-from .access_client import AccessServiceClient
+from .access_client import AuthAccessClient
 from .access_middleware import AccessSessionMiddleware
 from .access_tools import register_access_session_tools
 from .auth_client import LocalAuthTokenVerifier
@@ -123,8 +123,8 @@ def _public_facade(
     auth_by_surface: dict[str, RemoteAuthProvider],
 ) -> FastMCP:
     middleware = (
-        [AccessSessionMiddleware(surface=name, client=_access_service)]
-        if _access_settings.enabled
+        [AccessSessionMiddleware(surface=name, client=_auth_access)]
+        if _auth_access_settings.enabled
         else []
     )
     surface = FastMCP(
@@ -133,20 +133,20 @@ def _public_facade(
         auth=auth_by_surface.get(name),
         middleware=middleware,
     )
-    if _access_settings.enabled:
-        register_access_session_tools(surface, surface=name, client=_access_service)
+    if _auth_access_settings.enabled:
+        register_access_session_tools(surface, surface=name, client=_auth_access)
     surface.mount(server=_proxy(backend_name, backend_url))
     return surface
 
 
 _settings = BridgeSettings()
 _auth_settings = GatewayAuthSettings()
-_access_settings = AccessClientSettings()
-_access_settings.validate_bootstrap()
+_auth_access_settings = AuthAccessClientSettings()
+_auth_access_settings.validate_bootstrap()
 _admin_api_settings = AdminApiClientSettings()
 _BACKENDS = _settings.backends
 _admin_api = AdminApiClient(_admin_api_settings)
-_access_service = AccessServiceClient(_access_settings)
+_auth_access = AuthAccessClient(_auth_access_settings)
 _auth_by_surface = _build_surface_auth(_auth_settings)
 
 _backend_router = BackendRouter(
@@ -207,8 +207,8 @@ mcp = FastMCP(
     "mcp-bridge",
     version=__version__,
     middleware=(
-        [AccessSessionMiddleware(surface="root", client=_access_service)]
-        if _access_settings.enabled
+        [AccessSessionMiddleware(surface="root", client=_auth_access)]
+        if _auth_access_settings.enabled
         else []
     ),
     instructions=(
@@ -264,8 +264,8 @@ observability_surface = _public_facade(
 )
 
 
-if _access_settings.enabled:
-    register_access_session_tools(mcp, surface="root", client=_access_service)
+if _auth_access_settings.enabled:
+    register_access_session_tools(mcp, surface="root", client=_auth_access)
 
 
 @mcp.tool(title="Bridge ping", annotations=READ_ONLY_LOCAL)
@@ -394,7 +394,7 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
             yield
         finally:
             await _backend_router.close()
-            await _access_service.close()
+            await _auth_access.close()
             await asyncio.gather(
                 *(proxy.close() for proxy in _REVERSE_PROXIES),
                 return_exceptions=True,
