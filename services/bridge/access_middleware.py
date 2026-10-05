@@ -154,10 +154,10 @@ class AccessSessionMiddleware(Middleware):
         return await fastmcp_context.fastmcp.get_tool(tool_name)
 
     def _is_base_read_only(self, tool_name: str, tool: Tool | None) -> bool:
-        if self.surface == "root":
-            return tool_name in _SAFE_BRIDGE_TOOLS
-        if self.surface in _SAFE_ACCOUNT_DISCOVERY:
-            return tool_name in _SAFE_ACCOUNT_DISCOVERY[self.surface]
+        if self.surface == "root" and tool_name in _SAFE_BRIDGE_TOOLS:
+            return True
+        if tool_name in _SAFE_ACCOUNT_DISCOVERY.get(self.surface, frozenset()):
+            return True
         return bool(
             tool is not None
             and tool.annotations is not None

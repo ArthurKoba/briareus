@@ -1,4 +1,25 @@
 name: Frontend
 
 on:
+  pull_request:
+    paths:
+      - "admin-web-app/**"
+      - ".github/workflows/frontend.yaml"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-web-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run build

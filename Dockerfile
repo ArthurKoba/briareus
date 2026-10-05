@@ -37,6 +37,7 @@ RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
     && chown -R 1000:1000 /auth /admin-api /home/bridge
 
 COPY services/common ./services/common
+COPY scripts/provision_auth_access_databases.py ./scripts/provision_auth_access_databases.py
 
 EXPOSE 8000
 
