@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
@@ -16,7 +16,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from common.runtime_policy_contracts import (
     GitHubRuntimePolicy,
@@ -45,10 +45,14 @@ _R = TypeVar("_R")
 _DB_TRACER = trace.get_tracer("mcp-bridge.admin-api-db")
 
 
-def _db_span(operation: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
-    def decorate(function: Callable[_P, _R]) -> Callable[_P, _R]:
+def _db_span(
+    operation: str,
+) -> Callable[[Callable[_P, Coroutine[Any, Any, _R]]], Callable[_P, Coroutine[Any, Any, _R]]]:
+    def decorate(
+        function: Callable[_P, Coroutine[Any, Any, _R]],
+    ) -> Callable[_P, Coroutine[Any, Any, _R]]:
         @wraps(function)
-        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        async def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             with _DB_TRACER.start_as_current_span(
                 f"admin-api.db.{operation}",
                 kind=SpanKind.INTERNAL,
@@ -57,7 +61,7 @@ def _db_span(operation: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
                     "db.operation.name": operation,
                 },
             ):
-                return function(*args, **kwargs)
+                return await function(*args, **kwargs)
 
         return wrapped
 
@@ -65,7 +69,7 @@ def _db_span(operation: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
 
 
 class SqlAlchemyAccountRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
     @staticmethod
@@ -130,46 +134,46 @@ class SqlAlchemyAccountRepository:
         )
 
     @_db_span("accounts.list")
-    def list(
+    async def list(
         self,
         *,
         provider: Provider | None = None,
         enabled_only: bool = True,
     ) -> Sequence[Account]:
         accounts: list[Account] = []
-        with self.sessions() as session:
+        async with self.sessions() as session:
             if provider in {None, Provider.GITHUB}:
                 github_stmt = select(GitHubAccountRecord)
                 if enabled_only:
                     github_stmt = github_stmt.where(GitHubAccountRecord.enabled.is_(True))
                 accounts.extend(
-                    self._github_domain(row) for row in session.scalars(github_stmt).all()
+                    self._github_domain(row) for row in (await session.scalars(github_stmt)).all()
                 )
             if provider in {None, Provider.GITLAB}:
                 gitlab_stmt = select(GitLabAccountRecord)
                 if enabled_only:
                     gitlab_stmt = gitlab_stmt.where(GitLabAccountRecord.enabled.is_(True))
                 accounts.extend(
-                    self._gitlab_domain(row) for row in session.scalars(gitlab_stmt).all()
+                    self._gitlab_domain(row) for row in (await session.scalars(gitlab_stmt)).all()
                 )
             if provider in {None, Provider.SIGNOZ}:
                 signoz_stmt = select(SigNozAccountRecord)
                 if enabled_only:
                     signoz_stmt = signoz_stmt.where(SigNozAccountRecord.enabled.is_(True))
                 accounts.extend(
-                    self._signoz_domain(row) for row in session.scalars(signoz_stmt).all()
+                    self._signoz_domain(row) for row in (await session.scalars(signoz_stmt)).all()
                 )
             if provider in {None, Provider.COOLIFY}:
                 coolify_stmt = select(CoolifyAccountRecord)
                 if enabled_only:
                     coolify_stmt = coolify_stmt.where(CoolifyAccountRecord.enabled.is_(True))
                 accounts.extend(
-                    self._coolify_domain(row) for row in session.scalars(coolify_stmt).all()
+                    self._coolify_domain(row) for row in (await session.scalars(coolify_stmt)).all()
                 )
         return sorted(accounts, key=lambda item: (item.provider.value, item.alias))
 
     @_db_span("accounts.get")
-    def get(
+    async def get(
         self,
         selector: str,
         *,
@@ -179,7 +183,7 @@ class SqlAlchemyAccountRepository:
         value = selector.strip()
         if not value:
             raise KeyError("account selector is required")
-        with self.sessions() as session:
+        async with self.sessions() as session:
             stmt: Any
             record: Any
             if provider is Provider.GITHUB:
@@ -191,7 +195,7 @@ class SqlAlchemyAccountRepository:
                 )
                 if enabled_only:
                     stmt = stmt.where(GitHubAccountRecord.enabled.is_(True))
-                record = session.scalar(stmt)
+                record = await session.scalar(stmt)
                 if record is None:
                     raise KeyError(f"GitHub account not found: {selector}")
                 return self._github_domain(record)
@@ -204,7 +208,7 @@ class SqlAlchemyAccountRepository:
                 )
                 if enabled_only:
                     stmt = stmt.where(GitLabAccountRecord.enabled.is_(True))
-                record = session.scalar(stmt)
+                record = await session.scalar(stmt)
                 if record is None:
                     raise KeyError(f"GitLab account not found: {selector}")
                 return self._gitlab_domain(record)
@@ -217,7 +221,7 @@ class SqlAlchemyAccountRepository:
                 )
                 if enabled_only:
                     stmt = stmt.where(SigNozAccountRecord.enabled.is_(True))
-                record = session.scalar(stmt)
+                record = await session.scalar(stmt)
                 if record is None:
                     raise KeyError(f"SigNoz account not found: {selector}")
                 return self._signoz_domain(record)
@@ -228,13 +232,13 @@ class SqlAlchemyAccountRepository:
             )
             if enabled_only:
                 stmt = stmt.where(CoolifyAccountRecord.enabled.is_(True))
-            record = session.scalar(stmt)
+            record = await session.scalar(stmt)
             if record is None:
                 raise KeyError(f"Coolify account not found: {selector}")
             return self._coolify_domain(record)
 
     @_db_span("accounts.save")
-    def save(
+    async def save(
         self,
         account: Account,
         *,
@@ -280,10 +284,10 @@ class SqlAlchemyAccountRepository:
                 )
             if encrypted_credential is not None:
                 values["encrypted_credential"] = encrypted_credential
-            with self.sessions.begin() as session:
+            async with self.sessions.begin() as session:
                 result = cast(
                     CursorResult[object],
-                    session.execute(
+                    await session.execute(
                         update(model)
                         .where(model.id == account.id, model.updated_at == expected_updated_at)
                         .values(**values)
@@ -293,16 +297,16 @@ class SqlAlchemyAccountRepository:
                     raise AccountConflictError("account changed since it was loaded")
             return account
 
-        with self.sessions.begin() as session:
+        async with self.sessions.begin() as session:
             record: Any
             if account.provider is Provider.GITHUB:
-                record = session.get(GitHubAccountRecord, account.id) or GitHubAccountRecord(
+                record = await session.get(GitHubAccountRecord, account.id) or GitHubAccountRecord(
                     id=account.id
                 )
                 session.add(record)
                 record.app_id = account.external_id
             elif account.provider is Provider.GITLAB:
-                record = session.get(GitLabAccountRecord, account.id) or GitLabAccountRecord(
+                record = await session.get(GitLabAccountRecord, account.id) or GitLabAccountRecord(
                     id=account.id
                 )
                 session.add(record)
@@ -310,7 +314,7 @@ class SqlAlchemyAccountRepository:
                 record.verify_tls = account.verify_tls
                 record.ca_cert_pem = account.ca_cert_pem
             elif account.provider is Provider.SIGNOZ:
-                record = session.get(SigNozAccountRecord, account.id) or SigNozAccountRecord(
+                record = await session.get(SigNozAccountRecord, account.id) or SigNozAccountRecord(
                     id=account.id
                 )
                 session.add(record)
@@ -318,9 +322,9 @@ class SqlAlchemyAccountRepository:
                 record.verify_tls = account.verify_tls
                 record.ca_cert_pem = account.ca_cert_pem
             else:
-                record = session.get(CoolifyAccountRecord, account.id) or CoolifyAccountRecord(
-                    id=account.id
-                )
+                record = await session.get(
+                    CoolifyAccountRecord, account.id
+                ) or CoolifyAccountRecord(id=account.id)
                 session.add(record)
                 record.base_url = account.base_url
                 record.verify_tls = account.verify_tls
@@ -335,82 +339,84 @@ class SqlAlchemyAccountRepository:
         return account
 
     @_db_span("accounts.delete")
-    def delete(self, account_id: str, *, provider: Provider) -> None:
-        with self.sessions.begin() as session:
+    async def delete(self, account_id: str, *, provider: Provider) -> None:
+        async with self.sessions.begin() as session:
             record: Any
             if provider is Provider.GITHUB:
-                record = session.get(GitHubAccountRecord, account_id)
+                record = await session.get(GitHubAccountRecord, account_id)
             elif provider is Provider.GITLAB:
-                record = session.get(GitLabAccountRecord, account_id)
+                record = await session.get(GitLabAccountRecord, account_id)
             elif provider is Provider.SIGNOZ:
-                record = session.get(SigNozAccountRecord, account_id)
+                record = await session.get(SigNozAccountRecord, account_id)
             else:
-                record = session.get(CoolifyAccountRecord, account_id)
+                record = await session.get(CoolifyAccountRecord, account_id)
             if record is not None:
-                session.delete(record)
+                await session.delete(record)
 
     @_db_span("accounts.set_credential")
-    def set_credential(
+    async def set_credential(
         self,
         account_id: str,
         encrypted_value: str,
         *,
         provider: Provider,
     ) -> None:
-        with self.sessions.begin() as session:
+        async with self.sessions.begin() as session:
             record: Any
             if provider is Provider.GITHUB:
-                record = session.get(GitHubAccountRecord, account_id)
+                record = await session.get(GitHubAccountRecord, account_id)
             elif provider is Provider.GITLAB:
-                record = session.get(GitLabAccountRecord, account_id)
+                record = await session.get(GitLabAccountRecord, account_id)
             elif provider is Provider.SIGNOZ:
-                record = session.get(SigNozAccountRecord, account_id)
+                record = await session.get(SigNozAccountRecord, account_id)
             else:
-                record = session.get(CoolifyAccountRecord, account_id)
+                record = await session.get(CoolifyAccountRecord, account_id)
             if record is None:
                 raise KeyError(f"account not found: {account_id}")
             record.encrypted_credential = encrypted_value
             record.updated_at = datetime.now(UTC)
 
     @_db_span("accounts.credential")
-    def credential(self, account_id: str, *, provider: Provider) -> str:
-        with self.sessions() as session:
+    async def credential(self, account_id: str, *, provider: Provider) -> str:
+        async with self.sessions() as session:
             record: Any
             if provider is Provider.GITHUB:
-                record = session.get(GitHubAccountRecord, account_id)
+                record = await session.get(GitHubAccountRecord, account_id)
             elif provider is Provider.GITLAB:
-                record = session.get(GitLabAccountRecord, account_id)
+                record = await session.get(GitLabAccountRecord, account_id)
             elif provider is Provider.SIGNOZ:
-                record = session.get(SigNozAccountRecord, account_id)
+                record = await session.get(SigNozAccountRecord, account_id)
             else:
-                record = session.get(CoolifyAccountRecord, account_id)
+                record = await session.get(CoolifyAccountRecord, account_id)
             if record is None or not record.encrypted_credential:
                 raise KeyError(f"credential not configured for account: {account_id}")
             return str(record.encrypted_credential)
 
 
 class SqlAlchemyInvocationRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
     @staticmethod
-    def _config(session: Session) -> AdminConfigRecord:
-        config = session.get(AdminConfigRecord, 1)
+    async def _config(session: AsyncSession) -> AdminConfigRecord:
+        config = await session.get(AdminConfigRecord, 1)
         if config is None:
             config = AdminConfigRecord(id=1)
             session.add(config)
-            session.flush()
+            await session.flush()
         return config
 
     @staticmethod
-    def _cleanup_in_session(session: Session, config: AdminConfigRecord) -> int:
+    async def _cleanup_in_session(session: AsyncSession, config: AdminConfigRecord) -> int:
         cutoff = datetime.now(UTC) - timedelta(days=max(config.logging_retention_days, 1))
         removed_result = cast(
             CursorResult[object],
-            session.execute(delete(InvocationRecord).where(InvocationRecord.occurred_at < cutoff)),
+            await session.execute(
+                delete(InvocationRecord).where(InvocationRecord.occurred_at < cutoff)
+            ),
         )
         removed = removed_result.rowcount or 0
-        count = session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
+        count = await session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
         overflow = count - max(config.logging_max_records, 100)
         if overflow > 0:
             stale_ids = (
@@ -420,7 +426,9 @@ class SqlAlchemyInvocationRepository:
             )
             overflow_result = cast(
                 CursorResult[object],
-                session.execute(delete(InvocationRecord).where(InvocationRecord.id.in_(stale_ids))),
+                await session.execute(
+                    delete(InvocationRecord).where(InvocationRecord.id.in_(stale_ids))
+                ),
             )
             removed += overflow_result.rowcount or 0
         return int(removed)
@@ -443,11 +451,11 @@ class SqlAlchemyInvocationRepository:
             occurred_at=invocation.occurred_at,
         )
 
-    def append(self, invocation: Invocation, *, capture_payloads: bool = True) -> None:
-        self.append_many([invocation], capture_payloads=capture_payloads)
+    async def append(self, invocation: Invocation, *, capture_payloads: bool = True) -> None:
+        await self.append_many([invocation], capture_payloads=capture_payloads)
 
     @_db_span("audit.append_many")
-    def append_many(
+    async def append_many(
         self,
         invocations: Sequence[Invocation],
         *,
@@ -456,7 +464,7 @@ class SqlAlchemyInvocationRepository:
         if not invocations:
             return
         trace.get_current_span().set_attribute("db.batch.size", len(invocations))
-        with self.sessions.begin() as session:
+        async with self.sessions.begin() as session:
             session.add_all(
                 [
                     self._record(invocation, capture_payloads=capture_payloads)
@@ -482,7 +490,7 @@ class SqlAlchemyInvocationRepository:
             occurred_at=row.occurred_at,
         )
 
-    def query(self, query: InvocationQuery) -> InvocationPage:
+    async def query(self, query: InvocationQuery) -> InvocationPage:
         filters: list[Any] = []
         if query.module:
             filters.append(InvocationRecord.module == query.module)
@@ -506,10 +514,13 @@ class SqlAlchemyInvocationRepository:
                 )
             )
 
-        with self.sessions() as session:
-            total = session.scalar(
-                select(func.count()).select_from(InvocationRecord).where(*filters)
-            ) or 0
+        async with self.sessions() as session:
+            total = (
+                await session.scalar(
+                    select(func.count()).select_from(InvocationRecord).where(*filters)
+                )
+                or 0
+            )
             stmt = select(InvocationRecord).where(*filters)
             if query.cursor_at is not None and query.cursor_id:
                 stmt = stmt.where(
@@ -523,9 +534,12 @@ class SqlAlchemyInvocationRepository:
                 )
             elif query.offset:
                 stmt = stmt.offset(query.offset)
-            rows = session.scalars(
-                stmt.order_by(InvocationRecord.occurred_at.desc(), InvocationRecord.id.desc())
-                .limit(query.limit + 1)
+            rows = (
+                await session.scalars(
+                    stmt.order_by(
+                        InvocationRecord.occurred_at.desc(), InvocationRecord.id.desc()
+                    ).limit(query.limit + 1)
+                )
             ).all()
 
         has_more = len(rows) > query.limit
@@ -541,37 +555,37 @@ class SqlAlchemyInvocationRepository:
             next_cursor_id=tail.id if tail is not None else "",
         )
 
-    def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
-        return self.query(InvocationQuery(limit=max(1, min(limit, 500)))).events
+    async def recent(self, *, limit: int = 100) -> Sequence[Invocation]:
+        return (await self.query(InvocationQuery(limit=max(1, min(limit, 500))))).events
 
-    def clear(self) -> int:
-        with self.sessions.begin() as session:
-            count = session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
-            session.execute(delete(InvocationRecord))
+    async def clear(self) -> int:
+        async with self.sessions.begin() as session:
+            count = await session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
+            await session.execute(delete(InvocationRecord))
             return int(count)
 
-    def delete(self, invocation_id: str) -> bool:
-        with self.sessions.begin() as session:
+    async def delete(self, invocation_id: str) -> bool:
+        async with self.sessions.begin() as session:
             result = cast(
                 CursorResult[object],
-                session.execute(
+                await session.execute(
                     delete(InvocationRecord).where(InvocationRecord.id == invocation_id)
                 ),
             )
             return bool(result.rowcount)
 
-    def summary(self) -> dict[str, int | float]:
-        with self.sessions() as session:
-            total = session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
+    async def summary(self) -> dict[str, int | float]:
+        async with self.sessions() as session:
+            total = await session.scalar(select(func.count()).select_from(InvocationRecord)) or 0
             errors = (
-                session.scalar(
+                await session.scalar(
                     select(func.count())
                     .select_from(InvocationRecord)
                     .where(InvocationRecord.status == "error")
                 )
                 or 0
             )
-            average = session.scalar(select(func.avg(InvocationRecord.duration_ms))) or 0.0
+            average = await session.scalar(select(func.avg(InvocationRecord.duration_ms))) or 0.0
         return {
             "total": int(total),
             "errors": int(errors),
@@ -580,13 +594,13 @@ class SqlAlchemyInvocationRepository:
         }
 
     @_db_span("audit.cleanup")
-    def cleanup(self) -> int:
-        with self.sessions.begin() as session:
-            return self._cleanup_in_session(session, self._config(session))
+    async def cleanup(self) -> int:
+        async with self.sessions.begin() as session:
+            return await self._cleanup_in_session(session, await self._config(session))
 
 
 class SqlAlchemyOAuthSessionRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
     @staticmethod
@@ -619,9 +633,9 @@ class SqlAlchemyOAuthSessionRepository:
             updated_at=record.updated_at,
         )
 
-    def _resolve_record(
+    async def _resolve_record(
         self,
-        session: Session,
+        session: AsyncSession,
         *,
         session_id: str,
         refresh_jti: str,
@@ -631,7 +645,7 @@ class SqlAlchemyOAuthSessionRepository:
         login: str,
     ) -> OAuthSessionRecord | None:
         if session_id:
-            record = session.get(OAuthSessionRecord, session_id)
+            record = await session.get(OAuthSessionRecord, session_id)
             if record is not None:
                 return record
         if refresh_jti or access_jti:
@@ -645,7 +659,10 @@ class SqlAlchemyOAuthSessionRepository:
                 )
             if access_jti:
                 criteria.append(OAuthSessionRecord.access_jti == access_jti)
-            record = session.scalar(select(OAuthSessionRecord).where(or_(*criteria)))
+            record = cast(
+                OAuthSessionRecord | None,
+                await session.scalar(select(OAuthSessionRecord).where(or_(*criteria))),
+            )
             if record is not None:
                 return record
         if client_id and resource:
@@ -655,15 +672,18 @@ class SqlAlchemyOAuthSessionRepository:
             )
             if login:
                 stmt = stmt.where(OAuthSessionRecord.login == login)
-            return session.scalar(stmt.order_by(OAuthSessionRecord.updated_at.desc()))
+            return cast(
+                OAuthSessionRecord | None,
+                await session.scalar(stmt.order_by(OAuthSessionRecord.updated_at.desc())),
+            )
         return None
 
-    def apply_event(self, event: object) -> OAuthSession:
+    async def apply_event(self, event: object) -> OAuthSession:
         from common.oauth_session_contracts import OAuthSessionEvent
 
         value = OAuthSessionEvent.model_validate(event)
-        with self.sessions.begin() as session:
-            record = self._resolve_record(
+        async with self.sessions.begin() as session:
+            record = await self._resolve_record(
                 session,
                 session_id=value.session_id,
                 refresh_jti=value.refresh_jti,
@@ -734,22 +754,24 @@ class SqlAlchemyOAuthSessionRepository:
                 record.error_type = ""
                 record.error_message = ""
 
-            session.flush()
+            await session.flush()
             return self._domain(record)
 
-    def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]:
+    async def recent(self, *, limit: int = 200) -> Sequence[OAuthSession]:
         size = max(1, min(limit, 1000))
-        with self.sessions() as session:
-            rows = session.scalars(
-                select(OAuthSessionRecord)
-                .order_by(OAuthSessionRecord.updated_at.desc())
-                .limit(size)
+        async with self.sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(OAuthSessionRecord)
+                    .order_by(OAuthSessionRecord.updated_at.desc())
+                    .limit(size)
+                )
             ).all()
             return [self._domain(row) for row in rows]
 
 
 class SqlAlchemySnapshotRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
     @staticmethod
@@ -785,7 +807,7 @@ class SqlAlchemySnapshotRepository:
         )
 
     @_db_span("snapshots.ensure")
-    def ensure(
+    async def ensure(
         self,
         key: str,
         *,
@@ -794,8 +816,8 @@ class SqlAlchemySnapshotRepository:
         refresh_after_seconds: int,
     ) -> CachedSnapshot:
         now = datetime.now(UTC)
-        with self.sessions.begin() as session:
-            record = session.get(CachedSnapshotRecord, key)
+        async with self.sessions.begin() as session:
+            record = await session.get(CachedSnapshotRecord, key)
             if record is None:
                 record = CachedSnapshotRecord(
                     key=key,
@@ -809,41 +831,43 @@ class SqlAlchemySnapshotRepository:
                 record.category = category
                 record.parameters_json = json.dumps(parameters or {}, ensure_ascii=False)
                 record.refresh_after_seconds = refresh_after_seconds
-            session.flush()
+            await session.flush()
             return self._domain(record)
 
     @_db_span("snapshots.get")
-    def get(self, key: str) -> CachedSnapshot | None:
-        with self.sessions() as session:
-            record = session.get(CachedSnapshotRecord, key)
+    async def get(self, key: str) -> CachedSnapshot | None:
+        async with self.sessions() as session:
+            record = await session.get(CachedSnapshotRecord, key)
             return self._domain(record) if record is not None else None
 
     @_db_span("snapshots.list_category")
-    def list_category(self, category: str, *, limit: int = 1000) -> Sequence[CachedSnapshot]:
+    async def list_category(self, category: str, *, limit: int = 1000) -> Sequence[CachedSnapshot]:
         size = max(1, min(limit, 5000))
-        with self.sessions() as session:
-            rows = session.scalars(
-                select(CachedSnapshotRecord)
-                .where(CachedSnapshotRecord.category == category)
-                .order_by(CachedSnapshotRecord.created_at.asc())
-                .limit(size)
+        async with self.sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(CachedSnapshotRecord)
+                    .where(CachedSnapshotRecord.category == category)
+                    .order_by(CachedSnapshotRecord.created_at.asc())
+                    .limit(size)
+                )
             ).all()
             return [self._domain(row) for row in rows]
 
     @_db_span("snapshots.mark_attempt")
-    def mark_attempt(self, key: str, *, status: str = "refreshing") -> None:
-        with self.sessions.begin() as session:
-            record = session.get(CachedSnapshotRecord, key)
+    async def mark_attempt(self, key: str, *, status: str = "refreshing") -> None:
+        async with self.sessions.begin() as session:
+            record = await session.get(CachedSnapshotRecord, key)
             if record is None:
                 raise KeyError(key)
             record.attempted_at = datetime.now(UTC)
             record.status = status
 
     @_db_span("snapshots.store_success")
-    def store_success(self, key: str, payload: dict[str, object]) -> CachedSnapshot:
+    async def store_success(self, key: str, payload: dict[str, object]) -> CachedSnapshot:
         now = datetime.now(UTC)
-        with self.sessions.begin() as session:
-            record = session.get(CachedSnapshotRecord, key)
+        async with self.sessions.begin() as session:
+            record = await session.get(CachedSnapshotRecord, key)
             if record is None:
                 raise KeyError(key)
             record.payload_json = json.dumps(payload, ensure_ascii=False)
@@ -852,26 +876,26 @@ class SqlAlchemySnapshotRepository:
             record.attempted_at = now
             record.error_type = ""
             record.error_message = ""
-            session.flush()
+            await session.flush()
             return self._domain(record)
 
     @_db_span("snapshots.store_error")
-    def store_error(self, key: str, exc: Exception) -> CachedSnapshot:
+    async def store_error(self, key: str, exc: Exception) -> CachedSnapshot:
         now = datetime.now(UTC)
-        with self.sessions.begin() as session:
-            record = session.get(CachedSnapshotRecord, key)
+        async with self.sessions.begin() as session:
+            record = await session.get(CachedSnapshotRecord, key)
             if record is None:
                 raise KeyError(key)
             record.status = "error"
             record.attempted_at = now
             record.error_type = type(exc).__name__
             record.error_message = str(exc)[:4096]
-            session.flush()
+            await session.flush()
             return self._domain(record)
 
 
 class SqlAlchemyAdminConfigRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
     @staticmethod
@@ -885,19 +909,19 @@ class SqlAlchemyAdminConfigRepository:
         )
 
     @_db_span("config.get")
-    def get(self) -> AdminConfig:
-        with self.sessions.begin() as session:
-            record = session.get(AdminConfigRecord, 1)
+    async def get(self) -> AdminConfig:
+        async with self.sessions.begin() as session:
+            record = await session.get(AdminConfigRecord, 1)
             if record is None:
                 record = AdminConfigRecord(id=1)
                 session.add(record)
-                session.flush()
+                await session.flush()
             return self._domain(record)
 
     @_db_span("config.save")
-    def save(self, config: AdminConfig) -> AdminConfig:
-        with self.sessions.begin() as session:
-            record = session.get(AdminConfigRecord, 1)
+    async def save(self, config: AdminConfig) -> AdminConfig:
+        async with self.sessions.begin() as session:
+            record = await session.get(AdminConfigRecord, 1)
             if record is None:
                 record = AdminConfigRecord(id=1)
                 session.add(record)
@@ -907,7 +931,7 @@ class SqlAlchemyAdminConfigRepository:
 
 
 class SqlAlchemyRuntimeSettingsRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
 
     @staticmethod
@@ -918,29 +942,29 @@ class SqlAlchemyRuntimeSettingsRepository:
         )
 
     @_db_span("runtime.terminal.get")
-    def get_terminal_policy(self) -> TerminalRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(RuntimeSettingsRecord, 1)
+    async def get_terminal_policy(self) -> TerminalRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(RuntimeSettingsRecord, 1)
             if record is None:
                 record = RuntimeSettingsRecord(id=1)
                 session.add(record)
-                session.flush()
+                await session.flush()
             elif (
                 record.terminal_max_exec_timeout_seconds == 300
                 and record.terminal_max_job_runtime_seconds == 3600
             ):
                 record.terminal_max_exec_timeout_seconds = 21_600
                 record.terminal_max_job_runtime_seconds = 43_200
-                session.flush()
+                await session.flush()
             return self._domain(record)
 
     @_db_span("runtime.terminal.save")
-    def save_terminal_policy(
+    async def save_terminal_policy(
         self,
         policy: TerminalRuntimePolicy,
     ) -> TerminalRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(RuntimeSettingsRecord, 1)
+        async with self.sessions.begin() as session:
+            record = await session.get(RuntimeSettingsRecord, 1)
             if record is None:
                 record = RuntimeSettingsRecord(id=1)
                 session.add(record)
@@ -949,19 +973,19 @@ class SqlAlchemyRuntimeSettingsRepository:
         return policy
 
     @_db_span("runtime.mcp.get")
-    def get_mcp_policy(self) -> McpRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(McpRuntimeSettingsRecord, 1)
+    async def get_mcp_policy(self) -> McpRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(McpRuntimeSettingsRecord, 1)
             if record is None:
                 record = McpRuntimeSettingsRecord(id=1)
                 session.add(record)
-                session.flush()
+                await session.flush()
             return McpRuntimePolicy(call_timeout_seconds=record.call_timeout_seconds)
 
     @_db_span("runtime.mcp.save")
-    def save_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(McpRuntimeSettingsRecord, 1)
+    async def save_mcp_policy(self, policy: McpRuntimePolicy) -> McpRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(McpRuntimeSettingsRecord, 1)
             if record is None:
                 record = McpRuntimeSettingsRecord(id=1)
                 session.add(record)
@@ -969,13 +993,13 @@ class SqlAlchemyRuntimeSettingsRepository:
         return policy
 
     @_db_span("runtime.github.get")
-    def get_github_policy(self) -> GitHubRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(GitHubRuntimeSettingsRecord, 1)
+    async def get_github_policy(self) -> GitHubRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(GitHubRuntimeSettingsRecord, 1)
             if record is None:
                 record = GitHubRuntimeSettingsRecord(id=1)
                 session.add(record)
-                session.flush()
+                await session.flush()
             return GitHubRuntimePolicy(
                 local_first_guidance=record.local_first_guidance,
                 local_git_transport_enabled=record.local_git_transport_enabled,
@@ -983,9 +1007,9 @@ class SqlAlchemyRuntimeSettingsRepository:
             )
 
     @_db_span("runtime.github.save")
-    def save_github_policy(self, policy: GitHubRuntimePolicy) -> GitHubRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(GitHubRuntimeSettingsRecord, 1)
+    async def save_github_policy(self, policy: GitHubRuntimePolicy) -> GitHubRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(GitHubRuntimeSettingsRecord, 1)
             if record is None:
                 record = GitHubRuntimeSettingsRecord(id=1)
                 session.add(record)
@@ -995,13 +1019,13 @@ class SqlAlchemyRuntimeSettingsRepository:
         return policy
 
     @_db_span("runtime.gitlab.get")
-    def get_gitlab_policy(self) -> GitLabRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(GitLabRuntimeSettingsRecord, 1)
+    async def get_gitlab_policy(self) -> GitLabRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(GitLabRuntimeSettingsRecord, 1)
             if record is None:
                 record = GitLabRuntimeSettingsRecord(id=1)
                 session.add(record)
-                session.flush()
+                await session.flush()
             return GitLabRuntimePolicy(
                 local_first_guidance=record.local_first_guidance,
                 local_git_transport_enabled=record.local_git_transport_enabled,
@@ -1009,9 +1033,9 @@ class SqlAlchemyRuntimeSettingsRepository:
             )
 
     @_db_span("runtime.gitlab.save")
-    def save_gitlab_policy(self, policy: GitLabRuntimePolicy) -> GitLabRuntimePolicy:
-        with self.sessions.begin() as session:
-            record = session.get(GitLabRuntimeSettingsRecord, 1)
+    async def save_gitlab_policy(self, policy: GitLabRuntimePolicy) -> GitLabRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(GitLabRuntimeSettingsRecord, 1)
             if record is None:
                 record = GitLabRuntimeSettingsRecord(id=1)
                 session.add(record)

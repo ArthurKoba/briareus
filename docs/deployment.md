@@ -29,14 +29,15 @@ The root `docker-compose.yaml` contains only long-lived external infrastructure 
 
 Application source changes must not rebuild the infrastructure resource.
 
-PostgreSQL provisioning and Admin API migration are separate steps. The Admin API currently still derives its database URL from the SQLite `ADMIN_API_DATABASE_PATH` contract, so switching to PostgreSQL requires source support and a data migration first.
+Admin API accepts `POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB` with defaults `postgres`, `5432` and `mcp-bridge`, plus shared `POSTGRES_USER` and `POSTGRES_PASSWORD`; it selects the SQLAlchemy `postgresql+asyncpg` driver internally. The legacy SQLite database is a one-time migration source only; use `infrastructure.sqlite_to_postgres` during cutover and retain the original file until acceptance is complete.
 
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
 
-Infrastructure bootstrap defaults:
+Infrastructure database identity is fixed to `mcp-bridge`. Production injects only the shared PostgreSQL credentials:
 
 ```text
-POSTGRES_DB=mcp-bridge
-POSTGRES_USER=${SERVICE_USER_POSTGRES}
-POSTGRES_PASSWORD=${SERVICE_PASSWORD_64_POSTGRES}
+POSTGRES_USER={{environment.POSTGRES_USER}}
+POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}
 ```
+
+Run the SQLite -> PostgreSQL migration as a one-shot process/container outside the Admin API runtime. Mount the legacy `management` volume read-only, attach the process to Docker network `mcp`, and invoke `python -m infrastructure.sqlite_to_postgres /management/management.sqlite3`. The target PostgreSQL database must be empty. Remove the temporary migration container after row-count validation succeeds.

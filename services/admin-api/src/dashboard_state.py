@@ -25,11 +25,11 @@ async def build_dashboard_state(
     snapshots: SnapshotService,
 ) -> JsonObject:
     accounts, calls, oauth, workspace, reverse_snapshot = await asyncio.gather(
-        asyncio.to_thread(accounts_service.list),
-        asyncio.to_thread(audit.summary),
-        asyncio.to_thread(oauth_sessions.recent, limit=1000),
-        asyncio.to_thread(snapshots.get, WORKSPACE_STATS_KEY),
-        asyncio.to_thread(snapshots.get, REVERSE_OVERVIEW_KEY),
+        accounts_service.list(),
+        audit.summary(),
+        oauth_sessions.recent(limit=1000),
+        snapshots.get(WORKSPACE_STATS_KEY),
+        snapshots.get(REVERSE_OVERVIEW_KEY),
     )
     reverse_payload = reverse_snapshot.payload if reverse_snapshot is not None else {}
     projects = reverse_payload.get("projects")

@@ -1,28 +1,25 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     Float,
     Integer,
     String,
     Text,
-    create_engine,
-    event,
     inspect,
 )
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import (
-    DeclarativeBase,
-    Mapped,
-    Session,
-    mapped_column,
-    sessionmaker,
+from sqlalchemy.engine import URL, Connection
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
-from sqlalchemy.pool import ConnectionPoolEntry
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -39,8 +36,12 @@ class GitHubAccountRecord(Base):
     app_id: Mapped[str] = mapped_column(String(512), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     encrypted_credential: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
     _credential_input: str = ""
 
@@ -65,8 +66,12 @@ class GitLabAccountRecord(Base):
     ca_cert_pem: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     encrypted_credential: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
     _credential_input: str = ""
 
@@ -91,8 +96,12 @@ class SigNozAccountRecord(Base):
     ca_cert_pem: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     encrypted_credential: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
     _credential_input: str = ""
 
@@ -117,8 +126,12 @@ class CoolifyAccountRecord(Base):
     ca_cert_pem: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     encrypted_credential: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
     _credential_input: str = ""
 
@@ -146,7 +159,9 @@ class InvocationRecord(Base):
     arguments_json: Mapped[str] = mapped_column(Text, default="")
     result_json: Mapped[str] = mapped_column(Text, default="")
     error_message: Mapped[str] = mapped_column(Text, default="")
-    occurred_at: Mapped[datetime] = mapped_column(index=True, default=lambda: datetime.now(UTC))
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
+    )
 
 
 class OAuthSessionRecord(Base):
@@ -164,15 +179,25 @@ class OAuthSessionRecord(Base):
     access_jti: Mapped[str] = mapped_column(String(256), default="", index=True)
     refresh_jti: Mapped[str] = mapped_column(String(256), default="", index=True)
     previous_refresh_jti: Mapped[str] = mapped_column(String(256), default="", index=True)
-    access_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    refresh_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    last_used_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
-    last_refresh_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    access_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    refresh_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_type: Mapped[str] = mapped_column(String(256), default="")
     error_message: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(index=True, default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC)
+    )
 
 
 class CachedSnapshotRecord(Base):
@@ -184,11 +209,17 @@ class CachedSnapshotRecord(Base):
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
     refresh_after_seconds: Mapped[int] = mapped_column(Integer, default=300)
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
-    updated_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
-    attempted_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     error_type: Mapped[str] = mapped_column(String(256), default="")
     error_message: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 class AdminConfigRecord(Base):
@@ -235,40 +266,54 @@ class GitLabRuntimeSettingsRecord(Base):
     remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
-    if database_url.startswith("sqlite"):
+class DatabaseManager:
+    """Own the PostgreSQL async engine and session factory for Admin API."""
 
-        @event.listens_for(engine, "connect")
-        def _sqlite_pragmas(
-            dbapi_connection: sqlite3.Connection,
-            _connection_record: ConnectionPoolEntry,
-        ) -> None:
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
+    def __init__(
+        self,
+        *,
+        host: str = "postgres",
+        port: int = 5432,
+        database: str = "mcp-bridge",
+        username: str,
+        password: str,
+    ) -> None:
+        database_url = URL.create(
+            "postgresql+asyncpg",
+            username=username,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
+        )
+        self.engine: AsyncEngine = create_async_engine(
+            database_url,
+            pool_pre_ping=True,
+        )
+        self.sessions: async_sessionmaker[AsyncSession] = async_sessionmaker(
+            bind=self.engine,
+            expire_on_commit=False,
+        )
 
-    return engine, sessionmaker(bind=engine, expire_on_commit=False)
+    async def ensure_schema(self) -> bool:
+        async with self.engine.begin() as connection:
+            return await connection.run_sync(_ensure_schema_sync)
+
+    async def dispose(self) -> None:
+        await self.engine.dispose()
 
 
-def ensure_zero_state_schema(engine: Engine) -> bool:
-    """Ensure the admin-api schema exists without destroying persisted data.
+def _ensure_schema_sync(connection: Connection) -> bool:
+    """Create a fresh PostgreSQL schema and reject partial/incompatible schemas."""
 
-    Missing tables are created additively. Extra legacy tables/columns are tolerated so
-    a code rollout that removes fields cannot erase accounts or invocation history.
-    Missing required columns need an explicit migration and fail closed instead of
-    resetting the database.
-    """
-    before = inspect(engine)
+    before = inspect(connection)
     existing_tables = set(before.get_table_names())
     expected_tables = set(Base.metadata.tables)
     created_tables = expected_tables - existing_tables
 
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(connection)
 
-    inspector = inspect(engine)
+    inspector = inspect(connection)
     for table_name, table in Base.metadata.tables.items():
         actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
         expected_columns = {column.name for column in table.columns}

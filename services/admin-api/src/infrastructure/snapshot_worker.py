@@ -33,15 +33,13 @@ class SnapshotRefresher:
         self._coverage_wakeup = asyncio.Event()
 
     async def ensure_base_snapshots(self) -> None:
-        await asyncio.to_thread(
-            self.snapshots.ensure,
+        await self.snapshots.ensure(
             WORKSPACE_STATS_KEY,
             category="workspace_stats",
             parameters={},
             refresh_after_seconds=WORKSPACE_STATS_REFRESH_SECONDS,
         )
-        await asyncio.to_thread(
-            self.snapshots.ensure,
+        await self.snapshots.ensure(
             REVERSE_OVERVIEW_KEY,
             category="reverse_overview",
             parameters={},
@@ -49,42 +47,39 @@ class SnapshotRefresher:
         )
 
     async def _refresh_workspace_once(self) -> None:
-        due = await asyncio.to_thread(self.snapshots.due, "workspace_stats", limit=1)
+        due = await self.snapshots.due("workspace_stats", limit=1)
         if not due:
             return
         snapshot = due[0]
-        await asyncio.to_thread(self.snapshots.mark_attempt, snapshot.key)
+        await self.snapshots.mark_attempt(snapshot.key)
         try:
             payload = await asyncio.to_thread(self.files.stats)
-            await asyncio.to_thread(
-                self.snapshots.store_success,
+            await self.snapshots.store_success(
                 snapshot.key,
                 cast(dict[str, object], payload),
             )
         except Exception as exc:
             logger.exception("workspace snapshot refresh failed")
-            await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
+            await self.snapshots.store_error(snapshot.key, exc)
 
     async def _refresh_reverse_once(self) -> None:
-        due = await asyncio.to_thread(self.snapshots.due, "reverse_overview", limit=1)
+        due = await self.snapshots.due("reverse_overview", limit=1)
         if not due:
             return
         snapshot = due[0]
-        await asyncio.to_thread(self.snapshots.mark_attempt, snapshot.key)
+        await self.snapshots.mark_attempt(snapshot.key)
         try:
             payload = await self.reverse.overview()
-            await asyncio.to_thread(
-                self.snapshots.store_success,
+            await self.snapshots.store_success(
                 snapshot.key,
                 cast(dict[str, object], payload),
             )
         except Exception as exc:
             logger.exception("reverse overview snapshot refresh failed")
-            await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
+            await self.snapshots.store_error(snapshot.key, exc)
 
     async def _refresh_coverage_once(self) -> bool:
-        due = await asyncio.to_thread(
-            self.snapshots.due,
+        due = await self.snapshots.due(
             "reverse_coverage",
             retry_after_seconds=60,
             limit=100,
@@ -97,18 +92,17 @@ class SnapshotRefresher:
         full = snapshot.parameters.get("full")
         if not isinstance(project_id, str) or not project_id:
             exc = ValueError("cached coverage project_id is missing")
-            await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
+            await self.snapshots.store_error(snapshot.key, exc)
             return True
         if not isinstance(program, str) or not program:
             exc = ValueError("cached coverage program is missing")
-            await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
+            await self.snapshots.store_error(snapshot.key, exc)
             return True
         full_mode = bool(full)
-        await asyncio.to_thread(self.snapshots.mark_attempt, snapshot.key)
+        await self.snapshots.mark_attempt(snapshot.key)
         try:
             payload = await self.reverse.coverage(project_id, program, full=full_mode)
-            await asyncio.to_thread(
-                self.snapshots.store_success,
+            await self.snapshots.store_success(
                 snapshot.key,
                 cast(dict[str, object], payload),
             )
@@ -119,7 +113,7 @@ class SnapshotRefresher:
                 program,
                 full_mode,
             )
-            await asyncio.to_thread(self.snapshots.store_error, snapshot.key, exc)
+            await self.snapshots.store_error(snapshot.key, exc)
         return True
 
     def notify_coverage_requested(self) -> None:

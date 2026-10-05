@@ -350,7 +350,7 @@ def build_admin_api_router(
     @router.get("/accounts")
     async def accounts(request: Request, provider: Provider | None = None) -> JsonObject:
         require_user(request)
-        items = await asyncio.to_thread(available().accounts.list, provider=provider)
+        items = await available().accounts.list(provider=provider)
         return {"accounts": [item.model_dump(mode="json") for item in items], "count": len(items)}
 
     @router.post("/accounts", status_code=201)
@@ -358,9 +358,7 @@ def build_admin_api_router(
         api = mutation(request)
         try:
             account = _account_from_payload(payload)
-            saved = await asyncio.to_thread(
-                api.accounts.create, account, credential=payload.credential
-            )
+            saved = await api.accounts.create(account, credential=payload.credential)
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return saved.public()
@@ -373,9 +371,7 @@ def build_admin_api_router(
         if payload.provider is not provider:
             raise HTTPException(status_code=400, detail="provider cannot be changed")
         try:
-            existing = await asyncio.to_thread(
-                api.accounts.get, account_id, provider=provider, enabled_only=False
-            )
+            existing = await api.accounts.get(account_id, provider=provider, enabled_only=False)
             if payload.expected_updated_at is not None:
                 expected = payload.expected_updated_at
                 if expected.tzinfo is None:
@@ -389,8 +385,7 @@ def build_admin_api_router(
                     persisted = persisted.astimezone(UTC)
                 if expected != persisted:
                     raise AccountConflictError("account changed since it was loaded")
-            saved = await asyncio.to_thread(
-                api.accounts.update,
+            saved = await api.accounts.update(
                 _account_from_payload(payload, existing=existing),
                 credential=payload.credential,
                 expected_updated_at=existing.updated_at if payload.expected_updated_at else None,
@@ -399,9 +394,7 @@ def build_admin_api_router(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except AccountConflictError as exc:
             try:
-                current = await asyncio.to_thread(
-                    api.accounts.get, account_id, provider=provider, enabled_only=False
-                )
+                current = await api.accounts.get(account_id, provider=provider, enabled_only=False)
                 current_updated_at: str | None = str(current.public()["updated_at"])
             except KeyError:
                 current_updated_at = None
@@ -421,7 +414,7 @@ def build_admin_api_router(
     async def delete_account(provider: Provider, account_id: str, request: Request) -> JsonObject:
         api = mutation(request)
         try:
-            await asyncio.to_thread(api.accounts.delete, account_id, provider=provider)
+            await api.accounts.delete(account_id, provider=provider)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"deleted": True, "id": account_id, "provider": provider.value}
@@ -435,8 +428,7 @@ def build_admin_api_router(
         existing: Account | None = None
         try:
             if payload.account_id:
-                existing = await asyncio.to_thread(
-                    api.accounts.get,
+                existing = await api.accounts.get(
                     payload.account_id,
                     provider=payload.provider,
                     enabled_only=False,
@@ -453,8 +445,7 @@ def build_admin_api_router(
         try:
             async with candidate_verify_slots:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        api.accounts.verify_candidate,
+                    api.accounts.verify_candidate(
                         account,
                         credential=payload.credential,
                         credential_account_id=existing.id if existing is not None else "",
@@ -486,7 +477,7 @@ def build_admin_api_router(
     async def verify_account(provider: Provider, account_id: str, request: Request) -> JsonObject:
         api = mutation(request)
         try:
-            return await asyncio.to_thread(api.accounts.verify, account_id, provider=provider)
+            return await api.accounts.verify(account_id, provider=provider)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
@@ -510,8 +501,7 @@ def build_admin_api_router(
         cursor_id = ""
         if cursor:
             cursor_at, cursor_id = _decode_call_cursor(cursor)
-        page = await asyncio.to_thread(
-            available().audit.query,
+        page = await available().audit.query(
             InvocationQuery(
                 limit=limit,
                 offset=offset,
@@ -523,7 +513,7 @@ def build_admin_api_router(
                 account_id=account_id.strip(),
                 status=call_status,
                 search=search.strip(),
-            ),
+            )
         )
         next_cursor = (
             _encode_call_cursor(page.next_cursor_at, page.next_cursor_id)
@@ -543,7 +533,7 @@ def build_admin_api_router(
     @router.delete("/calls")
     async def clear_calls(request: Request) -> JsonObject:
         api = mutation(request)
-        removed = await asyncio.to_thread(api.audit.clear)
+        removed = await api.audit.clear()
         response: JsonObject = {"deleted": removed}
         await publish_admin_event(api, "calls.cleared", response)
         return response
@@ -551,7 +541,7 @@ def build_admin_api_router(
     @router.delete("/calls/{call_id}")
     async def delete_call(call_id: str, request: Request) -> JsonObject:
         api = mutation(request)
-        removed = await asyncio.to_thread(api.audit.delete, call_id)
+        removed = await api.audit.delete(call_id)
         if not removed:
             raise HTTPException(status_code=404, detail="call not found")
         response: JsonObject = {"deleted": True, "id": call_id}
@@ -565,12 +555,12 @@ def build_admin_api_router(
 
         async def events() -> AsyncIterator[str]:
             seen: set[str] = set()
-            initial = await asyncio.to_thread(audit.recent, limit=100)
+            initial = await audit.recent(limit=100)
             for item in reversed(initial):
                 seen.add(item.id)
                 yield f"data: {json.dumps(item.model_dump(mode='json'), ensure_ascii=False)}\\n\\n"
             while not await request.is_disconnected():
-                latest = await asyncio.to_thread(audit.recent, limit=100)
+                latest = await audit.recent(limit=100)
                 fresh = [item for item in reversed(latest) if item.id not in seen]
                 for item in fresh:
                     seen.add(item.id)
@@ -593,7 +583,7 @@ def build_admin_api_router(
         request: Request, limit: int = Query(200, ge=1, le=1000)
     ) -> JsonObject:
         require_user(request)
-        items = await asyncio.to_thread(available().oauth_sessions.recent, limit=limit)
+        items = await available().oauth_sessions.recent(limit=limit)
         return {"sessions": [_oauth_json(item) for item in items], "count": len(items)}
 
     @router.get("/files")
@@ -608,7 +598,7 @@ def build_admin_api_router(
         current = path.strip().strip("/")
         listing, cached_stats = await asyncio.gather(
             asyncio.to_thread(api.files.list, current, offset=offset, limit=limit),
-            asyncio.to_thread(api.snapshots.get, WORKSPACE_STATS_KEY),
+            api.snapshots.get(WORKSPACE_STATS_KEY),
         )
         return {
             "listing": listing,
@@ -748,7 +738,7 @@ def build_admin_api_router(
     @router.get("/analysis")
     async def analysis_overview(request: Request) -> JsonObject:
         require_user(request)
-        snapshot = await asyncio.to_thread(available().snapshots.get, REVERSE_OVERVIEW_KEY)
+        snapshot = await available().snapshots.get(REVERSE_OVERVIEW_KEY)
         return {
             "overview": snapshot.payload if snapshot is not None else {},
             "meta": snapshot_meta(snapshot),
@@ -891,8 +881,7 @@ def build_admin_api_router(
         require_user(request)
         api = available()
         key = coverage_snapshot_key(project_id, program, full=full)
-        snapshot = await asyncio.to_thread(
-            api.snapshots.ensure,
+        snapshot = await api.snapshots.ensure(
             key,
             category="reverse_coverage",
             parameters={"project_id": project_id, "program": program, "full": full},
@@ -1027,11 +1016,11 @@ def build_admin_api_router(
 
     async def settings_snapshot(api: WebApiServices) -> JsonObject:
         config, terminal_policy, mcp_policy, github_policy, gitlab_policy = await asyncio.gather(
-            asyncio.to_thread(api.config.get),
-            asyncio.to_thread(api.runtime_settings.terminal_policy),
-            asyncio.to_thread(api.runtime_settings.mcp_policy),
-            asyncio.to_thread(api.runtime_settings.github_policy),
-            asyncio.to_thread(api.runtime_settings.gitlab_policy),
+            api.config.get(),
+            api.runtime_settings.terminal_policy(),
+            api.runtime_settings.mcp_policy(),
+            api.runtime_settings.github_policy(),
+            api.runtime_settings.gitlab_policy(),
         )
         try:
             reverse_settings = await api.reverse.session_settings()
@@ -1109,7 +1098,7 @@ def build_admin_api_router(
                     if current is not None:
                         current_github = GitHubRuntimePolicy.model_validate(current["github"])
                     else:
-                        current_github = await asyncio.to_thread(api.runtime_settings.github_policy)
+                        current_github = await api.runtime_settings.github_policy()
                     github_policy = GitHubRuntimePolicy(
                         local_first_guidance=(
                             payload.github_local_first_guidance
@@ -1142,7 +1131,7 @@ def build_admin_api_router(
                     if current is not None:
                         current_gitlab = GitLabRuntimePolicy.model_validate(current["gitlab"])
                     else:
-                        current_gitlab = await asyncio.to_thread(api.runtime_settings.gitlab_policy)
+                        current_gitlab = await api.runtime_settings.gitlab_policy()
                     gitlab_policy = GitLabRuntimePolicy(
                         local_first_guidance=(
                             payload.gitlab_local_first_guidance
@@ -1163,16 +1152,18 @@ def build_admin_api_router(
                 reverse_settings = await api.reverse.set_idle_timeout(
                     payload.reverse_idle_timeout_seconds
                 )
-                saved_admin, saved_terminal, saved_mcp, saved_github, saved_gitlab = (
-                    await asyncio.gather(
-                        asyncio.to_thread(api.config.update, admin_api),
-                        asyncio.to_thread(
-                            api.runtime_settings.update_terminal_policy, terminal_policy
-                        ),
-                        asyncio.to_thread(api.runtime_settings.update_mcp_policy, mcp_policy),
-                        asyncio.to_thread(api.runtime_settings.update_github_policy, github_policy),
-                        asyncio.to_thread(api.runtime_settings.update_gitlab_policy, gitlab_policy),
-                    )
+                (
+                    saved_admin,
+                    saved_terminal,
+                    saved_mcp,
+                    saved_github,
+                    saved_gitlab,
+                ) = await asyncio.gather(
+                    api.config.update(admin_api),
+                    api.runtime_settings.update_terminal_policy(terminal_policy),
+                    api.runtime_settings.update_mcp_policy(mcp_policy),
+                    api.runtime_settings.update_github_policy(github_policy),
+                    api.runtime_settings.update_gitlab_policy(gitlab_policy),
                 )
             except (ValueError, RuntimeError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1192,7 +1183,7 @@ def build_admin_api_router(
     @router.post("/settings/cleanup-logs")
     async def settings_cleanup(request: Request) -> JsonObject:
         api = mutation(request)
-        removed = await asyncio.to_thread(api.audit.cleanup)
+        removed = await api.audit.cleanup()
         response: JsonObject = {"removed": removed}
         await publish_admin_event(api, "calls.retention_applied", response)
         return response

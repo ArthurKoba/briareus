@@ -4,9 +4,11 @@ The private `admin-api` runtime owns provider accounts, encrypted credentials, M
 
 ## Storage
 
-Admin API owns a persistent SQLite database at `/admin-api/admin.sqlite3` on the `admin-api` volume. SQLAlchemy is the persistence adapter. The project is currently deployed under a zero-state pre-production contract. The schema is created from current metadata at startup; if the on-disk Admin API schema is incompatible with current metadata, Admin API initializes its own SQLite tables instead of carrying migration compatibility.
+Admin API owns the PostgreSQL persistence boundary. Runtime database access uses SQLAlchemy 2.x `AsyncEngine` / `AsyncSession` with `asyncpg`; SQLite is not a supported runtime backend. PostgreSQL is authoritative for provider accounts, encrypted credentials, invocation history, OAuth sessions, cached snapshots and runtime/admin settings.
 
-Credentials are encrypted with Fernet before persistence. The master key is a deployment bootstrap secret and is never stored in SQLite.
+The current bootstrap creates missing tables from SQLAlchemy metadata and rejects schemas that are missing required columns. Versioned schema migrations will be introduced as the next database-evolution layer after the PostgreSQL cutover.
+
+Credentials are encrypted with Fernet before persistence. The master key is a deployment bootstrap secret and is never stored in PostgreSQL.
 
 ## Provider accounts
 
@@ -72,7 +74,11 @@ storage/index implementation.
 Dynamic provider credentials do not belong in deployment environment variables. Production bootstrap requires:
 
 ```text
-ADMIN_API_DATABASE_PATH=/admin-api/admin.sqlite3
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=mcp-bridge
+POSTGRES_USER=<user>
+POSTGRES_PASSWORD=<password>
 ADMIN_API_ENCRYPTION_KEY=<Fernet key>
 ADMIN_API_SERVICE_TOKEN=<random internal token>
 ADMIN_API_USERNAME=admin
@@ -82,3 +88,15 @@ ADMIN_API_SESSION_HTTPS_ONLY=true
 ```
 
 Gateway OAuth remains deployment configuration (`GITHUB_OAUTH_*`). Provider accounts are created through the Admin API used by the standalone frontend.
+
+## Legacy SQLite cutover
+
+SQLite is supported only as a one-time migration source. The importer refuses to write into a non-empty PostgreSQL target, refuses to silently drop unknown non-empty SQLite tables, preserves primary identifiers, validates and re-wraps encrypted credentials under `ADMIN_API_ENCRYPTION_KEY`, and validates row counts after the copy.
+
+Run it from an Admin API image/environment that can reach PostgreSQL:
+
+```text
+python -m infrastructure.sqlite_to_postgres /path/to/legacy.sqlite3
+```
+
+`POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB` default to `postgres`, `5432` and `mcp-bridge`; `POSTGRES_USER` and `POSTGRES_PASSWORD` supply PostgreSQL credentials. `ADMIN_API_ENCRYPTION_KEY` is the destination Fernet key. If the legacy key differs, pass `MANAGEMENT_ENCRYPTION_KEY` to the one-shot importer so credentials are decrypted with the old key and re-encrypted with the current key. Keep the original SQLite file read-only until production acceptance is complete.

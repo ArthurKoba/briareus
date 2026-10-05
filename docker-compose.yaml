@@ -4,18 +4,21 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mcp-bridge}
-      POSTGRES_USER: ${POSTGRES_USER:-${SERVICE_USER_POSTGRES}}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${SERVICE_PASSWORD_64_POSTGRES}}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-${SERVICE_USER_POSTGRES}} -d ${POSTGRES_DB:-mcp-bridge}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-mcp-bridge}"]
       interval: 5s
       timeout: 3s
       retries: 10
     mem_limit: ${POSTGRES_MEMORY_LIMIT:-2g}
     cpus: ${POSTGRES_CPU_LIMIT:-2.0}
     pids_limit: 256
+    networks:
+      - default
+      - mcp
 
   valkey:
     image: valkey/valkey:9.1.2-alpine
@@ -38,6 +41,13 @@ services:
     mem_limit: ${VALKEY_MEMORY_LIMIT:-192m}
     cpus: ${VALKEY_CPU_LIMIT:-0.5}
     pids_limit: 128
+    networks:
+      - default
+      - mcp
 
 volumes:
   postgres-data:
+
+networks:
+  mcp:
+    external: true

@@ -441,10 +441,11 @@ class AdminApiClientSettings(ProcessSettings):
 
 
 class AdminApiSettings(ProcessSettings):
-    database_path: Path = Field(
-        Path("/admin-api/admin.sqlite3"),
-        validation_alias="ADMIN_API_DATABASE_PATH",
-    )
+    postgres_host: str = Field("postgres", validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="POSTGRES_PORT")
+    postgres_db: str = Field("mcp-bridge", validation_alias="POSTGRES_DB")
+    postgres_user: str = Field(validation_alias="POSTGRES_USER")
+    postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
     admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
@@ -460,6 +461,9 @@ class AdminApiSettings(ProcessSettings):
     )
 
     @field_validator(
+        "postgres_host",
+        "postgres_db",
+        "postgres_user",
         "encryption_key",
         "service_token",
         "admin_username",
@@ -472,21 +476,12 @@ class AdminApiSettings(ProcessSettings):
     def _strip_secrets(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("database_path")
-    @classmethod
-    def _absolute_database_path(cls, value: Path) -> Path:
-        if not value.is_absolute():
-            raise ValueError("ADMIN_API_DATABASE_PATH must be absolute")
-        return value.resolve(strict=False)
-
-    @property
-    def database_url(self) -> str:
-        return f"sqlite:///{self.database_path}"
-
     def validate_bootstrap(self) -> None:
         missing = [
             name
             for name, value in (
+                ("POSTGRES_USER", self.postgres_user),
+                ("POSTGRES_PASSWORD", self.postgres_password),
                 ("ADMIN_API_ENCRYPTION_KEY", self.encryption_key),
                 ("ADMIN_API_SERVICE_TOKEN", self.service_token),
                 ("ADMIN_API_USERNAME", self.admin_username),
