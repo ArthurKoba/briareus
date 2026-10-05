@@ -21,7 +21,7 @@ They are separate modules and data models inside one service because they share 
 Owns:
 
 - local users and password authentication;
-- OAuth authorization server, clients, codes, auth sessions and refresh-token lifecycle;
+- OAuth authorization server, clients, codes, OAuth sessions and refresh-token lifecycle;
 - signing keys and JWKS;
 - agent sessions and their lifecycle;
 - read-only/full-access elevation requests;
