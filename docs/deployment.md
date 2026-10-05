@@ -41,6 +41,7 @@ python scripts/provision_auth_access_databases.py
 The provisioner uses the cluster-admin `POSTGRES_*` connection and the service-specific `AUTH_POSTGRES_*` / `ACCESS_POSTGRES_*` credentials. Auth/access runtimes receive only their own database credentials.
 
 Auth additionally requires local bootstrap credentials, an ES256 private signing key, and distinct service tokens for access/admin internal calls. Gateway receives only `AUTH_JWT_PUBLIC_KEY_PEM`. Access requires distinct gateway/admin service tokens and uses Valkey as a read-through cache; Redis loss falls back to the durable access database.
+Gateway reaches the private auth runtime through `AUTH_SERVICE_URL` (default `http://auth:8000`), so split/local topologies do not depend on a hard-coded container address.
 
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
 

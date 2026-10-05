@@ -153,6 +153,7 @@ class ValkeySettings(ProcessSettings):
 
 
 class BridgeSettings(ProcessSettings):
+    auth_url: str = Field("http://auth:8000", validation_alias="AUTH_SERVICE_URL")
     github_url: str = Field("http://github:8000/mcp", validation_alias="GITHUB_URL")
     gitlab_url: str = Field("http://gitlab:8000/mcp", validation_alias="GITLAB_URL")
     files_url: str = Field("http://files:8000/mcp", validation_alias="FILES_URL")
@@ -188,6 +189,7 @@ class BridgeSettings(ProcessSettings):
     )
 
     @field_validator(
+        "auth_url",
         "github_url",
         "gitlab_url",
         "files_url",
