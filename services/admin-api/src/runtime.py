@@ -54,9 +54,6 @@ observability_settings = ObservabilitySettings()
 _observability = build_observability("admin-api", settings=observability_settings)
 announce_runtime_started(_observability, "admin-api")
 database = DatabaseManager(
-    host=settings.postgres_host,
-    port=settings.postgres_port,
-    database=settings.postgres_db,
     username=settings.postgres_user,
     password=settings.postgres_password,
 )

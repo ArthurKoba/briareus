@@ -441,9 +441,6 @@ class AdminApiClientSettings(ProcessSettings):
 
 
 class AdminApiSettings(ProcessSettings):
-    postgres_host: str = Field(validation_alias="POSTGRES_HOST")
-    postgres_port: int = Field(ge=1, le=65535, validation_alias="POSTGRES_PORT")
-    postgres_db: str = Field(validation_alias="POSTGRES_DB")
     postgres_user: str = Field(validation_alias="POSTGRES_USER")
     postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
@@ -461,8 +458,6 @@ class AdminApiSettings(ProcessSettings):
     )
 
     @field_validator(
-        "postgres_host",
-        "postgres_db",
         "postgres_user",
         "encryption_key",
         "service_token",
@@ -480,8 +475,6 @@ class AdminApiSettings(ProcessSettings):
         missing = [
             name
             for name, value in (
-                ("POSTGRES_HOST", self.postgres_host),
-                ("POSTGRES_DB", self.postgres_db),
                 ("POSTGRES_USER", self.postgres_user),
                 ("POSTGRES_PASSWORD", self.postgres_password),
                 ("ADMIN_API_ENCRYPTION_KEY", self.encryption_key),

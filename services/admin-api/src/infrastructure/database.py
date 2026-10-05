@@ -269,22 +269,14 @@ class GitLabRuntimeSettingsRecord(Base):
 class DatabaseManager:
     """Own the PostgreSQL async engine and session factory for Admin API."""
 
-    def __init__(
-        self,
-        *,
-        host: str,
-        port: int,
-        database: str,
-        username: str,
-        password: str,
-    ) -> None:
+    def __init__(self, *, username: str, password: str) -> None:
         database_url = URL.create(
             "postgresql+asyncpg",
             username=username,
             password=password,
-            host=host,
-            port=port,
-            database=database,
+            host="postgres",
+            port=5432,
+            database="mcp-bridge",
         )
         self.engine: AsyncEngine = create_async_engine(
             database_url,

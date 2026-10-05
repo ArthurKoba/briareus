@@ -187,9 +187,6 @@ def _nonempty_unknown_tables(
 async def migrate_sqlite_to_postgres(
     sqlite_path: Path,
     *,
-    host: str,
-    port: int,
-    database: str,
     username: str,
     password: str,
     batch_size: int = _BATCH_SIZE,
@@ -200,9 +197,6 @@ async def migrate_sqlite_to_postgres(
     source_path = await asyncio.to_thread(lambda: sqlite_path.expanduser().resolve(strict=True))
     source = _open_source(source_path)
     manager = DatabaseManager(
-        host=host,
-        port=port,
-        database=database,
         username=username,
         password=password,
     )
@@ -323,13 +317,6 @@ def _parser() -> argparse.ArgumentParser:
         description="Migrate the legacy Admin SQLite database into empty PostgreSQL."
     )
     parser.add_argument("sqlite_path", type=Path)
-    parser.add_argument("--postgres-host", default=os.environ.get("POSTGRES_HOST", ""))
-    parser.add_argument(
-        "--postgres-port",
-        type=int,
-        default=int(os.environ.get("POSTGRES_PORT", "5432")),
-    )
-    parser.add_argument("--postgres-db", default=os.environ.get("POSTGRES_DB", ""))
     parser.add_argument("--postgres-user", default=os.environ.get("POSTGRES_USER", ""))
     parser.add_argument(
         "--postgres-password",
@@ -344,8 +331,6 @@ async def _main() -> None:
     missing = [
         name
         for name, value in (
-            ("POSTGRES_HOST", args.postgres_host),
-            ("POSTGRES_DB", args.postgres_db),
             ("POSTGRES_USER", args.postgres_user),
             ("POSTGRES_PASSWORD", args.postgres_password),
         )
@@ -355,9 +340,6 @@ async def _main() -> None:
         raise SystemExit("missing PostgreSQL settings: " + ", ".join(missing))
     report = await migrate_sqlite_to_postgres(
         args.sqlite_path,
-        host=args.postgres_host,
-        port=args.postgres_port,
-        database=args.postgres_db,
         username=args.postgres_user,
         password=args.postgres_password,
         batch_size=args.batch_size,
