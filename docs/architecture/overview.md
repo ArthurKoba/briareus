@@ -6,8 +6,8 @@ The source architecture separates external OAuth identity, agent access, public 
 flowchart TB
     Client[ChatGPT / MCP clients] --> GW[gateway]
 
-    GW -->|OAuth routes| AU[auth]
-    AU --> ADB[(auth DB)]
+    GW -->|OAuth routes| AU[authorization]
+    AU --> ADB[(authorization DB)]
 
     GW -->|agent-session validation| AU
     AU --> VK[(Valkey cache)]
@@ -28,18 +28,18 @@ flowchart TB
 
 ## Source ownership
 
-- `auth_service` — local users, OAuth/token state, JWT signing, agent sessions, access elevation, per-MCP controls, account scopes and access security history.
+- `authorization` — local users, OAuth/token state, JWT signing, agent sessions, access elevation, per-MCP controls, account scopes and access security history.
 - `bridge` — public gateway, MCP routing, protected-resource metadata, local OAuth token verification and access enforcement middleware.
 - `common` — provider-neutral contracts, stable MCP surface IDs and typed settings.
-- `admin-api` — administration BFF/realtime surface; it does not own auth persistence.
+- `admin-api` — administration BFF/realtime surface; it does not own authorization persistence.
 - `modules.github`, `modules.gitlab`, `modules.files`, `modules.web`, `modules.analysis`, `modules.terminal`, `modules.observability` — provider/domain runtimes.
 - `modules.ghidra` — private native analysis backend adapter.
 
 ## OAuth model
 
-Auth is one authorization server at `https://mcp.koba-nexus.ru`. Every public MCP URL is an exact protected resource and access-token audience. Gateway publishes protected-resource metadata; auth publishes authorization-server metadata and OAuth operational endpoints.
+The `authorization` runtime is one authorization server at `https://mcp.koba-nexus.ru`. Every public MCP URL is an exact protected resource and access-token audience. Gateway publishes protected-resource metadata; authorization publishes authorization-server metadata and OAuth operational endpoints.
 
-Auth issues ES256 tokens. The private signing key remains in auth; gateway verifies with the public key/JWKS.
+Authorization issues ES256 tokens. The private signing key remains in authorization; gateway verifies with the public key/JWKS.
 
 ## Agent access model
 
@@ -66,6 +66,6 @@ Raw Ghidra is private.
 
 ## Deployment isolation
 
-Production uses one Coolify application per Docker target. The legacy monolith stays pinned until split-runtime acceptance. Provider-only changes do not require auth/gateway restarts unless their shared contract changes.
+Production uses one Coolify application per Docker target. The legacy monolith stays pinned until split-runtime acceptance. Provider-only changes do not require authorization/gateway restarts unless their shared contract changes.
 
 See `docs/deployment.md`.

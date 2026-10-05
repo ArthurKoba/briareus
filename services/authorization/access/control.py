@@ -23,7 +23,7 @@ from common.access_contracts import (
 )
 from common.cache import SharedCache
 from common.mcp_surfaces import is_account_backed_surface
-from common.settings import AuthServiceSettings, ValkeySettings
+from common.settings import AuthorizationServiceSettings, ValkeySettings
 
 from .events import AccessEventPublisher
 from .repository import AccessRepository
@@ -39,7 +39,7 @@ class AbuseResult:
 class AbuseGuard:
     def __init__(
         self,
-        settings: AuthServiceSettings,
+        settings: AuthorizationServiceSettings,
         cache_settings: ValkeySettings,
     ) -> None:
         self.settings = settings
@@ -77,11 +77,11 @@ class AbuseGuard:
             return
 
 
-class AccessService:
+class AccessControl:
     def __init__(
         self,
         *,
-        settings: AuthServiceSettings,
+        settings: AuthorizationServiceSettings,
         repository: AccessRepository,
         cache: SharedCache,
         cache_settings: ValkeySettings,

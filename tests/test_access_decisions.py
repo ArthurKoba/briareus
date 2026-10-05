@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from auth_service.access.service import AccessService
+from authorization.access.control import AccessControl
 from common.access_contracts import SessionOpenRequest, SessionSnapshot, SessionValidateRequest
-from common.settings import AuthServiceSettings, ValkeySettings
+from common.settings import AuthorizationServiceSettings, ValkeySettings
 
 
 class FakeCache:
@@ -52,11 +52,11 @@ class FakeRepository:
         return self.blocked
 
 
-def settings() -> AuthServiceSettings:
-    return AuthServiceSettings.model_construct(
+def settings() -> AuthorizationServiceSettings:
+    return AuthorizationServiceSettings.model_construct(
         postgres_host="postgres",
         postgres_port=5432,
-        postgres_db="auth",
+        postgres_db="authorization",
         postgres_user="user",
         postgres_password="pass",
         gateway_service_token="gateway",
@@ -121,9 +121,9 @@ class AccessDecisionTest(unittest.IsolatedAsyncioTestCase):
         *,
         mode: str = "session_enforced",
         blocked: bool = False,
-    ) -> AccessService:
+    ) -> AccessControl:
         repository = FakeRepository(session, mode=mode, blocked=blocked)
-        return AccessService(
+        return AccessControl(
             settings=settings(),
             repository=repository,  # type: ignore[arg-type]
             cache=FakeCache(),  # type: ignore[arg-type]

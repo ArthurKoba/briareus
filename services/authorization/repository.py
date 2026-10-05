@@ -8,8 +8,8 @@ from mcp.shared.auth import OAuthClientInformationFull
 from sqlalchemy import delete, select, update
 
 from .database import (
-    AuthDatabase,
     AuthorizationCodeRecord,
+    AuthorizationDatabase,
     AuthorizationTransactionRecord,
     OAuthClientRecord,
     OAuthSessionRecord,
@@ -23,8 +23,8 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-class AuthRepository:
-    def __init__(self, database: AuthDatabase) -> None:
+class AuthorizationRepository:
+    def __init__(self, database: AuthorizationDatabase) -> None:
         self.database = database
 
     async def ensure_bootstrap_user(self, username: str, password: str) -> UserRecord:

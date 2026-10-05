@@ -7,7 +7,7 @@ Date: 2026-10-05
 
 The platform separates authorization, provider integrations and MCP invocation history instead of rebuilding one generic backend service.
 
-The `auth` service owns two internal security layers:
+The `authorization` service owns two internal security layers:
 
 - OAuth answers which local user/client is connected to a public MCP surface.
 - Agent access answers whether this concrete agent session may use this concrete MCP surface now.
@@ -16,7 +16,7 @@ They are separate modules and data models inside one service because they share 
 
 ## Service boundaries
 
-### auth
+### authorization
 
 Owns:
 
@@ -29,7 +29,7 @@ Owns:
 - session abuse protection and security history;
 - later: granular capabilities, grants and policies.
 
-Database: `auth`.
+Database: `authorization`.
 
 OAuth and agent-session tables share this database and service role. The code keeps OAuth and access logic in separate internal modules, but there is no independent `access` runtime, database or deployment unit.
 
@@ -76,7 +76,7 @@ It provides views and controls for:
 - MCP calls;
 - later: users, teams, sharing and granular policies.
 
-It does not become the source of truth for `auth` (including agent access), `integrations` or `invocations`.
+It does not become the source of truth for `authorization` (including agent access), `integrations` or `invocations`.
 
 ### gateway
 
@@ -105,7 +105,7 @@ One PostgreSQL server is acceptable.
 Use separate databases and roles by deployable bounded context:
 
 ```text
-auth         # OAuth identity + agent sessions/access state
+authorization # OAuth identity + agent sessions/access state
 integrations
 invocations
 admin        # only if genuinely admin-specific durable state appears later
@@ -179,10 +179,10 @@ ChatGPT / MCP client
       gateway
         |
         v
-       auth
+       authorization
         |
         v
-      auth DB
+      authorization DB
 ```
 
 The user authorizes the MCP connection using login/password from our own platform.
@@ -219,7 +219,7 @@ Argon2id is the intended password-hashing algorithm.
 
 Use asymmetric signing.
 
-`auth` owns the private signing key.
+`authorization` owns the private signing key.
 
 Gateway and other verifiers receive public keys/JWKS only.
 
@@ -231,7 +231,7 @@ There are two independent session concepts.
 
 ### Auth session
 
-Owned by `auth`.
+Owned by `authorization`.
 
 Represents authenticated local user/client identity and OAuth lifecycle.
 
@@ -382,7 +382,7 @@ access_session_close
 access_session_reissue
 ```
 
-These operations belong to the agent-access module inside `auth`, not to the OAuth protocol module.
+These operations belong to the agent-access module inside `authorization`, not to the OAuth protocol module.
 
 Rules for MVP:
 
@@ -468,7 +468,7 @@ PostgreSQL keeps durable lifecycle and security history.
 
 Valkey/Redis is a cache, not the authority.
 
-On a cache hit, validation is served from Redis. On a cache miss, the auth access module reads the durable session from PostgreSQL, validates it, repopulates Redis and continues the same request if the session is valid.
+On a cache hit, validation is served from Redis. On a cache miss, the authorization access module reads the durable session from PostgreSQL, validates it, repopulates Redis and continues the same request if the session is valid.
 
 A Redis restart or eviction must not force a valid session to be reissued.
 
@@ -526,7 +526,7 @@ When requesting full access, the agent may request:
 
 The administration UI may approve the requested scope or replace it with another valid scope.
 
-Changing an approved account scope (`all`, `selected`, `none`) takes effect on the next call. The auth service commits the new scope to PostgreSQL and invalidates/refreshes the Redis session projection; the agent does not need to reissue the session.
+Changing an approved account scope (`all`, `selected`, `none`) takes effect on the next call. The authorization service commits the new scope to PostgreSQL and invalidates/refreshes the Redis session projection; the agent does not need to reissue the session.
 
 Provider credentials remain inside `integrations`.
 
@@ -690,13 +690,13 @@ The same ownership model later applies to files, workspaces, analysis projects a
 
 ## Administration identity
 
-The user who logs into the administration UI is a local `auth` user.
+The user who logs into the administration UI is a local `authorization` user.
 
 That identity manages sessions belonging to that user's OAuth-connected MCP contexts.
 
 The current standalone admin credential is transitional/bootstrap behavior, not the target user model.
 
-A future service user may authenticate through `auth` under a distinct identity type and policy.
+A future service user may authenticate through `authorization` under a distinct identity type and policy.
 
 ## Access security history
 
@@ -759,13 +759,13 @@ This may later evolve to stronger workload identity or mTLS without changing dom
 
 ## Failure behavior
 
-### auth unavailable
+### authorization unavailable
 
-No new OAuth login/refresh or agent-session decision can proceed. Already-issued OAuth tokens may continue local JWT verification while valid, but a surface in `session_enforced` fails closed when the auth service cannot validate its agent session. Do not silently fall back to unrestricted behavior.
+No new OAuth login/refresh or agent-session decision can proceed. Already-issued OAuth tokens may continue local JWT verification while valid, but a surface in `session_enforced` fails closed when the authorization service cannot validate its agent session. Do not silently fall back to unrestricted behavior.
 
 ### Redis/Valkey unavailable
 
-Redis/Valkey is only the cache. If it is unavailable, the auth service validates sessions directly against PostgreSQL and continues operating at reduced performance.
+Redis/Valkey is only the cache. If it is unavailable, the authorization service validates sessions directly against PostgreSQL and continues operating at reduced performance.
 
 No valid session is revoked or reissued solely because Redis is unavailable.
 
@@ -843,7 +843,7 @@ The legacy MCP remains untouched until replacement components are accepted.
 
 Recommended order:
 
-1. Implement local `auth` database/users.
+1. Implement local `authorization` database/users.
 2. Replace GitHub-backed platform login with local OAuth.
 3. Add asymmetric signing/JWKS; gateway becomes verifier-only.
 4. Validate OAuth separately for each MCP resource with the initial local user.
@@ -908,7 +908,7 @@ Explicitly deferred:
 - advanced RBAC/ABAC;
 - MFA/passkeys;
 - distributed/high-availability cache coordination beyond the MVP read-through cache;
-- distributed/high-availability auth service;
+- distributed/high-availability authorization service;
 - KMS/HSM key storage;
 - advanced abuse scoring.
 

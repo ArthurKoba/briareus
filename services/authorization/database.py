@@ -77,7 +77,7 @@ class AuthorizationCodeRecord(Base):
 
 
 class OAuthSessionRecord(Base):
-    __tablename__ = "auth_sessions"
+    __tablename__ = "oauth_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(String(36), index=True)
@@ -107,7 +107,7 @@ class RefreshTokenRecord(Base):
     )
 
 
-class AuthDatabase:
+class AuthorizationDatabase:
     def __init__(
         self,
         *,
@@ -154,7 +154,7 @@ def _ensure_schema_sync(connection: Connection) -> bool:
         missing = expected - actual
         if missing:
             raise RuntimeError(
-                f"auth database migration required for {table_name}: "
+                f"authorization database migration required for {table_name}: "
                 f"missing columns: {', '.join(sorted(missing))}"
             )
 

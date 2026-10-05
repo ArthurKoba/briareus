@@ -11,12 +11,12 @@ from common.access_contracts import (
     SessionSnapshot,
     ValidationResult,
 )
-from common.settings import AuthAccessClientSettings
+from common.settings import AuthorizationAccessClientSettings
 
 
-class AuthAccessClient:
-    def __init__(self, settings: AuthAccessClientSettings | None = None) -> None:
-        self.settings = settings or AuthAccessClientSettings()
+class AuthorizationAccessClient:
+    def __init__(self, settings: AuthorizationAccessClientSettings | None = None) -> None:
+        self.settings = settings or AuthorizationAccessClientSettings()
         self._client = httpx.AsyncClient(
             base_url=self.settings.url.rstrip("/"),
             timeout=self.settings.timeout_seconds,
@@ -31,7 +31,7 @@ class AuthAccessClient:
         response.raise_for_status()
         value = response.json()
         if not isinstance(value, dict):
-            raise ValueError(f"auth access API returned non-object for {path}")
+            raise ValueError(f"authorization access API returned non-object for {path}")
         return value
 
     async def open(

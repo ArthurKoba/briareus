@@ -8,35 +8,35 @@ from starlette.routing import Mount
 
 from common.cache import SharedCache
 from common.observability import announce_runtime_started, build_observability
-from common.settings import AuthServiceSettings, ValkeySettings
+from common.settings import AuthorizationServiceSettings, ValkeySettings
 
 from .access.api import build_access_app
 from .access.database import AccessDatabase
 from .access.events import AccessEventPublisher
 from .access.repository import AccessRepository
-from .access.service import AccessService
-from .api import build_auth_app
-from .database import AuthDatabase
+from .access.service import AccessControl
+from .api import build_authorization_app
+from .database import AuthorizationDatabase
 from .provider import LocalOAuthProvider
-from .repository import AuthRepository
+from .repository import AuthorizationRepository
 
-settings = AuthServiceSettings()
+settings = AuthorizationServiceSettings()
 settings.validate_bootstrap()
 cache_settings = ValkeySettings()
-_observability = build_observability("auth")
-announce_runtime_started(_observability, "auth")
+_observability = build_observability("authorization")
+announce_runtime_started(_observability, "authorization")
 
-# OAuth identity and agent-access state are one auth bounded context and use the
+# OAuth identity and agent-access state are one authorization bounded context and use the
 # same PostgreSQL database/role. Separate metadata modules keep the code clear
 # without creating a second deployable service.
-database = AuthDatabase(
+database = AuthorizationDatabase(
     host=settings.postgres_host,
     port=settings.postgres_port,
     database=settings.postgres_db,
     username=settings.postgres_user,
     password=settings.postgres_password,
 )
-repository = AuthRepository(database)
+repository = AuthorizationRepository(database)
 provider = LocalOAuthProvider(settings, repository)
 
 access_database = AccessDatabase(
@@ -49,7 +49,7 @@ access_database = AccessDatabase(
 access_repository = AccessRepository(access_database)
 cache = SharedCache(cache_settings)
 access_events = AccessEventPublisher(cache, cache_settings)
-access_control = AccessService(
+access_control = AccessControl(
     settings=settings,
     repository=access_repository,
     cache=cache,
@@ -58,7 +58,7 @@ access_control = AccessService(
     revoke_oauth_session=repository.revoke_oauth_session,
 )
 
-_oauth_app = build_auth_app(provider)
+_oauth_app = build_authorization_app(provider)
 _access_app = build_access_app(access_control, settings)
 
 

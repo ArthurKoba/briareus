@@ -14,14 +14,14 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from auth_service.access.api import build_access_app
-from auth_service.access.database import AccessDatabase
-from auth_service.access.repository import AccessRepository
-from auth_service.access.service import AccessService
-from auth_service.api import build_auth_app
-from auth_service.database import AuthDatabase
-from auth_service.provider import LocalOAuthProvider
-from auth_service.repository import AuthRepository
+from authorization.access.api import build_access_app
+from authorization.access.control import AccessControl
+from authorization.access.database import AccessDatabase
+from authorization.access.repository import AccessRepository
+from authorization.api import build_authorization_app
+from authorization.database import AuthorizationDatabase
+from authorization.provider import LocalOAuthProvider
+from authorization.repository import AuthorizationRepository
 from common.access_contracts import (
     AdminResolveRequest,
     AdminSessionUpdate,
@@ -32,7 +32,7 @@ from common.access_contracts import (
 )
 from common.cache import SharedCache
 from common.mcp_surfaces import surface_id
-from common.settings import AuthServiceSettings, ValkeySettings
+from common.settings import AuthorizationServiceSettings, ValkeySettings
 
 _POSTGRES_HOST = os.getenv("TEST_POSTGRES_HOST", "")
 _RUN = bool(_POSTGRES_HOST)
@@ -48,30 +48,30 @@ def _private_key_pem() -> str:
 
 
 @unittest.skipUnless(_RUN, "integration PostgreSQL is not configured")
-class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
+class PostgresAuthorizationAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         host = _POSTGRES_HOST
         port = int(os.getenv("TEST_POSTGRES_PORT", "5432"))
-        self.auth_db = AuthDatabase(
+        self.authorization_db = AuthorizationDatabase(
             host=host,
             port=port,
-            database=os.environ["TEST_AUTH_POSTGRES_DB"],
-            username=os.environ["TEST_AUTH_POSTGRES_USER"],
-            password=os.environ["TEST_AUTH_POSTGRES_PASSWORD"],
+            database=os.environ["TEST_AUTHORIZATION_POSTGRES_DB"],
+            username=os.environ["TEST_AUTHORIZATION_POSTGRES_USER"],
+            password=os.environ["TEST_AUTHORIZATION_POSTGRES_PASSWORD"],
         )
         self.access_db = AccessDatabase(
             host=host,
             port=port,
-            database=os.environ["TEST_AUTH_POSTGRES_DB"],
-            username=os.environ["TEST_AUTH_POSTGRES_USER"],
-            password=os.environ["TEST_AUTH_POSTGRES_PASSWORD"],
+            database=os.environ["TEST_AUTHORIZATION_POSTGRES_DB"],
+            username=os.environ["TEST_AUTHORIZATION_POSTGRES_USER"],
+            password=os.environ["TEST_AUTHORIZATION_POSTGRES_PASSWORD"],
         )
-        await self.auth_db.ensure_schema()
+        await self.authorization_db.ensure_schema()
         await self.access_db.ensure_schema()
 
-        self.auth_repository = AuthRepository(self.auth_db)
+        self.authorization_repository = AuthorizationRepository(self.authorization_db)
         self.access_repository = AccessRepository(self.access_db)
-        self.user = await self.auth_repository.ensure_bootstrap_user(
+        self.user = await self.authorization_repository.ensure_bootstrap_user(
             "admin",
             "admin",
         )
@@ -82,12 +82,12 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             namespace=namespace,
         )
         self.cache = SharedCache(self.cache_settings)
-        self.auth_access_settings = AuthServiceSettings.model_construct(
+        self.authorization_access_settings = AuthorizationServiceSettings.model_construct(
             postgres_host=host,
             postgres_port=port,
-            postgres_db=os.environ["TEST_AUTH_POSTGRES_DB"],
-            postgres_user=os.environ["TEST_AUTH_POSTGRES_USER"],
-            postgres_password=os.environ["TEST_AUTH_POSTGRES_PASSWORD"],
+            postgres_db=os.environ["TEST_AUTHORIZATION_POSTGRES_DB"],
+            postgres_user=os.environ["TEST_AUTHORIZATION_POSTGRES_USER"],
+            postgres_password=os.environ["TEST_AUTHORIZATION_POSTGRES_PASSWORD"],
             gateway_service_token="gateway-test",
             admin_service_token="admin-test",
             default_session_ttl_seconds=3600,
@@ -97,33 +97,33 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             invalid_attempt_window_seconds=600,
             invalid_attempt_backoff_seconds=30,
         )
-        self.access_control = AccessService(
-            settings=self.auth_access_settings,
+        self.access_control = AccessControl(
+            settings=self.authorization_access_settings,
             repository=self.access_repository,
             cache=self.cache,
             cache_settings=self.cache_settings,
-            revoke_oauth_session=self.auth_repository.revoke_oauth_session,
+            revoke_oauth_session=self.authorization_repository.revoke_oauth_session,
         )
 
     async def asyncTearDown(self) -> None:
         await self.access_control.close()
         await self.access_db.dispose()
-        await self.auth_db.dispose()
+        await self.authorization_db.dispose()
 
-    async def test_auth_database_and_real_oauth_flow(self) -> None:
-        authenticated = await self.auth_repository.authenticate_user("admin", "admin")
+    async def test_authorization_database_and_real_oauth_flow(self) -> None:
+        authenticated = await self.authorization_repository.authenticate_user("admin", "admin")
         self.assertIsNotNone(authenticated)
         self.assertIsNone(
-            await self.auth_repository.authenticate_user("admin", "wrong-password")
+            await self.authorization_repository.authenticate_user("admin", "wrong-password")
         )
 
-        settings = AuthServiceSettings.model_construct(
+        settings = AuthorizationServiceSettings.model_construct(
             public_base_url="https://mcp.example.test",
             postgres_host=_POSTGRES_HOST,
             postgres_port=int(os.getenv("TEST_POSTGRES_PORT", "5432")),
-            postgres_db=os.environ["TEST_AUTH_POSTGRES_DB"],
-            postgres_user=os.environ["TEST_AUTH_POSTGRES_USER"],
-            postgres_password=os.environ["TEST_AUTH_POSTGRES_PASSWORD"],
+            postgres_db=os.environ["TEST_AUTHORIZATION_POSTGRES_DB"],
+            postgres_user=os.environ["TEST_AUTHORIZATION_POSTGRES_USER"],
+            postgres_password=os.environ["TEST_AUTHORIZATION_POSTGRES_PASSWORD"],
             bootstrap_username="admin",
             bootstrap_password="admin",
             jwt_private_key_pem=_private_key_pem(),
@@ -134,8 +134,8 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             refresh_token_ttl_seconds=3600,
             allowed_redirect_uris=("https://client.example/callback",),
         )
-        provider = LocalOAuthProvider(settings, self.auth_repository)
-        app = build_auth_app(provider)
+        provider = LocalOAuthProvider(settings, self.authorization_repository)
+        app = build_authorization_app(provider)
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
@@ -182,7 +182,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
             )["transaction"][0]
 
             login = await client.post(
-                "/auth/login",
+                "/authorization/login",
                 data={
                     "transaction": transaction,
                     "username": "admin",
@@ -299,8 +299,8 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(any(item.id == pending.id for item in still_pending))
 
-    async def test_auth_access_http_contract(self) -> None:
-        access_app = build_access_app(self.access_control, self.auth_access_settings)
+    async def test_authorization_access_http_contract(self) -> None:
+        access_app = build_access_app(self.access_control, self.authorization_access_settings)
         app = Starlette(routes=[Mount("/internal/access", app=access_app)])
         terminal_surface = int(surface_id("terminal"))
         context = {
@@ -313,7 +313,7 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
-            base_url="http://auth.test",
+            base_url="http://authorization.test",
         ) as client:
             opened_response = await client.post(
                 "/internal/access/v1/session/open",

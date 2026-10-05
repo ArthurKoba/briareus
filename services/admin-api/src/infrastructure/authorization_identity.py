@@ -12,7 +12,7 @@ class LocalUserIdentity(BaseModel):
     enabled: bool
 
 
-class AuthIdentityClient:
+class AuthorizationIdentityClient:
     def __init__(self, *, base_url: str, service_token: str) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),

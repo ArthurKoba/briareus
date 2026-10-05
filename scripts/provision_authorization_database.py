@@ -87,9 +87,9 @@ async def main() -> None:
     admin_user = _env("POSTGRES_USER")
     admin_password = _env("POSTGRES_PASSWORD")
 
-    auth_database = _env("AUTH_POSTGRES_DB", "auth")
-    auth_user = _env("AUTH_POSTGRES_USER")
-    auth_password = _env("AUTH_POSTGRES_PASSWORD")
+    authorization_database = _env("AUTHORIZATION_POSTGRES_DB", "authorization")
+    authorization_user = _env("AUTHORIZATION_POSTGRES_USER")
+    authorization_password = _env("AUTHORIZATION_POSTGRES_PASSWORD")
 
 
     connection = await asyncpg.connect(
@@ -100,9 +100,13 @@ async def main() -> None:
         password=admin_password,
     )
     try:
-        await _ensure_role(connection, role=auth_user, password=auth_password)
-        await _ensure_database(connection, database=auth_database, owner=auth_user)
-        print(f"ready database={auth_database} role={auth_user}")
+        await _ensure_role(
+            connection, role=authorization_user, password=authorization_password
+        )
+        await _ensure_database(
+            connection, database=authorization_database, owner=authorization_user
+        )
+        print(f"ready database={authorization_database} role={authorization_user}")
     finally:
         await connection.close()
 

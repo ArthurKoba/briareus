@@ -24,7 +24,7 @@ class Area:
 
 
 AREAS: dict[str, Area] = {
-    "auth": Area(("services/auth_service/",), ("services/auth_service",)),
+    "authorization": Area(("services/authorization/",), ("services/authorization",)),
     "gateway": Area(("services/bridge/",), ("services/bridge",)),
     "admin-api": Area(("services/admin-api/",), ("services/admin-api/src",)),
     "github": Area(("services/modules/github/",), ("services/modules/github",)),

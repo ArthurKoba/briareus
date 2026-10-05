@@ -8,7 +8,7 @@ from common.access_contracts import AccessLevel, AccountScope, EnforcementMode
 from common.models import JsonObject, json_object
 
 
-class AccessAdminClient:
+class AuthorizationAccessAdminClient:
     def __init__(self, *, base_url: str, service_token: str) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -32,7 +32,7 @@ class AccessAdminClient:
             return {}
         value = response.json()
         if not isinstance(value, dict):
-            raise ValueError("auth access API returned non-object response")
+            raise ValueError("authorization access API returned non-object response")
         return value
 
     @staticmethod

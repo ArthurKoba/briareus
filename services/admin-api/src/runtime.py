@@ -18,8 +18,8 @@ from browser_api import build_browser_operator_api_router
 from dashboard_state import build_dashboard_state
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from infrastructure.access import AccessAdminClient
-from infrastructure.auth_identity import AuthIdentityClient
+from infrastructure.authorization_access import AuthorizationAccessAdminClient
+from infrastructure.authorization_identity import AuthorizationIdentityClient
 from infrastructure.crypto import FernetCredentialCipher
 from infrastructure.database import DatabaseManager
 from infrastructure.files import FileAdminStore
@@ -99,13 +99,13 @@ reverse = ReverseAdminClient()
 snapshot_refresher = SnapshotRefresher(snapshots, files, reverse)
 terminal = TerminalAdminClient()
 web_admin = WebAdminClient()
-auth_access_admin = AccessAdminClient(
-    base_url=settings.auth_internal_url.rstrip("/") + "/internal/access",
-    service_token=settings.auth_admin_service_token,
+authorization_access_admin = AuthorizationAccessAdminClient(
+    base_url=settings.authorization_internal_url.rstrip("/") + "/internal/access",
+    service_token=settings.authorization_admin_service_token,
 )
-auth_identity = AuthIdentityClient(
-    base_url=settings.auth_internal_url,
-    service_token=settings.auth_admin_service_token,
+authorization_identity = AuthorizationIdentityClient(
+    base_url=settings.authorization_internal_url,
+    service_token=settings.authorization_admin_service_token,
 )
 
 
@@ -183,8 +183,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await telemetry.close()
         await realtime.close()
         await web_admin.close()
-        await auth_access_admin.close()
-        await auth_identity.close()
+        await authorization_access_admin.close()
+        await authorization_identity.close()
         await database.dispose()
 
 
@@ -241,8 +241,8 @@ app.include_router(
             snapshot_refresher=snapshot_refresher,
             realtime=realtime,
             telemetry=telemetry,
-            access=auth_access_admin,
-            auth_identity=auth_identity,
+            authorization_access=authorization_access_admin,
+            authorization_identity=authorization_identity,
         ),
     )
 )

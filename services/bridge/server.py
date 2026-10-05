@@ -30,16 +30,16 @@ from common.runtime_annotations import (
 from common.runtime_policy_contracts import McpRuntimePolicy
 from common.settings import (
     AdminApiClientSettings,
-    AuthAccessClientSettings,
+    AuthorizationAccessClientSettings,
     BridgeSettings,
-    GatewayAuthSettings,
+    GatewayAuthorizationSettings,
 )
 
 from . import __version__
-from .access_client import AuthAccessClient
 from .access_middleware import AccessSessionMiddleware
 from .access_tools import register_access_session_tools
-from .auth_client import LocalAuthTokenVerifier
+from .authorization_access_client import AuthorizationAccessClient
+from .authorization_client import LocalAuthorizationTokenVerifier
 from .backend_router import BackendDescriptor, BackendRouter
 from .backend_sessions import ProxyClientPool
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
@@ -49,14 +49,14 @@ _STARTED_AT = datetime.now(UTC).isoformat()
 _observability = build_observability("gateway")
 announce_runtime_started(_observability, "gateway")
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-_AUTH_PROXY_PATHS = (
+_AUTHORIZATION_PROXY_PATHS = (
     "/.well-known/oauth-authorization-server",
     "/.well-known/openid-configuration",
     "/authorize",
     "/token",
     "/register",
     "/revoke",
-    "/auth/login",
+    "/authorization/login",
     "/.well-known/jwks.json",
 )
 
@@ -90,12 +90,12 @@ def _proxy(name: str, url: str) -> FastMCP:
     return _proxy_target(name, url)
 
 
-def _build_auth_reverse_proxy(settings: BridgeSettings) -> ReverseProxy:
-    return ReverseProxy(settings.auth_url, backend_name="auth")
+def _build_authorization_reverse_proxy(settings: BridgeSettings) -> ReverseProxy:
+    return ReverseProxy(settings.authorization_url, backend_name="authorization")
 
 
-def _build_surface_auth(
-    settings: GatewayAuthSettings,
+def _build_surface_authorization(
+    settings: GatewayAuthorizationSettings,
 ) -> dict[str, RemoteAuthProvider]:
     if not settings.enabled:
         return {}
@@ -105,7 +105,7 @@ def _build_surface_auth(
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
         resource = resource_url(settings.public_base_url, surface)
-        verifier = LocalAuthTokenVerifier(settings, resource)
+        verifier = LocalAuthorizationTokenVerifier(settings, resource)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
@@ -120,34 +120,34 @@ def _public_facade(
     name: str,
     backend_name: str,
     backend_url: str,
-    auth_by_surface: dict[str, RemoteAuthProvider],
+    authorization_by_surface: dict[str, RemoteAuthProvider],
 ) -> FastMCP:
     middleware = (
-        [AccessSessionMiddleware(surface=name, client=_auth_access)]
-        if _auth_access_settings.enabled
+        [AccessSessionMiddleware(surface=name, client=_authorization_access)]
+        if _authorization_access_settings.enabled
         else []
     )
     surface = FastMCP(
         name,
         version=__version__,
-        auth=auth_by_surface.get(name),
+        auth=authorization_by_surface.get(name),
         middleware=middleware,
     )
-    if _auth_access_settings.enabled:
-        register_access_session_tools(surface, surface=name, client=_auth_access)
+    if _authorization_access_settings.enabled:
+        register_access_session_tools(surface, surface=name, client=_authorization_access)
     surface.mount(server=_proxy(backend_name, backend_url))
     return surface
 
 
 _settings = BridgeSettings()
-_auth_settings = GatewayAuthSettings()
-_auth_access_settings = AuthAccessClientSettings()
-_auth_access_settings.validate_bootstrap()
+_authorization_settings = GatewayAuthorizationSettings()
+_authorization_access_settings = AuthorizationAccessClientSettings()
+_authorization_access_settings.validate_bootstrap()
 _admin_api_settings = AdminApiClientSettings()
 _BACKENDS = _settings.backends
 _admin_api = AdminApiClient(_admin_api_settings)
-_auth_access = AuthAccessClient(_auth_access_settings)
-_auth_by_surface = _build_surface_auth(_auth_settings)
+_authorization_access = AuthorizationAccessClient(_authorization_access_settings)
+_authorization_by_surface = _build_surface_authorization(_authorization_settings)
 
 _backend_router = BackendRouter(
     (
@@ -207,8 +207,8 @@ mcp = FastMCP(
     "mcp-bridge",
     version=__version__,
     middleware=(
-        [AccessSessionMiddleware(surface="root", client=_auth_access)]
-        if _auth_access_settings.enabled
+        [AccessSessionMiddleware(surface="root", client=_authorization_access)]
+        if _authorization_access_settings.enabled
         else []
     ),
     instructions=(
@@ -217,55 +217,55 @@ mcp = FastMCP(
         "bridge_tools to fetch one backend tool catalog/signatures, and bridge_call "
         "to forward a call to a selected backend."
     ),
-    auth=_auth_by_surface.get("root"),
+    auth=_authorization_by_surface.get("root"),
 )
 
 github_surface = _public_facade(
     "github",
     "github",
     _BACKENDS["github"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 gitlab_surface = _public_facade(
     "gitlab",
     "gitlab",
     _BACKENDS["gitlab"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 files_surface = _public_facade(
     "files",
     "files",
     _BACKENDS["files"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 web_surface = _public_facade(
     "web",
     "web",
     _BACKENDS["web"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 analysis_surface = _public_facade(
     "analysis",
     "analysis",
     _BACKENDS["analysis"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 terminal_surface = _public_facade(
     "terminal",
     "terminal",
     _BACKENDS["terminal"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 observability_surface = _public_facade(
     "observability",
     "observability",
     _BACKENDS["observability"],
-    _auth_by_surface,
+    _authorization_by_surface,
 )
 
 
-if _auth_access_settings.enabled:
-    register_access_session_tools(mcp, surface="root", client=_auth_access)
+if _authorization_access_settings.enabled:
+    register_access_session_tools(mcp, surface="root", client=_authorization_access)
 
 
 @mcp.tool(title="Bridge ping", annotations=READ_ONLY_LOCAL)
@@ -352,8 +352,8 @@ def _http_app(surface: FastMCP) -> Starlette:
 def _resource_discovery_routes() -> list[BaseRoute]:
     routes: list[BaseRoute] = []
     seen_paths: set[str] = set()
-    for auth in _auth_by_surface.values():
-        for route in auth.get_well_known_routes(mcp_path="/mcp"):
+    for authorization_provider in _authorization_by_surface.values():
+        for route in authorization_provider.get_well_known_routes(mcp_path="/mcp"):
             path = getattr(route, "path", "")
             if not path or path in seen_paths:
                 continue
@@ -394,7 +394,7 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
             yield
         finally:
             await _backend_router.close()
-            await _auth_access.close()
+            await _authorization_access.close()
             await asyncio.gather(
                 *(proxy.close() for proxy in _REVERSE_PROXIES),
                 return_exceptions=True,
@@ -406,11 +406,11 @@ app = Starlette(lifespan=_gateway_lifespan)
 for _route in _resource_discovery_routes():
     app.router.routes.append(_route)
 
-if _auth_settings.enabled:
-    _auth_proxy = _build_auth_reverse_proxy(_settings)
-    _REVERSE_PROXIES.append(_auth_proxy)
-    for _path in _AUTH_PROXY_PATHS:
-        app.add_route(_path, _auth_proxy.handle, methods=_PROXY_METHODS)
+if _authorization_settings.enabled:
+    _authorization_proxy = _build_authorization_reverse_proxy(_settings)
+    _REVERSE_PROXIES.append(_authorization_proxy)
+    for _path in _AUTHORIZATION_PROXY_PATHS:
+        app.add_route(_path, _authorization_proxy.handle, methods=_PROXY_METHODS)
 
 
 

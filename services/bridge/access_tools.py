@@ -7,15 +7,15 @@ from common.mcp_surfaces import surface_id
 from common.models import JsonObject
 from common.runtime_annotations import READ_ONLY_LOCAL, WRITE_LOCAL
 
-from .access_client import AuthAccessClient
 from .access_middleware import oauth_context
+from .authorization_access_client import AuthorizationAccessClient
 
 
 def register_access_session_tools(
     mcp: FastMCP,
     *,
     surface: str,
-    client: AuthAccessClient,
+    client: AuthorizationAccessClient,
 ) -> None:
     resolved_surface_id = int(surface_id(surface))
 

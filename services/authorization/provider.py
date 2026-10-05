@@ -21,9 +21,9 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl
 
 from common.mcp_surfaces import allowed_resource_urls, canonical_public_base_url, resource_url
-from common.settings import AuthServiceSettings
+from common.settings import AuthorizationServiceSettings
 
-from .repository import AuthRepository
+from .repository import AuthorizationRepository
 from .security import (
     issue_access_token,
     load_private_key,
@@ -32,13 +32,15 @@ from .security import (
     verify_access_token,
 )
 
-_AUTH_CODE_TTL_SECONDS = 5 * 60
+_AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60
 _TRANSACTION_TTL_SECONDS = 10 * 60
 _REQUIRED_SCOPES = ["read:user"]
 
 
 class LocalOAuthProvider(OAuthProvider):
-    def __init__(self, settings: AuthServiceSettings, repository: AuthRepository) -> None:
+    def __init__(
+        self, settings: AuthorizationServiceSettings, repository: AuthorizationRepository
+    ) -> None:
         self.settings = settings
         self.repository = repository
         self.issuer = canonical_public_base_url(settings.public_base_url)
@@ -118,7 +120,7 @@ class LocalOAuthProvider(OAuthProvider):
             params=payload,
             expires_at=expires_at,
         )
-        return f"{self.issuer}/auth/login?{urlencode({'transaction': transaction_id})}"
+        return f"{self.issuer}/authorization/login?{urlencode({'transaction': transaction_id})}"
 
     async def login_context(self, transaction_id: str) -> dict[str, str] | None:
         transaction = await self.repository.load_transaction(transaction_id)
@@ -161,7 +163,7 @@ class LocalOAuthProvider(OAuthProvider):
             scopes=list(params.scopes or _REQUIRED_SCOPES),
             resource=resource,
             code_challenge=params.code_challenge,
-            expires_at=datetime.now(UTC) + timedelta(seconds=_AUTH_CODE_TTL_SECONDS),
+            expires_at=datetime.now(UTC) + timedelta(seconds=_AUTHORIZATION_CODE_TTL_SECONDS),
         )
         return construct_redirect_uri(
             str(params.redirect_uri),
