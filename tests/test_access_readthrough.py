@@ -64,8 +64,6 @@ class AccessReadThroughTest(unittest.IsolatedAsyncioTestCase):
             postgres_password="pass",
             gateway_service_token="gateway",
             admin_service_token="admin",
-            auth_url="http://auth:8000",
-            auth_service_token="auth-access",
             default_session_ttl_seconds=3600,
             session_cache_ttl_seconds=300,
             invalid_attempt_soft_limit=5,
