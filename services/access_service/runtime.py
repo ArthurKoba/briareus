@@ -11,6 +11,7 @@ from common.settings import AccessServiceSettings, ValkeySettings
 
 from .api import build_access_app
 from .database import AccessDatabase
+from .events import AccessEventPublisher
 from .repository import AccessRepository
 from .service import AccessService
 
@@ -29,11 +30,13 @@ database = AccessDatabase(
 )
 repository = AccessRepository(database)
 cache = SharedCache(cache_settings)
+events = AccessEventPublisher(cache, cache_settings)
 service = AccessService(
     settings=settings,
     repository=repository,
     cache=cache,
     cache_settings=cache_settings,
+    events=events,
 )
 _inner = build_access_app(service, settings)
 

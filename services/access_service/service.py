@@ -22,8 +22,10 @@ from common.access_contracts import (
     ValidationResult,
 )
 from common.cache import SharedCache
+from common.mcp_surfaces import is_account_backed_surface
 from common.settings import AccessServiceSettings, ValkeySettings
 
+from .events import AccessEventPublisher
 from .repository import AccessRepository
 
 
@@ -83,10 +85,12 @@ class AccessService:
         repository: AccessRepository,
         cache: SharedCache,
         cache_settings: ValkeySettings,
+        events: AccessEventPublisher | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.cache = cache
+        self.events = events
         self.abuse = AbuseGuard(settings, cache_settings)
         self._auth = httpx.AsyncClient(
             base_url=settings.auth_url.rstrip("/"),
@@ -95,6 +99,8 @@ class AccessService:
 
     async def close(self) -> None:
         await self._auth.aclose()
+        if self.events is not None:
+            await self.events.close()
 
     def _session_key(self, uid: str) -> str:
         return self.cache.key("access", "session", uid)
@@ -221,6 +227,16 @@ class AccessService:
             label=request.label,
         )
         await self._cache_session(session)
+        if self.events is not None:
+            await self.events.publish(
+                "session_opened",
+                {
+                    "session_id": session.id,
+                    "surface_id": session.surface_id,
+                    "user_id": session.user_id,
+                    "status": session.status,
+                },
+            )
         return session
 
     async def reissue_session(
@@ -288,16 +304,18 @@ class AccessService:
                 code="full_access_required",
                 session=session,
             )
-        if request.requires_full_access and request.account_id:
+        if request.requires_full_access and is_account_backed_surface(
+            request.surface_id
+        ):
             if session.account_scope == "none":
                 return ValidationResult(
                     allowed=False,
                     code="account_scope_denied",
                     session=session,
                 )
-            if (
-                session.account_scope == "selected"
-                and request.account_id not in session.account_ids
+            if session.account_scope == "selected" and (
+                not request.account_id
+                or request.account_id not in session.account_ids
             ):
                 return ValidationResult(
                     allowed=False,
@@ -427,13 +445,24 @@ class AccessService:
             raise ValueError("active agent session not found")
         if request.account_scope == "selected" and not request.account_ids:
             raise ValueError("selected account scope requires account_ids")
-        return await self.repository.create_request(
+        pending = await self.repository.create_request(
             session_id=session.id,
             kind="full_access",
             requested_access_level="full_access",
             account_scope=request.account_scope,
             account_ids=request.account_ids,
         )
+        if self.events is not None:
+            await self.events.publish(
+                "full_access_requested",
+                {
+                    "request_id": pending.id,
+                    "session_id": session.id,
+                    "surface_id": session.surface_id,
+                    "user_id": session.user_id,
+                },
+            )
+        return pending
 
     async def request_extension(
         self,
@@ -447,11 +476,22 @@ class AccessService:
         )
         if session is None or session.status != "active":
             raise ValueError("active agent session not found")
-        return await self.repository.create_request(
+        pending = await self.repository.create_request(
             session_id=session.id,
             kind="extension",
             requested_expires_at=request.requested_expires_at,
         )
+        if self.events is not None:
+            await self.events.publish(
+                "extension_requested",
+                {
+                    "request_id": pending.id,
+                    "session_id": session.id,
+                    "surface_id": session.surface_id,
+                    "user_id": session.user_id,
+                },
+            )
+        return pending
 
     async def close_session(
         self,
@@ -467,6 +507,15 @@ class AccessService:
         if revoked is None:
             raise ValueError("agent session not found")
         await self._invalidate_session(uid)
+        if self.events is not None:
+            await self.events.publish(
+                "session_closed",
+                {
+                    "session_id": revoked.id,
+                    "surface_id": revoked.surface_id,
+                    "user_id": revoked.user_id,
+                },
+            )
         return revoked
 
     async def resolve_request(
@@ -489,6 +538,17 @@ class AccessService:
     async def admin_update(
         self, session_id: str, request: AdminSessionUpdate
     ) -> SessionSnapshot:
+        current = await self.repository.get_session_by_id(session_id)
+        if current is None or current.user_id != request.admin_user_id:
+            raise ValueError("agent session not found")
+        effective_scope = request.account_scope or current.account_scope
+        effective_ids = (
+            request.account_ids
+            if request.account_ids is not None
+            else current.account_ids
+        )
+        if effective_scope == "selected" and not effective_ids:
+            raise ValueError("selected account scope requires account_ids")
         updated = await self.repository.admin_update_session(
             session_id,
             admin_user_id=request.admin_user_id,

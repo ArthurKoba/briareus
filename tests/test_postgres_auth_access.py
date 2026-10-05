@@ -20,7 +20,9 @@ from auth_service.database import AuthDatabase
 from auth_service.provider import LocalOAuthProvider
 from auth_service.repository import AuthRepository
 from common.access_contracts import (
+    AdminResolveRequest,
     AdminSessionUpdate,
+    FullAccessRequest,
     OAuthContext,
     SessionOpenRequest,
     SessionValidateRequest,
@@ -239,6 +241,61 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(status)
         assert status is not None
         self.assertEqual(status.status, "expired")
+
+    async def test_selected_scope_requires_account_ids_on_admin_paths(self) -> None:
+        github_surface = int(surface_id("github"))
+        context = OAuthContext(
+            user_id=self.user.id,
+            client_id="client-selected",
+            oauth_session_id="oauth-selected",
+        )
+        opened = await self.access_service.open_session(
+            SessionOpenRequest(
+                **context.model_dump(),
+                surface_id=github_surface,
+                label="selected",
+            )
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "selected account scope requires account_ids"
+        ):
+            await self.access_service.admin_update(
+                opened.id,
+                AdminSessionUpdate(
+                    admin_user_id=self.user.id,
+                    access_level="full_access",
+                    account_scope="selected",
+                    account_ids=[],
+                ),
+            )
+
+        pending = await self.access_service.request_full_access(
+            FullAccessRequest(
+                **context.model_dump(),
+                surface_id=github_surface,
+                session_uid=opened.uid,
+                account_scope="selected",
+                account_ids=["account-1"],
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError, "selected account scope requires account_ids"
+        ):
+            await self.access_service.resolve_request(
+                pending.id,
+                AdminResolveRequest(
+                    admin_user_id=self.user.id,
+                    approve=True,
+                    account_scope="selected",
+                    account_ids=[],
+                ),
+            )
+
+        still_pending = await self.access_repository.list_pending_requests(
+            self.user.id
+        )
+        self.assertTrue(any(item.id == pending.id for item in still_pending))
 
     async def test_access_session_persists_and_recovers_after_cache_eviction(self) -> None:
         terminal_surface = int(surface_id("terminal"))

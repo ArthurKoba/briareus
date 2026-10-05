@@ -15,6 +15,23 @@ class McpSurface(IntEnum):
     OBSERVABILITY = 7
 
 
+ACCOUNT_BACKED_SURFACES: frozenset[McpSurface] = frozenset(
+    {
+        McpSurface.GITHUB,
+        McpSurface.GITLAB,
+        McpSurface.OBSERVABILITY,
+    }
+)
+
+
+def is_account_backed_surface(value: int | McpSurface) -> bool:
+    try:
+        resolved = McpSurface(value)
+    except ValueError:
+        return False
+    return resolved in ACCOUNT_BACKED_SURFACES
+
+
 MCP_SURFACE_IDS: dict[str, McpSurface] = {
     "root": McpSurface.BRIDGE,
     "github": McpSurface.GITHUB,

@@ -77,6 +77,7 @@ def snapshot(
     access_level: str = "read_only",
     account_scope: str = "none",
     account_ids: list[str] | None = None,
+    surface_id: int = 4,
 ) -> SessionSnapshot:
     return SessionSnapshot.model_validate(
         {
@@ -85,7 +86,7 @@ def snapshot(
             "user_id": "user-1",
             "oauth_client_id": "client-1",
             "oauth_session_id": "oauth-1",
-            "surface_id": 4,
+            "surface_id": surface_id,
             "access_level": access_level,
             "account_scope": account_scope,
             "account_ids": account_ids or [],
@@ -101,12 +102,13 @@ def request(
     requires_full_access: bool,
     account_id: str = "",
     session_uid: str = "session-uid-1234567890",
+    surface_id: int = 4,
 ) -> SessionValidateRequest:
     return SessionValidateRequest(
         user_id="user-1",
         client_id="client-1",
         oauth_session_id="oauth-1",
-        surface_id=4,
+        surface_id=surface_id,
         session_uid=session_uid,
         tool_name="tool",
         requires_full_access=requires_full_access,
@@ -149,21 +151,71 @@ class AccessDecisionTest(unittest.IsolatedAsyncioTestCase):
                 access_level="full_access",
                 account_scope="selected",
                 account_ids=["account-1"],
+                surface_id=1,
             )
         )
         try:
             allowed = await service.validate(
-                request(requires_full_access=True, account_id="account-1")
+                request(
+                    requires_full_access=True,
+                    account_id="account-1",
+                    surface_id=1,
+                )
             )
-            denied = await service.validate(
-                request(requires_full_access=True, account_id="account-2")
+            wrong_account = await service.validate(
+                request(
+                    requires_full_access=True,
+                    account_id="account-2",
+                    surface_id=1,
+                )
+            )
+            missing_account = await service.validate(
+                request(requires_full_access=True, surface_id=1)
             )
         finally:
             await service.close()
 
         self.assertTrue(allowed.allowed)
-        self.assertFalse(denied.allowed)
-        self.assertEqual(denied.code, "account_scope_denied")
+        self.assertFalse(wrong_account.allowed)
+        self.assertEqual(wrong_account.code, "account_scope_denied")
+        self.assertFalse(missing_account.allowed)
+        self.assertEqual(missing_account.code, "account_scope_denied")
+
+    async def test_account_backed_none_denies_provider_default_account(self) -> None:
+        service = await self.build(
+            snapshot(
+                access_level="full_access",
+                account_scope="none",
+                surface_id=1,
+            )
+        )
+        try:
+            result = await service.validate(
+                request(requires_full_access=True, surface_id=1)
+            )
+        finally:
+            await service.close()
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.code, "account_scope_denied")
+
+    async def test_account_backed_all_allows_provider_default_account(self) -> None:
+        service = await self.build(
+            snapshot(
+                access_level="full_access",
+                account_scope="all",
+                surface_id=1,
+            )
+        )
+        try:
+            result = await service.validate(
+                request(requires_full_access=True, surface_id=1)
+            )
+        finally:
+            await service.close()
+
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.code, "allowed")
 
     async def test_blocked_oauth_context_cannot_open_new_session(self) -> None:
         service = await self.build(snapshot(), blocked=True)

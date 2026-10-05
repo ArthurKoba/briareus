@@ -315,10 +315,6 @@ class AccessRepository:
             if owner is None or owner.user_id != admin_user_id:
                 raise ValueError("pending access request not found")
 
-            request.status = "approved" if approve else "rejected"
-            request.resolved_by_user_id = admin_user_id
-            request.resolved_at = now
-
             if approve and request.kind == "full_access":
                 scope = account_scope or request.requested_account_scope
                 ids = (
@@ -326,8 +322,16 @@ class AccessRepository:
                     if account_ids is not None
                     else list(json.loads(request.requested_account_ids_json))
                 )
+                if scope == "selected" and not ids:
+                    raise ValueError("selected account scope requires account_ids")
                 if scope != "selected":
                     ids = []
+
+            request.status = "approved" if approve else "rejected"
+            request.resolved_by_user_id = admin_user_id
+            request.resolved_at = now
+
+            if approve and request.kind == "full_access":
                 owner.access_level = "full_access"
                 owner.account_scope = scope
                 owner.account_ids_json = json.dumps(ids, separators=(",", ":"))

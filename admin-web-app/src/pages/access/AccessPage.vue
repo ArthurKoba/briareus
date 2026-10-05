@@ -36,6 +36,13 @@ type SessionDraft = {
 }
 const drafts = reactive<Record<string, SessionDraft>>({})
 
+type RequestDraft = {
+  account_scope: AccountScope
+  account_ids: string
+  expires_at: number
+}
+const requestDrafts = reactive<Record<string, RequestDraft>>({})
+
 const surfaceNames = computed(() => new Map(controls.value.map(item => [item.surface_id, item.surface])))
 const sortedControls = computed(() => [...controls.value].sort((a, b) => a.surface_id - b.surface_id))
 
@@ -48,6 +55,21 @@ function syncDrafts(): void {
       account_ids: session.account_ids.join(", "),
       expires_at: session.expires_at,
       label: session.label,
+    }
+  }
+}
+
+function syncRequestDrafts(): void {
+  const live = new Set(requests.value.map(item => item.id))
+  for (const key of Object.keys(requestDrafts)) {
+    if (!live.has(key)) delete requestDrafts[key]
+  }
+  for (const request of requests.value) {
+    if (requestDrafts[request.id]) continue
+    requestDrafts[request.id] = {
+      account_scope: request.requested_account_scope,
+      account_ids: request.requested_account_ids.join(", "),
+      expires_at: request.requested_expires_at,
     }
   }
 }
@@ -65,6 +87,7 @@ async function load(): Promise<void> {
     requests.value = requestData.requests
     controls.value = controlData.controls
     syncDrafts()
+    syncRequestDrafts()
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : String(caught)
   } finally {
@@ -108,15 +131,22 @@ function requestedScope(request: AccessRequestRecord): string {
 }
 
 async function resolve(request: AccessRequestRecord, approve: boolean): Promise<void> {
+  const draft = requestDrafts[request.id]
   saving.value = true
   try {
+    const accountIds = draft?.account_scope === "selected"
+      ? draft.account_ids.split(",").map(value => value.trim()).filter(Boolean)
+      : []
     await adminApi.resolveAccessRequest(request.id, {
       approve,
       ...(approve && request.kind === "full_access"
-        ? { account_scope: request.requested_account_scope, account_ids: request.requested_account_ids }
+        ? {
+            account_scope: draft?.account_scope ?? request.requested_account_scope,
+            account_ids: accountIds,
+          }
         : {}),
       ...(approve && request.kind === "extension"
-        ? { expires_at: request.requested_expires_at }
+        ? { expires_at: draft?.expires_at ?? request.requested_expires_at }
         : {}),
     })
     notifications.success(String(t("notifications.saved")))
@@ -222,6 +252,32 @@ onBeforeUnmount(() => unsubscribe?.())
             {{ t("access.session") }} {{ request.session_id.slice(0, 8) }} ·
             <template v-if="request.kind === 'full_access'">{{ requestedScope(request) }}</template>
             <template v-else>{{ expiry(request.requested_expires_at) }}</template>
+          </div>
+          <div v-if="requestDrafts[request.id]" class="mt-3 flex flex-wrap gap-2">
+            <template v-if="request.kind === 'full_access'">
+              <Select
+                v-model:value="requestDrafts[request.id].account_scope"
+                class="w-32"
+                :options="[
+                  { label: 'none', value: 'none' },
+                  { label: 'all', value: 'all' },
+                  { label: 'selected', value: 'selected' },
+                ]"
+              />
+              <input
+                v-model="requestDrafts[request.id].account_ids"
+                class="field min-w-56 flex-1"
+                :placeholder="t('access.accountIds')"
+                :disabled="requestDrafts[request.id].account_scope !== 'selected'"
+              />
+            </template>
+            <input
+              v-else
+              v-model.number="requestDrafts[request.id].expires_at"
+              type="number"
+              min="0"
+              class="field w-52"
+            />
           </div>
         </div>
         <Button size="sm" variant="outline" :disabled="saving" @click="resolve(request, false)">{{ t("access.deny") }}</Button>
