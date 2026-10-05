@@ -4,6 +4,7 @@ Current documentation map:
 
 - [Architecture overview](architecture/overview.md)
 - [Component catalog](architecture/components.md)
+- [Authorization and agent access](architecture/authorization-access.md)
 - [Terminal workspace architecture](architecture/terminal-workspaces.md)
 - [Repository map](repository-map.md)
 - [Account administration](admin-api.md)
