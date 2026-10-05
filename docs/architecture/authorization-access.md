@@ -262,6 +262,8 @@ Represents one concrete agent context working through one concrete MCP surface.
 
 The remainder of this document uses “session” to mean this inner agent access session unless stated otherwise.
 
+One OAuth connection may own multiple active agent sessions at the same time. Different chats/agents or short-lived tasks may use separate session UIDs with different expiry and access state. Creating a second session does not replace the first one.
+
 ## Agent session identifier
 
 The session uses one opaque, randomly generated UID as its credential and identifier.
@@ -483,13 +485,15 @@ PostgreSQL keeps durable lifecycle and security history.
 
 ### Redis miss or loss
 
-MVP fails closed if the required runtime session projection is absent.
+Valkey/Redis is a cache, not the authority.
 
-It must never turn an unknown session into an allowed session.
+On a cache hit, validation is served from Redis. On a cache miss, the access service reads the durable session from PostgreSQL, validates it, repopulates Redis and continues the same request if the session is valid.
 
-After a Redis loss/restart, MVP may require sessions to be reissued.
+A Redis restart or eviction must not force a valid session to be reissued.
 
-A later production version may rebuild active Redis projections from PostgreSQL without changing the external session protocol.
+Every durable session mutation is committed to PostgreSQL first and then invalidates or refreshes the corresponding Redis projection. Revocation, expiry changes, access-level changes and account-scope changes must therefore be visible on the next call.
+
+If PostgreSQL confirms that the session does not exist, is expired or is revoked, the request fails closed.
 
 ## MVP access levels
 
@@ -541,6 +545,8 @@ When requesting full access, the agent may request:
 
 The administration UI may approve the requested scope or replace it with another valid scope.
 
+Changing an approved account scope (`all`, `selected`, `none`) takes effect on the next call. The access service commits the new scope to PostgreSQL and invalidates/refreshes the Redis session projection; the agent does not need to reissue the session.
+
 Provider credentials remain inside `integrations`.
 
 The session stores only account IDs/scope.
@@ -555,6 +561,8 @@ Each surface has:
 unrestricted
 session_enforced
 ```
+
+New MCP surfaces default to `session_enforced` once they implement the access-session contract. A migrated surface changes mode only through an explicit configured rollout; migration must not silently weaken or strengthen an already-running surface.
 
 ### unrestricted
 
@@ -612,14 +620,15 @@ The access layer tracks invalid/unknown-session attempts per authenticated OAuth
 
 Repeated invalid-session attempts use escalating protection rather than one immediate hard failure.
 
-The MVP should maintain a configurable failure counter/backoff per authenticated OAuth context and MCP surface. Conceptually:
+The MVP maintains a configurable failure counter/backoff per authenticated OAuth context and MCP surface. Conceptually:
 
 - a small number of mistakes are tolerated;
-- repeated misses trigger a temporary rate limit/backoff;
-- continued attempts after repeated rate-limit windows invalidate the active agent sessions for that OAuth context;
-- sustained abuse eventually revokes the offending OAuth session/refresh context and requires full OAuth reauthentication.
+- after about five consecutive invalid-session attempts, the caller enters a temporary rate-limit/backoff window;
+- further invalid attempts continue increasing the abuse score after the backoff expires;
+- the system does not revoke unrelated or guessed agent sessions, because the attacker may not possess any valid agent-session UID at all;
+- at a much higher configurable threshold, initially around 50 invalid attempts within the configured abuse window, the offending OAuth session/refresh context is revoked and full OAuth reauthentication is required.
 
-Exact thresholds are application settings rather than protocol constants. An initial policy may start throttling after roughly five consecutive invalid-session attempts and use a much higher cumulative threshold before OAuth revocation.
+Exact thresholds, windows and backoff duration are application settings rather than protocol constants.
 
 Protection must be scoped to the offending authenticated context so one user cannot trivially revoke another user's sessions.
 
@@ -783,9 +792,11 @@ Do not silently fall back to unrestricted behavior.
 
 ### Redis/Valkey unavailable
 
-For a surface in `session_enforced`, session validation fails closed.
+Redis/Valkey is only the cache. If it is unavailable, the access service validates sessions directly against PostgreSQL and continues operating at reduced performance.
 
-MVP may require session reissue after recovery.
+No valid session is revoked or reissued solely because Redis is unavailable.
+
+If the durable PostgreSQL authority cannot be reached or cannot confirm the session, a surface in `session_enforced` fails closed.
 
 ### integrations unavailable
 
@@ -887,8 +898,12 @@ The MVP authorization contour is accepted when:
 - a session is rejected on another MCP surface;
 - account-backed full access respects `none/all/selected` account scope;
 - `all` automatically includes newly available accounts for the same user/surface;
+- account-scope changes take effect on the next call without reissuing the session;
 - normal session validation uses Redis/Valkey rather than PostgreSQL per call;
-- Redis loss never fails open;
+- one OAuth context may hold multiple active agent sessions simultaneously;
+- a Redis cache miss transparently validates against PostgreSQL and repopulates the cache;
+- total Redis loss falls back to PostgreSQL without forcing valid sessions to reissue;
+- inability to confirm a session from durable PostgreSQL authority fails closed;
 - revoked/expired sessions stop new calls immediately;
 - cancellable active local work is terminated on revocation;
 - expiry/revocation never downgrades the old session; reissue creates a fresh read-only session with no carried full-access state;
@@ -919,7 +934,7 @@ Explicitly deferred:
 - delegated approval;
 - advanced RBAC/ABAC;
 - MFA/passkeys;
-- automatic Redis session-projection rebuild;
+- distributed/high-availability cache coordination beyond the MVP read-through cache;
 - distributed/high-availability access service;
 - KMS/HSM key storage;
 - advanced abuse scoring.
