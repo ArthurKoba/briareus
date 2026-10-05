@@ -29,7 +29,7 @@ The root `docker-compose.yaml` contains only long-lived external infrastructure 
 
 Application source changes must not rebuild the infrastructure resource.
 
-Admin API receives `POSTGRES_USER` and `POSTGRES_PASSWORD` and builds the SQLAlchemy `postgresql+asyncpg` URL internally for the fixed Docker-network endpoint `postgres:5432/mcp-bridge`. The legacy SQLite database is a one-time migration source only; use `infrastructure.sqlite_to_postgres` during cutover and retain the original file until acceptance is complete.
+Admin API accepts `POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB` with defaults `postgres`, `5432` and `mcp-bridge`, plus shared `POSTGRES_USER` and `POSTGRES_PASSWORD`; it selects the SQLAlchemy `postgresql+asyncpg` driver internally. The legacy SQLite database is a one-time migration source only; use `infrastructure.sqlite_to_postgres` during cutover and retain the original file until acceptance is complete.
 
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
 

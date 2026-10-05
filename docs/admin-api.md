@@ -74,6 +74,9 @@ storage/index implementation.
 Dynamic provider credentials do not belong in deployment environment variables. Production bootstrap requires:
 
 ```text
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=mcp-bridge
 POSTGRES_USER=<user>
 POSTGRES_PASSWORD=<password>
 ADMIN_API_ENCRYPTION_KEY=<Fernet key>
@@ -96,4 +99,4 @@ Run it from an Admin API image/environment that can reach PostgreSQL:
 python -m infrastructure.sqlite_to_postgres /path/to/legacy.sqlite3
 ```
 
-`POSTGRES_USER` and `POSTGRES_PASSWORD` supply the PostgreSQL credentials; the importer uses the same fixed Docker-network endpoint `postgres:5432/mcp-bridge` as Admin API. Keep the original SQLite file as a read-only backup until production acceptance is complete.
+`POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB` default to `postgres`, `5432` and `mcp-bridge`; `POSTGRES_USER` and `POSTGRES_PASSWORD` supply credentials. The `postgresql+asyncpg` driver is selected internally by Admin API. Keep the original SQLite file as a read-only backup until production acceptance is complete.

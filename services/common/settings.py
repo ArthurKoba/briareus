@@ -441,6 +441,9 @@ class AdminApiClientSettings(ProcessSettings):
 
 
 class AdminApiSettings(ProcessSettings):
+    postgres_host: str = Field("postgres", validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="POSTGRES_PORT")
+    postgres_db: str = Field("mcp-bridge", validation_alias="POSTGRES_DB")
     postgres_user: str = Field(validation_alias="POSTGRES_USER")
     postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
@@ -458,6 +461,8 @@ class AdminApiSettings(ProcessSettings):
     )
 
     @field_validator(
+        "postgres_host",
+        "postgres_db",
         "postgres_user",
         "encryption_key",
         "service_token",
