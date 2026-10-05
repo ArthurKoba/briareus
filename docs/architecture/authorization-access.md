@@ -1,18 +1,18 @@
 # Authorization and agent access architecture
 
-Status: target architecture with MVP boundary
+Status: target architecture with explicit MVP boundary
 Date: 2026-10-05
 
 ## Goal
 
-The platform must separate identity, agent access, provider integrations and MCP invocation history instead of rebuilding one generic backend service.
+The platform separates identity, agent access, provider integrations and MCP invocation history instead of rebuilding one generic backend service.
 
-The basic security model has two independent layers:
+The two security layers are different:
 
-- OAuth answers **which local user/client is connected to a public MCP surface**.
-- Agent access answers **whether this concrete agent session may use this concrete MCP surface now**.
+- OAuth answers which local user/client is connected to a public MCP surface.
+- Agent access answers whether this concrete agent session may use this concrete MCP surface now.
 
-The administration layer controls and displays these domains but is not their source of truth.
+The administration layer displays and controls these domains but is not their source of truth.
 
 ## Service boundaries
 
@@ -34,24 +34,24 @@ Database: `auth`.
 
 The platform login is local. GitHub, GitLab and other providers are not identity providers for the platform.
 
-The existing FastMCP/MCP SDK OAuth protocol layer should be reused where practical, while GitHub-backed identity and token persistence are removed.
+FastMCP/MCP SDK OAuth protocol machinery should be reused where practical. GitHub-backed identity and GitHub-backed OAuth token state are removed.
 
 ### access
 
 Owns:
 
 - agent sessions;
-- session approval/revocation;
-- session runtime state;
-- global session-control mode;
-- session security events;
-- later: granular permission requests, grants and policies.
+- session lifecycle;
+- full-access elevation requests;
+- session/account scope;
+- per-user/per-MCP enforcement mode;
+- session abuse protection;
+- session security history;
+- later: granular capabilities, grants and policies.
 
 Database: `access`.
 
-This is deliberately separate from `auth`.
-
-A valid OAuth session does not automatically mean that an agent session is allowed to execute.
+A valid OAuth session does not automatically mean that an agent may perform mutating actions.
 
 ### integrations
 
@@ -65,16 +65,16 @@ Owns:
 
 Database: `integrations`.
 
-Examples: GitHub, GitLab, SigNoz, Coolify and future provider accounts.
+Examples include GitHub, GitLab, SigNoz, Coolify and future providers.
 
 ### invocations
 
 Owns:
 
 - MCP call history;
-- call status and duration;
+- status and duration;
 - safe user/session/account correlation;
-- bounded redacted request/result metadata;
+- bounded redacted arguments/results metadata;
 - retention and pagination;
 - MCP-call realtime events.
 
@@ -84,14 +84,15 @@ Database: `invocations`.
 
 The administration layer is the browser frontend and its BFF/control-plane API.
 
-It provides UI and realtime views for:
+It provides views and controls for:
 
 - authentication state;
 - agent sessions;
-- access-control mode;
+- elevation requests;
+- per-MCP session-control mode;
 - integrations;
 - MCP calls;
-- later: users, teams, sharing, granular permission requests and policies.
+- later: users, teams, sharing and granular policies.
 
 It does not become the source of truth for `auth`, `access`, `integrations` or `invocations`.
 
@@ -101,9 +102,9 @@ Owns:
 
 - public MCP routing;
 - OAuth protected-resource metadata;
-- access-token verification;
+- OAuth access-token verification;
 - propagation of authenticated user/resource context;
-- access-session enforcement when session control is enabled.
+- access-session enforcement when enabled for a surface.
 
 Gateway has no application database.
 
@@ -113,7 +114,7 @@ Provider runtimes execute MCP capabilities.
 
 They do not read platform databases directly.
 
-Provider/account credentials are resolved through platform services, not embedded into session identifiers.
+Provider/account credentials are resolved through platform services and are never embedded into the agent session identifier.
 
 ## Database isolation
 
@@ -126,39 +127,38 @@ auth
 access
 integrations
 invocations
-admin        # only if genuinely admin-specific durable state appears
+admin        # only if genuinely admin-specific durable state appears later
 ```
 
 Each service receives credentials only for its own database.
 
-Cross-domain access happens through typed service APIs/events, not cross-database queries.
+Cross-domain access happens through typed APIs/events, not cross-database queries.
 
-The project uses Valkey as the Redis-compatible hot-state layer.
+Valkey is the Redis-compatible hot-state layer.
 
-PostgreSQL stores durable session/user/account state. Valkey/Redis is used for the session enforcement hot path.
+PostgreSQL stores durable user/session/account state. Valkey/Redis is used for the agent-session enforcement hot path.
 
-## MVP and later development
+## MVP boundary
 
-The target architecture must allow future expansion, but the first implementation is intentionally narrower.
+The first implementation is intentionally narrower than the long-term architecture.
 
-### MVP
-
-The first working version contains:
+### MVP includes
 
 - one local user;
 - local OAuth login for that user;
-- one OAuth identity linked to an MCP connection;
-- agent sessions;
+- separate OAuth authorization for each concrete MCP surface connection;
+- automatic creation of an active read-only agent session;
 - one agent session bound to one MCP surface;
-- where applicable, the session is also bound to one integration account;
-- binary session state: allowed or denied;
+- account scope for account-backed surfaces;
+- two coarse access levels: `read_only` and `full_access`;
 - Redis/Valkey hot-path validation;
-- session creation, status, extension/update and revocation;
-- administration UI for session approval/revocation and the global control switch;
-- current resources migrated to the initial user as owner;
+- session status/update/reissue/revocation;
+- extension and full-access requests approved from the administration UI;
+- per-MCP session-control switches;
+- existing persistent resources associated with the initial local user;
 - no teams;
 - no resource sharing;
-- no granular per-capability grants;
+- no per-tool capability matrix;
 - no policy DSL.
 
 ### Later production development
@@ -167,22 +167,23 @@ The architecture must allow adding without replacing the MVP model:
 
 - multiple local users;
 - service users;
-- account/resource ownership;
-- targeted sharing with another username;
+- ownership and sharing;
+- targeted sharing by username;
 - teams;
 - team-scoped sharing;
-- per-resource access to files/projects/workspaces;
+- per-resource ACLs for files/projects/workspaces;
 - granular capabilities;
-- session privilege elevation;
-- short-lived privilege grants;
+- sensitive-read distinction;
+- per-tool mutation permissions;
+- session privilege grants;
 - delegated approvers;
 - richer roles;
 - MFA/passkeys;
-- stronger service-to-service identity;
+- stronger workload identity;
 - signing/encryption key rotation;
 - high availability.
 
-The MVP must not hard-code assumptions that make these additions impossible.
+The MVP must not hard-code identifiers or ownership rules that make these additions impossible.
 
 ## OAuth model
 
@@ -203,23 +204,35 @@ ChatGPT / MCP client
       auth DB
 ```
 
-The user authorizes the MCP connection using a login/password from our own platform.
+The user authorizes the MCP connection using login/password from our own platform.
 
 That OAuth identity determines which local platform user the connection belongs to.
 
 Provider accounts are separate integrations and are not used for platform login.
 
-### Multiple users later
+### OAuth is per MCP surface
 
-When several local users exist, each OAuth authorization maps the external MCP connection to one local user.
+Each dedicated MCP surface performs its own OAuth authorization.
 
-That user then sees only resources and integration accounts owned by or shared with that identity.
+For example, an OAuth authorization for Terminal does not authorize GitHub, Web or another MCP surface.
 
-The server model supports multiple users independently even if a specific external client UI does not support several simultaneous connections to the same MCP URL. Client UI limitations must not define the server-side identity model.
+Every public MCP surface therefore remains a distinct OAuth resource/audience.
+
+A token for one resource does not implicitly authorize another resource.
+
+### Bridge/recovery surface
+
+A broad Bridge/recovery MCP may exist as a separate exceptional surface for rare repair scenarios.
+
+It has its own OAuth resource and does not reuse the OAuth authorization of dedicated MCP surfaces.
+
+It is not the normal integration path.
 
 ### Local credentials
 
-Passwords are stored only as strong password hashes. Argon2id is the intended password-hashing algorithm.
+Passwords are stored only as strong password hashes.
+
+Argon2id is the intended password-hashing algorithm.
 
 ### Token signing
 
@@ -229,13 +242,7 @@ Use asymmetric signing.
 
 Gateway and other verifiers receive public keys/JWKS only.
 
-A verifier should not be able to mint a valid platform OAuth token.
-
-### Resource audiences
-
-Every public MCP surface remains a distinct OAuth resource/audience.
-
-A token for one MCP resource does not implicitly authorize every other surface.
+A verifier should not be able to mint a valid OAuth token.
 
 ## Two session layers
 
@@ -253,75 +260,108 @@ Owned by `access`.
 
 Represents one concrete agent context working through one concrete MCP surface.
 
-The agent access session is the internal session discussed throughout the rest of this document.
+The remainder of this document uses “session” to mean this inner agent access session unless stated otherwise.
 
 ## Agent session identifier
 
-The agent session uses one opaque, randomly generated UID as its session credential and identifier.
+The session uses one opaque, randomly generated UID as its credential and identifier.
 
-There is no login/password inside the agent session.
+There is no login/password inside the session.
+
+For MVP the UID is stored directly in the `access` database and directly in the Valkey/Redis runtime projection.
+
+The design relies on:
+
+- strong random generation;
+- OAuth binding;
+- MCP-surface binding;
+- account-scope binding where applicable;
+- expiry/revocation;
+- abuse detection.
 
 The UID:
 
-- is created by the platform;
-- is stored with the durable session record;
-- is present in the Redis/Valkey runtime session projection;
+- is generated by the platform;
 - is sent by the agent with MCP calls;
 - is returned by MCP responses;
-- is bound to its OAuth identity and MCP surface;
-- cannot be reused against another MCP surface;
-- where relevant, cannot be reused for another integration account.
+- is bound to the authenticated local user;
+- is bound to one MCP surface;
+- cannot be reused on another surface;
+- cannot be used outside its approved account scope.
 
-The UID must have enough randomness that guessing a valid value is computationally impractical.
+## Stable MCP surface identity
+
+Authorization must not depend on deployment URLs, container names, Coolify IDs or transient infrastructure values.
+
+Use one shared stable MCP-surface registry.
+
+Conceptual symbolic names:
+
+```text
+terminal
+web
+files
+github
+gitlab
+analysis
+observability
+bridge
+```
+
+The implementation may use stable numeric enum codes internally for compact storage/lookup.
+
+Human-facing APIs, logs and administration UI should retain readable symbolic names.
+
+New surfaces are added through the registry rather than through arbitrary free-form text.
 
 ## Session scope
 
-An agent session is scoped at minimum by:
+Every session is scoped by at least:
 
 ```text
 local user / OAuth subject
-MCP surface
+MCP surface ID
 session UID
+access level
 expiry
 status
 ```
 
-For account-backed MCP operations it also includes:
+For account-backed MCP surfaces it also has an account scope.
+
+### Account-scope model
+
+Use three states:
 
 ```text
-integration account ID
+none
+all
+selected
 ```
 
-Conceptually:
+Meaning:
 
-```text
-session A
-  user: initial-user
-  surface: github
-  account: github-account-1
+- `none`: no elevated access to provider accounts;
+- `all`: all integration accounts available to this user for this MCP surface;
+- `selected`: an explicit set of immutable integration account IDs.
 
-session B
-  user: initial-user
-  surface: github
-  account: github-account-2
+`all` is dynamic.
 
-session C
-  user: initial-user
-  surface: terminal
-  account: none
-```
+If another account becomes available to the same user later, an existing `all` scope includes it automatically.
 
-Session A must not work as Session B or Session C.
+`selected` stores immutable account IDs.
 
-This is the main MVP authorization granularity.
+Aliases are for display/selection only and are not authorization identity.
 
 ## Session transport contract
 
-When session control is enabled, every MCP tool call requires a session UID except the minimal session-bootstrap methods needed to create/recover a session.
+When session control is enabled for an MCP surface, every normal MCP tool call requires the session UID.
 
-The session UID is carried explicitly in the MCP request contract.
+The only exceptions are the minimal bootstrap/lifecycle methods needed to create or recover a session, plus OAuth/health/discovery protocol endpoints.
 
-Every response returns session context again so the agent can continue using the same session.
+The UID is carried explicitly in the MCP request contract.
+
+Every MCP response returns session context again so the agent can continue using the same session.
 
 Conceptually:
 
@@ -336,13 +376,12 @@ response:
 {
   "session_id": "<uid>",
   "session_status": "active",
+  "access_level": "read_only",
   "...": "tool result"
 }
 ```
 
-The exact schema wrapper may be implemented centrally, but the behavior must be consistent across all public MCP surfaces.
-
-OAuth protocol endpoints, health/discovery endpoints and the session-bootstrap operation are outside this requirement.
+The exact wrapper may be implemented centrally, but behavior must be consistent across all public MCP surfaces.
 
 ## Common session operations
 
@@ -354,71 +393,197 @@ Conceptual operations:
 access_session_open
 access_session_status
 access_session_update
-access_session_extend
+access_session_request_extension
+access_session_request_full_access
 access_session_close
 access_session_reissue
 ```
 
-These operations belong to `access`, not to `auth`.
+These operations belong to `access`, not `auth`.
 
-`auth` authenticates the outer platform user. `access` manages the inner agent session.
+Rules for MVP:
 
-A session update may change safe metadata such as a description/label. Later it may also be the entry point for privilege-elevation requests.
+- `open` automatically creates an active read-only session for the authenticated user and MCP surface;
+- `status` returns current session state;
+- `update` changes only safe metadata such as description/label;
+- `request_extension` requests a different expiry but does not approve it itself;
+- `request_full_access` requests elevation to full action access and may request account scope;
+- `close` voluntarily revokes the session;
+- `reissue` creates a replacement session after expiry/revocation.
+
+Extension and full-access approval happen from the administration layer.
 
 ## Session lifecycle
+
+A base session does not require manual approval.
+
+It is created automatically and starts:
+
+```text
+active
+read_only
+```
 
 Typical lifecycle:
 
 ```text
-requested
-  -> pending approval
-  -> active
+open
+  -> active/read_only
+  -> optional full-access request
+       -> pending
+       -> approved / rejected
   -> expired / revoked / replaced
 ```
 
-The administration UI may approve, reject, extend or revoke the session.
+The administration UI may:
 
-Suggested initial policy:
+- approve/reject full access;
+- change the approved account scope;
+- set or change expiry;
+- revoke;
+- edit safe metadata.
+
+### Expiry
+
+Use:
 
 ```text
-default active lifetime: 24 hours
-maximum active lifetime: 7 days
-pending request lifetime: 30 minutes
+expires_at = 0        # never expires; manual revocation only
+expires_at > 0        # timestamp/epoch expiry
 ```
 
-These are configuration defaults rather than hard-coded protocol limits.
+The administrator may approve practical durations such as minutes, hours, days, a week or no automatic expiry.
 
-When a session expires or is revoked, the agent receives a structured response telling it that the session is no longer valid and must be reissued.
+If the session expires or is revoked, the agent receives a structured response telling it to reissue the session.
 
-## Redis/Valkey session hot path
+## Redis/Valkey hot path
 
 Normal MCP calls must not synchronously read PostgreSQL for every session check.
 
-Session creation/approval/revocation is persisted in PostgreSQL and projected into Valkey/Redis.
+Session state is persisted in PostgreSQL and projected into Valkey/Redis.
 
-The normal enforcement path is:
+Normal enforcement:
 
 ```text
 MCP call
   -> validate OAuth identity
   -> lookup session UID in Redis
-  -> validate status + expiry + user + MCP surface + account binding
+  -> validate status
+  -> validate expiry
+  -> validate local user
+  -> validate MCP surface
+  -> validate account scope
+  -> validate access level required by the tool
   -> execute or reject
 ```
 
-Redis therefore provides the fast runtime validation path.
+Redis therefore provides the normal runtime validation path.
 
-PostgreSQL keeps durable lifecycle/history.
+PostgreSQL keeps durable lifecycle and security history.
 
 ### Redis miss or loss
 
-In MVP, absence of the required runtime session entry is fail-closed.
+MVP fails closed if the required runtime session projection is absent.
 
-The agent is told to reissue the session.
+It must never turn an unknown session into an allowed session.
 
-A Redis restart must never silently turn an unknown session into an allowed session.
+After a Redis loss/restart, MVP may require sessions to be reissued.
 
-Later production versions may safely rebuild active Redis projections from PostgreSQL, but that is an optimization, not an MVP requirement.
+A later production version may rebuild active Redis projections from PostgreSQL without changing the external session protocol.
+
+## MVP access levels
+
+MVP intentionally avoids a full capability matrix.
+
+Every new session starts:
+
+```text
+read_only
+```
+
+Read-only methods are the methods each MCP surface classifies as non-mutating.
+
+Safe account discovery may expose account aliases/IDs available to the authenticated user.
+
+It does not expose provider credentials or sensitive provider details.
+
+The only elevated level in MVP is:
+
+```text
+full_access
+```
+
+Full access permits mutating actions supported by that MCP surface, limited by its account scope where applicable.
+
+Fine-grained distinctions such as:
+
+- sensitive read;
+- push;
+- delete;
+- deploy;
+- individual tool grants;
+
+are explicitly deferred.
+
+They will be introduced while each MCP surface is refined after the coarse MVP contour is working.
+
+## Integration-account interaction
+
+For an account-backed MCP surface, a read-only session may discover the safe aliases/IDs of integration accounts available to the authenticated user.
+
+When requesting full access, the agent may request:
+
+- one account;
+- several accounts;
+- all accounts.
+
+The administration UI may approve the requested scope or replace it with another valid scope.
+
+Provider credentials remain inside `integrations`.
+
+The session stores only account IDs/scope.
+
+## Per-MCP session-control mode
+
+Session enforcement is configured per local user and per MCP surface.
+
+Each surface has:
+
+```text
+unrestricted
+session_enforced
+```
+
+### unrestricted
+
+OAuth authentication still applies.
+
+The agent-session check is skipped for that MCP surface.
+
+Existing sessions are not deleted, changed or invalidated.
+
+Their expiry and access state continue to exist normally.
+
+### session_enforced
+
+Every normal MCP tool call requires a valid session for the user and surface.
+
+When switching from `unrestricted` back to `session_enforced`, all still-valid sessions immediately become effective again with the same state they had before.
+
+No session reset occurs merely because enforcement was temporarily bypassed.
+
+### Administration UI batch control
+
+There is no separate persistent global session-control mode.
+
+The UI may provide:
+
+- “all unrestricted”;
+- “all session-enforced”;
+
+as batch operations that update the individual MCP-surface switches.
+
+The individual per-user/per-surface setting remains the source of truth.
 
 ## Revocation and cancellation
 
@@ -429,108 +594,48 @@ After revocation:
 - no new call using that UID is accepted;
 - pending calls waiting for execution are cancelled;
 - locally cancellable active work is terminated where the runtime supports cancellation;
-- the agent receives a session-expired/revoked result and must obtain a new session.
+- the agent receives a revoked/expired response and must reissue the session.
 
-Examples of cancellable local work include terminal processes/jobs and queued runtime work.
+Examples of cancellable local work include terminal jobs/processes and queued runtime work.
 
-A security boundary cannot undo an external side effect that has already been committed. For example, a remote Git push or provider API mutation already accepted by the provider cannot be rolled back merely by revoking the session.
+A session revocation cannot undo an external side effect that has already been committed.
 
-The system should still cancel any remaining local work and reject all subsequent calls.
+For example, a provider API mutation or completed Git push cannot be rolled back simply by revoking the session.
 
 ## Session abuse protection
 
-Session IDs are not intended to be discoverable by enumeration.
+Session IDs are not intended to be enumerable.
 
-The access layer tracks invalid/unknown session attempts per authenticated OAuth context and MCP surface.
+The access layer tracks invalid/unknown-session attempts per authenticated OAuth context and MCP surface.
 
-Repeated suspicious attempts trigger protection such as:
+Repeated suspicious attempts can trigger:
 
 - rate limiting;
 - temporary blocking;
-- invalidation of the current agent sessions;
-- requiring OAuth reauthentication for the offending authenticated context when a configured threshold is exceeded.
+- invalidation of agent sessions belonging to the offending OAuth context;
+- required OAuth reauthentication.
 
-Protection is scoped to the authenticated context so that one attacker cannot trivially revoke unrelated users.
+Protection must be scoped to the offending authenticated context so one user cannot trivially revoke another user's sessions.
 
-All such events are written to the access security history.
+These events are written to access security history.
 
-## MVP access decision
+## Future granular privilege model
 
-The MVP has intentionally simple semantics.
+Granular permissions are explicitly deferred from MVP.
 
-When session control is enabled, a session is either:
+Later, the same session can request additional authority without being replaced.
 
-```text
-allowed
-denied
-```
+Future approval may support:
 
-No fine-grained capability matrix is required for the first implementation.
+- individual capabilities;
+- sensitive-read permissions;
+- only some requested permissions;
+- different TTL per grant;
+- account-specific grants;
+- provider-resource restrictions;
+- removal of existing permissions.
 
-Approval means that this session may use its bound MCP surface and, where applicable, its bound integration account until expiry/revocation.
-
-This lets us implement the complete authorization contour before individually redesigning every MCP permission model.
-
-## Global access-control mode
-
-MVP needs one clear global switch for agent-session enforcement.
-
-Conceptual modes:
-
-```text
-unrestricted
-session_enforced
-```
-
-### unrestricted
-
-This is the current/root-style behavior.
-
-OAuth authentication still applies, but agent access sessions are not required.
-
-For the MVP single-user system this gives the agent the same broad operational access it effectively has today.
-
-In the future multi-user system, unrestricted mode must still respect the authenticated user's ownership/sharing boundaries. It is not a bypass of user isolation.
-
-### session_enforced
-
-Every MCP tool call, except session-bootstrap operations, requires a valid active session bound to that surface/account.
-
-The administration UI controls this mode.
-
-Switching modes takes effect immediately for new calls.
-
-## Future privilege elevation
-
-Granular privileges are explicitly deferred from MVP.
-
-Later, an already-active session can request additional authority without discarding the whole session.
-
-Example future flow:
-
-```text
-session already active
-  -> agent requests additional permission
-  -> request appears in admin UI
-  -> administrator approves/edits/denies
-  -> same session receives the additional authority
-```
-
-Future approval must allow:
-
-- approving only some requested permissions;
-- removing requested permissions;
-- adding permitted rights;
-- reducing duration;
-- choosing a different allowed integration account where appropriate.
-
-This later model may use separate grants attached to the same session.
-
-The MVP database/API should not pretend that this granular model already exists.
-
-## Future capabilities
-
-Later access policies can use semantic capabilities such as:
+Conceptual later capabilities may include:
 
 ```text
 files:read
@@ -543,25 +648,15 @@ browser:developer
 infrastructure:deploy
 ```
 
-Capabilities and risk tiers are a later extension point.
+This later model can attach grants to the existing session.
 
-They must not be hard-coded into the first binary allow/deny session implementation.
-
-## Integration-account binding
-
-Account-backed sessions are bound to an immutable integration account ID.
-
-Aliases are display/selectors only and must not become authorization identity.
-
-A GitHub/GitLab/observability session for account A cannot be used against account B.
-
-Provider credentials remain inside `integrations`; session records store only the account reference.
+The MVP database/API should not pretend that this granular model already exists.
 
 ## MVP user and ownership model
 
 The first implementation has one local platform user.
 
-During migration, existing resources that later require ownership should be assigned to that initial user.
+During migration, existing persistent resources that later require ownership should be associated with that stable initial user ID.
 
 This includes, as applicable:
 
@@ -570,30 +665,30 @@ This includes, as applicable:
 - analysis/Ghidra projects;
 - other persistent user-owned resources.
 
-MVP does not implement sharing or team ACLs yet.
+MVP does not implement sharing or teams.
 
-It does establish stable user IDs and stable resource/account IDs so that ownership can be added without replacing identifiers later.
+It does establish stable user/resource/account identities so later ownership/sharing does not require replacing identifiers.
 
 ## Future users, sharing and teams
 
 The production model must support many local users.
 
-A user can connect their own GitHub, GitLab or other integration accounts.
+A user can connect their own provider accounts.
 
 Those accounts initially belong to that user.
 
-Later the owner may share an account/resource:
+Later, the owner may share an account/resource:
 
 - with everyone allowed by policy;
 - with a specific local username;
 - with selected team members;
 - with a team.
 
-The platform must not expose a global directory of all usernames merely to support sharing.
+The platform must not expose a global directory of all usernames simply to support sharing.
 
 Targeted sharing should allow entering an exact username and resolving it server-side.
 
-Teams are explicitly deferred from MVP but must be addable as a separate ownership/sharing layer.
+Teams are deferred from MVP but must be addable as a separate ownership/sharing layer.
 
 The same ownership model later applies to files, workspaces, analysis projects and other resources.
 
@@ -601,11 +696,11 @@ The same ownership model later applies to files, workspaces, analysis projects a
 
 The user who logs into the administration UI is a local `auth` user.
 
-That identity approves or rejects agent sessions belonging to that user's OAuth-connected MCP context.
+That identity manages sessions belonging to that user's OAuth-connected MCP contexts.
 
 The current standalone admin credential is transitional/bootstrap behavior, not the target user model.
 
-A future service user may also authenticate through `auth` under a distinct identity type and policy, but that is not required for MVP.
+A future service user may authenticate through `auth` under a distinct identity type and policy.
 
 ## Access security history
 
@@ -613,23 +708,23 @@ MCP call history and access-security history are different domains.
 
 `invocations` records tool calls.
 
-`access` keeps a small append-only security history for session/access lifecycle events such as:
+`access` keeps append-only security history for lifecycle events such as:
 
 ```text
-session requested
-session approved
-session rejected
-session extended
+session opened
+full-access requested
+full-access approved
+full-access rejected
+session extension requested
+session expiry changed
 session revoked
 session expired
-global access mode changed
+MCP session-control mode changed
 suspicious invalid-session activity
-protective block/reauth triggered
+protective block / OAuth reauthentication required
 ```
 
 This does not require a separate generic audit service for MVP.
-
-Later, if multiple domains require a unified compliance audit system, that can be introduced deliberately.
 
 ## Invocations
 
@@ -652,17 +747,19 @@ It must never persist:
 - terminal secrets;
 - browser cookies/form secrets.
 
-The bearer-form session UID remains owned by `access` and is not copied into `invocations`. Invocation history correlates through the internal session record ID.
+The bearer-form session UID remains owned by `access`.
+
+Invocation history correlates through the internal session record ID rather than copying the session UID.
 
 ## Internal service trust
 
-The private Docker network is not sufficient by itself as an authorization model.
+The private Docker network is not sufficient as an authorization model.
 
 MVP internal APIs should use distinct service credentials/identities between major services.
 
-Do not use one universal shared secret for every internal service.
+Do not use one universal shared secret for all internal services.
 
-Later this can evolve to stronger workload identity or mTLS without changing domain ownership.
+This may later evolve to stronger workload identity or mTLS without changing domain ownership.
 
 ## Failure behavior
 
@@ -674,72 +771,81 @@ Already-issued OAuth tokens may continue only while their normal local verificat
 
 ### access unavailable
 
-When `session_enforced` is active, protected MCP execution fails closed.
+For a surface in `session_enforced`, protected execution fails closed.
 
 Do not silently fall back to unrestricted behavior.
 
 ### Redis/Valkey unavailable
 
-When session enforcement is enabled, session validation fails closed.
+For a surface in `session_enforced`, session validation fails closed.
 
 MVP may require session reissue after recovery.
 
 ### integrations unavailable
 
-Account-backed calls fail.
+Account-backed operations fail.
 
-Do not silently switch to another account.
+Do not silently switch to another provider account.
 
 ### invocations unavailable
 
 An otherwise authorized successful provider action should not fail solely because invocation history cannot be recorded.
 
-Use bounded retry/queue behavior rather than turning observability storage into an execution dependency.
+Use bounded retry/queue behavior rather than turning invocation storage into an execution dependency.
 
 ## Administration UI for MVP
 
 The first UI does not need a full policy editor.
 
-It needs:
-
-### Session list
+### Sessions
 
 Show:
 
-- session UID/display form;
+- session UID;
 - MCP surface;
-- bound account when applicable;
+- account scope;
+- access level: read-only/full-access;
 - status;
 - created time;
 - last activity;
-- expiry;
+- expiry, where `0` means no automatic expiry;
 - safe description.
 
 Actions:
 
-- approve;
-- reject;
+- approve/reject full-access request;
+- choose/change account scope;
 - revoke;
-- extend;
+- approve requested extension / set expiry;
 - edit safe description.
 
-### Global control
+### MCP session-control switches
 
-Show the `unrestricted / session_enforced` switch clearly.
+For the current user, show every configured MCP surface with its own:
 
-The effect must be immediate and visible.
+```text
+unrestricted / session_enforced
+```
+
+switch.
+
+The UI may provide batch actions that update all individual switches in one request.
+
+There is no separate global persistent switch.
+
+Existing sessions remain stored and unchanged while a surface is unrestricted.
 
 ### Realtime
 
-Session state changes should appear in the administration UI without polling-heavy behavior.
+Session/elevation/control changes should appear without polling-heavy behavior.
 
-Suggested topic:
+Initial topic:
 
 ```text
 access.sessions
 ```
 
-Additional granular access topics can be added when granular permissions are implemented.
+Additional topics can be added when granular permissions are introduced.
 
 ## Migration order
 
@@ -750,37 +856,45 @@ Recommended order:
 1. Implement local `auth` database/users.
 2. Replace GitHub-backed platform login with local OAuth.
 3. Add asymmetric signing/JWKS; gateway becomes verifier-only.
-4. Validate OAuth end to end with the initial local user.
+4. Validate OAuth separately for each MCP resource with the initial local user.
 5. Establish stable integration account IDs and initial-user ownership semantics.
-6. Implement MVP `access`: binary sessions, Redis hot path, approval/revocation and global mode.
-7. Add the common session contract to the new MCP surfaces.
-8. Add admin UI for sessions and the global access-control switch.
+6. Implement MVP `access`: automatic read-only sessions, full-access elevation, Redis hot path, revocation and per-MCP control mode.
+7. Add the common session contract to new MCP surfaces.
+8. Add admin UI for sessions, elevation requests, expiry and per-MCP switches.
 9. Move provider accounts/credentials into `integrations` as each provider is migrated.
 10. Move MCP call history into `invocations`.
-11. Assign existing files/workspaces/analysis projects to the initial user during their respective migrations.
+11. Associate existing files/workspaces/analysis projects with the initial user during their migrations.
 12. Migrate MCP/provider surfaces one by one.
-13. Only after the binary session model is stable, add granular permissions, sharing and teams.
+13. Add granular permissions, sharing and teams only after the coarse session model is stable.
 
 ## MVP acceptance criteria
 
 The MVP authorization contour is accepted when:
 
 - local OAuth no longer depends on GitHub identity;
-- one local user can authorize an MCP connection;
-- every new MCP surface can request an agent session;
-- under `session_enforced`, every normal tool call requires that session UID;
-- the session is rejected on another MCP surface;
-- an account-bound session is rejected for another integration account;
-- normal validation uses Redis/Valkey rather than PostgreSQL per call;
-- Redis loss does not fail open;
+- the initial local user can authorize each dedicated MCP surface independently;
+- a new MCP connection can automatically obtain a read-only agent session;
+- under `session_enforced`, every normal tool call requires the session UID;
+- base sessions allow only methods classified as read-only;
+- mutating methods require approved `full_access`;
+- a session is rejected on another MCP surface;
+- account-backed full access respects `none/all/selected` account scope;
+- `all` automatically includes newly available accounts for the same user/surface;
+- normal session validation uses Redis/Valkey rather than PostgreSQL per call;
+- Redis loss never fails open;
 - revoked/expired sessions stop new calls immediately;
 - cancellable active local work is terminated on revocation;
 - the agent receives a clear reissue response after expiry/revocation;
 - repeated invalid-session attempts are rate-limited and recorded;
-- the admin UI can approve, reject, revoke and extend sessions;
-- the admin UI can switch between `unrestricted` and `session_enforced`;
-- existing migrated resources can be associated with the initial stable user ID;
-- no team/granular-permission implementation is required for MVP.
+- the admin UI can approve/reject full-access requests;
+- the admin UI can revoke sessions and set/extend expiry;
+- `expires_at = 0` supports sessions without automatic expiry;
+- each MCP surface has an independent `unrestricted/session_enforced` switch;
+- disabling enforcement preserves sessions;
+- re-enabling enforcement reuses still-valid sessions without resetting them;
+- UI-wide enable/disable controls are batch updates only;
+- existing persistent resources can be associated with the initial stable user ID;
+- teams/sharing/granular capabilities are not required for MVP.
 
 ## Deferred production features
 
@@ -791,33 +905,41 @@ Explicitly deferred:
 - user/resource sharing;
 - account sharing;
 - granular capabilities;
-- privilege-elevation grants;
-- resource-level Git repository/project/branch ACLs;
+- sensitive-read permissions;
+- per-tool mutation grants;
+- privilege-elevation grant objects;
+- resource-level repository/project/branch ACLs;
 - delegated approval;
-- advanced roles/RBAC/ABAC;
+- advanced RBAC/ABAC;
 - MFA/passkeys;
 - automatic Redis session-projection rebuild;
 - distributed/high-availability access service;
 - KMS/HSM key storage;
 - advanced abuse scoring.
 
-These features are expected extensions, not reasons to delay the binary-session MVP.
+These are expected extensions, not reasons to delay MVP.
 
 ## Architectural decisions
 
-- No generic platform “core” service.
+- No generic platform core service.
 - No provider-backed platform login.
-- No Keycloak for the MVP.
+- No Keycloak for MVP.
 - No direct cross-service database access.
 - OAuth identity and agent access session remain separate.
-- Agent session uses one opaque UID.
-- Agent session is always scoped to one MCP surface.
-- Account-backed sessions are additionally scoped to one integration account.
-- When session control is enabled, all normal MCP tool calls require a session.
-- Redis/Valkey is mandatory for the session validation hot path.
-- PostgreSQL stores durable session lifecycle/security history.
-- MVP access is binary allow/deny.
-- Granular permissions, teams and sharing are later stages.
+- OAuth authorization is per dedicated MCP surface.
+- Agent session uses one opaque UID stored directly for MVP.
+- Agent session is always scoped to one stable MCP surface ID.
+- Account-backed sessions use `none/all/selected` account scope.
+- New sessions are automatically active and read-only.
+- MVP has one elevated level: full access within the MCP/account scope.
+- Granular permissions are deferred.
+- When session control is enabled for a surface, all normal calls require a session.
+- Valkey/Redis is mandatory for the normal session-validation hot path.
+- PostgreSQL stores durable session lifecycle and access-security history.
+- Session enforcement is configured independently per user/MCP surface.
+- “Enable/disable all” in the UI is a batch operation, not a separate global state.
+- Switching enforcement off preserves all sessions and access state.
+- Re-enabling enforcement reuses still-valid sessions.
+- `expires_at = 0` means no automatic expiry.
 - Revocation is immediate for new calls and cancels locally cancellable active work.
-- The global MVP control is `unrestricted / session_enforced`.
 - Existing resources migrate to the initial local user before multi-user sharing is introduced.
