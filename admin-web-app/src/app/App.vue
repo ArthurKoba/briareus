@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue"
-import { Activity, AppWindow, Blocks, Bot, ChartNoAxesCombined, Database, FileText, GitBranch, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun, TerminalSquare } from "lucide-vue-next"
+import { Activity, AppWindow, Blocks, Bot, ChartNoAxesCombined, Database, FileText, GitBranch, Moon, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, Sun, TerminalSquare } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 import { adminApi, type AdminBootstrap, type SessionState } from "@/shared/api/admin"
 import { accountStore } from "@/features/accounts/model/account-store"
@@ -23,6 +23,7 @@ const FilesPage=defineAsyncComponent(()=>import("@/pages/files/FilesPage.vue"))
 const TerminalPage=defineAsyncComponent(()=>import("@/pages/terminal/TerminalPage.vue"))
 const BrowserPage=defineAsyncComponent(()=>import("@/pages/browser/BrowserPage.vue"))
 const AnalysisPage=defineAsyncComponent(()=>import("@/pages/analysis/AnalysisPage.vue"))
+const AccessPage=defineAsyncComponent(()=>import("@/pages/access/AccessPage.vue"))
 const OAuthPage=defineAsyncComponent(()=>import("@/pages/oauth/OAuthPage.vue"))
 const SettingsPage=defineAsyncComponent(()=>import("@/pages/settings/SettingsPage.vue"))
 
@@ -40,6 +41,7 @@ const nav=computed(()=>[
   {id:"terminal",label:t("nav.terminal"),icon:TerminalSquare,component:TerminalPage},
   {id:"browser",label:t("nav.browser"),icon:AppWindow,component:BrowserPage},
   {id:"analysis",label:t("nav.analysis"),icon:Database,component:AnalysisPage},
+  {id:"access",label:t("nav.access"),icon:ShieldCheck,component:AccessPage},
   {id:"oauth",label:t("nav.oauth"),icon:Bot,component:OAuthPage},
   {id:"settings",label:t("nav.settings"),icon:Settings,component:SettingsPage},
 ])

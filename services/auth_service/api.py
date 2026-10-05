@@ -60,6 +60,24 @@ def build_auth_app(provider: LocalOAuthProvider) -> Starlette:
     async def jwks(_request: Request) -> Response:
         return JSONResponse(provider.jwks, headers={"Cache-Control": "public, max-age=300"})
 
+    async def user_by_username_internal(request: Request) -> Response:
+        expected = f"Bearer {provider.settings.admin_service_token}"
+        authorization = request.headers.get("authorization")
+        if authorization is None or not hmac.compare_digest(authorization, expected):
+            return Response(status_code=401)
+        username = request.path_params["username"]
+        user = await provider.repository.get_user_by_username(username)
+        if user is None:
+            return Response(status_code=404)
+        return JSONResponse(
+            {
+                "id": user.id,
+                "username": user.username,
+                "enabled": user.enabled,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
     async def revoke_internal(request: Request) -> Response:
         expected = f"Bearer {provider.settings.access_service_token}"
         authorization = request.headers.get("authorization")
@@ -115,6 +133,11 @@ def build_auth_app(provider: LocalOAuthProvider) -> Starlette:
             Route("/auth/login", login_get, methods=["GET"]),
             Route("/auth/login", login_post, methods=["POST"]),
             Route("/.well-known/jwks.json", jwks, methods=["GET"]),
+            Route(
+                "/internal/v1/users/by-username/{username}",
+                user_by_username_internal,
+                methods=["GET"],
+            ),
             Route(
                 "/internal/v1/oauth-sessions/{session_id}/revoke",
                 revoke_internal,

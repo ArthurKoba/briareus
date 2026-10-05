@@ -103,6 +103,11 @@ class AccessRepository:
             await session.refresh(record)
             return _snapshot(record)
 
+    async def get_session_by_id(self, session_id: str) -> SessionSnapshot | None:
+        async with self.database.sessions() as session:
+            record = await session.get(AgentSessionRecord, session_id)
+            return None if record is None else _snapshot(record)
+
     async def get_session(self, uid: str) -> SessionSnapshot | None:
         async with self.database.sessions() as session:
             record = await session.scalar(
@@ -145,6 +150,64 @@ class AccessRepository:
                 return None
             record.label = label
             record.updated_at = _now()
+            await session.commit()
+            await session.refresh(record)
+            return _snapshot(record)
+
+    async def admin_update_session(
+        self,
+        session_id: str,
+        *,
+        admin_user_id: str,
+        access_level: str | None,
+        account_scope: str | None,
+        account_ids: list[str] | None,
+        expires_at: int | None,
+        label: str | None,
+    ) -> SessionSnapshot | None:
+        now = _now()
+        async with self.database.sessions() as session:
+            record = await session.get(AgentSessionRecord, session_id)
+            if record is None or record.user_id != admin_user_id:
+                return None
+            before = {
+                "access_level": record.access_level,
+                "account_scope": record.account_scope,
+                "expires_at": record.expires_at,
+            }
+            if access_level is not None:
+                record.access_level = access_level
+            if account_scope is not None:
+                record.account_scope = account_scope
+                if account_scope != "selected":
+                    record.account_ids_json = "[]"
+            if account_ids is not None:
+                record.account_ids_json = json.dumps(account_ids, separators=(",", ":"))
+            if expires_at is not None:
+                record.expires_at = expires_at
+            if label is not None:
+                record.label = label
+            record.updated_at = now
+            session.add(
+                SecurityEventRecord(
+                    user_id=record.user_id,
+                    oauth_session_id=record.oauth_session_id,
+                    session_id=record.id,
+                    surface_id=record.surface_id,
+                    event_type="session_admin_updated",
+                    details_json=json.dumps(
+                        {
+                            "before": before,
+                            "after": {
+                                "access_level": record.access_level,
+                                "account_scope": record.account_scope,
+                                "expires_at": record.expires_at,
+                            },
+                        },
+                        separators=(",", ":"),
+                    ),
+                )
+            )
             await session.commit()
             await session.refresh(record)
             return _snapshot(record)
@@ -249,8 +312,8 @@ class AccessRepository:
             if request is None or request.status != "pending":
                 raise ValueError("pending access request not found")
             owner = await session.get(AgentSessionRecord, request.session_id)
-            if owner is None:
-                raise ValueError("agent session not found")
+            if owner is None or owner.user_id != admin_user_id:
+                raise ValueError("pending access request not found")
 
             request.status = "approved" if approve else "rejected"
             request.resolved_by_user_id = admin_user_id
@@ -352,6 +415,42 @@ class AccessRepository:
             )
             await session.commit()
             return mode
+
+    async def set_modes_batch(
+        self,
+        items: list[tuple[str, int, EnforcementMode]],
+    ) -> list[tuple[str, int, EnforcementMode]]:
+        now = _now()
+        async with self.database.sessions() as session:
+            for user_id, surface_id, mode in items:
+                record = await session.scalar(
+                    select(SurfaceControlRecord).where(
+                        SurfaceControlRecord.user_id == user_id,
+                        SurfaceControlRecord.surface_id == surface_id,
+                    )
+                )
+                if record is None:
+                    session.add(
+                        SurfaceControlRecord(
+                            user_id=user_id,
+                            surface_id=surface_id,
+                            mode=mode,
+                            updated_at=now,
+                        )
+                    )
+                else:
+                    record.mode = mode
+                    record.updated_at = now
+                session.add(
+                    SecurityEventRecord(
+                        user_id=user_id,
+                        surface_id=surface_id,
+                        event_type="session_control_changed",
+                        details_json=json.dumps({"mode": mode}, separators=(",", ":")),
+                    )
+                )
+            await session.commit()
+        return items
 
     async def list_sessions(self, user_id: str) -> list[SessionSnapshot]:
         async with self.database.sessions() as session:

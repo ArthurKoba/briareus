@@ -67,6 +67,26 @@ export interface InvocationPage {
   next_cursor: string
 }
 
+export type AccessLevel = "read_only" | "full_access"
+export type AccountScope = "none" | "all" | "selected"
+export type EnforcementMode = "unrestricted" | "session_enforced"
+export interface AccessUser { id: string; username: string; enabled: boolean }
+export interface AccessSessionRecord {
+  id: string; uid: string; user_id: string; oauth_client_id: string; oauth_session_id: string
+  surface_id: number; access_level: AccessLevel; account_scope: AccountScope; account_ids: string[]
+  status: "active" | "revoked" | "expired"; label: string; expires_at: number
+}
+export interface AccessRequestRecord {
+  id: string; session_id: string; kind: "full_access" | "extension"; status: string
+  requested_access_level: string; requested_account_scope: AccountScope
+  requested_account_ids: string[]; requested_expires_at: number
+}
+export interface AccessControlRecord { surface: string; surface_id: number; mode: EnforcementMode }
+export interface AccessSessionUpdate {
+  access_level?: AccessLevel; account_scope?: AccountScope; account_ids?: string[]
+  expires_at?: number; label?: string
+}
+
 export interface OAuthRecord {
   id: string; client_id: string; client_name: string; resource: string; login: string; subject: string
   scopes: string[]; status: string; last_event: string; access_jti: string; refresh_jti: string
@@ -122,7 +142,7 @@ const previewBootstrap: AdminBootstrap = {
     { id: "overview", label: "Overview", enabled: true }, { id: "accounts", label: "Accounts", enabled: true },
     { id: "calls", label: "MCP Calls", enabled: true }, { id: "files", label: "Files", enabled: true },
     { id: "terminal", label: "Terminal", enabled: true }, { id: "browser", label: "Browser", enabled: true },
-    { id: "analysis", label: "Analysis", enabled: true }, { id: "oauth", label: "OAuth Sessions", enabled: true },
+    { id: "analysis", label: "Analysis", enabled: true }, { id: "access", label: "Access", enabled: true }, { id: "oauth", label: "OAuth Sessions", enabled: true },
     { id: "settings", label: "Settings", enabled: true },
   ],
 }
@@ -202,6 +222,13 @@ export const adminApi = {
   clearCalls: (): Promise<{ deleted: number }> => request("/calls", { method: "DELETE" }),
   deleteCall: (id: string): Promise<unknown> => request(`/calls/${id}`, { method: "DELETE" }),
   callsStreamUrl: adminApiUrl("/calls/stream"),
+  accessSessions: (): Promise<{ user: AccessUser; sessions: AccessSessionRecord[] }> => request("/access/sessions"),
+  accessRequests: (): Promise<{ user: AccessUser; requests: AccessRequestRecord[] }> => request("/access/requests"),
+  accessControls: (): Promise<{ user: AccessUser; controls: AccessControlRecord[] }> => request("/access/controls"),
+  resolveAccessRequest: (id: string, payload: { approve: boolean; account_scope?: AccountScope; account_ids?: string[]; expires_at?: number }): Promise<Record<string, unknown>> => request(`/access/requests/${encodeURIComponent(id)}/resolve`, { method: "POST", body: jsonBody(payload) }),
+  revokeAccessSession: (id: string): Promise<unknown> => request(`/access/sessions/${encodeURIComponent(id)}/revoke`, { method: "POST", body: "{}" }),
+  updateAccessSession: (id: string, payload: AccessSessionUpdate): Promise<AccessSessionRecord> => request(`/access/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: jsonBody(payload) }),
+  updateAccessControls: (items: Array<{ surface_id: number; mode: EnforcementMode }>): Promise<{ user: AccessUser; controls: AccessControlRecord[] }> => request("/access/controls", { method: "PUT", body: jsonBody({ items }) }),
   oauthSessions: (limit = 500): Promise<{ sessions: OAuthRecord[]; count: number }> => request(`/oauth-sessions?limit=${limit}`),
   files: (path = "", offset = 0, limit = 200): Promise<FilesState> => request(`/files?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`),
   uploadFile: (path: string, file: File, overwrite = false): Promise<Record<string, unknown>> => { const body = new FormData(); body.set("path", path); body.set("overwrite", String(overwrite)); body.set("file", file); return request("/files/upload", { method: "POST", body }) },

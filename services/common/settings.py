@@ -345,6 +345,7 @@ class AuthServiceSettings(ProcessSettings):
     jwt_private_key_pem: str = Field("", validation_alias="AUTH_JWT_PRIVATE_KEY_PEM")
     jwt_key_id: str = Field("auth-1", validation_alias="AUTH_JWT_KEY_ID")
     access_service_token: str = Field("", validation_alias="AUTH_ACCESS_SERVICE_TOKEN")
+    admin_service_token: str = Field("", validation_alias="AUTH_ADMIN_SERVICE_TOKEN")
     access_token_ttl_seconds: int = Field(
         900,
         ge=60,
@@ -373,6 +374,7 @@ class AuthServiceSettings(ProcessSettings):
         "jwt_private_key_pem",
         "jwt_key_id",
         "access_service_token",
+        "admin_service_token",
         mode="before",
     )
     @classmethod
@@ -395,6 +397,7 @@ class AuthServiceSettings(ProcessSettings):
                 ("AUTH_BOOTSTRAP_PASSWORD", self.bootstrap_password),
                 ("AUTH_JWT_PRIVATE_KEY_PEM", self.jwt_private_key_pem),
                 ("AUTH_ACCESS_SERVICE_TOKEN", self.access_service_token),
+                ("AUTH_ADMIN_SERVICE_TOKEN", self.admin_service_token),
             )
             if not value
         ]
@@ -525,6 +528,14 @@ class AdminApiSettings(ProcessSettings):
     postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
+    access_url: str = Field("http://access:8000", validation_alias="ACCESS_SERVICE_URL")
+    access_admin_service_token: str = Field(
+        "", validation_alias="ACCESS_ADMIN_SERVICE_TOKEN"
+    )
+    auth_internal_url: str = Field("http://auth:8000", validation_alias="AUTH_INTERNAL_URL")
+    auth_admin_service_token: str = Field(
+        "", validation_alias="AUTH_ADMIN_SERVICE_TOKEN"
+    )
     admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
     admin_password: str = Field("", validation_alias="ADMIN_API_PASSWORD")
     session_secret: str = Field("", validation_alias="ADMIN_API_SESSION_SECRET")
@@ -543,6 +554,10 @@ class AdminApiSettings(ProcessSettings):
         "postgres_user",
         "encryption_key",
         "service_token",
+        "access_url",
+        "access_admin_service_token",
+        "auth_internal_url",
+        "auth_admin_service_token",
         "admin_username",
         "admin_password",
         "session_secret",

@@ -6,13 +6,17 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 
 from common.access_contracts import (
     AdminResolveRequest,
+    AdminSessionOwnerRequest,
+    AdminSessionUpdate,
     ExtensionRequest,
     FullAccessRequest,
     SessionOpenRequest,
     SessionUpdateRequest,
     SessionValidateRequest,
+    SurfaceControlBatchUpdate,
     SurfaceControlUpdate,
 )
+from common.mcp_surfaces import MCP_SURFACE_IDS
 from common.settings import AccessServiceSettings
 
 from .service import AccessService
@@ -144,17 +148,64 @@ def build_access_app(
             "session": session.model_dump(mode="json"),
         }
 
+    @app.patch(
+        "/v1/admin/sessions/{session_id}",
+        dependencies=[Depends(require_admin)],
+    )
+    async def admin_update_session(
+        session_id: str, request: AdminSessionUpdate
+    ) -> dict[str, object]:
+        try:
+            updated = await service.admin_update(session_id, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return updated.model_dump(mode="json")
+
     @app.post(
         "/v1/admin/sessions/{session_id}/revoke",
         status_code=204,
         dependencies=[Depends(require_admin)],
     )
-    async def admin_revoke(session_id: str) -> Response:
+    async def admin_revoke(
+        session_id: str, request: AdminSessionOwnerRequest
+    ) -> Response:
         try:
-            await service.admin_revoke(session_id)
+            await service.admin_revoke(
+                session_id, admin_user_id=request.admin_user_id
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return Response(status_code=204)
+
+    @app.get(
+        "/v1/admin/users/{user_id}/controls",
+        dependencies=[Depends(require_admin)],
+    )
+    async def list_controls(user_id: str) -> dict[str, object]:
+        controls: list[dict[str, object]] = []
+        for name, member in MCP_SURFACE_IDS.items():
+            controls.append(
+                {
+                    "surface": name,
+                    "surface_id": int(member),
+                    "mode": await service.get_mode(user_id, int(member)),
+                }
+            )
+        return {"controls": controls}
+
+    @app.put("/v1/admin/controls/batch", dependencies=[Depends(require_admin)])
+    async def set_controls_batch(
+        request: SurfaceControlBatchUpdate,
+    ) -> dict[str, object]:
+        resolved = await service.set_modes_batch(
+            [(item.user_id, item.surface_id, item.mode) for item in request.items]
+        )
+        return {
+            "controls": [
+                {"user_id": user_id, "surface_id": surface_id, "mode": mode}
+                for user_id, surface_id, mode in resolved
+            ]
+        }
 
     @app.put("/v1/admin/control", dependencies=[Depends(require_admin)])
     async def set_control(request: SurfaceControlUpdate) -> dict[str, object]:

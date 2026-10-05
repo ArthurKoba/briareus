@@ -54,6 +54,27 @@ class ExtensionRequest(OAuthContext):
     requested_expires_at: int = Field(ge=0)
 
 
+class AdminSessionUpdate(BaseModel):
+    admin_user_id: str = Field(min_length=1, max_length=128)
+    access_level: AccessLevel | None = None
+    account_scope: AccountScope | None = None
+    account_ids: list[str] | None = Field(default=None, max_length=100)
+    expires_at: int | None = Field(default=None, ge=0)
+    label: str | None = Field(default=None, max_length=256)
+
+    @field_validator("account_ids")
+    @classmethod
+    def _normalize_account_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return list(dict.fromkeys(item.strip() for item in value if item.strip()))
+
+
+
+
+class AdminSessionOwnerRequest(BaseModel):
+    admin_user_id: str = Field(min_length=1, max_length=128)
+
 class AdminResolveRequest(BaseModel):
     admin_user_id: str = Field(min_length=1, max_length=128)
     approve: bool
@@ -66,6 +87,10 @@ class SurfaceControlUpdate(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     surface_id: int
     mode: EnforcementMode
+
+
+class SurfaceControlBatchUpdate(BaseModel):
+    items: list[SurfaceControlUpdate] = Field(min_length=1, max_length=100)
 
 
 class SessionSnapshot(BaseModel):

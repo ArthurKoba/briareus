@@ -61,6 +61,14 @@ class AuthRepository:
         async with self.database.sessions() as session:
             return await session.get(UserRecord, user_id)
 
+    async def get_user_by_username(self, username: str) -> UserRecord | None:
+        canonical = username.strip().casefold()
+        async with self.database.sessions() as session:
+            result = await session.scalars(
+                select(UserRecord).where(UserRecord.username == canonical)
+            )
+            return result.first()
+
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         async with self.database.sessions() as session:
             record = await session.get(OAuthClientRecord, client_id)

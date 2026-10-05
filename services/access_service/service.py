@@ -10,6 +10,7 @@ import valkey
 from common.access_contracts import (
     AccessRequestView,
     AdminResolveRequest,
+    AdminSessionUpdate,
     EnforcementMode,
     ExtensionRequest,
     FullAccessRequest,
@@ -181,6 +182,17 @@ class AccessService:
             mode=mode,
         )
         await asyncio.to_thread(self.cache.delete, self._control_key(user_id, surface_id))
+        return resolved
+
+    async def set_modes_batch(
+        self,
+        items: list[tuple[str, int, EnforcementMode]],
+    ) -> list[tuple[str, int, EnforcementMode]]:
+        resolved = await self.repository.set_modes_batch(items)
+        for user_id, surface_id, _mode in resolved:
+            await asyncio.to_thread(
+                self.cache.delete, self._control_key(user_id, surface_id)
+            )
         return resolved
 
     async def open_session(self, request: SessionOpenRequest) -> SessionSnapshot:
@@ -456,7 +468,30 @@ class AccessService:
         await self._cache_session(session)
         return resolved, session
 
-    async def admin_revoke(self, session_id: str) -> SessionSnapshot:
+    async def admin_update(
+        self, session_id: str, request: AdminSessionUpdate
+    ) -> SessionSnapshot:
+        updated = await self.repository.admin_update_session(
+            session_id,
+            admin_user_id=request.admin_user_id,
+            access_level=request.access_level,
+            account_scope=request.account_scope,
+            account_ids=request.account_ids,
+            expires_at=request.expires_at,
+            label=request.label,
+        )
+        if updated is None:
+            raise ValueError("agent session not found")
+        await self._invalidate_session(updated.uid)
+        await self._cache_session(updated)
+        return updated
+
+    async def admin_revoke(
+        self, session_id: str, *, admin_user_id: str
+    ) -> SessionSnapshot:
+        session = await self.repository.get_session_by_id(session_id)
+        if session is None or session.user_id != admin_user_id:
+            raise ValueError("agent session not found")
         revoked = await self.repository.revoke_session(session_id)
         if revoked is None:
             raise ValueError("agent session not found")
