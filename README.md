@@ -14,7 +14,9 @@ gateway
   |  \
   |   \-- OAuth routes ----------> auth
   |                                 |
-  |                                 +-- GitHub OAuth / DCR / token state
+  |                                 +-- local users / OAuth / token state
+  |
+  |   \-- agent access -----------> access (PostgreSQL + Valkey cache)
   |
   +-- /github/mcp   -------------> github
   +-- /gitlab/mcp   -------------> gitlab
@@ -54,39 +56,26 @@ https://api.mcp.koba-nexus.ru/v1/*    -> admin-api
 Admin UI/Admin API are independent deployment units. Gateway does not proxy their HTTP or
 WebSocket routes.
 
-## OAuth boundary
+## OAuth and agent-access boundary
 
-There is one OAuth authorization server:
+There is one local OAuth authorization server:
 
 ```text
 https://mcp.koba-nexus.ru
 ```
 
-and one GitHub OAuth callback:
+Every MCP endpoint is an independent RFC 8707 resource audience under that issuer. The `auth` runtime owns local users, OAuth clients/codes/sessions, refresh tokens and the private ES256 signing key. Gateway owns public routing and verifies already-issued tokens with the public key/JWKS.
 
-```text
-https://mcp.koba-nexus.ru/auth/callback
-```
+Agent access is a second authorization layer owned by the separate `access` service. In `session_enforced` mode each normal MCP call carries an agent session UID; sessions start read-only and may receive temporary/full access through administration approval. PostgreSQL is durable authority and Valkey is a read-through cache.
 
-Every MCP endpoint is an independent RFC 8707 resource audience under that issuer.
-Examples:
-
-```text
-https://mcp.koba-nexus.ru/mcp
-https://mcp.koba-nexus.ru/files/mcp
-https://mcp.koba-nexus.ru/analysis/mcp
-```
-
-The `auth` runtime owns GitHub OAuth credentials, DCR registrations, authorization
-transactions, refresh state and audience-bound FastMCP tokens. Gateway owns public
-routing, protected-resource metadata and local verification of already-issued signed
-tokens. GitHub OAuth credentials are never configured on provider runtimes or Admin API.
+Provider accounts remain integrations and are not platform login identities.
 
 ## Repository layout
 
 ```text
 services/
 ├── auth_service/
+├── access_service/
 ├── bridge/
 ├── common/
 ├── admin-api/

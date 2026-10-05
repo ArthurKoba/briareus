@@ -49,7 +49,11 @@ def build_access_app(
 
     @app.post("/v1/session/open", dependencies=[Depends(require_gateway)])
     async def open_session(request: SessionOpenRequest) -> dict[str, object]:
-        return (await service.open_session(request)).model_dump(mode="json")
+        try:
+            session = await service.open_session(request)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return session.model_dump(mode="json")
 
     @app.post("/v1/session/validate", dependencies=[Depends(require_gateway)])
     async def validate_session(request: SessionValidateRequest) -> dict[str, object]:
@@ -78,6 +82,8 @@ def build_access_app(
     async def request_full_access(request: FullAccessRequest) -> dict[str, object]:
         try:
             pending = await service.request_full_access(request)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return pending.model_dump(mode="json")
@@ -86,6 +92,8 @@ def build_access_app(
     async def request_extension(request: ExtensionRequest) -> dict[str, object]:
         try:
             pending = await service.request_extension(request)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return pending.model_dump(mode="json")
@@ -111,6 +119,8 @@ def build_access_app(
                 old_uid=request.session_uid,
                 label=request.label,
             )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return session.model_dump(mode="json")

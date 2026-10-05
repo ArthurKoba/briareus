@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from access_service.service import AccessService
-from common.access_contracts import SessionSnapshot, SessionValidateRequest
+from common.access_contracts import SessionOpenRequest, SessionSnapshot, SessionValidateRequest
 from common.settings import AccessServiceSettings, ValkeySettings
 
 
@@ -29,9 +29,16 @@ class FakeCache:
 
 
 class FakeRepository:
-    def __init__(self, session: SessionSnapshot, *, mode: str = "session_enforced") -> None:
+    def __init__(
+        self,
+        session: SessionSnapshot,
+        *,
+        mode: str = "session_enforced",
+        blocked: bool = False,
+    ) -> None:
         self.session = session
         self.mode = mode
+        self.blocked = blocked
 
     async def get_session(self, uid: str) -> SessionSnapshot | None:
         return self.session if uid == self.session.uid else None
@@ -42,7 +49,7 @@ class FakeRepository:
 
     async def oauth_context_blocked(self, oauth_session_id: str, *, user_id: str) -> bool:
         del oauth_session_id, user_id
-        return False
+        return self.blocked
 
 
 def settings() -> AccessServiceSettings:
@@ -109,9 +116,13 @@ def request(
 
 class AccessDecisionTest(unittest.IsolatedAsyncioTestCase):
     async def build(
-        self, session: SessionSnapshot, *, mode: str = "session_enforced"
+        self,
+        session: SessionSnapshot,
+        *,
+        mode: str = "session_enforced",
+        blocked: bool = False,
     ) -> AccessService:
-        repository = FakeRepository(session, mode=mode)
+        repository = FakeRepository(session, mode=mode, blocked=blocked)
         return AccessService(
             settings=settings(),
             repository=repository,  # type: ignore[arg-type]
@@ -153,6 +164,22 @@ class AccessDecisionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(allowed.allowed)
         self.assertFalse(denied.allowed)
         self.assertEqual(denied.code, "account_scope_denied")
+
+    async def test_blocked_oauth_context_cannot_open_new_session(self) -> None:
+        service = await self.build(snapshot(), blocked=True)
+        try:
+            with self.assertRaisesRegex(PermissionError, "oauth_session_revoked"):
+                await service.open_session(
+                    SessionOpenRequest(
+                        user_id="user-1",
+                        client_id="client-1",
+                        oauth_session_id="oauth-1",
+                        surface_id=4,
+                        label="blocked",
+                    )
+                )
+        finally:
+            await service.close()
 
     async def test_unrestricted_surface_skips_agent_session_requirement(self) -> None:
         service = await self.build(snapshot(), mode="unrestricted")

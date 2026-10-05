@@ -195,7 +195,14 @@ class AccessService:
             )
         return resolved
 
+    async def _require_oauth_context_active(self, context: OAuthContext) -> None:
+        if await self._oauth_context_blocked(
+            context.oauth_session_id, context.user_id
+        ):
+            raise PermissionError("oauth_session_revoked")
+
     async def open_session(self, request: SessionOpenRequest) -> SessionSnapshot:
+        await self._require_oauth_context_active(request)
         session = await self.repository.open_session(
             user_id=request.user_id,
             client_id=request.client_id,
@@ -401,6 +408,7 @@ class AccessService:
         self,
         request: FullAccessRequest,
     ) -> AccessRequestView:
+        await self._require_oauth_context_active(request)
         session = await self.status(
             context=request,
             surface_id=request.surface_id,
@@ -422,6 +430,7 @@ class AccessService:
         self,
         request: ExtensionRequest,
     ) -> AccessRequestView:
+        await self._require_oauth_context_active(request)
         session = await self.status(
             context=request,
             surface_id=request.surface_id,
