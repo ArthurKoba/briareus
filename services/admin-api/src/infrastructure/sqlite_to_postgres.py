@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, func, insert, select, text
+from sqlalchemy import Boolean, DateTime, func, insert, select
 from sqlalchemy.sql.schema import Column, Table
 
 from .crypto import FernetCredentialCipher
@@ -19,8 +19,6 @@ from .database import Base, DatabaseManager
 _BATCH_SIZE = 500
 _SQLITE_INTERNAL_PREFIX = "sqlite_"
 _LEGACY_TABLES: dict[str, str] = {"admin_config": "management_config"}
-_MIGRATION_MARKER_TABLE = "admin_migration_state"
-_MIGRATION_MARKER_KEY = "legacy_sqlite_import_v1"
 
 
 @dataclass(frozen=True)
@@ -38,7 +36,6 @@ class MigrationReport:
     source: Path
     tables: tuple[TableMigration, ...]
     ignored_empty_tables: tuple[str, ...]
-    already_migrated: bool = False
 
     @property
     def source_rows(self) -> int:
@@ -186,36 +183,6 @@ async def _target_counts(manager: DatabaseManager) -> dict[str, int]:
     return counts
 
 
-async def _ensure_migration_marker_table(manager: DatabaseManager) -> None:
-    async with manager.engine.begin() as connection:
-        await connection.execute(
-            text(
-                f"""
-                CREATE TABLE IF NOT EXISTS {_MIGRATION_MARKER_TABLE} (
-                    migration_key TEXT PRIMARY KEY,
-                    source_path TEXT NOT NULL,
-                    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-        )
-
-
-async def _migration_completed(manager: DatabaseManager) -> bool:
-    async with manager.engine.connect() as connection:
-        value = await connection.scalar(
-            text(
-                f"""
-                SELECT 1
-                FROM {_MIGRATION_MARKER_TABLE}
-                WHERE migration_key = :migration_key
-                """
-            ),
-            {"migration_key": _MIGRATION_MARKER_KEY},
-        )
-    return value is not None
-
-
 def _nonempty_unknown_tables(
     source: sqlite3.Connection,
     source_tables: Sequence[str],
@@ -248,6 +215,8 @@ async def migrate_sqlite_to_postgres(
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
 
+    source_path = await asyncio.to_thread(lambda: sqlite_path.expanduser().resolve(strict=True))
+    source = _open_source(source_path)
     manager = DatabaseManager(
         host=host,
         port=port,
@@ -263,22 +232,7 @@ async def migrate_sqlite_to_postgres(
             raise ValueError("MANAGEMENT_ENCRYPTION_KEY must be a Fernet key") from exc
     else:
         source_cipher = target_cipher
-
-    source: sqlite3.Connection | None = None
-    source_path = sqlite_path
     try:
-        await manager.ensure_schema()
-        await _ensure_migration_marker_table(manager)
-        if await _migration_completed(manager):
-            return MigrationReport(
-                source=source_path,
-                tables=(),
-                ignored_empty_tables=(),
-                already_migrated=True,
-            )
-
-        source_path = await asyncio.to_thread(lambda: sqlite_path.expanduser().resolve(strict=True))
-        source = _open_source(source_path)
         source_tables = _source_tables(source)
         unknown_nonempty, ignored_empty = _nonempty_unknown_tables(source, source_tables)
         if unknown_nonempty:
@@ -287,6 +241,7 @@ async def migrate_sqlite_to_postgres(
                 + ", ".join(unknown_nonempty)
             )
 
+        await manager.ensure_schema()
         before_counts = await _target_counts(manager)
         nonempty_target = {name: count for name, count in before_counts.items() if count}
         if nonempty_target:
@@ -368,36 +323,18 @@ async def migrate_sqlite_to_postgres(
                     )
                 )
 
-            await target.execute(
-                text(
-                    f"""
-                    INSERT INTO {_MIGRATION_MARKER_TABLE}
-                        (migration_key, source_path)
-                    VALUES (:migration_key, :source_path)
-                    """
-                ),
-                {
-                    "migration_key": _MIGRATION_MARKER_KEY,
-                    "source_path": str(source_path),
-                },
-            )
-
         return MigrationReport(
             source=source_path,
             tables=tuple(finalized),
             ignored_empty_tables=tuple(ignored_empty),
         )
     finally:
-        if source is not None:
-            source.close()
+        source.close()
         await manager.dispose()
 
 
 def _print_report(report: MigrationReport) -> None:
     print(f"source={report.source}")
-    if report.already_migrated:
-        print("status=already-migrated")
-        return
     for item in report.tables:
         print(
             f"{item.table}: sqlite={item.source_rows} postgres={item.target_rows} "

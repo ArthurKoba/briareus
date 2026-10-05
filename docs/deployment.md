@@ -40,4 +40,4 @@ POSTGRES_USER={{environment.POSTGRES_USER}}
 POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}
 ```
 
-For the SQLite -> PostgreSQL cutover, temporarily mount the legacy management volume read-only into `admin-api` and set `ADMIN_API_SQLITE_IMPORT_PATH` to the mounted `management.sqlite3`. The startup importer runs before Admin API creates default config/snapshot rows and writes an atomic migration marker so restarts do not re-import. If the legacy Fernet key differs from ADMIN_API_ENCRYPTION_KEY, temporarily provide MANAGEMENT_ENCRYPTION_KEY; credentials are decrypted with the legacy key and re-encrypted with the current key inside the migration transaction. Remove the temporary mount and cutover-only variables after production acceptance.
+Run the SQLite -> PostgreSQL migration as a one-shot process/container outside the Admin API runtime. Mount the legacy `management` volume read-only, attach the process to Docker network `mcp`, and invoke `python -m infrastructure.sqlite_to_postgres /management/management.sqlite3`. The target PostgreSQL database must be empty. Remove the temporary migration container after row-count validation succeeds.
