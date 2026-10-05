@@ -56,4 +56,4 @@ POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}
 
 `POSTGRES_DB` remains optional at the Compose level and defaults to `mcp-bridge`. `POSTGRES_USER` and `POSTGRES_PASSWORD` are required. The PostgreSQL healthcheck reads the resolved container environment instead of re-interpolating Compose inputs.
 
-Run the SQLite -> PostgreSQL migration as a one-shot process/container outside the Admin API runtime. Mount the legacy `management` volume read-only, attach the process to Docker network `mcp`, and invoke `python -m infrastructure.sqlite_to_postgres /management/management.sqlite3`. The target PostgreSQL database must be empty. Remove the temporary migration container after row-count validation succeeds.
+The completed legacy SQLite -> PostgreSQL migration was performed as a one-shot process outside the Admin API runtime. Any future recovery/import operation must mount its legacy SQLite source read-only and keep the PostgreSQL target/row-count validation rules from the importer.
