@@ -1,0 +1,40 @@
+name: MVP Backend
+
+on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "tests/**"
+      - "scripts/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/mvp-backend.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+      - run: uv sync --frozen --dev --no-install-project
+      - run: .venv/bin/ruff check services tests scripts/provision_auth_access_databases.py
+      - run: .venv/bin/mypy services/auth_service services/access_service services/bridge services/common services/admin-api/src scripts/provision_auth_access_databases.py
+      - run: PYTHONPATH=services .venv/bin/python -m unittest discover -s tests -v
+
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [auth, access, gateway, admin-api]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target "${{ matrix.target }}" -t "mcp-bridge:${{ matrix.target }}" .
