@@ -39,8 +39,7 @@ python scripts/provision_authorization_database.py
 
 The provisioner uses the cluster-admin `POSTGRES_*` connection and the service-specific `AUTHORIZATION_POSTGRES_*` credentials. The authorization runtime receives only the authorization database credentials.
 
-Authorization additionally requires local bootstrap credentials, an ES256 private signing key, one gateway service token and one admin service token. Gateway receives only `AUTHORIZATION_JWT_PUBLIC_KEY_PEM` plus the gateway token for agent-session checks. Agent-session state uses Valkey as a read-through cache; cache loss falls back to durable state in the same authorization database.
-Gateway reaches the private authorization runtime through `AUTHORIZATION_SERVICE_URL` (default `http://authorization:8000`), so split/local topologies do not depend on a hard-coded container address.
+Authorization additionally requires `AUTHORIZATION_PUBLIC_BASE_URL`, `MCP_PUBLIC_BASE_URL`, local bootstrap credentials, an ES256 private signing key, one gateway service token and one admin service token. Production authorization is public at `https://authorization.mcp.koba-nexus.ru`; MCP resources stay at `https://mcp.koba-nexus.ru`. Gateway receives `AUTHORIZATION_PUBLIC_BASE_URL`, `MCP_PUBLIC_BASE_URL`, `AUTHORIZATION_JWT_PUBLIC_KEY_PEM` and the gateway token for agent-session checks. Gateway does not proxy OAuth endpoints. Agent-session state uses Valkey as a read-through cache; cache loss falls back to durable state in the same authorization database. Admin API reaches authorization privately through `AUTHORIZATION_INTERNAL_URL` (default `http://authorization:8000`).
 
 The legacy monolith remains pinned to `e41085d9c86124a0f711411314265b36f4c23dea` until split-runtime acceptance is complete.
 

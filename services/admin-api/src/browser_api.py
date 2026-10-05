@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter
@@ -32,7 +31,7 @@ def build_browser_operator_api_router(
             verify_browser_remote_debug_token(
                 token,
                 settings.service_token,
-                settings.admin_username,
+                None,
                 target_id,
                 max_age_seconds=BROWSER_REMOTE_DEBUG_TTL_SECONDS,
             )
@@ -54,9 +53,7 @@ def build_browser_operator_api_router(
             return
         session = websocket.scope.get("session")
         username = session.get(_SESSION_KEY) if isinstance(session, dict) else None
-        if not isinstance(username, str) or not hmac.compare_digest(
-            username, settings.admin_username
-        ):
+        if not isinstance(username, str) or not username:
             await websocket.close(code=4401)
             return
         await relay(

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 class LocalUserIdentity(BaseModel):
     id: str
     username: str
+    role: str
     enabled: bool
 
 
@@ -22,6 +23,17 @@ class AuthorizationIdentityClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+
+    async def authenticate(self, username: str, password: str) -> LocalUserIdentity | None:
+        response = await self._client.post(
+            "/internal/v1/authenticate",
+            json={"username": username, "password": password},
+        )
+        if response.status_code == 401:
+            return None
+        response.raise_for_status()
+        return LocalUserIdentity.model_validate(response.json())
 
     async def by_username(self, username: str) -> LocalUserIdentity:
         response = await self._client.get(

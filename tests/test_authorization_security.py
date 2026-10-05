@@ -11,6 +11,8 @@ from authorization.security import (
     verify_access_token,
     verify_password,
 )
+from bridge.authorization_client import LocalAuthorizationTokenVerifier
+from common.settings import GatewayAuthorizationSettings
 
 
 class AuthorizationSecurityTest(unittest.TestCase):
@@ -25,7 +27,7 @@ class AuthorizationSecurityTest(unittest.TestCase):
         token, _ = issue_access_token(
             private_key=private_key,
             kid="test-key",
-            issuer="https://mcp.example.test",
+            issuer="https://authorization.example.test",
             audience="https://mcp.example.test/github/mcp",
             subject="user-1",
             username="admin",
@@ -38,7 +40,7 @@ class AuthorizationSecurityTest(unittest.TestCase):
         valid = verify_access_token(
             token,
             public_key=private_key.public_key(),
-            issuer="https://mcp.example.test",
+            issuer="https://authorization.example.test",
             audience="https://mcp.example.test/github/mcp",
         )
         self.assertIsNotNone(valid)
@@ -48,7 +50,7 @@ class AuthorizationSecurityTest(unittest.TestCase):
         wrong_resource = verify_access_token(
             token,
             public_key=private_key.public_key(),
-            issuer="https://mcp.example.test",
+            issuer="https://authorization.example.test",
             audience="https://mcp.example.test/terminal/mcp",
         )
         self.assertIsNone(wrong_resource)
@@ -61,6 +63,38 @@ class AuthorizationSecurityTest(unittest.TestCase):
             serialization.NoEncryption(),
         )
         self.assertIn(b"BEGIN PRIVATE KEY", pem)
+
+
+class GatewayAuthorizationVerifierTest(unittest.IsolatedAsyncioTestCase):
+    async def test_gateway_uses_authorization_issuer_and_mcp_audience(self) -> None:
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        public_pem = private_key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode()
+        settings = GatewayAuthorizationSettings.model_construct(
+            enabled=True,
+            public_base_url="https://authorization.example.test",
+            mcp_public_base_url="https://mcp.example.test",
+            jwt_public_key_pem=public_pem,
+        )
+        resource = "https://mcp.example.test/github/mcp"
+        verifier = LocalAuthorizationTokenVerifier(settings, resource)
+        token, _ = issue_access_token(
+            private_key=private_key,
+            kid="test-key",
+            issuer="https://authorization.example.test",
+            audience=resource,
+            subject="user-1",
+            username="admin",
+            client_id="client-1",
+            scopes=["read:user"],
+            session_id="oauth-session-1",
+            ttl_seconds=300,
+        )
+        verified = await verifier.verify_token(token)
+        self.assertIsNotNone(verified)
+
 
 
 if __name__ == "__main__":

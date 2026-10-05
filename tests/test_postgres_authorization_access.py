@@ -113,12 +113,15 @@ class PostgresAuthorizationAccessIntegrationTest(unittest.IsolatedAsyncioTestCas
     async def test_authorization_database_and_real_oauth_flow(self) -> None:
         authenticated = await self.authorization_repository.authenticate_user("admin", "admin")
         self.assertIsNotNone(authenticated)
+        assert authenticated is not None
+        self.assertEqual(authenticated.role, "superadmin")
         self.assertIsNone(
             await self.authorization_repository.authenticate_user("admin", "wrong-password")
         )
 
         settings = AuthorizationServiceSettings.model_construct(
-            public_base_url="https://mcp.example.test",
+            public_base_url="https://authorization.example.test",
+            mcp_public_base_url="https://mcp.example.test",
             postgres_host=_POSTGRES_HOST,
             postgres_port=int(os.getenv("TEST_POSTGRES_PORT", "5432")),
             postgres_db=os.environ["TEST_AUTHORIZATION_POSTGRES_DB"],
@@ -139,9 +142,19 @@ class PostgresAuthorizationAccessIntegrationTest(unittest.IsolatedAsyncioTestCas
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
-            base_url="https://mcp.example.test",
+            base_url="https://authorization.example.test",
             follow_redirects=False,
         ) as client:
+            authenticated_internal = await client.post(
+                "/internal/v1/authenticate",
+                headers={"Authorization": "Bearer admin-test"},
+                json={"username": "admin", "password": "admin"},
+            )
+            self.assertEqual(
+                authenticated_internal.status_code, 200, authenticated_internal.text
+            )
+            self.assertEqual(authenticated_internal.json()["role"], "superadmin")
+
             registration = await client.post(
                 "/register",
                 json={

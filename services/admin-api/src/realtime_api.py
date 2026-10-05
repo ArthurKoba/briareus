@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 
 from application.services import (
     AccountService,
@@ -60,9 +59,7 @@ def build_realtime_router(
             return
         session = websocket.scope.get("session")
         username = session.get(_SESSION_KEY) if isinstance(session, dict) else None
-        if not isinstance(username, str) or not hmac.compare_digest(
-            username, settings.admin_username
-        ):
+        if not isinstance(username, str) or not username:
             await websocket.close(code=4401)
             return
 
