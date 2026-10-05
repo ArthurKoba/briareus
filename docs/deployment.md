@@ -39,3 +39,5 @@ Infrastructure database identity is fixed to `mcp-bridge`. Production injects on
 POSTGRES_USER={{environment.POSTGRES_USER}}
 POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}
 ```
+
+For the SQLite -> PostgreSQL cutover, temporarily mount the legacy management volume read-only into `admin-api` and set `ADMIN_API_SQLITE_IMPORT_PATH` to the mounted `management.sqlite3`. The startup importer runs before Admin API creates default config/snapshot rows and writes an atomic migration marker so restarts do not re-import. Remove the temporary mount and variable after production acceptance.

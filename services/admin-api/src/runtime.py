@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from api_errors import install_admin_api_error_handlers
 from application.services import (
@@ -32,6 +33,7 @@ from infrastructure.repositories import (
 )
 from infrastructure.reverse import ReverseAdminClient
 from infrastructure.snapshot_worker import SnapshotRefresher
+from infrastructure.sqlite_to_postgres import migrate_sqlite_to_postgres
 from infrastructure.terminal import TerminalAdminClient
 from infrastructure.web import WebAdminClient
 from presentation.api import ApiServices, build_internal_router
@@ -142,6 +144,24 @@ async def _maintenance_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    if settings.sqlite_import_path:
+        report = await migrate_sqlite_to_postgres(
+            Path(settings.sqlite_import_path),
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            database=settings.postgres_db,
+            username=settings.postgres_user,
+            password=settings.postgres_password,
+        )
+        if report.already_migrated:
+            logger.info("admin-api legacy SQLite import already completed")
+        else:
+            logger.info(
+                "admin-api legacy SQLite import completed source_rows=%d target_rows=%d",
+                report.source_rows,
+                report.target_rows,
+            )
+
     if await database.ensure_schema():
         logger.info("admin-api PostgreSQL schema initialized missing tables")
     await config_service.get()

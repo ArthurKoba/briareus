@@ -446,6 +446,7 @@ class AdminApiSettings(ProcessSettings):
     postgres_db: str = Field("mcp-bridge", validation_alias="POSTGRES_DB")
     postgres_user: str = Field(validation_alias="POSTGRES_USER")
     postgres_password: str = Field(validation_alias="POSTGRES_PASSWORD")
+    sqlite_import_path: str = Field("", validation_alias="ADMIN_API_SQLITE_IMPORT_PATH")
     encryption_key: str = Field("", validation_alias="ADMIN_API_ENCRYPTION_KEY")
     service_token: str = Field("", validation_alias="ADMIN_API_SERVICE_TOKEN")
     admin_username: str = Field("admin", validation_alias="ADMIN_API_USERNAME")
@@ -464,6 +465,7 @@ class AdminApiSettings(ProcessSettings):
         "postgres_host",
         "postgres_db",
         "postgres_user",
+        "sqlite_import_path",
         "encryption_key",
         "service_token",
         "admin_username",
