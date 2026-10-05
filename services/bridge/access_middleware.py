@@ -13,7 +13,7 @@ from mcp.types import TextContent
 from common.access_contracts import OAuthContext, SessionSnapshot
 from common.mcp_surfaces import surface_id
 
-from .access_client import AuthAccessClient
+from .authorization_access_client import AuthorizationAccessClient
 
 _ACCESS_TOOL_PREFIX = "access_session_"
 _SAFE_ACCOUNT_DISCOVERY: dict[str, frozenset[str]] = {
@@ -82,7 +82,7 @@ class AccessSessionMiddleware(Middleware):
         self,
         *,
         surface: str,
-        client: AuthAccessClient,
+        client: AuthorizationAccessClient,
     ) -> None:
         self.surface = surface
         self.surface_id = int(surface_id(surface))

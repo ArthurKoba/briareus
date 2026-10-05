@@ -152,7 +152,7 @@ def _ensure_schema_sync(connection: Connection) -> bool:
         missing = expected - actual
         if missing:
             raise RuntimeError(
-                f"auth access schema migration required for {table_name}: "
+                f"authorization access schema migration required for {table_name}: "
                 f"missing columns: {', '.join(sorted(missing))}"
             )
     return bool(created_tables)

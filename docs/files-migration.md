@@ -19,7 +19,7 @@ The active stack uses:
 
 ```text
 admin-api              -> /admin-api
-auth               -> /auth
+authorization      -> /authorization
 terminal-workspace -> /workspace
 terminal-home      -> /home/agent
 ```

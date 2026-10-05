@@ -26,18 +26,18 @@ FROM dependencies AS runtime-base
 ARG BUILD_SHA=unknown
 ARG BUILD_TIME=unknown
 
-ENV FASTMCP_HOME=/auth \
+ENV FASTMCP_HOME=/authorization \
     HOME=/home/bridge \
     BUILD_SHA=${BUILD_SHA} \
     BUILD_TIME=${BUILD_TIME}
 
 COPY docker-entrypoint.sh /usr/local/bin/bridge-entrypoint
 RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
-    && mkdir -p /auth /admin-api /home/bridge \
-    && chown -R 1000:1000 /auth /admin-api /home/bridge
+    && mkdir -p /authorization /admin-api /home/bridge \
+    && chown -R 1000:1000 /authorization /admin-api /home/bridge
 
 COPY services/common ./services/common
-COPY scripts/provision_auth_database.py ./scripts/provision_auth_database.py
+COPY scripts/provision_authorization_database.py ./scripts/provision_authorization_database.py
 
 EXPOSE 8000
 
@@ -48,9 +48,9 @@ ENTRYPOINT ["/usr/local/bin/bridge-entrypoint"]
 CMD ["/app/.venv/bin/python", "-m", "common.asgi"]
 
 
-FROM runtime-base AS auth
-COPY services/auth_service ./services/auth_service
-ENV ASGI_APP=auth_service.runtime:app
+FROM runtime-base AS authorization
+COPY services/authorization ./services/authorization
+ENV ASGI_APP=authorization.runtime:app
 
 
 FROM runtime-base AS gateway

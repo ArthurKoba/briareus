@@ -4,13 +4,13 @@ from fastmcp.server.auth import AccessToken, TokenVerifier
 
 from common.mcp_surfaces import canonical_public_base_url
 from common.oauth_tokens import load_oauth_public_key, verify_oauth_access_token
-from common.settings import GatewayAuthSettings
+from common.settings import GatewayAuthorizationSettings
 
 
-class LocalAuthTokenVerifier(TokenVerifier):
-    """Validate locally issued OAuth access tokens without calling auth per request."""
+class LocalAuthorizationTokenVerifier(TokenVerifier):
+    """Validate locally issued OAuth access tokens without calling authorization per request."""
 
-    def __init__(self, settings: GatewayAuthSettings, resource: str) -> None:
+    def __init__(self, settings: GatewayAuthorizationSettings, resource: str) -> None:
         super().__init__(required_scopes=["read:user"])
         self.resource = resource
         self.issuer = canonical_public_base_url(settings.public_base_url)

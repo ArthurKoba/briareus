@@ -41,7 +41,7 @@ def _login_page(
   <p>Authorize {html.escape(client_name)}.</p>
   <p class="muted">{html.escape(resource)}</p>
   {error_html}
-  <form method="post" action="/auth/login">
+  <form method="post" action="/authorization/login">
     <input type="hidden" name="transaction" value="{html.escape(transaction_id)}">
     <label for="username">Username</label>
     <input id="username" name="username" autocomplete="username" required autofocus>
@@ -53,7 +53,7 @@ def _login_page(
 </html>"""
 
 
-def build_auth_app(provider: LocalOAuthProvider) -> Starlette:
+def build_authorization_app(provider: LocalOAuthProvider) -> Starlette:
     async def health(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
@@ -122,8 +122,8 @@ def build_auth_app(provider: LocalOAuthProvider) -> Starlette:
     routes = list(provider.get_routes(mcp_path="/mcp"))
     routes.extend(
         [
-            Route("/auth/login", login_get, methods=["GET"]),
-            Route("/auth/login", login_post, methods=["POST"]),
+            Route("/authorization/login", login_get, methods=["GET"]),
+            Route("/authorization/login", login_post, methods=["POST"]),
             Route("/.well-known/jwks.json", jwks, methods=["GET"]),
             Route(
                 "/internal/v1/users/by-username/{username}",

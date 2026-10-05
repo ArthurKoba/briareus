@@ -12,7 +12,7 @@ def load_oauth_public_key(pem: str) -> ec.EllipticCurvePublicKey:
     if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(
         key.curve, ec.SECP256R1
     ):
-        raise ValueError("AUTH_JWT_PUBLIC_KEY_PEM must contain a P-256 EC public key")
+        raise ValueError("AUTHORIZATION_JWT_PUBLIC_KEY_PEM must contain a P-256 EC public key")
     return key
 
 

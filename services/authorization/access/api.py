@@ -17,14 +17,14 @@ from common.access_contracts import (
     SurfaceControlUpdate,
 )
 from common.mcp_surfaces import MCP_SURFACE_IDS
-from common.settings import AuthServiceSettings
+from common.settings import AuthorizationServiceSettings
 
-from .service import AccessService
+from .control import AccessControl
 
 
 def build_access_app(
-    service: AccessService,
-    settings: AuthServiceSettings,
+    service: AccessControl,
+    settings: AuthorizationServiceSettings,
 ) -> FastAPI:
     app = FastAPI(title="Auth Access", docs_url=None, redoc_url=None, openapi_url=None)
 

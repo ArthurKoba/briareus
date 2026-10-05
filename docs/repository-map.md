@@ -5,7 +5,7 @@ mcp-bridge/
 ├── .github/
 ├── docs/
 ├── services/
-│   ├── auth_service/
+│   ├── authorization/
 │   │   └── access/            # internal agent-session/access module
 │   ├── bridge/                 # public gateway only
 │   ├── common/                 # shared contracts/settings/runtime primitives

@@ -87,7 +87,7 @@ ADMIN_API_SESSION_SECRET=<random session secret>
 ADMIN_API_SESSION_HTTPS_ONLY=true
 ```
 
-Local OAuth is owned by the separate `auth` service and uses the `AUTH_*` deployment contract. Provider accounts remain separate integration data exposed through the administration surface.
+Local OAuth is owned by the separate `authorization` service and uses the `AUTHORIZATION_*` deployment contract. Provider accounts remain separate integration data exposed through the administration surface.
 
 ## Legacy SQLite cutover
 

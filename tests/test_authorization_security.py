@@ -5,7 +5,7 @@ import unittest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from auth_service.security import (
+from authorization.security import (
     hash_password,
     issue_access_token,
     verify_access_token,
@@ -13,7 +13,7 @@ from auth_service.security import (
 )
 
 
-class AuthSecurityTest(unittest.TestCase):
+class AuthorizationSecurityTest(unittest.TestCase):
     def test_password_hash_uses_argon2id_and_verifies(self) -> None:
         encoded = hash_password("correct horse battery staple")
         self.assertTrue(encoded.startswith("$argon2id$"))

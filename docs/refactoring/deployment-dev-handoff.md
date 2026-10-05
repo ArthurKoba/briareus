@@ -52,7 +52,7 @@ Create a separate Coolify Git-backed Docker Compose resource on branch `dev`.
 It must not share production mutable state:
 
 - separate named volumes;
-- separate generated Admin API/auth secrets;
+- separate generated Admin API/authorization secrets;
 - separate Valkey;
 - separate browser profile;
 - separate public Dev domain;
@@ -125,6 +125,6 @@ For a Git-backed Compose application, use Coolify metadata to discover repositor
 
 ## Production preservation rule
 
-No Dev or refactor operation may intentionally use production mutable volumes, browser profiles, Ghidra worker sessions or auth stores as a test target.
+No Dev or refactor operation may intentionally use production mutable volumes, browser profiles, Ghidra worker sessions or authorization stores as a test target.
 
 Production remains `main`. Dev integration happens on `dev`. Changes graduate from Dev only after the relevant source/build/runtime acceptance level is demonstrated.

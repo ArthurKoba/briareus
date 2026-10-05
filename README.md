@@ -12,11 +12,11 @@ ChatGPT / MCP clients
         v
 gateway
   |  \
-  |   \-- OAuth routes ----------> auth
+  |   \-- OAuth routes ----------> authorization
   |                                 |
   |                                 +-- local users / OAuth / token state
   |
-  |   \-- agent access -----------> auth (PostgreSQL + Valkey cache)
+  |   \-- agent access -----------> authorization (PostgreSQL + Valkey cache)
   |
   +-- /github/mcp   -------------> github
   +-- /gitlab/mcp   -------------> gitlab
@@ -64,9 +64,9 @@ There is one local OAuth authorization server:
 https://mcp.koba-nexus.ru
 ```
 
-Every MCP endpoint is an independent RFC 8707 resource audience under that issuer. The `auth` runtime owns local users, OAuth clients/codes/sessions, refresh tokens and the private ES256 signing key. Gateway owns public routing and verifies already-issued tokens with the public key/JWKS.
+Every MCP endpoint is an independent RFC 8707 resource audience under that issuer. The `authorization` runtime owns local users, OAuth clients/codes/sessions, refresh tokens and the private ES256 signing key. Gateway owns public routing and verifies already-issued tokens with the public key/JWKS.
 
-Agent access is a second authorization layer inside the same `auth` service. In `session_enforced` mode each normal MCP call carries an agent session UID; sessions start read-only and may receive temporary/full access through administration approval. PostgreSQL is durable authority and Valkey is a read-through cache.
+Agent access is a second authorization layer inside the same `authorization` service. In `session_enforced` mode each normal MCP call carries an agent session UID; sessions start read-only and may receive temporary/full access through administration approval. PostgreSQL is durable authority and Valkey is a read-through cache.
 
 Provider accounts remain integrations and are not platform login identities.
 
@@ -74,7 +74,7 @@ Provider accounts remain integrations and are not platform login identities.
 
 ```text
 services/
-├── auth_service/
+├── authorization/
 │   └── access/
 ├── bridge/
 ├── common/
@@ -207,18 +207,7 @@ capabilities; it does not add fingerprint spoofing or site-control bypass logic.
 
 ## OAuth sessions
 
-The authorization runtime reports safe OAuth session metadata to Admin API without
-copying access or refresh tokens. Admin API shows client/resource identity, last use,
-refresh activity, token expiry, revocation and the latest authentication error. Refresh
-rotation keeps a bounded two-minute idempotency window in the encrypted persistent OAuth
-store. Concurrent requests and retries that cross an auth-container restart reuse the same
-rotated result instead of spending the one-time upstream refresh token again. Client-facing
-FastMCP access tokens use a 30-day lifetime; every request still validates the upstream GitHub
-session, so upstream expiry/revocation is not extended, while unnecessary daily client refresh
-rotation is avoided. Refresh attempts emit token-safe correlation logs for request, replay,
-upstream exchange, race recovery and terminal `reauth_required` branches; raw tokens are never
-logged. An upstream refresh token that was already invalid before these protections cannot be
-reconstructed and requires one fresh user authorization.
+The `authorization` runtime stores local OAuth users, clients, authorization codes, OAuth sessions and refresh-token state in PostgreSQL. Refresh tokens rotate on use and access tokens are short-lived ES256 JWTs signed only by the authorization runtime; gateway validates them locally with the public key. Provider integrations such as GitHub and GitLab do not participate in platform login or token refresh.
 
 ## Observability
 

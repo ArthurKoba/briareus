@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from auth_service.access.service import AccessService
+from authorization.access.control import AccessControl
 from common.access_contracts import SessionSnapshot
-from common.settings import AuthServiceSettings, ValkeySettings
+from common.settings import AuthorizationServiceSettings, ValkeySettings
 
 
 class FakeCache:
@@ -56,10 +56,10 @@ class AccessReadThroughTest(unittest.IsolatedAsyncioTestCase):
         )
         repository = FakeRepository(session)
         cache = FakeCache()
-        settings = AuthServiceSettings.model_construct(
+        settings = AuthorizationServiceSettings.model_construct(
             postgres_host="postgres",
             postgres_port=5432,
-            postgres_db="auth",
+            postgres_db="authorization",
             postgres_user="user",
             postgres_password="pass",
             gateway_service_token="gateway",
@@ -71,7 +71,7 @@ class AccessReadThroughTest(unittest.IsolatedAsyncioTestCase):
             invalid_attempt_window_seconds=600,
             invalid_attempt_backoff_seconds=30,
         )
-        service = AccessService(
+        service = AccessControl(
             settings=settings,
             repository=repository,  # type: ignore[arg-type]
             cache=cache,  # type: ignore[arg-type]

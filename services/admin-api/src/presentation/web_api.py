@@ -28,8 +28,8 @@ from domain.accounts import Account, AccountConflictError, AuthType, Provider
 from domain.configuration import AdminConfig
 from domain.telemetry import InvocationQuery
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
-from infrastructure.access import AccessAdminClient
-from infrastructure.auth_identity import AuthIdentityClient, LocalUserIdentity
+from infrastructure.authorization_access import AuthorizationAccessAdminClient
+from infrastructure.authorization_identity import AuthorizationIdentityClient, LocalUserIdentity
 from infrastructure.files import FileAdminStore
 from infrastructure.reverse import ReverseAdminClient
 from infrastructure.snapshot_worker import (
@@ -107,8 +107,8 @@ class WebApiServices:
     snapshot_refresher: SnapshotRefresher
     realtime: RealtimeBus | None = None
     telemetry: FrontendTelemetryProxy | None = None
-    access: AccessAdminClient | None = None
-    auth_identity: AuthIdentityClient | None = None
+    authorization_access: AuthorizationAccessAdminClient | None = None
+    authorization_identity: AuthorizationIdentityClient | None = None
 
 
 class LoginRequest(BaseModel):
@@ -311,22 +311,24 @@ def build_admin_api_router(
     async def local_user(request: Request) -> LocalUserIdentity:
         username = require_user(request)
         api = available()
-        if api.auth_identity is None:
-            raise HTTPException(status_code=503, detail="auth identity service unavailable")
+        if api.authorization_identity is None:
+            raise HTTPException(
+                status_code=503, detail="authorization identity service unavailable"
+            )
         try:
-            identity = await api.auth_identity.by_username(username)
+            identity = await api.authorization_identity.by_username(username)
         except Exception as exc:
             raise HTTPException(
-                status_code=503, detail="auth identity service unavailable"
+                status_code=503, detail="authorization identity service unavailable"
             ) from exc
         if not identity.enabled:
             raise HTTPException(status_code=403, detail="local user disabled")
         return identity
 
-    def access_control(api: WebApiServices) -> AccessAdminClient:
-        if api.access is None:
+    def authorization_access_control(api: WebApiServices) -> AuthorizationAccessAdminClient:
+        if api.authorization_access is None:
             raise HTTPException(status_code=503, detail="authorization controls unavailable")
-        return api.access
+        return api.authorization_access
 
     async def publish_admin_event(api: WebApiServices, event_type: str, data: object) -> None:
         if api.realtime is not None:
@@ -400,7 +402,7 @@ def build_admin_api_router(
         return json_object(
             {
                 "user": identity.model_dump(mode="json"),
-                "sessions": await access_control(api).sessions(identity.id),
+                "sessions": await authorization_access_control(api).sessions(identity.id),
             }
         )
 
@@ -411,7 +413,7 @@ def build_admin_api_router(
         return json_object(
             {
                 "user": identity.model_dump(mode="json"),
-                "requests": await access_control(api).requests(identity.id),
+                "requests": await authorization_access_control(api).requests(identity.id),
             }
         )
 
@@ -422,7 +424,7 @@ def build_admin_api_router(
         return json_object(
             {
                 "user": identity.model_dump(mode="json"),
-                "controls": await access_control(api).controls(identity.id),
+                "controls": await authorization_access_control(api).controls(identity.id),
             }
         )
 
@@ -432,7 +434,7 @@ def build_admin_api_router(
     ) -> JsonObject:
         api = mutation(request)
         identity = await local_user(request)
-        result = await access_control(api).resolve_request(
+        result = await authorization_access_control(api).resolve_request(
             request_id,
             admin_user_id=identity.id,
             approve=payload.approve,
@@ -450,7 +452,7 @@ def build_admin_api_router(
     ) -> JsonObject:
         api = mutation(request)
         identity = await local_user(request)
-        result = await access_control(api).update_session(
+        result = await authorization_access_control(api).update_session(
             session_id,
             admin_user_id=identity.id,
             access_level=payload.access_level,
@@ -467,7 +469,7 @@ def build_admin_api_router(
     async def revoke_access_session(session_id: str, request: Request) -> Response:
         api = mutation(request)
         identity = await local_user(request)
-        await access_control(api).revoke_session(
+        await authorization_access_control(api).revoke_session(
             session_id, admin_user_id=identity.id
         )
         if api.realtime is not None:
@@ -482,7 +484,7 @@ def build_admin_api_router(
     ) -> JsonObject:
         api = mutation(request)
         identity = await local_user(request)
-        controls = await access_control(api).set_controls(
+        controls = await authorization_access_control(api).set_controls(
             user_id=identity.id,
             items=[(item.surface_id, item.mode) for item in payload.items],
         )

@@ -14,9 +14,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from mcp.shared.auth import OAuthClientInformationFull
 
-from auth_service.api import build_auth_app
-from auth_service.provider import LocalOAuthProvider
-from common.settings import AuthServiceSettings
+from authorization.api import build_authorization_app
+from authorization.provider import LocalOAuthProvider
+from common.settings import AuthorizationServiceSettings
 
 
 @dataclass
@@ -53,7 +53,7 @@ class RefreshRecord:
     revoked_at: datetime | None = None
 
 
-class FakeAuthRepository:
+class FakeAuthorizationRepository:
     def __init__(self) -> None:
         self.clients: dict[str, OAuthClientInformationFull] = {}
         self.transactions: dict[str, Transaction] = {}
@@ -241,13 +241,13 @@ def private_key_pem() -> str:
 
 class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_authorization_code_pkce_and_refresh_rotation(self) -> None:
-        repository = FakeAuthRepository()
-        settings = AuthServiceSettings.model_construct(
+        repository = FakeAuthorizationRepository()
+        settings = AuthorizationServiceSettings.model_construct(
             public_base_url="https://mcp.example.test",
             postgres_host="postgres",
             postgres_port=5432,
-            postgres_db="auth",
-            postgres_user="auth",
+            postgres_db="authorization",
+            postgres_user="authorization",
             postgres_password="secret",
             bootstrap_username="admin",
             bootstrap_password="admin",
@@ -263,7 +263,7 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
             settings,
             repository,  # type: ignore[arg-type]
         )
-        app = build_auth_app(provider)
+        app = build_authorization_app(provider)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
             transport=transport,
@@ -323,7 +323,7 @@ class LocalOAuthFlowTest(unittest.IsolatedAsyncioTestCase):
             transaction = parse_qs(urlsplit(login_url).query)["transaction"][0]
 
             login = await client.post(
-                "/auth/login",
+                "/authorization/login",
                 data={
                     "transaction": transaction,
                     "username": "admin",
