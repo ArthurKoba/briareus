@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 
 import httpx
 import mcp_types as mt
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
-from fastmcp.tools.base import Tool, ToolResult
+from fastmcp.tools.base import InputRequiredToolResult, Tool, ToolResult
 from mcp.types import TextContent
 
 from common.access_contracts import OAuthContext, SessionSnapshot
@@ -139,9 +140,7 @@ class AccessSessionMiddleware(Middleware):
 
         forwarded = context.message.model_copy(update={"arguments": arguments})
         result = await call_next(context.copy(message=forwarded))
-        meta = dict(result.meta or {})
-        meta["access_session"] = _session_meta(decision.session)
-        return result.model_copy(update={"meta": meta})
+        return self._with_session_result(result, decision.session)
 
     async def _resolve_tool(
         self,
@@ -162,6 +161,35 @@ class AccessSessionMiddleware(Middleware):
             tool is not None
             and tool.annotations is not None
             and tool.annotations.read_only_hint is True
+        )
+
+    @staticmethod
+    def _with_session_result(
+        result: ToolResult, session: SessionSnapshot | None
+    ) -> ToolResult:
+        if session is None or isinstance(result, InputRequiredToolResult):
+            return result
+        session_context = _session_meta(session)
+        meta = dict(result.meta or {})
+        meta["access_session"] = session_context
+        content = list(result.content)
+        content.append(
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"access_session": session_context},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+        )
+        # Rebuild instead of model_copy: proxied ToolResult may retain a private
+        # raw MCP result whose wire serialization would otherwise ignore updates.
+        return ToolResult(
+            content=content,
+            structured_content=result.structured_content,
+            meta=meta,
+            is_error=result.is_error,
         )
 
     @staticmethod
@@ -202,9 +230,24 @@ class AccessSessionMiddleware(Middleware):
             payload["retry_after_seconds"] = retry_after_seconds
         if detail:
             payload["detail"] = detail
-        meta = {"access_session": _session_meta(session)}
+        session_context = _session_meta(session)
+        if session_context:
+            payload["access_session"] = session_context
+        meta = {"access_session": session_context}
+        content = [TextContent(type="text", text=message)]
+        if session_context:
+            content.append(
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {"access_session": session_context},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                )
+            )
         return ToolResult(
-            content=[TextContent(type="text", text=message)],
+            content=content,
             structured_content=payload,
             meta=meta,
             is_error=True,
