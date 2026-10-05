@@ -61,7 +61,7 @@ def settings() -> AuthServiceSettings:
         postgres_password="pass",
         gateway_service_token="gateway",
         admin_service_token="admin",
-                default_session_ttl_seconds=3600,
+        default_session_ttl_seconds=3600,
         session_cache_ttl_seconds=300,
         invalid_attempt_soft_limit=5,
         invalid_attempt_oauth_revoke_limit=50,
