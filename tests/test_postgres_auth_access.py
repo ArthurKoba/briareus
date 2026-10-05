@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -206,6 +207,38 @@ class PostgresAuthAccessIntegrationTest(unittest.IsolatedAsyncioTestCase):
         assert access is not None
         self.assertEqual(access.subject, self.user.id)
         self.assertEqual(access.resource, resource)
+
+    async def test_expired_cached_session_is_persisted_as_expired(self) -> None:
+        terminal_surface = int(surface_id("terminal"))
+        context = OAuthContext(
+            user_id=self.user.id,
+            client_id="client-expiry",
+            oauth_session_id="oauth-expiry",
+        )
+        opened = await self.access_service.open_session(
+            SessionOpenRequest(
+                **context.model_dump(),
+                surface_id=terminal_surface,
+                label="expiry",
+            )
+        )
+        await self.access_service.admin_update(
+            opened.id,
+            AdminSessionUpdate(
+                admin_user_id=self.user.id,
+                expires_at=int(time.time()) - 1,
+            ),
+        )
+
+        status = await self.access_service.status(
+            context=context,
+            surface_id=terminal_surface,
+            uid=opened.uid,
+        )
+
+        self.assertIsNotNone(status)
+        assert status is not None
+        self.assertEqual(status.status, "expired")
 
     async def test_access_session_persists_and_recovers_after_cache_eviction(self) -> None:
         terminal_surface = int(surface_id("terminal"))

@@ -120,18 +120,18 @@ class AccessRepository:
                 and record.expires_at > 0
                 and record.expires_at <= int(time.time())
             ):
-                    record.status = "expired"
-                    record.updated_at = _now()
-                    session.add(
-                        SecurityEventRecord(
-                            user_id=record.user_id,
-                            oauth_session_id=record.oauth_session_id,
-                            session_id=record.id,
-                            surface_id=record.surface_id,
-                            event_type="session_expired",
-                        )
+                record.status = "expired"
+                record.updated_at = _now()
+                session.add(
+                    SecurityEventRecord(
+                        user_id=record.user_id,
+                        oauth_session_id=record.oauth_session_id,
+                        session_id=record.id,
+                        surface_id=record.surface_id,
+                        event_type="session_expired",
                     )
-                    await session.commit()
+                )
+                await session.commit()
             return _snapshot(record)
 
     async def touch_session(self, session_id: str) -> None:

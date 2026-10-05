@@ -78,7 +78,12 @@ def register_access_session_tools(
             session_uid=session_id,
             requested_expires_at=requested_expires_at,
         )
-        return pending.model_dump(mode="json")
+        result = pending.model_dump(mode="json")
+        result["session_id"] = session_id
+        result["instructions"] = (
+            f"Ask the user to approve extension request {pending.id} in the administration UI."
+        )
+        return result
 
     @mcp.tool(
         name="access_session_request_full_access",
@@ -98,7 +103,12 @@ def register_access_session_tools(
             account_scope=account_scope,
             account_ids=account_ids or [],
         )
-        return pending.model_dump(mode="json")
+        result = pending.model_dump(mode="json")
+        result["session_id"] = session_id
+        result["instructions"] = (
+            f"Ask the user to approve full-access request {pending.id} in the administration UI."
+        )
+        return result
 
     @mcp.tool(
         name="access_session_close",

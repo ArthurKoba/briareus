@@ -124,8 +124,17 @@ class AccessService:
         cached = await asyncio.to_thread(self.cache.get_json, key)
         if isinstance(cached, dict):
             try:
-                return SessionSnapshot.model_validate(cached)
+                snapshot = SessionSnapshot.model_validate(cached)
             except Exception:
+                await asyncio.to_thread(self.cache.delete, key)
+            else:
+                expired = (
+                    snapshot.status == "active"
+                    and snapshot.expires_at > 0
+                    and snapshot.expires_at <= int(time.time())
+                )
+                if not expired:
+                    return snapshot
                 await asyncio.to_thread(self.cache.delete, key)
 
         session = await self.repository.get_session(uid)
