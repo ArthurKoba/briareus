@@ -409,7 +409,7 @@ Rules for MVP:
 - `request_extension` requests a different expiry but does not approve it itself;
 - `request_full_access` requests elevation to full action access and may request account scope;
 - `close` voluntarily revokes the session;
-- `reissue` creates a replacement session after expiry/revocation.
+- `reissue` creates a completely new session after expiry/revocation; the old session is not downgraded or reused.
 
 Extension and full-access approval happen from the administration layer.
 
@@ -452,9 +452,9 @@ expires_at = 0        # never expires; manual revocation only
 expires_at > 0        # timestamp/epoch expiry
 ```
 
-The administrator may approve practical durations such as minutes, hours, days, a week or no automatic expiry.
+The configurable application default for a new session is 1 hour. The administrator may approve practical durations such as minutes, hours, days, a week or no automatic expiry.
 
-If the session expires or is revoked, the agent receives a structured response telling it to reissue the session.
+If the session expires or is revoked, the session ends. It is not downgraded back to read-only. The agent must create/reissue a new session, which starts again as a fresh read-only session with no carried elevation.
 
 ## Redis/Valkey hot path
 
@@ -501,11 +501,13 @@ Every new session starts:
 read_only
 ```
 
+For MVP, each MCP surface owns a static method classification that marks tools as read-only or mutating. Unknown/unclassified tools must not silently gain write authority.
+
 Read-only methods are the methods each MCP surface classifies as non-mutating.
 
-Safe account discovery may expose account aliases/IDs available to the authenticated user.
+For account-backed surfaces, base read-only access may expose only the safe list of account aliases/IDs available to the authenticated user. Provider details beyond that are considered a future sensitive-read permission and are not part of the MVP contract.
 
-It does not expose provider credentials or sensitive provider details.
+Provider credentials are never exposed.
 
 The only elevated level in MVP is:
 
@@ -525,7 +527,7 @@ Fine-grained distinctions such as:
 
 are explicitly deferred.
 
-They will be introduced while each MCP surface is refined after the coarse MVP contour is working.
+They will be introduced while each MCP surface is refined after the coarse MVP contour is working. A later administration model may define named access levels (for example level 1/2/3/4) and map tools to those levels dynamically; the MVP static classification must not make that evolution impossible.
 
 ## Integration-account interaction
 
@@ -608,12 +610,16 @@ Session IDs are not intended to be enumerable.
 
 The access layer tracks invalid/unknown-session attempts per authenticated OAuth context and MCP surface.
 
-Repeated suspicious attempts can trigger:
+Repeated invalid-session attempts use escalating protection rather than one immediate hard failure.
 
-- rate limiting;
-- temporary blocking;
-- invalidation of agent sessions belonging to the offending OAuth context;
-- required OAuth reauthentication.
+The MVP should maintain a configurable failure counter/backoff per authenticated OAuth context and MCP surface. Conceptually:
+
+- a small number of mistakes are tolerated;
+- repeated misses trigger a temporary rate limit/backoff;
+- continued attempts after repeated rate-limit windows invalidate the active agent sessions for that OAuth context;
+- sustained abuse eventually revokes the offending OAuth session/refresh context and requires full OAuth reauthentication.
+
+Exact thresholds are application settings rather than protocol constants. An initial policy may start throttling after roughly five consecutive invalid-session attempts and use a much higher cumulative threshold before OAuth revocation.
 
 Protection must be scoped to the offending authenticated context so one user cannot trivially revoke another user's sessions.
 
@@ -873,9 +879,10 @@ The MVP authorization contour is accepted when:
 
 - local OAuth no longer depends on GitHub identity;
 - the initial local user can authorize each dedicated MCP surface independently;
-- a new MCP connection can automatically obtain a read-only agent session;
+- a new MCP connection can automatically obtain a read-only agent session with a configurable default TTL of 1 hour;
 - under `session_enforced`, every normal tool call requires the session UID;
-- base sessions allow only methods classified as read-only;
+- base sessions allow only methods in the surface's static MVP read-only classification;
+- account-backed base access exposes only safe account alias/ID discovery, not sensitive account details;
 - mutating methods require approved `full_access`;
 - a session is rejected on another MCP surface;
 - account-backed full access respects `none/all/selected` account scope;
@@ -884,8 +891,8 @@ The MVP authorization contour is accepted when:
 - Redis loss never fails open;
 - revoked/expired sessions stop new calls immediately;
 - cancellable active local work is terminated on revocation;
-- the agent receives a clear reissue response after expiry/revocation;
-- repeated invalid-session attempts are rate-limited and recorded;
+- expiry/revocation never downgrades the old session; reissue creates a fresh read-only session with no carried full-access state;
+- repeated invalid-session attempts use configurable escalating backoff/rate limits and can eventually revoke the offending OAuth session;
 - the admin UI can approve/reject full-access requests;
 - the admin UI can revoke sessions and set/extend expiry;
 - `expires_at = 0` supports sessions without automatic expiry;
@@ -932,6 +939,9 @@ These are expected extensions, not reasons to delay MVP.
 - Account-backed sessions use `none/all/selected` account scope.
 - New sessions are automatically active and read-only.
 - MVP has one elevated level: full access within the MCP/account scope.
+- MVP read/write tool classification is static per MCP surface; dynamic named access levels are deferred.
+- New sessions default to a configurable 1-hour TTL.
+- Expired/revoked sessions are never reused or downgraded; reissue creates a fresh read-only session.
 - Granular permissions are deferred.
 - When session control is enabled for a surface, all normal calls require a session.
 - Valkey/Redis is mandatory for the normal session-validation hot path.
