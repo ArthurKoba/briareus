@@ -603,7 +603,7 @@ class GitHubPolicySettings(ProcessSettings):
         validation_alias="GITHUB_AGENT_PROTECTED_BRANCHES",
     )
     required_checks: Annotated[tuple[str, ...], NoDecode] = Field(
-        ("test", "docker"),
+        ("validate",),
         validation_alias="GITHUB_AGENT_REQUIRED_CHECKS",
     )
     required_reviewers: Annotated[tuple[str, ...], NoDecode] = Field(

@@ -2,115 +2,72 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
-FULL_TRIGGERS = (
-    ".github/workflows/",
-    "Dockerfile",
-    "docker-compose.yaml",
-    "pyproject.toml",
-    "uv.lock",
-    "docker-entrypoint.sh",
-    "scripts/ci_plan.py",
-    "services/common/",
-)
-
-
-@dataclass(frozen=True)
-class Area:
-    source_prefixes: tuple[str, ...]
-    mypy_paths: tuple[str, ...]
-
-
-AREAS: dict[str, Area] = {
-    "authorization": Area(("services/authorization/",), ("services/authorization",)),
-    "gateway": Area(("services/bridge/",), ("services/bridge",)),
-    "admin-api": Area(("services/admin-api/",), ("services/admin-api/src",)),
-    "github": Area(("services/modules/github/",), ("services/modules/github",)),
-    "gitlab": Area(("services/modules/gitlab/",), ("services/modules/gitlab",)),
-    "files": Area(("services/modules/files/",), ("services/modules/files",)),
-    "web": Area(("services/modules/web/",), ("services/modules/web",)),
-    "terminal": Area(("services/modules/terminal/",), ("services/modules/terminal",)),
-    "analysis": Area(("services/modules/analysis/",), ("services/modules/analysis",)),
-    "ghidra": Area(("services/modules/ghidra/",), ("services/modules/ghidra",)),
-    "observability": Area(
-        (
-            "services/modules/signoz/",
-            "services/modules/coolify/",
-            "services/modules/observability/",
-        ),
-        ("services/modules/signoz", "services/modules/coolify", "services/modules/observability"),
+# Integration suites are intentionally narrower than static validation. Ruff,
+# mypy and unit tests run for the whole backend; expensive PostgreSQL/Valkey
+# suites run only when their runtime contract or test/provisioning inputs change.
+INTEGRATION_SUITES: dict[str, tuple[str, ...]] = {
+    "authorization": (
+        "services/authorization/",
+        "tests/test_postgres_authorization_access.py",
+        "scripts/provision_authorization_database.py",
     ),
 }
 
-
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(values))
+# These inputs can affect every integration suite regardless of service owner.
+CROSS_CUTTING_INTEGRATION_TRIGGERS = (
+    ".github/workflows/mvp-backend.yaml",
+    "pyproject.toml",
+    "uv.lock",
+    "scripts/ci_plan.py",
+    "services/common/",
+)
 
 
 def _matches(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix)
 
 
-def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, object]:
+def _normalize(changed_paths: list[str]) -> list[str]:
     paths: list[str] = []
     for raw_path in changed_paths:
         value = raw_path.strip()
         if not value:
             continue
         paths.append(value[2:] if value.startswith("./") else value)
-    full = force_full or not paths or any(
-        _matches(path, trigger) for path in paths for trigger in FULL_TRIGGERS
+    return list(dict.fromkeys(paths))
+
+
+def plan(changed_paths: list[str], *, force_full: bool = False) -> dict[str, object]:
+    paths = _normalize(changed_paths)
+    run_all_integrations = force_full or not paths or any(
+        _matches(path, trigger)
+        for path in paths
+        for trigger in CROSS_CUTTING_INTEGRATION_TRIGGERS
     )
 
-    matched_areas: list[str] = []
-    unknown_code = False
-    for path in paths:
-        area_match = None
-        for name, area in AREAS.items():
-            if any(_matches(path, prefix) for prefix in area.source_prefixes):
-                area_match = name
-                break
-        if area_match and area_match not in matched_areas:
-            matched_areas.append(area_match)
-        elif path.startswith("services/") and not area_match:
-            unknown_code = True
+    integration_suites: list[str] = []
+    for suite, triggers in INTEGRATION_SUITES.items():
+        if run_all_integrations or any(
+            _matches(path, trigger) for path in paths for trigger in triggers
+        ):
+            integration_suites.append(suite)
 
-    # Cross-cutting or unknown code changes are safer as a full gate.
-    if unknown_code or len(matched_areas) >= 4:
-        full = True
-
-    if full:
-        return {
-            "full": True,
-            "areas": ["full"],
-            "mypy_paths": ["services"],
-            "ruff_paths": ["services", "scripts"],
-        }
-
-    mypy_paths: list[str] = []
-    for name in matched_areas:
-        area = AREAS[name]
-        mypy_paths.extend(area.mypy_paths)
-
-    changed_python = [path for path in paths if path.endswith(".py") and Path(path).parts]
     return {
-        "full": False,
-        "areas": matched_areas or ["non-code"],
-        "mypy_paths": _unique(mypy_paths),
-        "ruff_paths": _unique(changed_python),
+        "changed_paths": paths,
+        "integration_suites": integration_suites,
+        "run_authorization_integration": "authorization" in integration_suites,
     }
 
 
 def _emit_github_output(result: dict[str, object], output_file: Path) -> None:
-    lines = []
+    lines: list[str] = []
     for key, value in result.items():
-        rendered = (
-            json.dumps(value, separators=(",", ":"))
-            if not isinstance(value, bool)
-            else str(value).lower()
-        )
+        if isinstance(value, bool):
+            rendered = str(value).lower()
+        else:
+            rendered = json.dumps(value, separators=(",", ":"))
         lines.append(f"{key}={rendered}")
     output_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
