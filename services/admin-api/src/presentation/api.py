@@ -130,6 +130,18 @@ def build_internal_router(services: ApiServices) -> APIRouter:
     ) -> JsonObject:
         return (await services.runtime_settings.gitlab_policy()).to_json()
 
+    @router.get("/runtime-settings/browser")
+    async def browser_runtime_settings(
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        return (await services.runtime_settings.browser_policy()).to_json()
+
+    @router.get("/runtime-settings/browser-launcher")
+    async def browser_launcher_settings(
+        _authorized: None = Depends(authorize),
+    ) -> JsonObject:
+        return (await services.runtime_settings.browser_launcher_policy()).to_json()
+
     @router.post("/events", status_code=204)
     async def record_event(
         event: InvocationEvent,

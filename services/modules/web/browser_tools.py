@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from common.models import JsonObject
 
 from .browser import BrowserManager
-
-if TYPE_CHECKING:
-    from .devtools_proxy import DevToolsProxyRuntime
 
 
 def register_browser_tools(
@@ -19,7 +14,6 @@ def register_browser_tools(
     write_annotations: ToolAnnotations,
     *,
     browser: BrowserManager,
-    devtools: DevToolsProxyRuntime,
 ) -> None:
     @mcp.tool(title="Browser diagnostics", annotations=read_annotations)
     async def browser_diagnostics() -> JsonObject:
@@ -55,29 +49,6 @@ def register_browser_tools(
     async def browser_debug_target(page_id: str) -> JsonObject:
         """Resolve the CDP target for one application page without exposing the raw debug port."""
         return await browser.debug_target(page_id)
-
-    @mcp.tool(title="Browser DevTools target", annotations=read_annotations)
-    async def browser_devtools_target() -> JsonObject:
-        """Report whether DevTools controls the managed Chromium or an external Chrome target."""
-        return await devtools.target_status()
-
-    @mcp.tool(title="Attach DevTools to external Chrome", annotations=write_annotations)
-    async def browser_devtools_connect(
-        endpoint: str,
-        ws_headers: dict[str, str] | None = None,
-    ) -> JsonObject:
-        """Attach existing devtools_* tools to an external Chrome DevTools endpoint.
-
-        Accepts an HTTP(S) browser-debug URL or a direct WS(S)
-        /devtools/browser/... endpoint. Optional WebSocket headers are supported only
-        for direct WS(S) endpoints. Browser Developer access must already be enabled.
-        """
-        return await devtools.connect_external(endpoint, ws_headers)
-
-    @mcp.tool(title="Detach external Chrome DevTools", annotations=write_annotations)
-    async def browser_devtools_disconnect() -> JsonObject:
-        """Return existing devtools_* tools to the managed persistent Chromium."""
-        return await devtools.disconnect_external()
 
     @mcp.tool(title="Browser set viewport", annotations=write_annotations)
     async def browser_set_viewport(page_id: str, width: int, height: int) -> JsonObject:

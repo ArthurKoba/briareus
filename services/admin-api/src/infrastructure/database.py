@@ -266,6 +266,19 @@ class GitLabRuntimeSettingsRecord(Base):
     remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class BrowserRuntimeSettingsRecord(Base):
+    __tablename__ = "browser_runtime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    external_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_mcp_url: Mapped[str] = mapped_column(String(2048), default="")
+    call_timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    auto_disconnect_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    idle_timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    profile_dir_name: Mapped[str] = mapped_column(String(128), default="Default")
+    encrypted_extension_token: Mapped[str] = mapped_column(Text, default="")
+
+
 class DatabaseManager:
     """Own the PostgreSQL async engine and session factory for Admin API."""
 

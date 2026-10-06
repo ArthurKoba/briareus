@@ -19,6 +19,8 @@ from .http_transport import HttpTransportError, PooledHttpTransport
 from .models import JsonObject, json_loads, json_object
 from .oauth_session_contracts import OAuthSessionEvent
 from .runtime_policy_contracts import (
+    BrowserLauncherPolicy,
+    BrowserRuntimePolicy,
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,
     McpRuntimePolicy,
@@ -274,6 +276,25 @@ class AdminApiClient:
             ttl_seconds=self.cache_settings.policy_ttl_seconds,
         )
         return result
+
+
+    def browser_runtime_policy(self) -> BrowserRuntimePolicy:
+        cache_key = self.cache_keys.browser_policy()
+        cached = self.cache.get_json(cache_key)
+        if isinstance(cached, dict):
+            return BrowserRuntimePolicy.model_validate(cached)
+        data = self._request("GET", "/internal/runtime-settings/browser")
+        result = BrowserRuntimePolicy.model_validate(data)
+        self.cache.set_json(
+            cache_key,
+            result.to_json(),
+            ttl_seconds=self.cache_settings.policy_ttl_seconds,
+        )
+        return result
+
+    def browser_launcher_policy(self) -> BrowserLauncherPolicy:
+        data = self._request("GET", "/internal/runtime-settings/browser-launcher")
+        return BrowserLauncherPolicy.model_validate(data)
 
     def record_oauth_session(self, event: OAuthSessionEvent) -> None:
         self._request(

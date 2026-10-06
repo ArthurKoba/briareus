@@ -203,14 +203,19 @@ cookies, authorization headers, JavaScript, request bodies or authenticated page
 name, status, duration and traces remain observable. The runtime uses normal Chromium
 capabilities; it does not add fingerprint spoofing or site-control bypass logic.
 
-Developer mode can temporarily redirect the existing `devtools_*` tools to an external Chrome
-debugging endpoint with `browser_devtools_connect`. HTTP(S) browser-debug URLs and direct WS(S)
-`/devtools/browser/...` endpoints are supported; direct WebSocket targets may include connection
-headers. `browser_devtools_disconnect` returns DevTools to the managed persistent Chromium.
-External endpoint/header configuration is process-local and ephemeral, is cleared by a fresh
-container, and is omitted from Admin API audit payloads. The basic `browser_*` tools continue to
-control only the managed Chromium; external attachment changes the privileged DevTools target,
-not browser ownership.
+The managed Chromium keeps its existing `browser_*` and privileged `devtools_*` surfaces. An
+operator may additionally configure an official Microsoft Playwright MCP server from Admin →
+Settings → Browser. Endpoint, per-call timeout, Chrome profile, explicit/idle disconnect policy
+and Playwright Extension token are stored as runtime policy in Admin API/PostgreSQL rather than
+container environment variables. The token is encrypted at rest and public settings expose only
+whether it is configured; a service-authenticated browser-launcher policy endpoint may resolve the
+secret when a local Windows launcher needs to populate `PLAYWRIGHT_MCP_EXTENSION_TOKEN`.
+
+External Playwright tools are mounted under the `external_*` namespace and reuse one persistent
+upstream MCP session, so one approved browser selection remains active across tool calls until an
+explicit disconnect, process loss, policy change, or optional idle timeout. The external browser
+path is independent from the managed Chromium and never redirects the managed `devtools_*`
+backend.
 
 ## OAuth sessions
 

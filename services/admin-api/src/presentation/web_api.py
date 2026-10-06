@@ -55,6 +55,7 @@ from common.browser_remote_debug import (
 )
 from common.models import JsonObject, JsonValue, json_object
 from common.runtime_policy_contracts import (
+    BrowserRuntimePolicy,
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,
     McpRuntimePolicy,
@@ -221,6 +222,14 @@ class SettingsPayload(BaseModel):
     terminal_max_exec_timeout_seconds: int = Field(21_600, ge=1, le=86_400)
     terminal_max_job_runtime_seconds: int = Field(43_200, ge=1, le=604_800)
     mcp_call_timeout_seconds: int = Field(5, ge=1, le=300)
+    browser_external_enabled: bool = False
+    browser_external_mcp_url: str = Field("", max_length=2048)
+    browser_call_timeout_seconds: int = Field(300, ge=1, le=1800)
+    browser_auto_disconnect_enabled: bool = False
+    browser_idle_timeout_seconds: int = Field(300, ge=30, le=86_400)
+    browser_profile_dir_name: str = Field("Default", min_length=1, max_length=128)
+    browser_extension_token: str = Field("", max_length=4096)
+    browser_clear_extension_token: bool = False
     github_local_first_guidance: bool = True
     github_local_git_transport_enabled: bool = True
     github_remote_source_mutations_enabled: bool = False
@@ -1180,6 +1189,47 @@ def build_admin_api_router(
             )
             raise HTTPException(status_code=code, detail=message) from exc
 
+    @router.get("/browser/external/status")
+    async def browser_external_status(request: Request) -> JsonObject:
+        require_user(request)
+        try:
+            return await available().web.external_status()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/browser/external/connect")
+    async def browser_external_connect(request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            result = await api.web.external_connect()
+            if api.realtime is not None:
+                await api.realtime.publish("browser.runtime", "external.connected", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/browser/external/disconnect")
+    async def browser_external_disconnect(request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            result = await api.web.external_disconnect()
+            if api.realtime is not None:
+                await api.realtime.publish("browser.runtime", "external.disconnected", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/browser/external/reset")
+    async def browser_external_reset(request: Request) -> JsonObject:
+        api = mutation(request)
+        try:
+            result = await api.web.external_reset()
+            if api.realtime is not None:
+                await api.realtime.publish("browser.runtime", "external.reset", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     @router.post("/telemetry")
     async def frontend_telemetry(payload: FrontendTelemetryBatch, request: Request) -> JsonObject:
         api = mutation(request)
@@ -1195,6 +1245,7 @@ def build_admin_api_router(
             "admin": snapshot["admin"],
             "terminal": snapshot["terminal"],
             "mcp": snapshot["mcp"],
+            "browser": snapshot["browser"],
             "github": snapshot["github"],
             "gitlab": snapshot["gitlab"],
             "analysis_idle_timeout_seconds": idle_timeout,
@@ -1203,10 +1254,18 @@ def build_admin_api_router(
         return sha256(encoded).hexdigest()
 
     async def settings_snapshot(api: WebApiServices) -> JsonObject:
-        config, terminal_policy, mcp_policy, github_policy, gitlab_policy = await asyncio.gather(
+        (
+            config,
+            terminal_policy,
+            mcp_policy,
+            browser_policy,
+            github_policy,
+            gitlab_policy,
+        ) = await asyncio.gather(
             api.config.get(),
             api.runtime_settings.terminal_policy(),
             api.runtime_settings.mcp_policy(),
+            api.runtime_settings.browser_policy(),
             api.runtime_settings.github_policy(),
             api.runtime_settings.gitlab_policy(),
         )
@@ -1224,6 +1283,7 @@ def build_admin_api_router(
             "admin": config.model_dump(mode="json"),
             "terminal": terminal_policy.model_dump(mode="json"),
             "mcp": mcp_policy.model_dump(mode="json"),
+            "browser": browser_policy.model_dump(mode="json"),
             "github": github_policy.model_dump(mode="json"),
             "gitlab": gitlab_policy.model_dump(mode="json"),
             "analysis": reverse_settings,
@@ -1270,6 +1330,62 @@ def build_admin_api_router(
                 max_job_runtime_seconds=payload.terminal_max_job_runtime_seconds,
             )
             mcp_policy = McpRuntimePolicy(call_timeout_seconds=payload.mcp_call_timeout_seconds)
+            if current is not None:
+                current_browser = BrowserRuntimePolicy.model_validate(current["browser"])
+            else:
+                current_browser = await api.runtime_settings.browser_policy()
+            try:
+                browser_policy = BrowserRuntimePolicy(
+                    external_enabled=(
+                        payload.browser_external_enabled
+                        if "browser_external_enabled" in payload.model_fields_set
+                        else current_browser.external_enabled
+                    ),
+                    external_mcp_url=(
+                        payload.browser_external_mcp_url
+                        if "browser_external_mcp_url" in payload.model_fields_set
+                        else current_browser.external_mcp_url
+                    ),
+                    call_timeout_seconds=(
+                        payload.browser_call_timeout_seconds
+                        if "browser_call_timeout_seconds" in payload.model_fields_set
+                        else current_browser.call_timeout_seconds
+                    ),
+                    auto_disconnect_enabled=(
+                        payload.browser_auto_disconnect_enabled
+                        if "browser_auto_disconnect_enabled" in payload.model_fields_set
+                        else current_browser.auto_disconnect_enabled
+                    ),
+                    idle_timeout_seconds=(
+                        payload.browser_idle_timeout_seconds
+                        if "browser_idle_timeout_seconds" in payload.model_fields_set
+                        else current_browser.idle_timeout_seconds
+                    ),
+                    profile_dir_name=(
+                        payload.browser_profile_dir_name
+                        if "browser_profile_dir_name" in payload.model_fields_set
+                        else current_browser.profile_dir_name
+                    ),
+                    extension_token_configured=current_browser.extension_token_configured,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            browser_token = (
+                payload.browser_extension_token
+                if "browser_extension_token" in payload.model_fields_set
+                and payload.browser_extension_token.strip()
+                else None
+            )
+            clear_browser_token = (
+                payload.browser_clear_extension_token
+                if "browser_clear_extension_token" in payload.model_fields_set
+                else False
+            )
+            if browser_token is not None and clear_browser_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail="cannot set and clear external browser extension token together",
+                )
             github_fields = {
                 "github_local_first_guidance",
                 "github_local_git_transport_enabled",
@@ -1344,21 +1460,38 @@ def build_admin_api_router(
                     saved_admin,
                     saved_terminal,
                     saved_mcp,
+                    saved_browser,
                     saved_github,
                     saved_gitlab,
                 ) = await asyncio.gather(
                     api.config.update(admin_api),
                     api.runtime_settings.update_terminal_policy(terminal_policy),
                     api.runtime_settings.update_mcp_policy(mcp_policy),
+                    api.runtime_settings.update_browser_policy(
+                        browser_policy,
+                        extension_token=browser_token,
+                        clear_extension_token=clear_browser_token,
+                    ),
                     api.runtime_settings.update_github_policy(github_policy),
                     api.runtime_settings.update_gitlab_policy(gitlab_policy),
                 )
             except (ValueError, RuntimeError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if saved_browser != current_browser:
+                try:
+                    await api.web.external_disconnect()
+                except Exception as exc:
+                    if api.realtime is not None:
+                        await api.realtime.publish(
+                            "browser.runtime",
+                            "external.policy_disconnect_failed",
+                            {"error": str(exc)},
+                        )
             response: JsonObject = {
                 "admin": saved_admin.model_dump(mode="json"),
                 "terminal": saved_terminal.model_dump(mode="json"),
                 "mcp": saved_mcp.model_dump(mode="json"),
+                "browser": saved_browser.model_dump(mode="json"),
                 "github": saved_github.model_dump(mode="json"),
                 "gitlab": saved_gitlab.model_dump(mode="json"),
                 "analysis": reverse_settings,
