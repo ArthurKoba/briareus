@@ -75,14 +75,14 @@ register_curl_tools(
     curl_binary=_curl_binary,
 )
 
+_devtools = DevToolsProxyRuntime(_browser, _browser_settings)
 register_browser_tools(
     mcp,
     READ_EXTERNAL,
     WRITE_EXTERNAL,
     browser=_browser,
+    devtools=_devtools,
 )
-
-_devtools = DevToolsProxyRuntime(_browser, _browser_settings)
 mcp.mount(_devtools.server, namespace="devtools")
 
 app = private_http_app(mcp, _private_settings)
