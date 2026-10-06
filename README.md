@@ -203,6 +203,15 @@ cookies, authorization headers, JavaScript, request bodies or authenticated page
 name, status, duration and traces remain observable. The runtime uses normal Chromium
 capabilities; it does not add fingerprint spoofing or site-control bypass logic.
 
+Developer mode can temporarily redirect the existing `devtools_*` tools to an external Chrome
+debugging endpoint with `browser_devtools_connect`. HTTP(S) browser-debug URLs and direct WS(S)
+`/devtools/browser/...` endpoints are supported; direct WebSocket targets may include connection
+headers. `browser_devtools_disconnect` returns DevTools to the managed persistent Chromium.
+External endpoint/header configuration is process-local and ephemeral, is cleared by a fresh
+container, and is omitted from Admin API audit payloads. The basic `browser_*` tools continue to
+control only the managed Chromium; external attachment changes the privileged DevTools target,
+not browser ownership.
+
 ## OAuth sessions
 
 The `authorization` runtime stores local OAuth users, clients, authorization codes, OAuth sessions and refresh-token state in PostgreSQL. Refresh tokens rotate on use and access tokens are short-lived ES256 JWTs signed only by the authorization runtime; gateway validates them locally with the public key. Provider integrations such as GitHub and GitLab do not participate in platform login or token refresh.
