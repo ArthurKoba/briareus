@@ -308,9 +308,9 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
         </span>
       </div>
       <div class="flex flex-wrap gap-2 pt-3">
-        <Button size="sm" :disabled="Boolean(browserExternalAction) || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('connect')">{{ t("settings.externalBrowserConnect") }}</Button>
+        <Button size="sm" :disabled="Boolean(browserExternalAction) || dirty || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('connect')">{{ t("settings.externalBrowserConnect") }}</Button>
         <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction)" @click="runExternalBrowserAction('disconnect')">{{ t("settings.externalBrowserDisconnect") }}</Button>
-        <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction) || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('reset')">{{ t("settings.externalBrowserReset") }}</Button>
+        <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction) || dirty || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('reset')">{{ t("settings.externalBrowserReset") }}</Button>
       </div>
     </section>
 

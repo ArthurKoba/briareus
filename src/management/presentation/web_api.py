@@ -1138,39 +1138,42 @@ def build_admin_api_router(
                 current_browser = BrowserRuntimePolicy.model_validate(current["browser"])
             else:
                 current_browser = await asyncio.to_thread(api.runtime_settings.browser_policy)
-            browser_policy = BrowserRuntimePolicy(
-                external_enabled=(
-                    payload.browser_external_enabled
-                    if "browser_external_enabled" in payload.model_fields_set
-                    else current_browser.external_enabled
-                ),
-                external_mcp_url=(
-                    payload.browser_external_mcp_url
-                    if "browser_external_mcp_url" in payload.model_fields_set
-                    else current_browser.external_mcp_url
-                ),
-                call_timeout_seconds=(
-                    payload.browser_call_timeout_seconds
-                    if "browser_call_timeout_seconds" in payload.model_fields_set
-                    else current_browser.call_timeout_seconds
-                ),
-                auto_disconnect_enabled=(
-                    payload.browser_auto_disconnect_enabled
-                    if "browser_auto_disconnect_enabled" in payload.model_fields_set
-                    else current_browser.auto_disconnect_enabled
-                ),
-                idle_timeout_seconds=(
-                    payload.browser_idle_timeout_seconds
-                    if "browser_idle_timeout_seconds" in payload.model_fields_set
-                    else current_browser.idle_timeout_seconds
-                ),
-                profile_dir_name=(
-                    payload.browser_profile_dir_name
-                    if "browser_profile_dir_name" in payload.model_fields_set
-                    else current_browser.profile_dir_name
-                ),
-                extension_token_configured=current_browser.extension_token_configured,
-            )
+            try:
+                browser_policy = BrowserRuntimePolicy(
+                    external_enabled=(
+                        payload.browser_external_enabled
+                        if "browser_external_enabled" in payload.model_fields_set
+                        else current_browser.external_enabled
+                    ),
+                    external_mcp_url=(
+                        payload.browser_external_mcp_url
+                        if "browser_external_mcp_url" in payload.model_fields_set
+                        else current_browser.external_mcp_url
+                    ),
+                    call_timeout_seconds=(
+                        payload.browser_call_timeout_seconds
+                        if "browser_call_timeout_seconds" in payload.model_fields_set
+                        else current_browser.call_timeout_seconds
+                    ),
+                    auto_disconnect_enabled=(
+                        payload.browser_auto_disconnect_enabled
+                        if "browser_auto_disconnect_enabled" in payload.model_fields_set
+                        else current_browser.auto_disconnect_enabled
+                    ),
+                    idle_timeout_seconds=(
+                        payload.browser_idle_timeout_seconds
+                        if "browser_idle_timeout_seconds" in payload.model_fields_set
+                        else current_browser.idle_timeout_seconds
+                    ),
+                    profile_dir_name=(
+                        payload.browser_profile_dir_name
+                        if "browser_profile_dir_name" in payload.model_fields_set
+                        else current_browser.profile_dir_name
+                    ),
+                    extension_token_configured=current_browser.extension_token_configured,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             browser_token = (
                 payload.browser_extension_token
                 if "browser_extension_token" in payload.model_fields_set
@@ -1281,6 +1284,16 @@ def build_admin_api_router(
                 )
             except (ValueError, RuntimeError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if saved_browser != current_browser:
+                try:
+                    await api.web.external_disconnect()
+                except Exception as exc:
+                    if api.realtime is not None:
+                        await api.realtime.publish(
+                            "browser.runtime",
+                            "external.policy_disconnect_failed",
+                            {"error": str(exc)},
+                        )
             response: JsonObject = {
                 "management": saved_management.model_dump(mode="json"),
                 "terminal": saved_terminal.model_dump(mode="json"),
