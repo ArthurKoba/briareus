@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import os
 import re
 import sys
+import threading
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 import httpx
 import mcp.types as mt
@@ -33,6 +36,105 @@ from .devtools_target import (
 )
 
 CHROME_DEVTOOLS_MCP_VERSION = "1.10.1"
+
+
+
+logger = logging.getLogger("mcp_bridge.web.devtools")
+
+_DEVTOOLS_ENV_KEYS = (
+    "BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
+    "BROWSER_DEVTOOLS_TARGET_PATH",
+    "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS",
+    "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS",
+    "CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY",
+)
+_URL_WITH_SECRET_RE = re.compile(r"\b(?:https?|wss?)://[^\s'\"<>]+")
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(authorization|cookie|set-cookie|token|api[-_]?key|secret|password)"
+    r"\b\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+)
+
+
+def _launcher_cwd() -> str:
+    # modules/web/devtools_proxy.py -> import root (`services` on main, `src` on legacy).
+    return str(Path(__file__).resolve().parents[2])
+
+
+def _launcher_env() -> dict[str, str]:
+    # StdioTransport intentionally drops almost all parent env. Pass only values
+    # required by the launcher/upstream and never forward service credentials.
+    return {key: value for key in _DEVTOOLS_ENV_KEYS if (value := os.environ.get(key))}
+
+
+def _redact_upstream_stderr(line: str) -> str:
+    def redact_url(match: re.Match[str]) -> str:
+        value = match.group(0)
+        try:
+            from urllib.parse import urlsplit, urlunsplit
+
+            parts = urlsplit(value)
+            path = "/<redacted>" if parts.path not in {"", "/"} else parts.path
+            return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+        except ValueError:
+            return "<redacted-url>"
+
+    redacted = _URL_WITH_SECRET_RE.sub(redact_url, line)
+    return _SECRET_ASSIGNMENT_RE.sub(lambda m: f"{m.group(1)}=<redacted>", redacted)
+
+
+class _DevToolsStderrForwarder:
+    """Forward upstream stderr into normal Python logging (and therefore OTLP)."""
+
+    def __init__(self) -> None:
+        read_fd, write_fd = os.pipe()
+        self._reader = os.fdopen(
+            read_fd,
+            "r",
+            encoding="utf-8",
+            errors="replace",
+            buffering=1,
+        )
+        self.stream: TextIO = os.fdopen(
+            write_fd,
+            "w",
+            encoding="utf-8",
+            errors="replace",
+            buffering=1,
+        )
+        self._thread = threading.Thread(
+            target=self._run,
+            name="chrome-devtools-mcp-stderr",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        for raw_line in self._reader:
+            line = _redact_upstream_stderr(raw_line.rstrip())
+            if not line:
+                continue
+            lowered = line.casefold()
+            level = (
+                logging.ERROR
+                if any(
+                    token in lowered
+                    for token in ("error", "failed", "exception", "unknown argument")
+                )
+                else logging.INFO
+            )
+            logger.log(
+                level,
+                "chrome-devtools-mcp stderr: %s",
+                line,
+                extra={"mcp_component": "chrome-devtools-mcp"},
+            )
+
+    def close(self) -> None:
+        if not self.stream.closed:
+            self.stream.close()
+        self._thread.join(timeout=1.0)
+        if not self._reader.closed:
+            self._reader.close()
 
 
 class DeveloperAccessMiddleware(Middleware):
@@ -143,12 +245,14 @@ class DevToolsProxyRuntime:
     def __init__(self, browser: BrowserManager, _settings: BrowserSettings) -> None:
         self.browser = browser
         self._target_lock = asyncio.Lock()
+        self._stderr_forwarder = _DevToolsStderrForwarder()
         self.transport = StdioTransport(
             command=sys.executable,
             args=["-m", "modules.web.devtools_launcher"],
-            cwd="/workspace",
+            env=_launcher_env(),
+            cwd=_launcher_cwd(),
             keep_alive=True,
-            log_file=Path("/browser/chrome-devtools-mcp.log"),
+            log_file=self._stderr_forwarder.stream,
         )
 
         def client_factory() -> ProxyClient[StdioTransport]:
