@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import uuid
-from contextlib import suppress
 from pathlib import Path
 
 from fastmcp import Client, FastMCP
@@ -11,7 +10,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from common.mcp_client_pool import PersistentMcpClientPool
 from common.models import JsonObject, json_object
 from common.settings import AnalysisSettings
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.files.workspace_store import WorkspaceFileError, WorkspaceFileStore
 
 from .result import decode_call_result
 
@@ -67,7 +66,13 @@ class AnalysisWorkspaceTransfers:
         self,
         workspace_path: str,
     ) -> JsonObject:
-        source = self.workspace.path_for(workspace_path)
+        try:
+            source = self.workspace.path_for(workspace_path)
+        except WorkspaceFileError as exc:
+            raise AnalysisTransferError(
+                "workspace path is not a file; place the artifact in Files/Terminal "
+                "shared storage before importing it"
+            ) from exc
         if not source.is_file():
             raise AnalysisTransferError(
                 "workspace path is not a file; place the artifact in Files/Terminal "
