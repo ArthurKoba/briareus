@@ -45,7 +45,7 @@ function handle(event: BusEvent): void {
   eventEpoch += 1
   if (event.type === "settings.updated") {
     const data = event.data as Partial<SettingsState>
-    if (typeof data.revision === "string" && data.admin && data.terminal && data.mcp && data.github && data.analysis) {
+    if (typeof data.revision === "string" && data.admin && data.terminal && data.mcp && data.browser && data.github && data.analysis) {
       accept(data as SettingsState)
       return
     }

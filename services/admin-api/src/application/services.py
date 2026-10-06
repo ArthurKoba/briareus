@@ -15,6 +15,8 @@ from common.audit_payloads import redact_payload
 from common.cache import CacheBackend, CacheKeys
 from common.models import JsonObject, json_object
 from common.runtime_policy_contracts import (
+    BrowserLauncherPolicy,
+    BrowserRuntimePolicy,
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,
     McpRuntimePolicy,
@@ -396,10 +398,12 @@ class RuntimeSettingsService:
         self,
         repository: RuntimeSettingsRepository,
         *,
+        cipher: CredentialCipher | None = None,
         cache: CacheBackend | None = None,
         cache_settings: ValkeySettings | None = None,
     ) -> None:
         self.repository = repository
+        self.cipher = cipher
         self.cache = cache
         self.cache_settings = cache_settings or ValkeySettings()
         self.cache_keys = CacheKeys(cache) if cache is not None else None
@@ -502,3 +506,53 @@ class RuntimeSettingsService:
                 ttl_seconds=self.cache_settings.policy_ttl_seconds,
             )
         return result
+
+
+    async def browser_policy(self) -> BrowserRuntimePolicy:
+        if self.cache is not None and self.cache_keys is not None:
+            cached = self.cache.get_json(self.cache_keys.browser_policy())
+            if isinstance(cached, dict):
+                return BrowserRuntimePolicy.model_validate(cached)
+        result = await self.repository.get_browser_policy()
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.browser_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
+
+    async def update_browser_policy(
+        self,
+        policy: BrowserRuntimePolicy,
+        *,
+        extension_token: str | None = None,
+        clear_extension_token: bool = False,
+    ) -> BrowserRuntimePolicy:
+        encrypted: str | None = None
+        if extension_token is not None and extension_token.strip():
+            if self.cipher is None:
+                raise RuntimeError("browser runtime credential cipher is unavailable")
+            encrypted = self.cipher.encrypt(extension_token.strip())
+        result = await self.repository.save_browser_policy(
+            policy,
+            encrypted_extension_token=encrypted,
+            clear_extension_token=clear_extension_token,
+        )
+        if self.cache is not None and self.cache_keys is not None:
+            self.cache.set_json(
+                self.cache_keys.browser_policy(),
+                result.to_json(),
+                ttl_seconds=self.cache_settings.policy_ttl_seconds,
+            )
+        return result
+
+    async def browser_launcher_policy(self) -> BrowserLauncherPolicy:
+        policy = await self.browser_policy()
+        ciphertext = await self.repository.browser_extension_token()
+        token = ""
+        if ciphertext:
+            if self.cipher is None:
+                raise RuntimeError("browser runtime credential cipher is unavailable")
+            token = self.cipher.decrypt(ciphertext)
+        return BrowserLauncherPolicy(**policy.model_dump(), extension_token=token)

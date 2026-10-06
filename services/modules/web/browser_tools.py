@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from common.models import JsonObject
 
 from .browser import BrowserManager
-
-if TYPE_CHECKING:
-    from .devtools_proxy import DevToolsProxyRuntime
 
 
 def register_browser_tools(
@@ -19,7 +14,6 @@ def register_browser_tools(
     write_annotations: ToolAnnotations,
     *,
     browser: BrowserManager,
-    devtools: DevToolsProxyRuntime,
 ) -> None:
     @mcp.tool(title="Browser diagnostics", annotations=read_annotations)
     async def browser_diagnostics() -> JsonObject:
@@ -56,29 +50,6 @@ def register_browser_tools(
         """Resolve the CDP target for one application page without exposing the raw debug port."""
         return await browser.debug_target(page_id)
 
-    @mcp.tool(title="Browser DevTools target", annotations=read_annotations)
-    async def browser_devtools_target() -> JsonObject:
-        """Report whether DevTools controls the managed Chromium or an external Chrome target."""
-        return await devtools.target_status()
-
-    @mcp.tool(title="Attach DevTools to external Chrome", annotations=write_annotations)
-    async def browser_devtools_connect(
-        endpoint: str,
-        ws_headers: dict[str, str] | None = None,
-    ) -> JsonObject:
-        """Attach existing devtools_* tools to an external Chrome DevTools endpoint.
-
-        Accepts an HTTP(S) browser-debug URL or a direct WS(S)
-        /devtools/browser/... endpoint. Optional WebSocket headers are supported only
-        for direct WS(S) endpoints. Browser Developer access must already be enabled.
-        """
-        return await devtools.connect_external(endpoint, ws_headers)
-
-    @mcp.tool(title="Detach external Chrome DevTools", annotations=write_annotations)
-    async def browser_devtools_disconnect() -> JsonObject:
-        """Return existing devtools_* tools to the managed persistent Chromium."""
-        return await devtools.disconnect_external()
-
     @mcp.tool(title="Browser set viewport", annotations=write_annotations)
     async def browser_set_viewport(page_id: str, width: int, height: int) -> JsonObject:
         """Set one browser page viewport and return the effective measured viewport."""
@@ -95,101 +66,4 @@ def register_browser_tools(
         max_text_chars: int | None = None,
         max_elements: int | None = None,
     ) -> JsonObject:
-        """Return bounded page text plus visible interactive elements with short refs.
-
-        Refs are intentionally ephemeral. Take a fresh snapshot after meaningful DOM
-        changes before clicking/filling again.
         """
-        return await browser.snapshot(
-            page_id,
-            max_text_chars=max_text_chars,
-            max_elements=max_elements,
-        )
-
-    @mcp.tool(title="Browser click", annotations=write_annotations)
-    async def browser_click(page_id: str, ref: str) -> JsonObject:
-        """Click one interactive element ref from the latest browser_snapshot."""
-        return await browser.click(page_id, ref)
-
-    @mcp.tool(title="Browser fill", annotations=write_annotations)
-    async def browser_fill(
-        page_id: str,
-        ref: str,
-        value: str,
-        press_enter: bool = False,
-    ) -> JsonObject:
-        """Replace the value of one input/textarea ref; optionally press Enter."""
-        return await browser.fill(page_id, ref, value, press_enter=press_enter)
-
-    @mcp.tool(title="Browser press key", annotations=write_annotations)
-    async def browser_press(page_id: str, ref: str, key: str) -> JsonObject:
-        """Press a Playwright key chord on one element ref (for example Enter or Control+A)."""
-        return await browser.press(page_id, ref, key)
-
-    @mcp.tool(title="Browser select option", annotations=write_annotations)
-    async def browser_select_option(page_id: str, ref: str, value: str) -> JsonObject:
-        """Select one HTML select option by value."""
-        return await browser.select_option(page_id, ref, value)
-
-    @mcp.tool(title="Browser upload", annotations=write_annotations)
-    async def browser_upload(page_id: str, ref: str, workspace_path: str) -> JsonObject:
-        """Attach one existing shared-workspace file to a file-input element ref."""
-        return await browser.upload(page_id, ref, workspace_path)
-
-    @mcp.tool(title="Browser download", annotations=write_annotations)
-    async def browser_download(
-        page_id: str,
-        ref: str,
-        workspace_path: str,
-        overwrite: bool = False,
-    ) -> JsonObject:
-        """Click an element expected to download a file and save it into /workspace."""
-        return await browser.download(
-            page_id,
-            ref,
-            workspace_path,
-            overwrite=overwrite,
-        )
-
-    @mcp.tool(title="Browser screenshot", annotations=write_annotations)
-    async def browser_screenshot(
-        page_id: str,
-        workspace_path: str,
-        full_page: bool = True,
-        overwrite: bool = False,
-    ) -> JsonObject:
-        """Capture a PNG screenshot directly into the shared workspace."""
-        return await browser.screenshot(
-            page_id,
-            workspace_path,
-            full_page=full_page,
-            overwrite=overwrite,
-        )
-
-    @mcp.tool(title="Browser wait", annotations=read_annotations)
-    async def browser_wait(
-        page_id: str,
-        state: str = "networkidle",
-        timeout_seconds: float = 30,
-    ) -> JsonObject:
-        """Wait for a browser page load state without repeatedly polling snapshots."""
-        return await browser.wait(
-            page_id,
-            state=state,
-            timeout_seconds=timeout_seconds,
-        )
-
-    @mcp.tool(title="Browser back", annotations=write_annotations)
-    async def browser_back(page_id: str) -> JsonObject:
-        """Navigate one browser page backward."""
-        return await browser.back(page_id)
-
-    @mcp.tool(title="Browser reload", annotations=write_annotations)
-    async def browser_reload(page_id: str) -> JsonObject:
-        """Reload one browser page."""
-        return await browser.reload(page_id)
-
-    @mcp.tool(title="Browser close page", annotations=write_annotations)
-    async def browser_close_page(page_id: str) -> JsonObject:
-        """Close one browser page/tab; the persistent browser profile remains intact."""
-        return await browser.close_page(page_id)

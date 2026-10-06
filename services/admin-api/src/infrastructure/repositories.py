@@ -19,6 +19,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from common.runtime_policy_contracts import (
+    BrowserRuntimePolicy,
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,
     McpRuntimePolicy,
@@ -27,6 +28,7 @@ from common.runtime_policy_contracts import (
 
 from .database import (
     AdminConfigRecord,
+    BrowserRuntimeSettingsRecord,
     CachedSnapshotRecord,
     CoolifyAccountRecord,
     GitHubAccountRecord,
@@ -1043,3 +1045,59 @@ class SqlAlchemyRuntimeSettingsRepository:
             record.local_git_transport_enabled = policy.local_git_transport_enabled
             record.remote_source_mutations_enabled = policy.remote_source_mutations_enabled
         return policy
+
+    @staticmethod
+    def _browser_domain(record: BrowserRuntimeSettingsRecord) -> BrowserRuntimePolicy:
+        return BrowserRuntimePolicy(
+            external_enabled=record.external_enabled,
+            external_mcp_url=record.external_mcp_url,
+            call_timeout_seconds=record.call_timeout_seconds,
+            auto_disconnect_enabled=record.auto_disconnect_enabled,
+            idle_timeout_seconds=record.idle_timeout_seconds,
+            profile_dir_name=record.profile_dir_name,
+            extension_token_configured=bool(record.encrypted_extension_token),
+        )
+
+    @_db_span("runtime.browser.get")
+    async def get_browser_policy(self) -> BrowserRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(BrowserRuntimeSettingsRecord, 1)
+            if record is None:
+                record = BrowserRuntimeSettingsRecord(id=1)
+                session.add(record)
+                await session.flush()
+            return self._browser_domain(record)
+
+    @_db_span("runtime.browser.save")
+    async def save_browser_policy(
+        self,
+        policy: BrowserRuntimePolicy,
+        *,
+        encrypted_extension_token: str | None = None,
+        clear_extension_token: bool = False,
+    ) -> BrowserRuntimePolicy:
+        async with self.sessions.begin() as session:
+            record = await session.get(BrowserRuntimeSettingsRecord, 1)
+            if record is None:
+                record = BrowserRuntimeSettingsRecord(id=1)
+                session.add(record)
+            record.external_enabled = policy.external_enabled
+            record.external_mcp_url = policy.external_mcp_url
+            record.call_timeout_seconds = policy.call_timeout_seconds
+            record.auto_disconnect_enabled = policy.auto_disconnect_enabled
+            record.idle_timeout_seconds = policy.idle_timeout_seconds
+            record.profile_dir_name = policy.profile_dir_name
+            if clear_extension_token:
+                record.encrypted_extension_token = ""
+            elif encrypted_extension_token is not None:
+                record.encrypted_extension_token = encrypted_extension_token
+            await session.flush()
+            return self._browser_domain(record)
+
+    @_db_span("runtime.browser.token")
+    async def browser_extension_token(self) -> str:
+        async with self.sessions.begin() as session:
+            record = await session.get(BrowserRuntimeSettingsRecord, 1)
+            if record is None or not record.encrypted_extension_token:
+                return ""
+            return str(record.encrypted_extension_token)
