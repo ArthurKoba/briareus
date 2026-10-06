@@ -209,13 +209,7 @@ class AnalysisToolProvider(Provider):
         }
         for backend_tool in backend_tools:
             if (
-                backend_tool.name in {
-                    "search_tools",
-                    "check_tools",
-                    "import_file",
-                    "import_program",
-                    "restore_project",
-                }
+                backend_tool.name in {"search_tools", "check_tools"}
                 or backend_tool.name.startswith("artifact_stage_")
                 or backend_tool.name.startswith("artifact_file_")
             ):
