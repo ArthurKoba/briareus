@@ -79,7 +79,10 @@ config_service = ManagementConfigService(
     config_repository, cache=shared_cache, cache_settings=cache_settings
 )
 runtime_settings = RuntimeSettingsService(
-    runtime_settings_repository, cache=shared_cache, cache_settings=cache_settings
+    runtime_settings_repository,
+    cipher=cipher,
+    cache=shared_cache,
+    cache_settings=cache_settings,
 )
 oauth_sessions = OAuthSessionService(oauth_session_repository)
 snapshots = SnapshotService(snapshot_repository)

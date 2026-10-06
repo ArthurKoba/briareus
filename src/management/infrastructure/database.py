@@ -235,6 +235,19 @@ class GitLabRuntimeSettingsRecord(Base):
     remote_source_mutations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class BrowserRuntimeSettingsRecord(Base):
+    __tablename__ = "browser_runtime_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    external_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_mcp_url: Mapped[str] = mapped_column(String(2048), default="")
+    call_timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    auto_disconnect_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    idle_timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    profile_dir_name: Mapped[str] = mapped_column(String(128), default="Default")
+    encrypted_extension_token: Mapped[str] = mapped_column(Text, default="")
+
+
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)

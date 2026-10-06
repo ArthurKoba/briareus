@@ -91,6 +91,34 @@ export interface BrowserState {
   capabilities?: Record<string, boolean>
   viewport?: { width?: number; height?: number }
 }
+export interface BrowserRuntimeSettings {
+  external_enabled: boolean
+  external_mcp_url: string
+  call_timeout_seconds: number
+  auto_disconnect_enabled: boolean
+  idle_timeout_seconds: number
+  profile_dir_name: string
+  extension_token_configured: boolean
+}
+
+export interface BrowserExternalStatus {
+  configured?: boolean
+  enabled?: boolean
+  connected?: boolean
+  browser_ready?: boolean
+  provider?: string
+  namespace?: string
+  endpoint_origin?: string
+  profile_dir_name?: string
+  extension_token_configured?: boolean
+  session_connect_count?: number
+  last_activity_at?: string
+  call_timeout_seconds?: number
+  auto_disconnect_enabled?: boolean
+  idle_timeout_seconds?: number
+  tool_count?: number
+}
+
 export interface BrowserRemoteDebug {
   page_id: string
   target_id: string
@@ -110,6 +138,7 @@ export interface SettingsState {
   management: { logging_enabled: boolean; logging_capture_payloads: boolean; logging_retention_days: number; logging_max_records: number; maintenance_interval_minutes: number }
   terminal: { max_exec_timeout_seconds: number; max_job_runtime_seconds: number }
   mcp: { call_timeout_seconds: number }
+  browser: BrowserRuntimeSettings
   github: VcsPolicyState
   gitlab: VcsPolicyState
   analysis: { idle_timeout_seconds?: number; auto_release_enabled?: boolean; source?: string }
@@ -228,6 +257,10 @@ export const managementApi = {
   setBrowserTheme: (colorScheme: "system" | "light" | "dark"): Promise<BrowserState> => request("/api/browser/theme", { method: "PUT", body: jsonBody({ color_scheme: colorScheme }) }),
   browserRemoteDebug: (pageId: string): Promise<BrowserRemoteDebug> => request("/api/browser/remote-debug", { method: "POST", body: jsonBody({ page_id: pageId }) }),
   setBrowserViewport: (pageId: string, width: number, height: number): Promise<Record<string, unknown>> => request("/api/browser/viewport", { method: "PUT", body: jsonBody({ page_id: pageId, width, height }) }),
+  browserExternalStatus: (): Promise<BrowserExternalStatus> => request("/api/browser/external/status"),
+  browserExternalConnect: (): Promise<BrowserExternalStatus> => request("/api/browser/external/connect", { method: "POST", body: "{}" }),
+  browserExternalDisconnect: (): Promise<BrowserExternalStatus> => request("/api/browser/external/disconnect", { method: "POST", body: "{}" }),
+  browserExternalReset: (): Promise<BrowserExternalStatus> => request("/api/browser/external/reset", { method: "POST", body: "{}" }),
   settings: (options: RequestOptions = {}): Promise<SettingsState> => request("/api/settings", {}, options),
   updateSettings: (payload: SettingsUpdatePayload): Promise<SettingsState> => request("/api/settings", { method: "PUT", body: jsonBody(payload) }),
   cleanupLogs: (): Promise<{ removed: number }> => request("/api/settings/cleanup-logs", { method: "POST", body: "{}" }),

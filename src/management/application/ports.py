@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Protocol
 
 from common.runtime_policy_contracts import (
+    BrowserRuntimePolicy,
     GitHubRuntimePolicy,
     GitLabRuntimePolicy,
     McpRuntimePolicy,
@@ -138,6 +139,18 @@ class RuntimeSettingsRepository(Protocol):
     def get_gitlab_policy(self) -> GitLabRuntimePolicy: ...
 
     def save_gitlab_policy(self, policy: GitLabRuntimePolicy) -> GitLabRuntimePolicy: ...
+
+    def get_browser_policy(self) -> BrowserRuntimePolicy: ...
+
+    def save_browser_policy(
+        self,
+        policy: BrowserRuntimePolicy,
+        *,
+        encrypted_extension_token: str | None = None,
+        clear_extension_token: bool = False,
+    ) -> BrowserRuntimePolicy: ...
+
+    def browser_extension_token(self) -> str: ...
 
 
 class CredentialCipher(Protocol):

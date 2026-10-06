@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import re
 
@@ -17,6 +18,7 @@ from common.browser_remote_debug import (
 from common.models import JsonObject
 from common.runtime_annotations import READ_EXTERNAL, READ_ONLY_LOCAL, WRITE_EXTERNAL
 from common.runtime_common import build_private_mcp, management_client, private_http_app
+from common.runtime_policy_contracts import BrowserRuntimePolicy
 from common.settings import (
     BrowserSettings,
     CurlSettings,
@@ -87,21 +89,36 @@ register_browser_tools(
 _devtools = DevToolsProxyRuntime(_browser, _browser_settings)
 mcp.mount(_devtools.server, namespace="devtools")
 
-_external_browser = ExternalBrowserProxyRuntime(_browser_settings)
-if _external_browser.server is not None:
-    mcp.mount(_external_browser.server, namespace="external")
+async def _external_browser_policy() -> BrowserRuntimePolicy:
+    return await asyncio.to_thread(_management.browser_runtime_policy)
+
+
+_external_browser = ExternalBrowserProxyRuntime(_external_browser_policy)
+mcp.mount(_external_browser.server, namespace="external")
 
 
 @mcp.tool(title="External browser status", annotations=READ_EXTERNAL)
 async def browser_external_status() -> JsonObject:
-    """Report configuration for the official external Playwright MCP browser bridge."""
-    return _external_browser.status()
+    """Report configuration and live state for the external Playwright MCP bridge."""
+    return await _external_browser.status()
+
+
+@mcp.tool(title="Connect external browser", annotations=WRITE_EXTERNAL)
+async def browser_external_connect() -> JsonObject:
+    """Connect the configured external Playwright MCP server and keep the session alive."""
+    return await _external_browser.connect()
 
 
 @mcp.tool(title="Disconnect external browser", annotations=WRITE_EXTERNAL)
 async def browser_external_disconnect() -> JsonObject:
     """Close the persistent external Playwright MCP session without stopping Chrome."""
     return await _external_browser.disconnect()
+
+
+@mcp.tool(title="Reset external browser", annotations=WRITE_EXTERNAL)
+async def browser_external_reset() -> JsonObject:
+    """Reset the external MCP session and reconnect using current Admin settings."""
+    return await _external_browser.reset()
 
 
 app = private_http_app(mcp, _private_settings)

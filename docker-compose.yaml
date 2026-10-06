@@ -194,8 +194,6 @@ services:
     environment:
       <<: [*cache-client, *management-client, *observability]
       TZ: ${TZ:-UTC}
-      BROWSER_EXTERNAL_MCP_URL: ${BROWSER_EXTERNAL_MCP_URL:-}
-      BROWSER_EXTERNAL_MCP_TIMEOUT_SECONDS: ${BROWSER_EXTERNAL_MCP_TIMEOUT_SECONDS:-120}
     volumes:
       - terminal-workspace:/workspace
       - web-browser:/browser

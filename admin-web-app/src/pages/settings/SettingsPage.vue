@@ -4,7 +4,7 @@ import { InputNumber, Select, Switch } from "ant-design-vue"
 import { Save, Trash2 } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 
-import { managementApi, type BrowserState, type SettingsState } from "@/shared/api/management"
+import { managementApi, type BrowserExternalStatus, type BrowserState, type SettingsState } from "@/shared/api/management"
 import { ManagementApiError } from "@/shared/api/error"
 import { runtimeConfig } from "@/shared/config/runtime"
 import { eventBus } from "@/shared/events/bus"
@@ -23,6 +23,8 @@ const { t } = useI18n()
 const section = ref("interface")
 const state = ref<SettingsState | null>(null)
 const browserState = ref<BrowserState | null>(null)
+const browserExternalStatus = ref<BrowserExternalStatus | null>(null)
+const browserExternalAction = ref<"" | "connect" | "disconnect" | "reset">("")
 const browserTheme = ref<"system" | "light" | "dark">("dark")
 const loading = ref(false)
 const saving = ref(false)
@@ -40,6 +42,14 @@ const form = reactive({
   terminal_max_exec_timeout_seconds: 21600,
   terminal_max_job_runtime_seconds: 43200,
   mcp_call_timeout_seconds: 5,
+  browser_external_enabled: false,
+  browser_external_mcp_url: "",
+  browser_call_timeout_seconds: 300,
+  browser_auto_disconnect_enabled: false,
+  browser_idle_timeout_seconds: 300,
+  browser_profile_dir_name: "Default",
+  browser_extension_token: "",
+  browser_clear_extension_token: false,
   reverse_idle_timeout_seconds: 900,
 })
 
@@ -79,6 +89,14 @@ function formFromState(value: SettingsState) {
     terminal_max_exec_timeout_seconds: value.terminal.max_exec_timeout_seconds,
     terminal_max_job_runtime_seconds: value.terminal.max_job_runtime_seconds,
     mcp_call_timeout_seconds: value.mcp.call_timeout_seconds,
+    browser_external_enabled: value.browser.external_enabled,
+    browser_external_mcp_url: value.browser.external_mcp_url,
+    browser_call_timeout_seconds: value.browser.call_timeout_seconds,
+    browser_auto_disconnect_enabled: value.browser.auto_disconnect_enabled,
+    browser_idle_timeout_seconds: value.browser.idle_timeout_seconds,
+    browser_profile_dir_name: value.browser.profile_dir_name,
+    browser_extension_token: "",
+    browser_clear_extension_token: false,
     reverse_idle_timeout_seconds: Number(value.analysis.idle_timeout_seconds ?? 900),
   }
 }
@@ -108,7 +126,12 @@ async function load(): Promise<void> {
 
 async function loadBrowser(): Promise<void> {
   try {
-    browserState.value = await managementApi.browserState()
+    const [managed, external] = await Promise.all([
+      managementApi.browserState(),
+      managementApi.browserExternalStatus().catch(() => null),
+    ])
+    browserState.value = managed
+    browserExternalStatus.value = external
     const scheme = browserState.value.color_scheme
     if (scheme === "system" || scheme === "light" || scheme === "dark") browserTheme.value = scheme
   } catch (caught) {
@@ -127,8 +150,8 @@ async function changeBrowserTheme(value: string): Promise<void> {
   }
 }
 
-async function save(): Promise<void> {
-  if (!state.value || loading.value || saving.value) return
+async function save(): Promise<boolean> {
+  if (!state.value || loading.value || saving.value) return false
   saving.value = true
   error.value = ""
   try {
@@ -137,14 +160,38 @@ async function save(): Promise<void> {
     applyState(saved)
     error.value = ""
     notifications.success(String(t("notifications.saved")))
+    return true
   } catch (caught) {
     error.value = caught instanceof IncompleteSettingsSnapshotError
       ? String(t("settings.reloadBeforeSave"))
       : caught instanceof ManagementApiError && caught.status === 409 && caught.code === "settings_conflict"
         ? String(t("settings.conflict"))
         : caught instanceof Error ? caught.message : "Unable to save settings"
+    return false
   } finally {
     saving.value = false
+  }
+}
+
+async function runExternalBrowserAction(action: "connect" | "disconnect" | "reset"): Promise<void> {
+  if (browserExternalAction.value) return
+  if (action !== "disconnect" && dirty.value) {
+    const saved = await save()
+    if (!saved) return
+  }
+  browserExternalAction.value = action
+  error.value = ""
+  try {
+    browserExternalStatus.value = action === "connect"
+      ? await managementApi.browserExternalConnect()
+      : action === "disconnect"
+        ? await managementApi.browserExternalDisconnect()
+        : await managementApi.browserExternalReset()
+    notifications.success(String(t("notifications.saved")))
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "Unable to control external browser"
+  } finally {
+    browserExternalAction.value = ""
   }
 }
 
@@ -216,6 +263,54 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
       <div class="setting-row">
         <span><b>{{ t("settings.browserViewport") }}</b><small>{{ t("settings.browserViewportHint") }}</small></span>
         <span class="font-mono text-xs">{{ browserState?.viewport?.width ?? 1280 }} × {{ browserState?.viewport?.height ?? 720 }}</span>
+      </div>
+
+      <div class="mt-5 border-t border-border/70 pt-4">
+        <h3 class="text-sm font-semibold">{{ t("settings.externalBrowser") }}</h3>
+        <p class="mt-1 text-xs text-muted-foreground">{{ t("settings.externalBrowserHint") }}</p>
+      </div>
+      <label class="setting-row">
+        <span><b>{{ t("settings.externalBrowserEnabled") }}</b><small>{{ t("settings.externalBrowserEnabledHint") }}</small></span>
+        <Switch v-model:checked="form.browser_external_enabled" />
+      </label>
+      <label class="setting-row items-start">
+        <span><b>{{ t("settings.externalBrowserUrl") }}</b><small>{{ t("settings.externalBrowserUrlHint") }}</small></span>
+        <input v-model="form.browser_external_mcp_url" class="field w-full max-w-sm font-mono text-xs" placeholder="http://192.168.1.11:8931/mcp" />
+      </label>
+      <label class="setting-row">
+        <span><b>{{ t("settings.externalBrowserCallTimeout") }}</b><small>{{ t("settings.externalBrowserCallTimeoutHint") }}</small></span>
+        <InputNumber v-model:value="form.browser_call_timeout_seconds" :min="1" :max="1800" />
+      </label>
+      <label class="setting-row">
+        <span><b>{{ t("settings.externalBrowserAutoDisconnect") }}</b><small>{{ t("settings.externalBrowserAutoDisconnectHint") }}</small></span>
+        <Switch v-model:checked="form.browser_auto_disconnect_enabled" />
+      </label>
+      <label v-if="form.browser_auto_disconnect_enabled" class="setting-row">
+        <span><b>{{ t("settings.externalBrowserIdleTimeout") }}</b><small>{{ t("settings.externalBrowserIdleTimeoutHint") }}</small></span>
+        <InputNumber v-model:value="form.browser_idle_timeout_seconds" :min="30" :max="86400" />
+      </label>
+      <label class="setting-row items-start">
+        <span><b>{{ t("settings.externalBrowserProfile") }}</b><small>{{ t("settings.externalBrowserProfileHint") }}</small></span>
+        <input v-model="form.browser_profile_dir_name" class="field w-56 font-mono text-xs" placeholder="Default" />
+      </label>
+      <label class="setting-row items-start">
+        <span><b>{{ t("settings.externalBrowserToken") }}</b><small>{{ state?.browser.extension_token_configured ? t("settings.externalBrowserTokenConfigured") : t("settings.externalBrowserTokenHint") }}</small></span>
+        <input v-model="form.browser_extension_token" class="field w-full max-w-sm font-mono text-xs" type="password" autocomplete="off" :placeholder="state?.browser.extension_token_configured ? '••••••••' : ''" />
+      </label>
+      <label v-if="state?.browser.extension_token_configured" class="setting-row">
+        <span><b>{{ t("settings.externalBrowserClearToken") }}</b><small>{{ t("settings.externalBrowserClearTokenHint") }}</small></span>
+        <Switch v-model:checked="form.browser_clear_extension_token" />
+      </label>
+      <div class="setting-row">
+        <span><b>{{ t("settings.externalBrowserStatus") }}</b><small>{{ browserExternalStatus?.endpoint_origin || form.browser_external_mcp_url || '—' }}</small></span>
+        <span class="rounded-md bg-muted px-2 py-1 text-xs" :class="browserExternalStatus?.connected ? 'text-emerald-600' : 'text-muted-foreground'">
+          {{ browserExternalStatus?.connected ? t("common.connected") : t("common.disconnected") }}
+        </span>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-3">
+        <Button size="sm" :disabled="Boolean(browserExternalAction) || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('connect')">{{ t("settings.externalBrowserConnect") }}</Button>
+        <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction)" @click="runExternalBrowserAction('disconnect')">{{ t("settings.externalBrowserDisconnect") }}</Button>
+        <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction) || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('reset')">{{ t("settings.externalBrowserReset") }}</Button>
       </div>
     </section>
 

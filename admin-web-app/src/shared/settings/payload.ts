@@ -10,6 +10,14 @@ export interface SettingsUpdatePayload {
   terminal_max_exec_timeout_seconds: number
   terminal_max_job_runtime_seconds: number
   mcp_call_timeout_seconds: number
+  browser_external_enabled: boolean
+  browser_external_mcp_url: string
+  browser_call_timeout_seconds: number
+  browser_auto_disconnect_enabled: boolean
+  browser_idle_timeout_seconds: number
+  browser_profile_dir_name: string
+  browser_extension_token: string
+  browser_clear_extension_token: boolean
   github_local_first_guidance: boolean
   github_local_git_transport_enabled: boolean
   github_remote_source_mutations_enabled: boolean
@@ -45,6 +53,14 @@ export function settingsUpdatePayload(state: SettingsState, overrides: Partial<S
     terminal_max_exec_timeout_seconds: state.terminal.max_exec_timeout_seconds,
     terminal_max_job_runtime_seconds: state.terminal.max_job_runtime_seconds,
     mcp_call_timeout_seconds: state.mcp.call_timeout_seconds,
+    browser_external_enabled: state.browser.external_enabled,
+    browser_external_mcp_url: state.browser.external_mcp_url,
+    browser_call_timeout_seconds: state.browser.call_timeout_seconds,
+    browser_auto_disconnect_enabled: state.browser.auto_disconnect_enabled,
+    browser_idle_timeout_seconds: state.browser.idle_timeout_seconds,
+    browser_profile_dir_name: state.browser.profile_dir_name,
+    browser_extension_token: "",
+    browser_clear_extension_token: false,
     github_local_first_guidance: githubPolicy.local_first_guidance,
     github_local_git_transport_enabled: githubPolicy.local_git_transport_enabled,
     github_remote_source_mutations_enabled: githubPolicy.remote_source_mutations_enabled,
