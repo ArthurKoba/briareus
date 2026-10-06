@@ -22,7 +22,12 @@ class _PersistentPlaywrightProxyClient(ProxyClient[StreamableHttpTransport]):
     """Serialize proxy calls through one persistent upstream MCP HTTP session."""
 
     def __init__(self, url: str, *, timeout_seconds: float) -> None:
-        transport = StreamableHttpTransport(url)
+        parts = urlsplit(url)
+        host_header = parts.hostname or ""
+        transport = StreamableHttpTransport(
+            url,
+            headers={"Host": host_header} if host_header else None,
+        )
         super().__init__(
             transport,
             timeout=timeout_seconds,
