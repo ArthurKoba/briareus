@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
 
+import httpx
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 
@@ -62,6 +64,79 @@ class AnalysisWorkspaceTransfers:
         if value.get("success") is False:
             raise AnalysisTransferError(f"analysis backend {name} failed")
         return value
+
+    async def _direct_upload_workspace_file(
+        self,
+        project_id: str,
+        workspace_path: str,
+    ) -> JsonObject:
+        source = self.workspace.path_for(workspace_path)
+        if not source.is_file():
+            raise AnalysisTransferError("workspace path is not a file")
+        size = source.stat().st_size
+        if size > self.max_file_bytes:
+            raise AnalysisTransferError("workspace file exceeds configured size limit")
+        digest = self.workspace.sha256(workspace_path)
+        upload_url = self.settings.direct_upload_url.strip()
+        if not upload_url:
+            raise AnalysisTransferError("direct artifact upload is not configured")
+
+        async def chunks() -> AsyncIterator[bytes]:
+            with source.open("rb") as handle:
+                while True:
+                    chunk = handle.read(max(self.chunk_bytes, 4 * 1024 * 1024))
+                    if not chunk:
+                        break
+                    yield chunk
+
+        timeout = httpx.Timeout(self.settings.direct_upload_timeout_seconds)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                upload_url,
+                params={"project_id": project_id, "name": source.name},
+                headers={
+                    "X-Koba-Proxy-Origin": "analysis",
+                    "X-Artifact-Size": str(size),
+                    "X-Artifact-SHA256": digest,
+                    "Content-Type": "application/octet-stream",
+                },
+                content=chunks(),
+            )
+        if response.status_code >= 400:
+            raise AnalysisTransferError(
+                f"direct artifact upload failed with HTTP {response.status_code}"
+            )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise AnalysisTransferError("direct artifact upload returned invalid response")
+        path = payload.get("path")
+        if not isinstance(path, str) or not path:
+            raise AnalysisTransferError("direct artifact upload returned no artifact path")
+        return {
+            "path": path,
+            "workspace_path": workspace_path,
+            "size_bytes": size,
+            "sha256": digest,
+            "transfer_method": "direct_raw",
+        }
+
+    async def _transfer_workspace_file(
+        self,
+        project_id: str,
+        workspace_path: str,
+    ) -> JsonObject:
+        direct_error = ""
+        if self.settings.direct_upload_url.strip():
+            try:
+                return await self._direct_upload_workspace_file(project_id, workspace_path)
+            except Exception as exc:
+                direct_error = str(exc)
+
+        staged = await self._stage_workspace_file(project_id, workspace_path)
+        staged["transfer_method"] = "mcp_base64"
+        if direct_error:
+            staged["direct_upload_error"] = direct_error
+        return staged
 
     async def _stage_workspace_file(
         self,
@@ -131,6 +206,7 @@ class AnalysisWorkspaceTransfers:
             "workspace_path": workspace_path,
             "size_bytes": size,
             "sha256": digest,
+            "transfer_method": "mcp_base64",
         }
 
     async def _cancel_stage(self, project_id: str, stage_id: str) -> None:
@@ -150,6 +226,23 @@ class AnalysisWorkspaceTransfers:
             return str(exc)
         return ""
 
+    async def _cleanup_transfer_best_effort(
+        self,
+        project_id: str,
+        transferred: JsonObject,
+    ) -> str:
+        try:
+            if transferred.get("transfer_method") == "direct_raw":
+                await self._call(
+                    "artifact_file_delete",
+                    {"project_id": project_id, "path": str(transferred["path"])},
+                )
+            else:
+                await self._cancel_stage(project_id, str(transferred["stage_id"]))
+        except Exception as exc:
+            return str(exc)
+        return ""
+
     async def import_workspace_file(
         self,
         project_id: str,
@@ -159,14 +252,13 @@ class AnalysisWorkspaceTransfers:
         compiler_spec: str = "",
         auto_analyze: bool = True,
     ) -> JsonObject:
-        staged = await self._stage_workspace_file(project_id, workspace_path)
-        stage_id = str(staged["stage_id"])
+        transferred = await self._transfer_workspace_file(project_id, workspace_path)
         try:
             result = await self._call(
                 "import_file",
                 {
                     "project_id": project_id,
-                    "file_path": staged["path"],
+                    "file_path": transferred["path"],
                     "project_folder": project_folder,
                     "language": language,
                     "compiler_spec": compiler_spec,
@@ -174,14 +266,16 @@ class AnalysisWorkspaceTransfers:
                 },
             )
         except Exception:
-            await self._cancel_stage_best_effort(project_id, stage_id)
+            await self._cleanup_transfer_best_effort(project_id, transferred)
             raise
-        cleanup_error = await self._cancel_stage_best_effort(project_id, stage_id)
+        cleanup_error = await self._cleanup_transfer_best_effort(project_id, transferred)
         return {
             "workspace_path": workspace_path,
-            "sha256": staged["sha256"],
+            "sha256": transferred["sha256"],
+            "transfer_method": transferred["transfer_method"],
+            "direct_upload_error": transferred.get("direct_upload_error", ""),
             "result": result,
-            "stage_cleanup_error": cleanup_error,
+            "transfer_cleanup_error": cleanup_error,
         }
 
     async def import_workspace_program(
@@ -192,28 +286,29 @@ class AnalysisWorkspaceTransfers:
         target_name: str = "",
         overwrite: bool = False,
     ) -> JsonObject:
-        staged = await self._stage_workspace_file(project_id, workspace_path)
-        stage_id = str(staged["stage_id"])
+        transferred = await self._transfer_workspace_file(project_id, workspace_path)
         try:
             result = await self._call(
                 "import_program",
                 {
                     "project_id": project_id,
-                    "gzf_path": staged["path"],
+                    "gzf_path": transferred["path"],
                     "target_folder": target_folder,
                     "target_name": target_name,
                     "overwrite": overwrite,
                 },
             )
         except Exception:
-            await self._cancel_stage_best_effort(project_id, stage_id)
+            await self._cleanup_transfer_best_effort(project_id, transferred)
             raise
-        cleanup_error = await self._cancel_stage_best_effort(project_id, stage_id)
+        cleanup_error = await self._cleanup_transfer_best_effort(project_id, transferred)
         return {
             "workspace_path": workspace_path,
-            "sha256": staged["sha256"],
+            "sha256": transferred["sha256"],
+            "transfer_method": transferred["transfer_method"],
+            "direct_upload_error": transferred.get("direct_upload_error", ""),
             "result": result,
-            "stage_cleanup_error": cleanup_error,
+            "transfer_cleanup_error": cleanup_error,
         }
 
     async def restore_workspace_project(
@@ -223,27 +318,28 @@ class AnalysisWorkspaceTransfers:
         project_name: str,
         parent_dir: str = "",
     ) -> JsonObject:
-        staged = await self._stage_workspace_file(project_id, workspace_path)
-        stage_id = str(staged["stage_id"])
+        transferred = await self._transfer_workspace_file(project_id, workspace_path)
         try:
             result = await self._call(
                 "restore_project",
                 {
                     "project_id": project_id,
-                    "gar_path": staged["path"],
+                    "gar_path": transferred["path"],
                     "project_name": project_name,
                     "parent_dir": parent_dir,
                 },
             )
         except Exception:
-            await self._cancel_stage_best_effort(project_id, stage_id)
+            await self._cleanup_transfer_best_effort(project_id, transferred)
             raise
-        cleanup_error = await self._cancel_stage_best_effort(project_id, stage_id)
+        cleanup_error = await self._cleanup_transfer_best_effort(project_id, transferred)
         return {
             "workspace_path": workspace_path,
-            "sha256": staged["sha256"],
+            "sha256": transferred["sha256"],
+            "transfer_method": transferred["transfer_method"],
+            "direct_upload_error": transferred.get("direct_upload_error", ""),
             "result": result,
-            "stage_cleanup_error": cleanup_error,
+            "transfer_cleanup_error": cleanup_error,
         }
 
     async def _copy_artifact_to_workspace(
