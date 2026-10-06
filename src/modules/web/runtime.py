@@ -14,6 +14,7 @@ from common.browser_remote_debug import (
     BrowserRemoteDebugAuthError,
     verify_browser_remote_debug_token,
 )
+from common.models import JsonObject
 from common.runtime_annotations import READ_EXTERNAL, READ_ONLY_LOCAL, WRITE_EXTERNAL
 from common.runtime_common import build_private_mcp, management_client, private_http_app
 from common.settings import (
@@ -31,6 +32,7 @@ from .browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE, resolve_chromium_g
 from .browser_tools import register_browser_tools
 from .devtools_proxy import DevToolsProxyRuntime
 from .executor import resolve_curl_binary
+from .external_browser_proxy import ExternalBrowserProxyRuntime
 from .operator import browser_operator_websocket
 from .tools import register_curl_tools
 
@@ -75,15 +77,26 @@ register_curl_tools(
     curl_binary=_curl_binary,
 )
 
-_devtools = DevToolsProxyRuntime(_browser, _browser_settings)
 register_browser_tools(
     mcp,
     READ_EXTERNAL,
     WRITE_EXTERNAL,
     browser=_browser,
-    devtools=_devtools,
 )
+
+_devtools = DevToolsProxyRuntime(_browser, _browser_settings)
 mcp.mount(_devtools.server, namespace="devtools")
+
+_external_browser = ExternalBrowserProxyRuntime(_browser_settings)
+if _external_browser.server is not None:
+    mcp.mount(_external_browser.server, namespace="external")
+
+
+@mcp.tool(title="External browser status", annotations=READ_EXTERNAL)
+async def browser_external_status() -> JsonObject:
+    """Report configuration for the official external Playwright MCP browser bridge."""
+    return _external_browser.status()
+
 
 app = private_http_app(mcp, _private_settings)
 

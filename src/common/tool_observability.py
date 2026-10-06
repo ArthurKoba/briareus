@@ -35,10 +35,6 @@ def invocation_arguments_payload(
         return _terminal_arguments_payload(arguments)
     if normalized_module == "web" and tool.startswith("devtools_"):
         return render_payload({"detail": "Chrome DevTools arguments omitted from Management audit"})
-    if normalized_module == "web" and tool == "browser_devtools_connect":
-        return render_payload(
-            {"detail": "external DevTools endpoint and headers omitted from Management audit"}
-        )
     if normalized_module == "web" and tool.startswith("browser_") and isinstance(arguments, dict):
         bounded = dict(arguments)
         if tool == "browser_fill" and "value" in bounded:

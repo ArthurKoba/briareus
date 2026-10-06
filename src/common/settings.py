@@ -669,6 +669,13 @@ class BrowserSettings(ProcessSettings):
         ),
         validation_alias="BROWSER_DEVTOOLS_MCP_SCRIPT_PATH",
     )
+    external_mcp_url: str = Field("", validation_alias="BROWSER_EXTERNAL_MCP_URL")
+    external_mcp_timeout_seconds: float = Field(
+        120.0,
+        ge=1.0,
+        le=600.0,
+        validation_alias="BROWSER_EXTERNAL_MCP_TIMEOUT_SECONDS",
+    )
     timeout_ms: int = Field(30_000, ge=1_000, le=120_000, validation_alias="BROWSER_TIMEOUT_MS")
     max_snapshot_text_chars: int = Field(
         30_000,
@@ -689,6 +696,16 @@ class BrowserSettings(ProcessSettings):
         if not value.is_absolute():
             raise ValueError("browser paths must be absolute")
         return value.resolve(strict=False)
+
+    @field_validator("external_mcp_url", mode="before")
+    @classmethod
+    def _normalize_external_mcp_url(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        if normalized and not normalized.startswith(("http://", "https://")):
+            raise ValueError("external browser MCP URL must use http or https")
+        return normalized
 
     @field_validator("timezone", mode="before")
     @classmethod
