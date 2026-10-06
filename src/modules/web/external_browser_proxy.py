@@ -39,6 +39,11 @@ class _PersistentPlaywrightProxyClient(ProxyClient[StreamableHttpTransport]):
         self._persistent_hold = False
         self.connect_count = 0
 
+    @property
+    def connected(self) -> bool:
+        task = self._session_state.session_task
+        return bool(self._persistent_hold and task is not None and not task.done())
+
     async def acquire(self) -> _PersistentPlaywrightProxyClient:
         await self._lease_lock.acquire()
         return self
@@ -125,8 +130,14 @@ class ExternalBrowserProxyRuntime:
             "provider": "playwright-mcp",
             "namespace": "external",
             "endpoint_origin": f"{parts.scheme}://{host}{port}",
+            "connected": self._client.connected if self._client else False,
             "session_connect_count": self._client.connect_count if self._client else 0,
         }
+
+    async def disconnect(self) -> JsonObject:
+        if self._client is not None:
+            await self._client.shutdown()
+        return self.status()
 
     @asynccontextmanager
     async def _lifespan(self, _server: FastMCP[Any]) -> AsyncIterator[None]:

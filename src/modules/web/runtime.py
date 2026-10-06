@@ -98,6 +98,12 @@ async def browser_external_status() -> JsonObject:
     return _external_browser.status()
 
 
+@mcp.tool(title="Disconnect external browser", annotations=WRITE_EXTERNAL)
+async def browser_external_disconnect() -> JsonObject:
+    """Close the persistent external Playwright MCP session without stopping Chrome."""
+    return await _external_browser.disconnect()
+
+
 app = private_http_app(mcp, _private_settings)
 
 
