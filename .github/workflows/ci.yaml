@@ -1,5 +1,10 @@
 name: CI
 
+# Transitional compatibility for the currently deployed legacy GitHub reviewer.
+# These jobs do not build containers or run project tests. Once the GitHub provider
+# is migrated to the split runtime (which requires the `validate` check), delete
+# this workflow entirely.
+
 on:
   pull_request:
   push:

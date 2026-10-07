@@ -39,7 +39,7 @@ from . import __version__
 from .access_middleware import AccessSessionMiddleware
 from .access_tools import register_access_session_tools
 from .authorization_access_client import AuthorizationAccessClient
-from .authorization_client import LocalAuthorizationTokenVerifier
+from .authorization_client import AuthorizationJwksClient, LocalAuthorizationTokenVerifier
 from .backend_router import BackendDescriptor, BackendRouter
 from .backend_sessions import ProxyClientPool
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
@@ -80,16 +80,19 @@ def _proxy(name: str, url: str) -> FastMCP:
 
 def _build_surface_authorization(
     settings: GatewayAuthorizationSettings,
+    jwks: AuthorizationJwksClient | None,
 ) -> dict[str, RemoteAuthProvider]:
     if not settings.enabled:
         return {}
 
     settings.validate_bootstrap()
+    if jwks is None:
+        raise ValueError("authorization JWKS client is required when OAuth is enabled")
     authorization_server = AnyHttpUrl(settings.public_base_url)
     result: dict[str, RemoteAuthProvider] = {}
     for surface in MCP_SURFACE_PATHS:
         resource = resource_url(settings.mcp_public_base_url, surface)
-        verifier = LocalAuthorizationTokenVerifier(settings, resource)
+        verifier = LocalAuthorizationTokenVerifier(settings, resource, jwks)
         result[surface] = RemoteAuthProvider(
             token_verifier=verifier,
             authorization_servers=[authorization_server],
@@ -131,7 +134,12 @@ _admin_api_settings = AdminApiClientSettings()
 _BACKENDS = _settings.backends
 _admin_api = AdminApiClient(_admin_api_settings)
 _authorization_access = AuthorizationAccessClient(_authorization_access_settings)
-_authorization_by_surface = _build_surface_authorization(_authorization_settings)
+_authorization_jwks = (
+    AuthorizationJwksClient(_authorization_settings) if _authorization_settings.enabled else None
+)
+_authorization_by_surface = _build_surface_authorization(
+    _authorization_settings, _authorization_jwks
+)
 
 _backend_router = BackendRouter(
     (
@@ -378,6 +386,8 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
         finally:
             await _backend_router.close()
             await _authorization_access.close()
+            if _authorization_jwks is not None:
+                await _authorization_jwks.close()
 
 
 app = Starlette(lifespan=_gateway_lifespan)

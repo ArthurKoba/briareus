@@ -342,8 +342,7 @@ class AuthorizationServiceSettings(ProcessSettings):
     postgres_password: str = Field("", validation_alias="AUTHORIZATION_POSTGRES_PASSWORD")
     bootstrap_username: str = Field("", validation_alias="AUTHORIZATION_BOOTSTRAP_USERNAME")
     bootstrap_password: str = Field("", validation_alias="AUTHORIZATION_BOOTSTRAP_PASSWORD")
-    jwt_private_key_pem: str = Field("", validation_alias="AUTHORIZATION_JWT_PRIVATE_KEY_PEM")
-    jwt_key_id: str = Field("authorization-1", validation_alias="AUTHORIZATION_JWT_KEY_ID")
+    jwt_signing_key: str = Field("", validation_alias="AUTHORIZATION_JWT_SIGNING_KEY")
     gateway_service_token: str = Field("", validation_alias="AUTHORIZATION_GATEWAY_SERVICE_TOKEN")
     admin_service_token: str = Field("", validation_alias="AUTHORIZATION_ADMIN_SERVICE_TOKEN")
     access_token_ttl_seconds: int = Field(
@@ -388,7 +387,7 @@ class AuthorizationServiceSettings(ProcessSettings):
     @field_validator(
         "public_base_url", "mcp_public_base_url", "postgres_host", "postgres_db", "postgres_user",
         "postgres_password", "bootstrap_username", "bootstrap_password",
-        "jwt_private_key_pem", "jwt_key_id", "gateway_service_token",
+        "jwt_signing_key", "gateway_service_token",
         "admin_service_token", mode="before",
     )
     @classmethod
@@ -410,7 +409,7 @@ class AuthorizationServiceSettings(ProcessSettings):
                 ("AUTHORIZATION_POSTGRES_PASSWORD", self.postgres_password),
                 ("AUTHORIZATION_BOOTSTRAP_USERNAME", self.bootstrap_username),
                 ("AUTHORIZATION_BOOTSTRAP_PASSWORD", self.bootstrap_password),
-                ("AUTHORIZATION_JWT_PRIVATE_KEY_PEM", self.jwt_private_key_pem),
+                ("AUTHORIZATION_JWT_SIGNING_KEY", self.jwt_signing_key),
                 ("AUTHORIZATION_GATEWAY_SERVICE_TOKEN", self.gateway_service_token),
                 ("AUTHORIZATION_ADMIN_SERVICE_TOKEN", self.admin_service_token),
             )
@@ -424,9 +423,13 @@ class GatewayAuthorizationSettings(ProcessSettings):
     enabled: bool = Field(False, validation_alias="OAUTH_ENABLED")
     public_base_url: str = Field("", validation_alias="AUTHORIZATION_PUBLIC_BASE_URL")
     mcp_public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
-    jwt_public_key_pem: str = Field("", validation_alias="AUTHORIZATION_JWT_PUBLIC_KEY_PEM")
+    authorization_internal_url: str = Field(
+        "http://authorization:8000", validation_alias="AUTHORIZATION_INTERNAL_URL"
+    )
 
-    @field_validator("public_base_url", "mcp_public_base_url", "jwt_public_key_pem", mode="before")
+    @field_validator(
+        "public_base_url", "mcp_public_base_url", "authorization_internal_url", mode="before"
+    )
     @classmethod
     def _strip_strings(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
@@ -439,7 +442,7 @@ class GatewayAuthorizationSettings(ProcessSettings):
             for name, value in (
                 ("AUTHORIZATION_PUBLIC_BASE_URL", self.public_base_url),
                 ("MCP_PUBLIC_BASE_URL", self.mcp_public_base_url),
-                ("AUTHORIZATION_JWT_PUBLIC_KEY_PEM", self.jwt_public_key_pem),
+                ("AUTHORIZATION_INTERNAL_URL", self.authorization_internal_url),
             )
             if not value
         ]
@@ -610,7 +613,7 @@ class GitHubPolicySettings(ProcessSettings):
         validation_alias="GITHUB_AGENT_PROTECTED_BRANCHES",
     )
     required_checks: Annotated[tuple[str, ...], NoDecode] = Field(
-        ("test", "docker"),
+        ("validate",),
         validation_alias="GITHUB_AGENT_REQUIRED_CHECKS",
     )
     required_reviewers: Annotated[tuple[str, ...], NoDecode] = Field(

@@ -6,7 +6,6 @@ on:
       - "services/**"
       - "tests/**"
       - "scripts/**"
-      - "Dockerfile"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/mvp-backend.yaml"
@@ -16,6 +15,27 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run_authorization_integration: ${{ steps.plan.outputs.run_authorization_integration }}
+      integration_suites: ${{ steps.plan.outputs.integration_suites }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            mapfile -t changed < <(git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}")
+            python scripts/ci_plan.py "${changed[@]}" --github-output "$GITHUB_OUTPUT"
+          else
+            python scripts/ci_plan.py --force-full --github-output "$GITHUB_OUTPUT"
+          fi
+
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -25,11 +45,13 @@ jobs:
           version: "0.8.22"
           enable-cache: true
       - run: uv sync --frozen --dev --no-install-project
-      - run: .venv/bin/ruff check services tests scripts/provision_authorization_database.py
-      - run: .venv/bin/mypy services/authorization services/bridge services/common services/admin-api/src scripts/provision_authorization_database.py
+      - run: .venv/bin/ruff check services tests scripts
+      - run: .venv/bin/mypy services/authorization services/bridge services/common services/admin-api/src scripts/provision_authorization_database.py scripts/ci_plan.py
       - run: PYTHONPATH=services .venv/bin/python -m unittest discover -s tests -v
 
-  integration:
+  integration-authorization:
+    needs: plan
+    if: needs.plan.outputs.run_authorization_integration == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -72,7 +94,7 @@ jobs:
           AUTHORIZATION_POSTGRES_USER: authorization_mvp
           AUTHORIZATION_POSTGRES_PASSWORD: authorization_mvp_secret
         run: .venv/bin/python scripts/provision_authorization_database.py
-      - name: Run PostgreSQL and Valkey integration tests
+      - name: Run authorization PostgreSQL and Valkey integration tests
         env:
           TEST_POSTGRES_HOST: 127.0.0.1
           TEST_POSTGRES_PORT: "5432"
@@ -81,13 +103,3 @@ jobs:
           TEST_AUTHORIZATION_POSTGRES_PASSWORD: authorization_mvp_secret
           TEST_VALKEY_URL: redis://127.0.0.1:6379/15
         run: PYTHONPATH=services .venv/bin/python -m unittest tests.test_postgres_authorization_access -v
-
-  images:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [authorization, gateway, admin-api]
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build --target "${{ matrix.target }}" -t "mcp-bridge:${{ matrix.target }}" .

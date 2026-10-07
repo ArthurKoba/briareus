@@ -39,7 +39,7 @@ flowchart TB
 
 The `authorization` runtime is the authorization server at `https://authorization.mcp.koba-nexus.ru`. Public MCP URLs remain under `https://mcp.koba-nexus.ru` and are exact protected resources/access-token audiences. Gateway publishes protected-resource metadata that points clients to the separate authorization-server URL; OAuth operational endpoints are served directly by authorization.
 
-Authorization issues ES256 tokens. The private signing key remains in authorization; gateway verifies with the public key/JWKS.
+Authorization issues ES256 tokens. Its signing key remains only in authorization; authorization derives and publishes JWKS, and gateway fetches/caches those public keys for local verification.
 
 ## Agent access model
 

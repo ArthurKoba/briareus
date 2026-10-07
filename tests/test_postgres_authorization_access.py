@@ -38,13 +38,14 @@ _POSTGRES_HOST = os.getenv("TEST_POSTGRES_HOST", "")
 _RUN = bool(_POSTGRES_HOST)
 
 
-def _private_key_pem() -> str:
+def _signing_key_value() -> str:
     key = ec.generate_private_key(ec.SECP256R1())
-    return key.private_bytes(
-        serialization.Encoding.PEM,
+    der = key.private_bytes(
+        serialization.Encoding.DER,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
-    ).decode()
+    )
+    return base64.b64encode(der).decode()
 
 
 @unittest.skipUnless(_RUN, "integration PostgreSQL is not configured")
@@ -129,8 +130,7 @@ class PostgresAuthorizationAccessIntegrationTest(unittest.IsolatedAsyncioTestCas
             postgres_password=os.environ["TEST_AUTHORIZATION_POSTGRES_PASSWORD"],
             bootstrap_username="admin",
             bootstrap_password="admin",
-            jwt_private_key_pem=_private_key_pem(),
-            jwt_key_id="integration-key",
+            jwt_signing_key=_signing_key_value(),
             gateway_service_token="gateway-test",
             admin_service_token="admin-test",
             access_token_ttl_seconds=300,
