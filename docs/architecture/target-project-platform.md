@@ -71,8 +71,8 @@
 | Teams | Team, Team owner User, TeamMembership, роли команды, командные политики | **Отдельный бизнес-модуль**; не отдельный deploy unit только потому, что это домен |
 | Projects | Project, personal/team ownership, проектные политики, ссылки на проектные ресурсы | **Отдельный бизнес-модуль**; связывает team_id/user_id по стабильным идентификаторам, а не через импорт Team aggregate |
 | Agents | Project-owned AgentIdentity, создание/иерархия дочерних агентов и их независимый жизненный цикл | **Отдельный бизнес-модуль**, runtime placement не выбран; OAuth-сессиями не владеет |
-| Authorization | Локальный OAuth, refresh, JWT/JWKS, AgentSession, SessionBinding, grants/approvals, отзыв и защита от злоупотреблений | **Отдельный стабильный Authorization runtime**; проверяет доступ через интерфейсы к Identity/Teams/Projects/Agents |
-| Gateway | Публичные MCP-маршруты, OAuth protected-resource metadata, проверка токенов/AgentSession, контекст проекта, аудит/вызовы/метрики | **Отдельный стабильный runtime**, не владеет аккаунтами или бизнес-правилами |
+| Authorization | Локальный OAuth, refresh, JWT/JWKS, проектные AgentSessions, project-key validation, grants/approvals, TTL, отзыв и защита от злоупотреблений | **Отдельный стабильный Authorization runtime**; проверяет доступ через интерфейсы к Identity/Teams/Projects/Agents |
+| Gateway | Публичные MCP-маршруты, OAuth protected-resource metadata, проверка OAuth **или project key** и `session_uuid`/Project scope, метрики и маршрутизация | **Отдельный стабильный runtime**, не владеет аккаунтами или бизнес-правилами |
 | Version Control (публично **SVC**) | Проектные подключения систем контроля версий и Git-операции | GitHub, GitHub App, GitLab, будущие провайдеры; **один домен / один deploy unit MVP** |
 | Infrastructure | Подключения инфраструктурных систем проекта и инструменты работы с ними | Coolify, Zoomies, SigNoz, Grafana и другие; один публичный MCP-домен; существующий read-only observability переиспользуется |
 | Files | Логическое проектное дерево файлов, загрузка, скачивание, чтение/запись, безопасные пути | Собственный API/MCP, использует файловое пространство проекта |
@@ -385,7 +385,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 Последовательность:
 1. Снять фактическую карту таблиц, контрактов, потребителей shared код/lockfile, runtime state/volumes и адресов Coolify. Зафиксировать backup/rollback.
-2. Согласовать стабильные DTO для Project/Principal/OAuthBinding/AgentSession/RuntimeSession и границу Project ownership. Закрыть OAuth cross-surface противоречие до зависимой разработки.
+2. Согласовать DTO для Project/CallerCredential/AgentSession (`session_uuid` UUID v4)/RuntimeSession, выбрать административные project-key grants и миграционный адаптер legacy UID. OAuth может использоваться, но **не** определяет жизненный цикл AgentSession; chat ID и cross-surface OAuth binding не нужны.
 3. Вводить схемы и новые use cases **аддитивно**, с переходным адаптером старых surface/session API.
 4. Постепенно переносить аккаунты и ресурсы на Project, не переинициализируя рабочие браузерные профили/Ghidra/Terminal.
 5. Включать адресные MCP маршруты и Coolify deploy unit по одному, через реальные probe/health и end-to-end тесты.
@@ -422,7 +422,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **10.11 Автономная Service Identity — после MVP.** На MVP для безбраузерных клиентов (LM Studio/локальный агент) допустим **project-scoped connection key** вместо OAuth; это способ аутентификации вызова, **не** полнофункциональная автономная AgentIdentity. Позднее добавить service principal lifecycle, делегирование, rotation и governance (post-MVP issue #391). Существующий `OAuthContext` требует User/OAuth, поэтому нужна альтернативная схема caller в Gateway/Authorization, а не `nullable user_id` с анонимной проверкой.
 
-**10.12 Фактические границы MVP.** Чтобы ускорить доставку, не требовать миграцию всего каталога Web/SVC/Infrastructure/Reverse и всех поддоменов **до первой работающей вертикальной версии**. Сначала один Personal/Team Project + безопасные AgentSession/Binding + один существующий MCP домен; затем включение следующих направлений независимо. Точный первый набор доменов определить при планировании после решения 10.1–10.4.
+**10.12 Фактические границы MVP.** Для быстрой поставки сначала Personal/Team Project + `session_uuid` UUID v4 + минимальная проверка caller по OAuth или project key + один MCP-домен. Следующим срезом внедрить cross-MCP reuse (тот же UUID при Project scope), не требуя все провайдеры/новые поддомены в одном cutover. Начальный набор модулей выбрать после проверки реального import/build graph.
 
 **10.13 Семантика проекта, процесса и релиза.** Бизнес-домен `Reverse` объединяет Analysis и Ghidra, но Ghidra при необходимости сохраняет собственный runtime/container внутри его release bundle; аналогично UI/API имеют разные release units без выделения новой доменной сущности. Запрет root Compose на все сервисы не означает запрет общего shared infrastructure Compose для существующих PostgreSQL/Valkey.
 
