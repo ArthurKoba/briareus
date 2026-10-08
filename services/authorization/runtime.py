@@ -14,7 +14,7 @@ from .access.api import build_access_app
 from .access.database import AccessDatabase
 from .access.events import AccessEventPublisher
 from .access.repository import AccessRepository
-from .access.service import AccessControl
+from .access.control import AccessControl
 from .api import build_authorization_app
 from .database import AuthorizationDatabase
 from .provider import LocalOAuthProvider
