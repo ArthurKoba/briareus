@@ -36,8 +36,8 @@
 
 | Сущность | Значение | Инварианты |
 | --- | --- | --- |
-| User | Локальный человек, способный войти в Administration и авторизовать MCP | Один User может состоять в нескольких Team и владеть личными Project |
-| Team | Организация совместной работы пользователей | У команды участники и роли: управляющие и обычные; детальные права можно наращивать |
+| User | Локальный человек, способный войти в Administration и авторизовать MCP | Регистрация/доступ могут зависеть от разрешения администратора; один User может состоять в нескольких Team и владеть личными Project |
+| Team | Объединение пользователей для совместной работы | У команды ровно один владелец-User; участники и роли команды управляются отдельно от Project |
 | TeamMembership | Участие User в Team | Определяет доступ к командным проектам и предел административных полномочий |
 | Project | Контейнер деловых ресурсов и агентских действий | Имеет **ровно одного** владельца: User либо Team; межпроектный доступ по умолчанию запрещён |
 | ProjectIntegration | Подключение внешнего провайдера | Принадлежит одному Project; alias не является полномочием или глобальным идентификатором |
@@ -49,6 +49,7 @@
 
 **Согласовано:**
 
+- Team имеет одного владельца — User, и набор TeamMembership с ролями/полномочиями. Team не является разновидностью Project, а Project — не внутренней сущностью Team.
 - Личный Project принадлежит User. Пригласить туда других пользователей нельзя. Для совместной работы владелец переносит Project в Team.
 - Командный Project принадлежит одной Team. Участники Team имеют доступ к её проектам с учётом роли и установленных ограничений; один пользователь может состоять в разных Team.
 - Пользователи в первую очередь **управляют и оркестрируют** агентами. Файлы, вкладки, терминальные окружения, аккаунты и артефакты принадлежат проектам, а не отдельному чату.
@@ -66,8 +67,11 @@
 
 | Домен / вход | Владеет | Внешние адаптеры и положение в MVP |
 | --- | --- | --- |
-| Identity & Authorization | Локальные идентичности, OAuth, refresh, подпись JWT, AgentIdentity, AgentSession, grants/approvals, отзыв и защита от злоупотреблений | **Отдельный Authorization runtime**; бизнес-истина о правах |
-| Projects & Teams | Project/Team/TeamMembership, владение и проектная область видимости | Логически отдельный модуль; **точный deployment unit ещё не утверждён** |
+| Identity | User, регистрация, жизненный цикл учётной записи, состояние и профиль | Отдельный бизнес-модуль; не обязан иметь собственный deploy |
+| Teams | Team, Team owner User, TeamMembership, роли команды, командные политики | **Отдельный бизнес-модуль**; не отдельный deploy unit только потому, что это домен |
+| Projects | Project, personal/team ownership, проектные политики, ссылки на проектные ресурсы | **Отдельный бизнес-модуль**; связывает team_id/user_id по стабильным идентификаторам, а не через импорт Team aggregate |
+| Agents | Project-owned AgentIdentity, создание/иерархия дочерних агентов и их независимый жизненный цикл | **Отдельный бизнес-модуль**, runtime placement не выбран; OAuth-сессиями не владеет |
+| Authorization | Локальный OAuth, refresh, JWT/JWKS, AgentSession, SessionBinding, grants/approvals, отзыв и защита от злоупотреблений | **Отдельный стабильный Authorization runtime**; проверяет доступ через интерфейсы к Identity/Teams/Projects/Agents |
 | Gateway | Публичные MCP-маршруты, OAuth protected-resource metadata, проверка токенов/AgentSession, контекст проекта, аудит/вызовы/метрики | **Отдельный стабильный runtime**, не владеет аккаунтами или бизнес-правилами |
 | Version Control (публично **SVC**) | Проектные подключения систем контроля версий и Git-операции | GitHub, GitHub App, GitLab, будущие провайдеры; **один домен / один deploy unit MVP** |
 | Infrastructure | Подключения инфраструктурных систем проекта и инструменты работы с ними | Coolify, Zoomies, SigNoz, Grafana и другие; один публичный MCP-домен; существующий read-only observability переиспользуется |
@@ -78,7 +82,11 @@
 | Administration | Admin UI, Admin API/BFF, операторские WebSocket/просмотры/команды | UI и API — **самостоятельные deploy units**; не владеют чужой доменной истиной |
 | Observability of platform | Инструментирование самих вызовов MCP и доменных сервисов | Сквозная инфраструктурная возможность; не путать с проектным MCP-доменом Infrastructure |
 
-**Не создаём вымышленный универсальный Core-service.** Общие DTO/ports и системные библиотеки — это исходные контракты, а не постоянно запущенный «главный контейнер».
+**Не создаём вымышленный универсальный Core-service.** Общие DTO/ports и системные библиотеки — это исходные контракты, а не постоянно запущенный «главный контейнер». **Не объединяем User, Team, Project, Agent в один агрегат `Projects & Teams` и не назначаем по контейнеру на каждый модуль.**
+
+**Правила слабой связанности:** Identity владеет User; Teams — Team/TeamMembership; Projects — Project и ровно одним owner reference (user_id либо team_id); Agents — агентами/родительскими отношениями; Authorization — OAuth/AgentSession/grants. Team не хранит дублируемый «список проектов» как собственный изменяемый aggregate: проекты выбираются по owner_team_id из Projects. Междоменное чтение — через application ports/read projections со стабильными типами; никто не изменяет чужие таблицы напрямую. Факт членства не подменяет собой токен, а сервисный токен не даёт права impersonate User.
+
+**Граница процесса остаётся открытой:** логические модули Identity/Teams/Projects/Agents допустимо упаковать вместе в минимальное число существующих backend-runtimes на MVP, но не помещать Auth внутрь Admin API и не возобновлять для этого массовые перезапуски. Расположение composition roots/потребителей выбирается после реального графа зависимостей.
 
 ### 3.1 SVC и Infrastructure: проектные подключения
 
@@ -313,6 +321,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 ### MVP (обязательный ближайший срез)
 
 **Фундамент / первая волна:**
+- Сепарировать Identity, Teams, Projects, Agents и Authorization как bounded contexts/модули с минимальными контрактами. TeamOwner — User; ProjectOwner — ровно один User либо Team. **Не назначать этим доменам независимые deployment units автоматически.**
 - Зафиксировать project_id, Team/User ownership, минимальные TeamMembership roles и Service/Agent identities; миграции в общем PostgreSQL без поломки существующих OAuth и Admin API.
 - Сохранить Authorization issuer, refresh rotation, JWT/JWKS, уже работающие MCP-подключения, Gateway/telemetry и Valkey fallback.
 - Ввести AgentSession как **проектную**, а не surface-owned сущность. Несколько UUID на agent/OAuth context и повышение на короткое время; права/approval и anti-bruteforce из текущей реализации.
@@ -380,7 +389,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **10.1 Критический: один AgentSession через разные MCP surface.** Нужно подтвердить конструкцию OAuth authorization context / grant family при независимых protected-resource audiences и отсутствие cross-connection replay. Старое surface binding этому противоречит. Выбор точного claim/binding, refresh rotation и алгоритма подтверждается security test.
 
-**10.2 Критический: где живут Projects & Teams.** Бизнес-сущности нужны отдельно от Admin BFF и Authorization; точное владение миграциями, синхронными решениями Project membership, количество runtime и способ проверки границ без циклических зависимостей ещё не согласованы. Не создавать бессодержательный «Core», но и не смешивать административную UI-логику с authoritative RBAC.
+**10.2 Критический: согласованное доменное разделение и открытое runtime placement.** **Принято:** пять самостоятельных бизнес-модулей Identity (User), Teams (Team/TeamMembership/owner), Projects (Project/owner reference), Agents (AgentIdentity/child agents), Authorization (OAuth/AgentSession/grants). **Запрещено:** объединять Teams и Projects в один бизнес-модуль или выделять отдельный контейнер на сущность. **Осталось доказать:** composition root(ы), интерфейсы проверки TeamMembership/ProjectOwner/Agent grants, схема изоляции без циклического RPC; точно где работают первые четыре модуля без ненужного deploy overhead. Admin API не является owner другой доменной модели, Authorization не пересоздаётся при деплое админки.
 
 **10.3 Критический: текущие БД и миграция sessions.** Проверить реальную схему Authorization/PostgreSQL/Admin API, существующие UUID и риски перехода на одну DB. Стратегия zero-downtime expand/contract, backup/rollback до DB mutation обязательна.
 
