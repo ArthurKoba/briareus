@@ -217,6 +217,7 @@ Idle TTL и hard TTL **различны**. Активность продлева
 4. При cache miss/сбое Valkey чтение восстанавливается из PostgreSQL, затем кеш заново заполняется. Если нельзя подтвердить полномочия, привилегированное действие **fail-closed**.
 5. При отсутствии Authorization запрещены новые login/refresh/grant decisions; поднимаются мониторинг и алерты. В MVP **нет** неаудируемого «разрешить всё, пока сервис недоступен».
 
+**Результат source-аудита перед миграцией:** текущий `access/control.py::_load_session` читает snapshot Valkey первым, а последующая инвалидация в `revoke_session/admin_update` вызывает `SharedCache.delete` без гарантии, что удаление реально прошло: кеш может временно возвращать старое разрешение при потере Valkey. Текущий `AbuseGuard.failure` при исключении Valkey возвращает `(0, 0)`, то есть не обеспечивает rate-limit при outage. В `AccessControl.validate` режим `unrestricted` разрешает вызов до проверки Session UUID — в новом project-protected MCP этот bypass должен быть закрыт или явно ограничен безопасным bootstrap. Current `AgentSessionRecord` имеет одиночный `expires_at`; независимые idle/hard TTL политики потребуется вводить осознанно. Эти четыре исходниковые дельты фиксируются в основном [issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390), не являются подтверждённым продакшен-дeфектом без runtime-теста.
 **Незакрытая инженерная деталь:** распределённый DB commit и Valkey delete не атомарны. Нельзя обещать «мгновенный revoke при любом сетевом сбое» одной лишь TTL-инвалидацией. В MVP должны быть измеримый предел задержки отзыва при нормальной работе, failure tests и fail-closed для elevated/опасных операций. Конкретную стратегию фиксируем после проверки уже существующего cache/abuse/revoke кода, не внедряем второй кеш-фреймворк.
 
 ## 6. Сеть, публичные MCP-адреса и межмодульные контракты
@@ -241,6 +242,8 @@ Idle TTL и hard TTL **различны**. Активность продлева
 У каждого публичного направления — название и единообразная собственная SVG-иконка для отображения в MCP-клиентах; изображения/названия не влияют на authority ресурса.
 
 ### 6.2 Маршрутизация и внутренний протокол
+
+**MVP gate для no-OAuth клиента:** в текущих gateway/FastMCP настройках public MCP surfaces защищены `RemoteAuthProvider` и JWT verifier. Перед внедрением project key на **тех же публичных MCP адресах** нужно доказать корректную двурежимную обработку middleware/metadata: OAuth для ChatGPT либо project-key caller для локального клиента, без анонимной ветки, неверной resource audience или обхода session/project проверки. **Нельзя считать**, что добавление `project_key` в инструменты автоматически обходит обязательный FastMCP OAuth на HTTP transport.
 
 - Gateway — тонкая публичная граница: маршруты, проверка **OAuth/JWT или отдельного project key** для без-OAuth MCP-клиента, `session_uuid` + project/grants enforcement, correlation IDs, метрики/аудит, MCP proxy. **Не** источник истины для Team/Project/credentials. Ни одна публичная capability не становится доступной по одному UUID без проверки caller и проекта.
 - Существующее FastMCP proxy и discovery **сохраняются**; не придумываем обязательную платформу динамических manifests.
