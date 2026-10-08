@@ -8,7 +8,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:?}
+      # Portable Compose accepts an explicit public issuer; fail closed at app startup if missing.
+      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:-}
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
