@@ -3,7 +3,7 @@
 **Статус:** DRAFT / архитектурная гипотеза для совместного ревью, не утверждённое ТЗ на реализацию.  
 **Срез обсуждения:** 2026-10-09.  
 **Источник продуктовых требований:** последовательное согласование с владельцем проекта в чате Koba Infrastructure.  
-**Текущая реализация:** не равна описанному ниже целевому состоянию. Действующие сервисы и существующие данные не затрагиваются этим документом.
+**НОВОЕ РЕШЕНИЕ ВЛАДЕЛЬЦА (2026-10-09): GREENFIELD / CLEAN START.** В новую MCP Bridge **не переносим legacy данные, пользователей, OAuth, AgentSessions, интеграции, файлы, Ghidra, профили браузера, учётные записи или старые MCP API**. Создаём новую пустую PostgreSQL DB, volumes, конфигурацию и учётные записи. Допускается переиспользовать полезный исходный код, но не миграционные скрипты, legacy adapters и routes. **Тесты пока не пишем, не запускаем и не используем вообще** (unit/integration/e2e/smoke/CI test jobs); не добавляем тестовые файлы или testing policies. Это архитектурное решение не даёт автоматического разрешения на удаление текущего production без точного определения ресурсов.
 
 ## 0. Как читать документ
 
@@ -12,7 +12,7 @@
 - **Гипотеза / требуется проверить** — нельзя без дополнительной проверки закрепить как контракт реализации.
 - **Позже** — целевая расширяемость без обязанности внедрять в MVP.
 
-Документ фиксирует устойчивую предметную модель, причины выбора и границы миграции. Это не отражение текущих имён классов, таблиц или полного дерева репозитория. При реализации текущее состояние проверяется по исходникам, а незавершённые задачи отслеживаются в issue tracker, не в этой спецификации.
+Документ фиксирует устойчивую предметную модель, причины выбора и границы чистого запуска. Это не отражение текущих имён классов, таблиц или полного дерева репозитория. При реализации текущее состояние проверяется по исходникам, а незавершённые задачи отслеживаются в issue tracker, не в этой спецификации.
 
 ## 1. Цель и принципы
 
@@ -24,7 +24,7 @@
 2. **Домен ≠ модуль ≠ deployment unit ≠ worker ≠ контейнер.** Единый домен может содержать несколько адаптеров; в MVP он обычно поставляется как один независимо обновляемый пакет контейнеров.
 3. **Стабильные жизненные циклы.** Изменение Admin UI/API не перезапускает Authorization; изменение Web не перезапускает Terminal/Ghidra/Gateway; доменные воркеры обновляются вместе со своим доменом.
 4. **Проект — граница ресурсов и обычной агентской работы.** Нет межпроектных агентов, невидимого доступа через alias/UUID и неограниченного общего файлового пространства.
-5. **Переиспользование работающих механизмов.** Сохранять FastMCP, Gateway, локальный OAuth/JWT, Valkey, защиту от перебора, текущие интеграции, Web/Terminal/Ghidra и UI; постепенно переносить и адаптировать, а не начинать с нуля.
+5. **Переиспользование исходного кода, а не legacy.** Можно брать существующие FastMCP/Gateway/OAuth/JWT/Valkey/Web/Terminal/Ghidra/UI реализации, но не переносить данные, API, state, sessions, credentials и старые маршруты.
 6. **Быстрый MVP без чрезмерной инфраструктуры.** Новые протоколы, тонкие ACL, множество воркеров, независимые сборки каждого адаптера и отдельные базы на проект не являются обязательными.
 7. **Одна контрольная точка отказа не должна означать каскадный перезапуск.** Доступность конкретного доменного runtime не должна определять доступность остальных MCP-доменов.
 
@@ -75,7 +75,7 @@
 - **Безопасность startup logs:** вывод действующего registration token — сознательно принятое требование, поэтому доступ к логам Authorization эквивалентен возможности приглашать новых пользователей. Секреты не должны попадать в общие MCP invocation logs, traces, публичные метрики, tool responses или URL-запросы сторонним провайдерам. Повторный показ той же ссылки при рестарте потребует защищённого recoverable хранения/детерминированного восстановления токена: **одного hash в БД недостаточно для перепечатывания**. Точный криптографический механизм выбрать при реализации, без хранения открытого токена в обычных таблицах.
 - **Защита от повторного захвата superuser:** статус «первая установка» определяется пустой историей пользователей/явным persistent bootstrap state, а не только текущим отсутствием superuser. После первичной инициализации обычная ссылка регистрации **никогда** не создаёт нового superuser. Последнего superuser нельзя удалить без предусмотренного recovery; восстановление при потере всех superuser — отдельная привилегированная recovery-процедура, не массовая публичная регистрация.
 
-**Текущее состояние (source finding):** `services/authorization/runtime.py` вызывает `repository.ensure_bootstrap_user(settings.bootstrap_username, settings.bootstrap_password)`; в `services/authorization/repository.py` этот путь создаёт/повышает пользователя до старой роли `superadmin` при старте. Регистрационная invitation-модель и новый bootstrap superuser ещё **не реализованы**. Удалять/заменять старый bootstrap механизм только в отдельной совместимой миграции с сохранением существующего административного доступа.
+**Source finding:** текущий код создаёт legacy `superadmin` через `ensure_bootstrap_user`. В новой чистой DB создать первого `superuser` через invitation bootstrap, **без миграции** старых Users и roles.
 
 ### 2.3 Локальные политики учётных записей — согласовано для MVP (2026-10-09)
 
@@ -87,7 +87,7 @@
 6. **Базовая политика TTL.** Normal AgentSession — исходно **24 часа** с продлением только по явной/разрешённой политике; elevated AgentSession — **5 минут hard TTL без автоматического продления**. Внутренний Browser RuntimeSession — **5 минут idle TTL** с продлением активностью, при этом idle timeout не закрывает внешний Chrome. Привилегированные Terminal/root процессы ограничены собственным независимым **hard TTL** (по умолчанию 5 минут), который останавливает принадлежащее дерево процессов даже при активности. Другие процессы/долговременные проектные задачи используют собственную lease policy, не наследуют автоматически AgentSession TTL. OAuth refresh lifecycle остаётся независимым.
 7. **ОТЛОЖЕНО — удаление Team и выход Team owner.** Пользователь **не утвердил** предложенный дополнительный workflow удаления команды и выхода владельца; не считать детали этого сценария принятыми MVP acceptance. Уже согласованные инварианты **не меняются**: у Team ровно один owner; superuser может сменить owner; удаление User с владениями требует предварительной передачи, проекты не уничтожаются автоматически. Условия удаления Team/выхода Team owner будут определены отдельно до соответствующей операции/реализации, без молчаливой политики каскадного удаления.
 
-**Дополнительные source-level границы для принятого account/realtime контракта (не runtime-дефекты):** текущий `AuthorizationRepository.ensure_bootstrap_user` создаёт/повышает legacy `superadmin` на каждом startup, поэтому ввод invitation/bootstrap + нескольких superusers требует аддитивной миграции Identity и безопасного отключения этого поведения. `UserRecord.enabled` уже существует и проверяется при локальном password-login и OAuth-refresh, но Gateway `LocalAuthorizationTokenVerifier` валидирует только подпись/claims JWT и не проверяет online-состояние User; следовательно, при блокировке аккаунта необходим проверенный **connection-level revoke и bounded status/version fence** на MCP hot path, без SQL lookup на каждый вызов и с fail-closed для повышенных действий. Текущий Admin API допускает login только для `superadmin` и содержит legacy-password fallback. Его `/v1/realtime` сейчас проверяет cookie session и подписку на topic, **не** project membership; после внедрения команд необходимо разрешать и доставлять `access.sessions` события только действующим участникам соответствующего Project, не ретранслируя глобальный snapshot чужой команды. Указанные механизмы требуют source/integration proof до расширения прав обычных пользователей.
+**Source-level границы clean start:** новый bootstrap заменяет legacy `superadmin`, Admin API сразу обслуживает обычных пользователей и `superuser`, login/token fencing блокирует User, realtime подписки фильтруются по Project. Старые роли, таблицы и API не сохранять. Исходниковая ревизия — не тестирование.
 
 **Граница:** это продуктовые решения, **не реализованные endpoints/ORM/UI**. Не считать наличие текста доказательством приёмки текущей Authorization/Admin API.
 
@@ -137,7 +137,7 @@
 - Путь в пользовательском интерфейсе и MCP всегда ограничен корнем Project; общий физический volume сам по себе не обеспечивает изоляцию.
 - Разные проекты нельзя соединить доступом к одной папке по угадываемому пути или симлинку.
 - Files управляет файлами, Terminal — процессами; это не одна бизнес-сущность и они не обязаны иметь общий deploy.
-- **Позже:** несколько workspaces в одном Project, миграция путей/селекторов и собственные workspace_id.
+- **Позже:** несколько workspaces в одном Project с отдельными path selectors и workspace_id.
 
 ### 3.3 Reverse / Ghidra
 
@@ -191,7 +191,7 @@ User login / OAuth client            Local app / LM Studio / service client
 
 **MVP enforcement (не отложить):** `session_uuid` — идентификатор, **не единственное доказательство полномочий**. Gateway/Authorization проверяет (1) подтверждённую личность caller через OAuth или проверенный вход существующего локального User без OAuth при доступе к MCP, (2) разрешённость Project для caller, (3) совпадение Project у AgentSession и выбранного MCP/ресурса, (4) действительный статус/TTL/список grants и право использовать привилегию. Эффективные права не превышают ограничений подключившегося caller и самой session. Для доступа к project-only API, где клиент OAuth не имеет, не придумывать анонимную выдачу полных прав. **OAuth revoke** прекращает вызовы через отозванное OAuth-подключение, но **не удаляет** AgentSessions и живые Project RuntimeSessions, которыми могут пользоваться другие разрешённые подключения. Аналогично блокировка локального входа пользователя прекращает новые запросы по этому способу аутентификации, но не удаляет существующие независимые проектные сессии.
 
-**Текущая реализация и миграционная дельта:** в `services/authorization/access/repository.py` внешний `uid` сегодня генерируется через `secrets.token_urlsafe(32)` — **это не UUID**; отдельный внутренний `AgentSessionRecord.id` создаётся как `uuid4()`. В `services/common/access_contracts.py` и `bridge/access_middleware.py` передаётся `session_id`, а SessionSnapshot привязан к `user_id/oauth_session_id/surface_id`. Новый API должен использовать название **`session_uuid`** и валидировать UUID v4; в БД выбрать одно каноническое поле session UUID и сохранить внутренние FK/audit корректно. Существующие opaque `session_id`/UID могут временно поддерживаться адаптером старых маршрутов **до завершения TTL/migration**; никогда не объявлять их валидными UUID и не ломать действующие OAuth-клиенты одной сменой DTO.
+**Source finding:** текущий opaque `session_id`/UID и OAuth/surface-binding заменяются новым проектным `session_uuid` UUID v4. **Нет** преобразования или импорта legacy UID; новый API сразу использует правильные DTO.
 
 ### 4.2 Политики сеансов и англоязычный MCP-интерфейс
 
@@ -206,7 +206,7 @@ User login / OAuth client            Local app / LM Studio / service client
 
 **Базовый anti-abuse контракт:** если доказано злоупотребление AgentSession — suspend/revoke только её UUID. При продолжении атаки через удостоверенное OAuth/login-подключение — блокируется атакующий connection/principal. Подбор произвольных UUID приводит к backoff источника/caller, **никогда к отзыву чужой сессии, идентификатор которой предъявил атакующий**. Связи жизненных циклов Session и OAuth не создавать. В будущем — отдельное security-ревью и усиление provenance/ACL; MVP не должен допускать DoS отзывом чужого OAuth через перебор UUID.
 
-**Текущая реализация:** middleware умеет добавлять старый `session_id`, выдавать `session_required` и возвращать session metadata; `access_session_open`, request_full_access/extension существуют. Их переиспользовать, но изменить UUID-format/naming, обязательную связь с OAuth, project-scoping, fallback-auth для non-OAuth client и session-policy согласно новому контракту. До миграции legacy API остаётся рабочим.
+**Source finding:** существующий middleware помогает понять access_session API, но новый публичный контракт использует только `session_uuid` и Project grants. Старые `session_id` arguments/legacy endpoints не поддерживать.
 
 ### 4.3 Жизненные циклы и TTL
 
@@ -229,12 +229,12 @@ Idle TTL и hard TTL **различны**. Активность продлева
 
 ### 5.1 PostgreSQL и файлы
 
-**MVP:** один действующий PostgreSQL сервер, **одна логическая база платформы**, доменные схемы (например identity, projects, authorization, version_control, infrastructure, sessions) с собственными migration owners. **Это целевой контракт, не описание текущей продакшен-схемы.** Физические файлы workspace и долговременные Ghidra artifacts остаются в независимых объёмах, связанными project_id.
+**MVP:** создать **новую пустую логическую PostgreSQL DB** с доменными schemas (`identity`, `projects`, `authorization`, `version_control`, `infrastructure`, `sessions`) и прямым начальным DDL. Не переносить старые DB, `oauth_sessions`, files и accounts. PostgreSQL host может быть общим, но новая DB и новые volumes не используют legacy state.
 
 - project_id явно присутствует в данных и запросах ресурса, когда ресурс проектный.
-- Каждый модуль владеет миграциями и репозиториями своего контекста. Отсутствует прямое изменение чужих таблиц из произвольного провайдера.
+- Каждый модуль владеет начальным DDL и репозиториями своего контекста. Отсутствует прямое изменение чужих таблиц из произвольного провайдера.
 - Внутри одного процесса и транзакционной границы возможен общий Unit of Work; **одна PostgreSQL DB не делает транзакции атомарными через сетевые вызовы независимо работающих runtime**. Междоменный workflow, пересекающий API/worker, требует явных outbox/idempotency/compensation правил, а не предполагаемой общей SQL-транзакции. Это ещё одна причина не вводить отдельную БД на Project в MVP.
-- Нельзя объединять существующие Authorization/Admin oauth_sessions без полноценной миграции: сейчас схемы конфликтуют по смыслу/структуре.
+- Существующие Authorization/Admin `oauth_sessions` — только исходниковый контекст, не источник данных. Новые таблицы спроектировать сразу по целевой схеме; никакого объединения или переноса.
 - **Позже:** экспорт/импорт проекта, backup, мягкое и окончательное удаление с полным cleanup файлов/Reverse, потенциальное физическое выделение крупных проектов; никакого «DROP DATABASE = удаление проекта» в MVP.
 
 ### 5.2 Valkey и быстрые проверки доступа
@@ -249,8 +249,8 @@ Idle TTL и hard TTL **различны**. Активность продлева
 4. При cache miss/сбое Valkey чтение восстанавливается из PostgreSQL, затем кеш заново заполняется. Если нельзя подтвердить полномочия, привилегированное действие **fail-closed**.
 5. При отсутствии Authorization запрещены новые login/refresh/grant decisions; поднимаются мониторинг и алерты. В MVP **нет** неаудируемого «разрешить всё, пока сервис недоступен».
 
-**Результат source-аудита перед миграцией:** текущий `access/control.py::_load_session` читает snapshot Valkey первым, а последующая инвалидация в `revoke_session/admin_update` вызывает `SharedCache.delete` без гарантии, что удаление реально прошло: кеш может временно возвращать старое разрешение при потере Valkey. Текущий `AbuseGuard.failure` при исключении Valkey возвращает `(0, 0)`, то есть не обеспечивает rate-limit при outage. В `AccessControl.validate` режим `unrestricted` разрешает вызов до проверки Session UUID — в новом project-protected MCP этот bypass должен быть закрыт или явно ограничен безопасным bootstrap. Current `AgentSessionRecord` имеет одиночный `expires_at`; независимые idle/hard TTL политики потребуется вводить осознанно. Эти четыре исходниковые дельты фиксируются в основном [issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390), не являются подтверждённым продакшен-дeфектом без runtime-теста.
-**Незакрытая инженерная деталь:** распределённый DB commit и Valkey delete не атомарны. Нельзя обещать «мгновенный revoke при любом сетевом сбое» одной лишь TTL-инвалидацией. В MVP должны быть измеримый предел задержки отзыва при нормальной работе, failure tests и fail-closed для elevated/опасных операций. Конкретную стратегию фиксируем после проверки уже существующего cache/abuse/revoke кода, не внедряем второй кеш-фреймворк.
+**Результат исходникового ревью перед clean-start реализацией:** в старом access/control есть Valkey invalidation и abuse fallback gaps; учесть при новом design, не писать тесты сейчас.
+**Незакрытая инженерная деталь:** распределённый DB commit и Valkey delete не атомарны. Нельзя обещать «мгновенный revoke при любом сетевом сбое» одной лишь TTL-инвалидацией. В MVP нужны предел задержки отзыва и fail-closed elevated операций; тесты сейчас не пишем и не запускаем. Конкретную стратегию фиксируем после проверки уже существующего cache/abuse/revoke кода, не внедряем второй кеш-фреймворк.
 
 ## 6. Сеть, публичные MCP-адреса и межмодульные контракты
 
@@ -269,7 +269,7 @@ Idle TTL и hard TTL **различны**. Активность продлева
 
 Это **предлагаемые стабильные имена**, не доказательство готовности DNS/TLS/маршрутов. Authorization issuer остаётся отдельным, одним для платформы. У каждого MCP surface собственная защищённая OAuth resource audience. Проверку FastMCP discovery/metadata и RFC resource-поведения выполняем на реальных клиентах.
 
-Текущие /github/mcp, /gitlab/mcp, /analysis/mcp, /observability/mcp и общий /mcp остаются **временными alias/совместимостью при миграции**, без необходимости делать общий Bridge основной рабочей точкой.
+**Старые MCP routes/aliases не сохраняем:** `/github/mcp`, `/gitlab/mcp`, `/analysis/mcp`, `/observability/mcp` не требуют переноса или совместимости. Новые доменные endpoints создаются сразу по целевой модели.
 
 У каждого публичного направления — название и единообразная собственная SVG-иконка для отображения в MCP-клиентах; изображения/названия не влияют на authority ресурса.
 
@@ -357,7 +357,7 @@ Python — основной язык бизнес-логики. При подт�
 
 Portable Compose описывает runtime, Coolify adapter — требования установленного парсера/маршрутов/сети. Секреты поступают через существующие Shared Variables с явными привязками; доменно-специфичные переключатели/аккаунты/провайдеры хранятся в приложении, не превращаются в десятки ручных DevOps env.
 
-Не изменять существующие PostgreSQL/Valkey volumes и legacy deployment до доказанной runtime-приёмки. Существующий ADR-0003 описывает **переходную** упаковку Authorization и её реальные ограничения, а не всю эту целевую архитектуру.
+Для clean start используются новые DB/Valkey/volumes и новые конфигурации. Никаких миграций legacy volumes/keys/sessions. Текущие production ресурсы не удалять в ходе архитектурного ревью; их будущая очистка — отдельное ограниченное по конкретным объектам разрушительное действие.
 
 ## 8. Поэтапное внедрение и границы MVP
 
@@ -367,8 +367,8 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Фундамент / первая волна:**
 - Сепарировать Identity, Teams, Projects, Agents и Authorization как bounded contexts/модули с минимальными контрактами. TeamOwner — User; ProjectOwner — ровно один User либо Team. **Не назначать этим доменам независимые deployment units автоматически.**
-- Зафиксировать project_id, Team/User ownership и минимальные TeamMembership roles; добавить регистрацию только по invitation URL, первичный bootstrap superuser и ссылки от любого активного User **без активации/выдачи Team/Project прав пригласившим**. Для AgentIdentity/ServiceIdentity — границы и совместимые DTO, **без полноценной автономной служебной авторизации в MVP**. Миграции в общем PostgreSQL не ломают существующие OAuth и Admin API.
-- Сохранить Authorization issuer, refresh rotation, JWT/JWKS, уже работающие MCP-подключения, Gateway/telemetry и Valkey fallback.
+- Создать новую Identity/Team/Project DB и `project_id`, Team/User ownership, TeamMembership, invite registration/first superuser на пустом состоянии. Никакого переноса старых Users/DB.
+- Создать новый Authorization issuer, refresh rotation, JWT/JWKS и Gateway/telemetry. Не переносить прежние grants/refresh sessions/issuer keys; полезный код можно переиспользовать.
 - Ввести AgentSession как **проектную**, не OAuth-owned/surface-owned/chat-owned сущность, c каноническим `session_uuid` UUID v4. Сохранить работающий OAuth с локальным логином/паролем для ChatGPT и LM Studio desktop; для действительно no-OAuth клиентов подготовить отдельный проверенный adapter входа локального User только после transport proof. Повышение прав/approval/abuse guard из существующего кода переиспользовать.
 
 **Проектные ресурсы / вторая волна:**
@@ -378,11 +378,11 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 - Минимальные воркеры очистки, idempotent cleanup, safe reconnect без сложного HA.
 
 **Доставка / третья волна:**
-- Domain-owned Compose/Dockerfile/Watch Paths для реально независимо выпускаемых направлений; сохранить работающие Legacy и rollback.
-- Стабильные MCP-поддомены через Gateway, отдельный issuer/resource audience, обратная совместимость старых путей; SVG идентификация модулей.
+- Domain-owned Compose/Dockerfile/Watch Paths для независимо выпускаемых направлений с новыми resources, без legacy совместимости и data cutover.
+- Стабильные MCP-поддомены через Gateway с issuer/audience и SVG, без старых URL или transitional routes.
 - Независимость Administration frontend, Administration API, Authorization, Gateway и Web/Terminal/Reverse/SVC/Infrastructure runtimes. Не делать UX/API-change trigger чужих деплоев.
 
-**Обязательные приёмочные сценарии:**
+**Ожидаемое поведение готового продукта (только требования, сейчас не писать и не запускать тесты):**
 - **User deletion guard:** superuser не может удалить владельца Team или личного Project; после переназначения Team owners и переноса личных Projects удаление разрешено без разрушения общих runtime/data.
 0. На пустой базе startup лог Authorization содержит регистрацию первого superuser; первый успешный пользователь получает эту роль строго один раз; после bootstrap системная ссылка появляется при каждом запуске для обычного пользователя; invite активного участника не выдаёт автоматически проектных/командных прав и не требует активации.
 1. Один личный Project и один Team Project с несколькими User; доступ чужой команды/проекта через ID, Files path и account alias отклонён.
@@ -396,7 +396,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 9. Сброс Files workspace не удаляет импортированные Reverse/Ghidra проекты.
 10. ChatGPT и LM Studio desktop используют локальный OAuth с логином/паролем, а клиент без OAuth — проверенный локальный вход после transport proof; каждый проходит authentication → выбор Project → `session_uuid` → инструмент MCP. Действующие OAuth-refresh не требуют постоянного переподключения; один Session UUID работает между модулями при наличии доступа.
 
-**Тесты перед включением:** данные и миграции (legacy opaque UID → UUID v4), project scope и caller credential, shared Session UUID между разными удостоверенными MCP-подключениями, отрицательные тесты cross-project/unauthenticated, TTL/revocation, privilege approval, дерево процессов, восстановление Valkey, watch build, ChatGPT/LM Studio smoke. Рабочий Green CI или Docker image **не равен** live Coolify/MCP acceptance.
+**ТЕСТЫ ПРИОСТАНОВЛЕНЫ:** не писать и не запускать никакие тесты (unit, integration, e2e, smoke, CI), не создавать mocks/fixtures и testing policies. Вся текущая деятельность — архитектура, чтение исходников и документация. Будущее решение о проверках принимает владелец отдельно.
 
 ### Не в MVP / расширения
 
@@ -407,45 +407,36 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 - делегирование точных view/interact/manage/terminate, RBAC/ABAC, fine-grained repository/file ACL;
 - удаление Project, архив, backup/restore/export/import и перенос проектов между инсталляциями;
 - независимый релиз curl/Chromium/Remote Browser компонентов **внутри** Web;
-- высокодоступные supervisor/worker takeovers, автоматическая миграция живых процессов, cross-host scheduling;
+- высокодоступные supervisor/worker takeovers и cross-host scheduling;
 - Go-ускорители и специфичные транспортные замены без подтверждённой потребности;
 - GraphQL/gRPC/WebRTC как стандарт платформы, полная шина событий, distributed multi-DB transaction;
 - разделение проекта в собственную физическую БД, per-project databases и независимые PostgreSQL clusters;
 - внешние Identity Providers / GitHub/GitLab OAuth как platform-login dependency (не планируется);
-- мостовой общий /mcp как приоритетный пользовательский интерфейс (оставить только совместимость/восстановление).
+- Общий `/mcp` не требуется ради старой совместимости; целевые доменные маршруты самостоятельны.
 
 **Согласовано — внешний сервер локальных моделей (только inference):** пользователь самостоятельно размещает на Ubuntu/GPU LM Studio/`llmster` либо другой движок с **OpenAI-compatible API**, запускает модели и ведёт чаты на стороне этого ПО. Его агенты и приложения используют сервер как **альтернативный model API provider**: настраиваются `base_url`, `model` и, если сервер требует, native `Authorization: Bearer` API token. Не требуется покупка токенов у стороннего LLM API, но остаются эксплуатационные расходы и лицензии выбранных моделей. **MCP Bridge не владеет GPU-хостом и не должен делать GPU API обязательным Web/Terminal/Agents MCP-доменом или проксировать все вызовы для MVP.** Клиент может обращаться к model API напрямую; если позже платформа сама станет потребителем модели, подключение оформляется как конфигурация model provider с защищённым credential, без новой AgentSession/OAuth-привязки. У GPU API **нет** SSH/shell/Python/Docker/remote jobs/произвольного исполнения в рамках этого требования. Сервер инференса не становится MCP-сервером или service identity платформы. Защитить удалённый HTTP-доступ (ограниченная сеть или TLS, аутентификация провайдера); не смешивать native model API token с OAuth MCP-клиента и `session_uuid`. Не разрабатывать отдельный inference orchestration домен по этой договорённости.
 
-**Согласовано — адресная legacy migration:** никаких автоматически назначенных ресурсов в первый Project. Пользователь создаёт личный Project самостоятельно; отдельный миграционный этап точечно переносит/привязывает GitHub/GitLab accounts, Files, Browser/Terminal и независимые Ghidra artifacts, с инвентаризацией, сохранением томов/секретов, backup и rollback. Никакого массового пересоздания или молчаливого owner mapping.
+**Пересмотрено 2026-10-09:** адресная legacy migration полностью отменена. Старые аккаунты, Files, Ghidra, Browser, Terminal, UUID и OAuth не переносим; всё создаётся заново.
 
-## 9. Миграция и сохранение известного рабочего состояния
+## 9. Чистая установка; миграций и тестов нет
 
-**Сейчас:** код организован вокруг surface-specific OAuth/session, отдельных GitHub/GitLab provider runtimes, Admin API и Authorization. Старый документ docs/architecture/authorization-access.md фиксирует MVP, где AgentSession принадлежит одному MCP surface и одному текущему пользователю. Это **не соответствует новому целевому контракту**; не «исправлять» старую историю документальным редактированием до работающей миграции.
+**GREENFIELD:** новая MCP Bridge собирается с чистой DB/schema, пустыми файловыми и Ghidra volumes, новыми учётными записями, ключами, provider accounts, Browser/Terminal состоянием. Никаких импорта/экспорта legacy, адаптеров `session_id`, прежних OAuth connections и URL aliases. Можно переиспользовать уже написанный код, если он соответствует конечным контрактам.
 
-Существующий ADR docs/decisions/0003-service-owned-packaging.md допускает временную отдельную Authorization DB из-за конфликтующих oauth_sessions. Новая цель — **одна платформа DB с domain schemas**, что требует плановой схемной/data migration; не копировать конфликтующие таблицы в одну schema.
+**Этапы:** спроектировать разделение доменов и начальный DDL, создать Identity/Teams/Projects, Authorization/AgentSession UUID v4 и нужные MCP-домены, затем независимый Coolify deployment без необходимости переносить старые ресурсы.
 
-Последовательность:
-1. Снять фактическую карту таблиц, контрактов, потребителей shared код/lockfile, runtime state/volumes и адресов Coolify. Зафиксировать backup/rollback.
-2. Согласовать DTO для Project/CallerCredential/AgentSession (`session_uuid` UUID v4)/RuntimeSession, выбрать административные local-login grants и миграционный адаптер legacy UID. OAuth может использоваться, но **не** определяет жизненный цикл AgentSession; chat ID и cross-surface OAuth binding не нужны.
-3. Вводить схемы и новые use cases **аддитивно**, с переходным адаптером старых surface/session API.
-4. Постепенно переносить аккаунты и ресурсы на Project, не переинициализируя рабочие браузерные профили/Ghidra/Terminal.
-5. Включать адресные MCP маршруты и Coolify deploy unit по одному, через реальные probe/health и end-to-end тесты.
-6. Убирать старые межсервисные hop/token/alias только после подтверждения, что они больше не нужны и reverse dependencies отсутствуют.
-7. Отдельно рефакторить внутреннюю структуру модулей после прохода функциональной совместимости; не смешивать огромный rename с миграцией данных и выпуском OAuth.
+**Тестовая пауза:** никаких test files, fixtures/mocks, testing policies, unit/integration/e2e/smoke/CI test jobs. Только чтение/ревью исходников, спецификация и обычная нетестовая разработка после согласования. К проверкам вернуться лишь по новому решению владельца.
 
-**Не изменять** автоматически рабочий legacy stack, существующие Postgres/Valkey volumes, JWT signing identity и ключи шифрования без контролируемого cutover.
-
-**Проверенные идентификаторы текущей системы не являются новыми PlatformProjectId:** `services/modules/terminal/manager.py` уже предоставляет `workspace_id` как имя каталога под `/workspace/projects`; `services/modules/analysis/workspace_transfer.py` использует `project_id` для Ghidra-проекта. Новая платформа обязана ввести явное отображение старых ID, не присваивать этим полям новый смысл без миграции. В Admin API существуют `github_accounts`, `gitlab_accounts`, `signoz_accounts`, `coolify_accounts` с глобально уникальными alias, а не project-owned aliases; их schema/uniqueness придётся мигрировать.
+**Разрушительная граница:** решение «всё под ноль» не означает, что нужно сейчас удалить какую-либо production DB/volume или контейнер. Перед фактическим reset/clean deployment определить точный список затрагиваемых ресурсов и исключить сторонние сервисы. Это ограничение на опасную операцию, **не миграционный план**.
 
 ## 10. Открытые архитектурные решения и риски
 
 **Это ревью-вопросы, не молчаливые разрешения на реализацию.**
 
-**10.1 Project-owned Session UUID — архитектура принята; mandatory OAuth binding отменён.** Новый `session_uuid` UUID v4 принадлежит Project, не OAuth/chat/surface; допустим для Web/SVC и любого другого MCP при **независимой проверке project authorization caller** через OAuth либо локальный login. Нельзя использовать UUID как единственное доказательство права доступа. Миграция текущего `uid=token_urlsafe(32)`/surface+OAuth привязки, отрицательные project-scope/credential tests и обработка legacy IDs — обязательный MVP gate. Вопросы расширенного session provenance/audit перенесены в post-MVP issue #391.
+**10.1 Project-owned UUID v4:** один `session_uuid` принадлежит Project, не OAuth/chat/surface; Project/caller rights проверяются независимо. Старые opaque UID/`session_id` не мигрировать и не поддерживать. Security/revocation требуют source-review, тесты на паузе.
 
 **10.2 Критический: согласованное доменное разделение и открытое runtime placement.** **Принято:** пять самостоятельных бизнес-модулей Identity (User), Teams (Team/TeamMembership/owner), Projects (Project/owner reference), Agents (AgentIdentity/child agents), Authorization (OAuth/AgentSession/grants). **Запрещено:** объединять Teams и Projects в один бизнес-модуль или выделять отдельный контейнер на сущность. **Осталось доказать:** composition root(ы), интерфейсы проверки TeamMembership/ProjectOwner/Agent grants, схема изоляции без циклического RPC; точно где работают первые четыре модуля без ненужного deploy overhead. Admin API не является owner другой доменной модели, Authorization не пересоздаётся при деплое админки.
 
-**10.3 Критический: текущие БД и миграция sessions.** Проверить реальную схему Authorization/PostgreSQL/Admin API, существующие UUID и риски перехода на одну DB. Стратегия zero-downtime expand/contract, backup/rollback до DB mutation обязательна.
+**10.3 Чистая DB:** определить новую логическую PostgreSQL DB, domain schemas и initial DDL. Не объединять и не переносить старые Authorization/Admin `oauth_sessions`; никаких миграционных скриптов или rollback старых таблиц.
 
 **10.4 Security/cache consistency.** Выбрать и протестировать механизм отзыва grant при race PostgreSQL/Valkey; указать максимальную задержку, fail-closed и ответственность worker. Нельзя принять новый elevated flow без защиты от устаревшего разрешения.
 
@@ -474,14 +465,14 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 Документ годен для декомпозиции на параллельные агентские задачи только после:
 
 - подтверждения разделов 1–8 владельцем проекта с учётом замечаний ревью в разделе 10;
-- проверки технических acceptance gates 10.1–10.4: migration UUID/caller credentials, размещение доменов, единая PostgreSQL DB, Valkey consistency; без требования ChatGPT chat ID или общего OAuth grant family;
+- проверки технических acceptance gates 10.1–10.4: UUID/caller contracts, размещение доменов, единая PostgreSQL DB, Valkey consistency; без требования ChatGPT chat ID или общего OAuth grant family;
 - доказанной карты фактических исходников и инфраструктуры, а не только соответствия гипотезам;
-- утверждения scope/acceptance и границ миграции из разделов 8–9;
-- выделения независимых задач с собственным owner, изменяемыми директориями, контрактами, тестами и порядком интеграции.
+- утверждения scope/acceptance и чистого запуска из разделов 8–9;
+- выделения независимых задач с owner, контрактами, изменяемыми директориями и порядком интеграции, **без тестовых работ**.
 
-**Текущее состояние: DRAFT — обсуждение и ревью; реализации, деплоя, миграции, удаления сервисов и выдачи агентам работ этот документ не запускает.**
+**Текущее состояние: DRAFT — архитектурный review, без реализации, тестов, deploy или очистки работающей среды.
 
-**Отслеживание миграции:** [основной issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390); **отложенные проверки и расширения:** [post-MVP issue #391](https://github.com/ArthurKoba/mcp-bridge/issues/391). Draft PR #389 остаётся каналом текстового ревью; не использовать PR как backlog и не отмечать там готовность миграции.
+**Отслеживание реализации greenfield-платформы:**
 
 ### Навигация по текущему состоянию
 
