@@ -1,0 +1,47 @@
+# Git-backed Coolify Compose Application for the standalone authorization unit.
+# Base Directory: /deploy/coolify/authorization
+# Docker Compose Location: /docker-compose.yaml
+# This resource must not own PostgreSQL or Valkey containers/volumes.
+services:
+  authorization:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: authorization
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:?}
+      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
+      AUTHORIZATION_POSTGRES_HOST: postgres
+      AUTHORIZATION_POSTGRES_PORT: "5432"
+      AUTHORIZATION_POSTGRES_DB: ${AUTHORIZATION_POSTGRES_DB:-authorization}
+      AUTHORIZATION_POSTGRES_USER: ${AUTHORIZATION_POSTGRES_USER:?}
+      AUTHORIZATION_POSTGRES_PASSWORD: ${AUTHORIZATION_POSTGRES_PASSWORD:?}
+      AUTHORIZATION_BOOTSTRAP_USERNAME: ${AUTHORIZATION_BOOTSTRAP_USERNAME:?}
+      AUTHORIZATION_BOOTSTRAP_PASSWORD: ${AUTHORIZATION_BOOTSTRAP_PASSWORD:?}
+      AUTHORIZATION_JWT_PRIVATE_KEY_PEM: ${AUTHORIZATION_JWT_PRIVATE_KEY_PEM:?}
+      AUTHORIZATION_JWT_KEY_ID: ${AUTHORIZATION_JWT_KEY_ID:-authorization-1}
+      AUTHORIZATION_GATEWAY_SERVICE_TOKEN: ${AUTHORIZATION_GATEWAY_SERVICE_TOKEN:?}
+      AUTHORIZATION_ADMIN_SERVICE_TOKEN: ${AUTHORIZATION_ADMIN_SERVICE_TOKEN:?}
+      VALKEY_URL: redis://valkey:6379/0
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "2", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 6
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    networks:
+      mcp:
+        aliases:
+          - authorization
+
+networks:
+  mcp:
+    external: true
+    name: mcp
