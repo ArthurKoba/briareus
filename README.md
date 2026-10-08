@@ -94,9 +94,9 @@ services/
 Production is migrating from the legacy single Compose resource to independent Coolify
 Applications sharing one repository and multi-stage Dockerfile. `admin-ui`, `admin-api` and
 `authorization` already have separate Coolify resources; not all are healthy yet. The root
-Compose now owns only PostgreSQL and Valkey. Portable and optional Coolify-specific
-Compose definitions for Authorization live together in `deploy/authorization/`;
-this pilot has **not** replaced the current Dockerfile Application.
+Compose now owns only PostgreSQL and Valkey. Authorization's portable Dockerfile
+and Compose definitions live beside its Python package in `services/authorization/`;
+this staged pilot has **not** replaced the current Dockerfile Application.
 
 Independent deployment units prevent a Git webhook for one provider from starting a
 Coolify deployment of the entire stack. Runtime correctness must not depend on

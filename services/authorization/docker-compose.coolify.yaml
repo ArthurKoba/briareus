@@ -8,6 +8,7 @@ services:
       service: authorization
     environment:
       SERVICE_URL_AUTHORIZATION_8000: /
+      AUTHORIZATION_SHARED_NETWORK: ${AUTHORIZATION_SHARED_NETWORK:?}
     mem_limit: ${AUTHORIZATION_MEMORY_LIMIT:-1g}
     cpus: ${AUTHORIZATION_CPU_LIMIT:-1.0}
     pids_limit: ${AUTHORIZATION_PIDS_LIMIT:-256}

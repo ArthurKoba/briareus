@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      smoke_auth_packaging:
+        description: 'Explicitly verify Auth Compose expansion and one image build on Zoomies'
+        type: boolean
+        required: false
+        default: false
       build_images:
         description: 'Explicitly build the three Docker images'
         type: boolean
@@ -111,6 +116,37 @@ jobs:
           docker version
           docker info --format 'Server={{.ServerVersion}} Driver={{.Driver}}'
           printf 'FROM busybox:1.36\nRUN echo zoomies-dind-ok\n' | docker build --progress=plain -t zoomies-dind-smoke -
+
+  auth-packaging:
+    if: github.event_name == 'workflow_dispatch' && inputs.smoke_auth_packaging == true
+    runs-on: zoomies-mcp-bridge-builder
+    timeout-minutes: 15
+    env:
+      AUTHORIZATION_PUBLIC_BASE_URL: https://authorization.example.test
+      MCP_PUBLIC_BASE_URL: https://mcp.example.test
+      AUTHORIZATION_POSTGRES_USER: ci_authorization_user
+      AUTHORIZATION_POSTGRES_PASSWORD: ci-only-dummy-password
+      AUTHORIZATION_BOOTSTRAP_USERNAME: ci-admin
+      AUTHORIZATION_BOOTSTRAP_PASSWORD: ci-only-dummy-password
+      AUTHORIZATION_JWT_PRIVATE_KEY_PEM: ci-only-dummy-private-key
+      AUTHORIZATION_GATEWAY_SERVICE_TOKEN: ci-only-dummy-gateway-token
+      AUTHORIZATION_ADMIN_SERVICE_TOKEN: ci-only-dummy-admin-token
+      AUTHORIZATION_SHARED_NETWORK: ci-not-a-production-network
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Compose plugin and service inheritance
+        shell: bash
+        run: |
+          docker compose version
+          docker compose -f services/authorization/docker-compose.coolify.yaml config --quiet
+          test "$(docker compose -f services/authorization/docker-compose.coolify.yaml config --services)" = authorization
+          docker compose -f services/authorization/docker-compose.coolify.yaml config > /tmp/auth-compose-rendered.yaml
+          grep -Fq 'dockerfile: services/authorization/Dockerfile' /tmp/auth-compose-rendered.yaml
+          grep -Fq 'AUTHORIZATION_JWT_PRIVATE_KEY_PEM:' /tmp/auth-compose-rendered.yaml
+          grep -Fq 'AUTHORIZATION_POSTGRES_PASSWORD:' /tmp/auth-compose-rendered.yaml
+      - name: Build only isolated Authorization image
+        shell: bash
+        run: docker build --file services/authorization/Dockerfile --tag mcp-bridge:auth-packaging-smoke .
 
   images:
     if: github.event_name == 'workflow_dispatch' && inputs.build_images == true

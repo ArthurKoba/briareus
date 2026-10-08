@@ -1,74 +1,56 @@
 # Deployment
 
-## Independent deployment units and reusable Compose overlays
+## Service-owned packaging and Coolify migration
 
-The current runtime transition uses independent Git-backed Coolify Applications
-built from the shared multi-stage Dockerfile. The legacy deployment is still
-running from its pinned branch and must not be repointed during this migration.
-
-Deployment definitions for each application live in a **flat service directory**:
+ADR [0003](decisions/0003-service-owned-packaging.md) defines the replacement
+for the earlier `deploy/authorization` pilot. Source packaging is colocated:
 
 ```text
-deploy/authorization/
-  docker-compose.yaml          # portable Docker Compose definition
-  docker-compose.coolify.yaml  # Coolify-specific override/adapter
+services/authorization/
+  Dockerfile                   # service-owned image, rooted build context
+  docker-compose.yaml         # portable runtime with required inputs
+  docker-compose.coolify.yaml # optional Coolify adapter via extends
+  runtime.py
+  access/
 ```
 
-`docker-compose.yaml` owns the deployable service, Docker build target,
-portable environment contract and health check. It has no Coolify-only
-magic variables, environment-specific domains, networks or host limits.
-External PostgreSQL and Valkey belong to other deployment resources.
+The legacy all-in-one Compose remains untouched. Split deployments still run as
+independent Coolify Applications; their existing Dockerfile strategy is not
+changed by merging source packaging. The root Dockerfile remains available
+for other units until they have separately passed runtime acceptance.
 
-`docker-compose.coolify.yaml` is an optional adapter which references the base
-service through Docker Compose `extends`, adds a Coolify service URL directive,
-resource limits and an operator-selected existing shared network. It
-never copies production secrets into Git or creates another database/cache.
-Other orchestrators can supply their own adapter beside the portable base,
-without new directory levels such as `deploy/coolify/authorization/`.
+For the **unaccepted** Authorization Compose pilot, the Git repository root is
+the build context (`../..` relative to `services/authorization`), and the
+Dockerfile is `services/authorization/Dockerfile`. The image copies only the
+common Python runtime library and the Auth package, and does not import the
+privileged PostgreSQL provisioner or the root entrypoint.
 
-**Acceptance constraint:** Docker Compose supports cross-file `extends`, but the
-Coolify parser may inspect only the selected YAML before Docker Compose expands
-it. The selected Coolify version must be shown to discover the inherited
-`build:` target and all required environment variables before switching a live
-resource. These two source files are a staged pattern, not evidence of parser
-or runtime acceptance. Do not use Raw mode merely to bypass validation.
+Candidate Coolify Git-backed resource settings (not instructions to modify
+production until parser acceptance):
 
-### Portable local deployment
+- Base Directory: `/services/authorization`
+- Docker Compose Location: `/docker-compose.coolify.yaml` (relative to Base)
+- Raw Compose: **off**. Prove `extends.file` is expanded by installed Coolify
+  before switching production; Docker Compose CLI compatibility alone is not
+  sufficient.
+- Watch Paths: `services/authorization/**`, `services/common/**`,
+  `pyproject.toml`, `uv.lock`. Other common dependencies may be added only
+  when a concrete consumer actually needs them; unrelated provider changes
+  must not trigger an Auth deploy.
+- Reuse the correct Coolify destination and shared network selected in that
+  environment. `AUTHORIZATION_SHARED_NETWORK` in the optional adapter is an
+  explicit required external network name; other users supply their own.
+- Required resource variables use `${VAR:?}` in the portable Compose source.
+  Bind them to existing explicit Coolify Shared Variables at their real scope,
+  e.g. `{{environment.AUTHORIZATION_POSTGRES_PASSWORD}}`. Scope references
+  belong in the Coolify resource, not in portable public Git templates.
+- Ensure secrets are runtime-only, Protected; PEM signing key is multiline.
+  Confirm no stale/duplicated parser-managed variables are being reused.
+- No automatic deploy/domain reassignment until non-production parser, build,
+  Auth DB role/provisioner, startup, OAuth/JWKS and rollback checks pass.
 
-Use the base manifest with Docker Compose on a machine with the external
-PostgreSQL and Valkey dependencies available. Provide the required environment
-variables through an untracked secret provider or local env file. Build context
-`../..` resolves to the repository root from `deploy/authorization/`.
-
-### Coolify-specific adapter pilot
-
-For a Git-backed Coolify Application **after parser acceptance**:
-
-- Base Directory: `/deploy/authorization`.
-- Docker Compose Location: `/docker-compose.coolify.yaml`.
-- Build target (in the portable base): `authorization`.
-- Assign `${AUTHORIZATION_SHARED_NETWORK:?}` to the external network available
-  on the destination; do not hardcode a deployment-specific network into source.
-- Supply all `${VAR:?}` runtime inputs as protected resource or shared variables.
-  The signing private key must remain secret and multiline. Reuse an existing
-  key during cutover rather than silently rotating the issuer.
-- Set the public service domain on `authorization` port `8000` only during a
-  controlled domain cutover; do not hardcode a public hostname in either YAML.
-- Narrow Watch Paths to the two Compose files, `services/authorization/**`,
-  `services/common/**`, root `Dockerfile`, `docker-entrypoint.sh`, `pyproject.toml`
-  and `uv.lock`. Source changes belonging only to another provider must not
-  cause an authorization deployment.
-- Keep credentialed PostgreSQL provisioning a separate privileged one-shot
-  operation (`scripts/provision_authorization_database.py`); runtime Auth must
-  not hold cluster-superuser credentials.
-- Confirm generated Coolify Compose, discovered required variables, domain,
-  external network, clean startup, health, OAuth/JWKS and rollback **before**
-  replacing the existing Dockerfile Application. Do not modify the legacy
-  Compose resource as part of this pilot.
-
-A new Coolify Application remains a distinct deploy unit regardless of how many
-Python modules live in the shared repository. This solves the original global
-restart problem without multiplying independent Python microservices.
+Resource-specific domain, credentials, fixed network name and server metadata
+belong to the private infrastructure inventory, not in reusable manifests.
 
 ## Runtime Docker targets
 
