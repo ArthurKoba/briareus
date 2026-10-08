@@ -1,62 +1,74 @@
 # Deployment
 
-## Deployment units and migration strategy
+## Independent deployment units and reusable Compose overlays
 
-The **current** production split runtimes use independent Git-backed Coolify Dockerfile
-Applications built from the shared multi-stage root `Dockerfile`. The legacy monolith
-still uses its own pinned branch and Compose resource. Both are intentionally preserved
-until the replacements pass runtime acceptance.
+The current runtime transition uses independent Git-backed Coolify Applications
+built from the shared multi-stage Dockerfile. The legacy deployment is still
+running from its pinned branch and must not be repointed during this migration.
 
-The target is **one Git repository and one shared Dockerfile, with one independent
-Git-backed Coolify Compose Application per runtime deployment unit**. Each resource
-has a small Compose manifest selecting exactly one Docker build target. Coolify
-Watch Paths filter Git webhook deployments *per application*, not individual
-services inside one multi-container resource. This changes deployment packaging,
-not the source-level ownership boundaries or the application APIs.
+Deployment definitions for each application live in a **flat service directory**:
 
-The first staged manifest is `deploy/coolify/authorization/docker-compose.yaml`.
-It is an undeployed migration candidate, not a claim about the active Auth resource.
-Only switch an existing Coolify application after its generated Compose, domains,
-secret references, network membership and rollback have been verified. Do not
-repoint or retire the running legacy Compose deployment during this experiment.
+```text
+deploy/authorization/
+  docker-compose.yaml          # portable Docker Compose definition
+  docker-compose.coolify.yaml  # Coolify-specific override/adapter
+```
 
-Authorization pilot configuration for a **Git-backed Docker Compose Application**:
+`docker-compose.yaml` owns the deployable service, Docker build target,
+portable environment contract and health check. It has no Coolify-only
+magic variables, environment-specific domains, networks or host limits.
+External PostgreSQL and Valkey belong to other deployment resources.
 
-- Repository: `ArthurKoba/mcp-bridge`, target branch `main` after acceptance.
-- Base Directory: `/deploy/coolify/authorization`.
-- Docker Compose Location (relative to Base Directory): `/docker-compose.yaml`.
-- Build context in the manifest: `../../..` (the repository root);
-  Dockerfile target: `authorization`.
-- Domain: `https://authorization.mcp.koba-nexus.ru` on service `authorization`,
-  internal port `8000` — move the live domain only at controlled cutover.
-- Networking: existing destination `mcp-bridge-network` / external `mcp` network;
-  verify `postgres`, `valkey` and the `authorization` DNS alias on the real host.
-- Use normal Coolify Compose processing, **not Raw**, and connect to the
-  selected predefined destination network when required for proxy reachability.
-- Watch Paths (one path per line):
-  `deploy/coolify/authorization/docker-compose.yaml`, `services/authorization/**`,
-  `services/common/**`, `scripts/provision_authorization_database.py`,
-  `Dockerfile`, `docker-entrypoint.sh`, `pyproject.toml`, `uv.lock`.
-  These filter Git webhooks; manual Deploy/Redeploy is always an explicit override.
-- **All** `${VAR:?}` values must be assigned in Coolify before deployment.
-  Secret values belong to runtime-only protected variables or scoped shared
-  references, never Git or build arguments. Mark the signing key secret and
-  multiline; keep its existing value when rotating an active installation.
-- Provision the Auth PostgreSQL role/database separately using the existing
-  idempotent provisioner and cluster-admin authority. Do **not** inject cluster
-  superuser credentials into the steady-state Auth container. Coordinate the
-  Gateway and Admin API shared-service tokens and public verification key.
-- Accept in stages: offline manifest/schema verification -> Coolify parsed
-  required-variable/domain/network inspection -> disposable non-production
-  runtime check -> controlled replacement -> `/health`, JWKS, private service
-  access, persistence, OAuth and rollback verification. Production acceptance
-  cannot be inferred from a passing Docker build or smoke import.
+`docker-compose.coolify.yaml` is an optional adapter which references the base
+service through Docker Compose `extends`, adds a Coolify service URL directive,
+resource limits and an operator-selected existing shared network. It
+never copies production secrets into Git or creates another database/cache.
+Other orchestrators can supply their own adapter beside the portable base,
+without new directory levels such as `deploy/coolify/authorization/`.
 
-Each future deployment unit (Gateway, providers, Web, Terminal, etc.) gets its
-own scoped manifest and Coolify resource only as required. Do not introduce
-extra Python microservices merely to achieve independent build triggers.
-Keep browser profiles, shared workspace storage and durable DB volumes under
-explicit existing ownership rather than adopting freshly generated volume names.
+**Acceptance constraint:** Docker Compose supports cross-file `extends`, but the
+Coolify parser may inspect only the selected YAML before Docker Compose expands
+it. The selected Coolify version must be shown to discover the inherited
+`build:` target and all required environment variables before switching a live
+resource. These two source files are a staged pattern, not evidence of parser
+or runtime acceptance. Do not use Raw mode merely to bypass validation.
+
+### Portable local deployment
+
+Use the base manifest with Docker Compose on a machine with the external
+PostgreSQL and Valkey dependencies available. Provide the required environment
+variables through an untracked secret provider or local env file. Build context
+`../..` resolves to the repository root from `deploy/authorization/`.
+
+### Coolify-specific adapter pilot
+
+For a Git-backed Coolify Application **after parser acceptance**:
+
+- Base Directory: `/deploy/authorization`.
+- Docker Compose Location: `/docker-compose.coolify.yaml`.
+- Build target (in the portable base): `authorization`.
+- Assign `${AUTHORIZATION_SHARED_NETWORK:?}` to the external network available
+  on the destination; do not hardcode a deployment-specific network into source.
+- Supply all `${VAR:?}` runtime inputs as protected resource or shared variables.
+  The signing private key must remain secret and multiline. Reuse an existing
+  key during cutover rather than silently rotating the issuer.
+- Set the public service domain on `authorization` port `8000` only during a
+  controlled domain cutover; do not hardcode a public hostname in either YAML.
+- Narrow Watch Paths to the two Compose files, `services/authorization/**`,
+  `services/common/**`, root `Dockerfile`, `docker-entrypoint.sh`, `pyproject.toml`
+  and `uv.lock`. Source changes belonging only to another provider must not
+  cause an authorization deployment.
+- Keep credentialed PostgreSQL provisioning a separate privileged one-shot
+  operation (`scripts/provision_authorization_database.py`); runtime Auth must
+  not hold cluster-superuser credentials.
+- Confirm generated Coolify Compose, discovered required variables, domain,
+  external network, clean startup, health, OAuth/JWKS and rollback **before**
+  replacing the existing Dockerfile Application. Do not modify the legacy
+  Compose resource as part of this pilot.
+
+A new Coolify Application remains a distinct deploy unit regardless of how many
+Python modules live in the shared repository. This solves the original global
+restart problem without multiplying independent Python microservices.
 
 ## Runtime Docker targets
 
@@ -75,6 +87,12 @@ Application Docker targets:
 - `observability`
 
 `admin-ui` is built from `admin-web-app/Dockerfile`.
+
+## Current deployment-specific notes (not part of the portable templates)
+
+These details describe one active infrastructure and are not defaults for other
+users of the Compose files above. Durable live infrastructure authority belongs
+in its own infrastructure inventory.
 
 All MCP production resources use the Coolify destination/network `mcp-bridge-network` (`mcp`).
 Internal service addressing should use the stable service/container names configured in Coolify.
