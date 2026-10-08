@@ -1,7 +1,64 @@
 # Deployment
 
-Production applications are separate Git-backed Coolify Applications built from the root `Dockerfile`.
-Do not create per-service Compose wrappers for application runtimes.
+## Deployment units and migration strategy
+
+The **current** production split runtimes use independent Git-backed Coolify Dockerfile
+Applications built from the shared multi-stage root `Dockerfile`. The legacy monolith
+still uses its own pinned branch and Compose resource. Both are intentionally preserved
+until the replacements pass runtime acceptance.
+
+The target is **one Git repository and one shared Dockerfile, with one independent
+Git-backed Coolify Compose Application per runtime deployment unit**. Each resource
+has a small Compose manifest selecting exactly one Docker build target. Coolify
+Watch Paths filter Git webhook deployments *per application*, not individual
+services inside one multi-container resource. This changes deployment packaging,
+not the source-level ownership boundaries or the application APIs.
+
+The first staged manifest is `deploy/coolify/authorization/docker-compose.yaml`.
+It is an undeployed migration candidate, not a claim about the active Auth resource.
+Only switch an existing Coolify application after its generated Compose, domains,
+secret references, network membership and rollback have been verified. Do not
+repoint or retire the running legacy Compose deployment during this experiment.
+
+Authorization pilot configuration for a **Git-backed Docker Compose Application**:
+
+- Repository: `ArthurKoba/mcp-bridge`, target branch `main` after acceptance.
+- Base Directory: `/deploy/coolify/authorization`.
+- Docker Compose Location (relative to Base Directory): `/docker-compose.yaml`.
+- Build context in the manifest: `../../..` (the repository root);
+  Dockerfile target: `authorization`.
+- Domain: `https://authorization.mcp.koba-nexus.ru` on service `authorization`,
+  internal port `8000` — move the live domain only at controlled cutover.
+- Networking: existing destination `mcp-bridge-network` / external `mcp` network;
+  verify `postgres`, `valkey` and the `authorization` DNS alias on the real host.
+- Use normal Coolify Compose processing, **not Raw**, and connect to the
+  selected predefined destination network when required for proxy reachability.
+- Watch Paths (one path per line):
+  `deploy/coolify/authorization/docker-compose.yaml`, `services/authorization/**`,
+  `services/common/**`, `scripts/provision_authorization_database.py`,
+  `Dockerfile`, `docker-entrypoint.sh`, `pyproject.toml`, `uv.lock`.
+  These filter Git webhooks; manual Deploy/Redeploy is always an explicit override.
+- **All** `${VAR:?}` values must be assigned in Coolify before deployment.
+  Secret values belong to runtime-only protected variables or scoped shared
+  references, never Git or build arguments. Mark the signing key secret and
+  multiline; keep its existing value when rotating an active installation.
+- Provision the Auth PostgreSQL role/database separately using the existing
+  idempotent provisioner and cluster-admin authority. Do **not** inject cluster
+  superuser credentials into the steady-state Auth container. Coordinate the
+  Gateway and Admin API shared-service tokens and public verification key.
+- Accept in stages: offline manifest/schema verification -> Coolify parsed
+  required-variable/domain/network inspection -> disposable non-production
+  runtime check -> controlled replacement -> `/health`, JWKS, private service
+  access, persistence, OAuth and rollback verification. Production acceptance
+  cannot be inferred from a passing Docker build or smoke import.
+
+Each future deployment unit (Gateway, providers, Web, Terminal, etc.) gets its
+own scoped manifest and Coolify resource only as required. Do not introduce
+extra Python microservices merely to achieve independent build triggers.
+Keep browser profiles, shared workspace storage and durable DB volumes under
+explicit existing ownership rather than adopting freshly generated volume names.
+
+## Runtime Docker targets
 
 Application Docker targets:
 

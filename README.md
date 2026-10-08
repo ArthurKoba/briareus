@@ -1,7 +1,7 @@
 # mcp-bridge
 
 Modular MCP platform with one public gateway, one central OAuth authorization service,
-and isolated private provider runtimes managed as one Docker Compose stack.
+and isolated private provider runtimes deployed as independently managed units.
 
 ## Architecture
 
@@ -92,15 +92,16 @@ services/
 ## Runtime and deployment isolation
 
 Production is migrating from the legacy single Compose resource to independent Coolify
-Applications built from the same repository/Dockerfile targets. `admin-ui` and `admin-api` are
-already separate deployment units; remaining runtimes move independently. The root Compose file
-remains the integration/local topology authority during the cutover.
+Applications sharing one repository and multi-stage Dockerfile. `admin-ui`, `admin-api` and
+`authorization` already have separate Coolify resources; not all are healthy yet. The root
+Compose now owns only PostgreSQL and Valkey. A staged Git-backed one-service Compose
+manifest for Authorization is documented in `docs/deployment.md` and has **not** replaced
+its current Dockerfile Application.
 
-Deployments may rebuild or recreate the stack. Runtime correctness does not depend on
-selective-restart scripts. Each service has its own restart policy, and Compose
-dependencies exist only where a runtime cannot perform its primary job without another
-service: GitHub and GitLab require Admin API for account resolution, while Analysis
-requires Ghidra. Gateway is deliberately not health-gated on provider availability, so
+Independent deployment units prevent a Git webhook for one provider from starting a
+Coolify deployment of the entire stack. Runtime correctness must not depend on
+selective-restart scripts. Cross-service requirements remain: GitHub and GitLab use
+Admin API for account resolution, while Analysis uses Ghidra. Gateway is deliberately not health-gated on provider availability, so
 one broken provider does not prevent the remaining MCP surfaces from starting and being
 used to repair the system. Backend MCP connections are lazy and reused: each public proxy
 keeps a small pool of persistent sessions instead of repeating MCP discovery/initialization
