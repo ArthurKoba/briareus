@@ -1,6 +1,5 @@
-# Coolify-specific overlay: the portable definition remains authoritative.
-# WARNING: Coolify parser support for external `extends.file` must be verified
-# on the actual deployed Coolify version before cutover.
+# Existing production network, no extra operator-supplied network variable.
+# Verify actual Coolify Compose parser support for cross-file extends before deploy.
 services:
   authorization:
     extends:
@@ -8,14 +7,10 @@ services:
       service: authorization
     environment:
       SERVICE_URL_AUTHORIZATION_8000: /
-      AUTHORIZATION_SHARED_NETWORK: ${AUTHORIZATION_SHARED_NETWORK:?}
-    mem_limit: ${AUTHORIZATION_MEMORY_LIMIT:-1g}
-    cpus: ${AUTHORIZATION_CPU_LIMIT:-1.0}
-    pids_limit: ${AUTHORIZATION_PIDS_LIMIT:-256}
     networks:
-      - shared
+      - mcp
 
 networks:
-  shared:
+  mcp:
     external: true
-    name: ${AUTHORIZATION_SHARED_NETWORK:?}
+    name: mcp

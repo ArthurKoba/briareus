@@ -57,6 +57,7 @@ async def _ensure_database(
     *,
     database: str,
     owner: str,
+    preserve_existing: bool = False,
 ) -> None:
     database = _identifier(database, name="service database")
     owner = _identifier(owner, name="service role")
@@ -66,6 +67,9 @@ async def _ensure_database(
         "SELECT 1 FROM pg_database WHERE datname=$1",
         database,
     )
+    if exists and preserve_existing:
+        # Shared credentials must never reassign ownership of an existing DB.
+        return
     if not exists:
         await connection.execute(
             f"CREATE DATABASE {quoted_database} OWNER {quoted_owner}"
@@ -88,9 +92,21 @@ async def main() -> None:
     admin_password = _env("POSTGRES_PASSWORD")
 
     authorization_database = _env("AUTHORIZATION_POSTGRES_DB", "authorization")
-    authorization_user = _env("AUTHORIZATION_POSTGRES_USER")
-    authorization_password = _env("AUTHORIZATION_POSTGRES_PASSWORD")
-
+    # Reuse existing PostgreSQL credentials unless an explicit dedicated role
+    # has been provided for a separately managed deployment.
+    dedicated_user = os.getenv("AUTHORIZATION_POSTGRES_USER", "").strip()
+    dedicated_password = os.getenv("AUTHORIZATION_POSTGRES_PASSWORD", "").strip()
+    if bool(dedicated_user) != bool(dedicated_password):
+        raise RuntimeError(
+            "AUTHORIZATION_POSTGRES_USER and AUTHORIZATION_POSTGRES_PASSWORD "
+            "must both be supplied for a dedicated role"
+        )
+    if dedicated_user and dedicated_user == admin_user:
+        raise RuntimeError(
+            "refusing to change the existing PostgreSQL admin role; "
+            "omit AUTHORIZATION_POSTGRES_USER/PASSWORD to reuse it unchanged"
+        )
+    authorization_user = dedicated_user or admin_user
 
     connection = await asyncpg.connect(
         host=admin_host,
@@ -100,11 +116,15 @@ async def main() -> None:
         password=admin_password,
     )
     try:
-        await _ensure_role(
-            connection, role=authorization_user, password=authorization_password
-        )
+        if dedicated_user:
+            await _ensure_role(
+                connection, role=authorization_user, password=dedicated_password
+            )
         await _ensure_database(
-            connection, database=authorization_database, owner=authorization_user
+            connection,
+            database=authorization_database,
+            owner=authorization_user,
+            preserve_existing=not bool(dedicated_user),
         )
         print(f"ready database={authorization_database} role={authorization_user}")
     finally:

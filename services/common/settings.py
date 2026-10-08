@@ -335,11 +335,11 @@ class ObservabilitySettings(ProcessSettings):
 class AuthorizationServiceSettings(ProcessSettings):
     public_base_url: str = Field("", validation_alias="AUTHORIZATION_PUBLIC_BASE_URL")
     mcp_public_base_url: str = Field("", validation_alias="MCP_PUBLIC_BASE_URL")
-    postgres_host: str = Field("postgres", validation_alias="AUTHORIZATION_POSTGRES_HOST")
-    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="AUTHORIZATION_POSTGRES_PORT")
-    postgres_db: str = Field("authorization", validation_alias="AUTHORIZATION_POSTGRES_DB")
-    postgres_user: str = Field("", validation_alias="AUTHORIZATION_POSTGRES_USER")
-    postgres_password: str = Field("", validation_alias="AUTHORIZATION_POSTGRES_PASSWORD")
+    postgres_host: str = Field("postgres", validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="POSTGRES_PORT")
+    postgres_db: str = Field("authorization", validation_alias="POSTGRES_DB")
+    postgres_user: str = Field("", validation_alias="POSTGRES_USER")
+    postgres_password: str = Field("", validation_alias="POSTGRES_PASSWORD")
     bootstrap_username: str = Field("", validation_alias="AUTHORIZATION_BOOTSTRAP_USERNAME")
     bootstrap_password: str = Field("", validation_alias="AUTHORIZATION_BOOTSTRAP_PASSWORD")
     jwt_private_key_pem: str = Field("", validation_alias="AUTHORIZATION_JWT_PRIVATE_KEY_PEM")
@@ -406,8 +406,8 @@ class AuthorizationServiceSettings(ProcessSettings):
             for name, value in (
                 ("AUTHORIZATION_PUBLIC_BASE_URL", self.public_base_url),
                 ("MCP_PUBLIC_BASE_URL", self.mcp_public_base_url),
-                ("AUTHORIZATION_POSTGRES_USER", self.postgres_user),
-                ("AUTHORIZATION_POSTGRES_PASSWORD", self.postgres_password),
+                ("POSTGRES_USER", self.postgres_user),
+                ("POSTGRES_PASSWORD", self.postgres_password),
                 ("AUTHORIZATION_BOOTSTRAP_USERNAME", self.bootstrap_username),
                 ("AUTHORIZATION_BOOTSTRAP_PASSWORD", self.bootstrap_password),
                 ("AUTHORIZATION_JWT_PRIVATE_KEY_PEM", self.jwt_private_key_pem),

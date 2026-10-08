@@ -5,12 +5,34 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 
 class AuthorizationRuntimeImportTest(unittest.TestCase):
+    def test_postgres_settings_use_existing_canonical_env_names(self) -> None:
+        from common.settings import AuthorizationServiceSettings
+
+        with patch.dict(
+            os.environ,
+            {
+                "POSTGRES_USER": "existing_user",
+                "POSTGRES_PASSWORD": "existing_password",
+                "POSTGRES_DB": "authorization",
+                "AUTHORIZATION_POSTGRES_USER": "obsolete_user",
+                "AUTHORIZATION_POSTGRES_PASSWORD": "obsolete_password",
+            },
+            clear=True,
+        ):
+            settings = AuthorizationServiceSettings()
+            self.assertEqual(settings.postgres_user, "existing_user")
+            self.assertEqual(settings.postgres_password, "existing_password")
+            self.assertEqual(settings.postgres_db, "authorization")
+            self.assertEqual(settings.postgres_host, "postgres")
+            self.assertEqual(settings.postgres_port, 5432)
+
     def test_asgi_application_imports_without_external_services(self) -> None:
         private_key = ec.generate_private_key(ec.SECP256R1()).private_bytes(
             serialization.Encoding.PEM,
@@ -24,8 +46,8 @@ class AuthorizationRuntimeImportTest(unittest.TestCase):
             OTLP_ENDPOINT="",
             AUTHORIZATION_PUBLIC_BASE_URL="https://authorization.example.test",
             MCP_PUBLIC_BASE_URL="https://mcp.example.test",
-            AUTHORIZATION_POSTGRES_USER="test_user",
-            AUTHORIZATION_POSTGRES_PASSWORD="test_password",
+            POSTGRES_USER="test_user",
+            POSTGRES_PASSWORD="test_password",
             AUTHORIZATION_BOOTSTRAP_USERNAME="test_admin",
             AUTHORIZATION_BOOTSTRAP_PASSWORD="test_password",
             AUTHORIZATION_JWT_PRIVATE_KEY_PEM=private_key,
