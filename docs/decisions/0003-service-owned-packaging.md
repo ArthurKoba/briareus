@@ -86,8 +86,8 @@ separate Coolify resources, but the new Auth is not yet accepted at runtime.
 
 | Input | Owner/source | Runtime behavior |
 | --- | --- | --- |
-| `AUTHORIZATION_PUBLIC_BASE_URL` | Coolify resource, canonical public issuer | Required; URL must match proxy and OAuth issuer |
-| `MCP_PUBLIC_BASE_URL` | Public Gateway route configuration | Required; matches MCP resource audiences |
+| `AUTHORIZATION_PUBLIC_BASE_URL` | Auth public issuer | Defaults to Coolify-generated `SERVICE_URL_AUTHORIZATION` in the adapter, explicit override allowed; runtime validates nonempty URL |
+| `MCP_PUBLIC_BASE_URL` | Gateway/public resource owner | Required; enumerates OAuth resource audiences, not internal host |
 | `POSTGRES_{HOST,PORT}` | Existing internal PostgreSQL connection | Defaults `postgres`/`5432` |
 | `POSTGRES_DB` | Auth resource | Default `authorization`; MUST NOT reuse Admin API's `mcp-bridge` database |
 | `POSTGRES_USER` | Existing Production Environment Shared Variable | Required `{{environment.POSTGRES_USER}}`; runtime-only |

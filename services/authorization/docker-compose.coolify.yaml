@@ -9,7 +9,9 @@ services:
       service: authorization
     environment:
       SERVICE_URL_AUTHORIZATION_8000: /
-      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:?}
+      # Coolify generates SERVICE_URL_AUTHORIZATION from SERVICE_URL_AUTHORIZATION_8000.
+      # Keep an explicit override for a custom issuer or non-Coolify runtime.
+      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:-${SERVICE_URL_AUTHORIZATION}}
       MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}

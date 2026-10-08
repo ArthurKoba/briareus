@@ -52,9 +52,22 @@ production until parser acceptance):
   `POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}`. Do not create fresh
   credentials or reuse stale generated `POSTGRES_USER is required` values.
   Both keys are runtime-only protected secrets (never build arguments).
-- Required resource variables use `${VAR:?}` in portable Compose. Bind the
-  existing Auth issuer/Bootstrap/JWT/consumer tokens at their actual confirmed
-  Production Shared Variable scope, without guessing missing secret values.
+- Coolify owns the public Auth route with `SERVICE_URL_AUTHORIZATION_8000: /`.
+  The application issuer `AUTHORIZATION_PUBLIC_BASE_URL` defaults to the
+  generated **unqualified** `SERVICE_URL_AUTHORIZATION`, following the validated
+  Coolify/Zoomies URL pattern, and still accepts an explicit override. Portable
+  Compose accepts an explicit `AUTHORIZATION_PUBLIC_BASE_URL`; if neither it
+  nor the Coolify-generated URL is available, the app rejects startup instead
+  of inventing an issuer. A generated route and the app's resolved issuer
+  **must be validated separately**; Coolify parser timing can differ by version.
+- `MCP_PUBLIC_BASE_URL` remains required: it identifies the public OAuth
+  resource audiences (`/mcp`, `/github/mcp`, etc.), **not** the internal Gateway
+  container. It belongs to the Gateway/project route owner and must be shared
+  with the Auth and Gateway consumers consistently. It cannot be derived from
+  the Auth domain and must not be hardcoded into portable Compose.
+- Bind existing bootstrap/JWT/service tokens at their actual confirmed
+  Production Shared Variable scope. Do not infer a signing key from Admin API's
+  Fernet encryption key or reuse unrelated API/session tokens.
 - Ensure secrets are runtime-only, Protected; PEM signing key is multiline.
   Confirm no stale/duplicated parser-managed variables are being reused.
 - No automatic deploy/domain reassignment until non-production parser, build,

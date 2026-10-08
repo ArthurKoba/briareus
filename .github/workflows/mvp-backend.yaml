@@ -144,6 +144,10 @@ jobs:
           grep -Fq 'dockerfile: services/authorization/Dockerfile' /tmp/auth-compose-rendered.yaml
           grep -Fq 'AUTHORIZATION_JWT_PRIVATE_KEY_PEM:' /tmp/auth-compose-rendered.yaml
           grep -Fq 'POSTGRES_PASSWORD:' /tmp/auth-compose-rendered.yaml
+          # Prove the Coolify-generated URL becomes the issuer when no override exists.
+          env -u AUTHORIZATION_PUBLIC_BASE_URL SERVICE_URL_AUTHORIZATION=https://authorization.generated.example.test \
+            docker compose -f services/authorization/docker-compose.coolify.yaml config > /tmp/auth-compose-generated.yaml
+          grep -Fq 'AUTHORIZATION_PUBLIC_BASE_URL: https://authorization.generated.example.test' /tmp/auth-compose-generated.yaml
       - name: Build only isolated Authorization image
         shell: bash
         run: docker build --file services/authorization/Dockerfile --tag mcp-bridge:auth-packaging-smoke .

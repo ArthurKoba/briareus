@@ -33,6 +33,19 @@ class AuthorizationRuntimeImportTest(unittest.TestCase):
             self.assertEqual(settings.postgres_host, "postgres")
             self.assertEqual(settings.postgres_port, 5432)
 
+    def test_missing_public_issuer_is_rejected_at_startup(self) -> None:
+        from common.settings import AuthorizationServiceSettings
+
+        with (
+            patch.dict(
+                os.environ,
+                {"MCP_PUBLIC_BASE_URL": "https://mcp.example.test"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "AUTHORIZATION_PUBLIC_BASE_URL"),
+        ):
+            AuthorizationServiceSettings().validate_bootstrap()
+
     def test_asgi_application_imports_without_external_services(self) -> None:
         private_key = ec.generate_private_key(ec.SECP256R1()).private_bytes(
             serialization.Encoding.PEM,

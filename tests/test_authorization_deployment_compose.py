@@ -20,9 +20,18 @@ class AuthorizationDeploymentComposeTests(unittest.TestCase):
         )
         env = dict(adapter["environment"])
         self.assertEqual(env.pop("SERVICE_URL_AUTHORIZATION_8000"), "/")
-        self.assertEqual(env, base_service["environment"])
+        portable_env = dict(base_service["environment"])
+        self.assertEqual(set(env), set(portable_env))
+        self.assertEqual(
+            portable_env.pop("AUTHORIZATION_PUBLIC_BASE_URL"),
+            "${AUTHORIZATION_PUBLIC_BASE_URL:-}",
+        )
+        self.assertEqual(
+            env.pop("AUTHORIZATION_PUBLIC_BASE_URL"),
+            "${AUTHORIZATION_PUBLIC_BASE_URL:-${SERVICE_URL_AUTHORIZATION}}",
+        )
+        self.assertEqual(env, portable_env)
         for key in (
-            "AUTHORIZATION_PUBLIC_BASE_URL",
             "MCP_PUBLIC_BASE_URL",
             "AUTHORIZATION_BOOTSTRAP_USERNAME",
             "AUTHORIZATION_BOOTSTRAP_PASSWORD",
