@@ -1,6 +1,6 @@
 # MCP Bridge — целевая архитектура проектной платформы
 
-**Статус:** DRAFT / архитектурная гипотеза для совместного ревью, не утверждённое ТЗ на реализацию.  
+**Статус:** DRAFT — согласован продуктовый каркас MVP, но технические контракты и будущие подсистемы ещё на ревью. Это не подтверждение runtime/production-готовности.  
 **Срез обсуждения:** 2026-10-09.  
 **Источник продуктовых требований:** последовательное согласование с владельцем проекта в чате Koba Infrastructure.  
 **НОВОЕ РЕШЕНИЕ ВЛАДЕЛЬЦА (2026-10-09): GREENFIELD / CLEAN START.** В новую MCP Bridge **не переносим legacy данные, пользователей, OAuth, AgentSessions, интеграции, файлы, Ghidra, профили браузера, учётные записи или старые MCP API**. Создаём новую пустую PostgreSQL DB, volumes, конфигурацию и учётные записи. Допускается переиспользовать полезный исходный код, но не миграционные скрипты, legacy adapters и routes. **Тесты пока не пишем, не запускаем и не используем вообще** (unit/integration/e2e/smoke/CI test jobs); не добавляем тестовые файлы или testing policies. Это архитектурное решение не даёт автоматического разрешения на удаление текущего production без точного определения ресурсов.
@@ -472,7 +472,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Текущее состояние: DRAFT — архитектурный review, без реализации, тестов, deploy или очистки работающей среды.**
 
-**Отслеживание реализации greenfield-платформы:**
+**Учёт действий:** [текущая greenfield-реализация — issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390); [отложенная безопасность/платформенные расширения — #391](https://github.com/ArthurKoba/mcp-bridge/issues/391). Pull Request содержит только diff и ревью, а не копию задач или источник продуктовой истины.
 
 ### Навигация по текущему состоянию
 
@@ -482,3 +482,57 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 - docs/architecture/terminal-workspaces.md — исходный контракт терминального workspace.
 - docs/decisions/0003-service-owned-packaging.md — действующая переходная договорённость о Coolify packaging.
 - docs/deployment.md — работающая конфигурация и правила эксплуатации; не подменять этим документом.
+
+## 12. Направления развития, предложенные владельцем (контракты ещё НЕ согласованы)
+
+Нижеследующие требования озвучены 2026-10-09 как **дальнейший продуктовый план**, а не как разрешение менять согласованный MVP или сейчас запускать агентов. По мере уточнения устойчивые решения переносятся в разделы 2–8; статус, задачи и очередность ведутся в тематических issues.
+
+### 12.1 История чатов, проектное хранилище и поиск — [#395](https://github.com/ArthurKoba/mcp-bridge/issues/395)
+
+Цель: авторизованная информация об общении пользователей и агентов, сообщениях, вызовах MCP, документах и результатах работы сохраняется **в контексте Project**, чтобы впоследствии строить embeddings и полнотекстовый/семантический/гибридный поиск. Это отдельное **долговременное knowledge/data storage**, не новая интерпретация `AgentSession`. Предлагаемые сущности `Conversation`, `Message`, `ToolInvocation`, `SourceArtifact`, `KnowledgeChunk`, `Embedding` обладают собственными ID и retention; `session_uuid` остаётся независимым идентификатором разрешений агента, а не чата.
+
+**Принцип границы доступа:** внешнее приложение (в том числе ChatGPT/LM Studio) **не обязано отдавать MCP-серверу полную историю чатов**. У нас могут быть собственные проектные conversation events, разрешённый экспорт, явные client connectors или прикладной ingestion. Нет обещания получать чужую историю автоматически из одного факта MCP-подключения. Нужны permission-aware ingestion, source/provenance, порядок сообщений, исключение секретов и политики хранения/удаления.
+
+**Открытое продуктовое решение:** «свои базы у проектов» пока не определяет физическую модель. Отличать платформенные `Identity/Teams/Projects/Authorization` (контрольная DB) от проектного content/knowledge хранилища; варианты — логическая изоляция по `project_id`/schema/partition в общем PostgreSQL или отдельная физическая DB на Project. **Ни один вариант ещё не одобрен**, первоначальное физическое разделение на каждую Team/Project не следует молчаливо из принятой архитектуры. Предусмотреть порт ProjectStorage, чтобы storage strategy могла меняться независимо от project/domain API. `pgvector` + PostgreSQL full-text — исследуемый вариант, не утверждённая инфраструктура. Перенос в отдельные DB не требует переносить **legacy**: это проектирование новой системы.
+
+### 12.2 Работа с кодом — [#396](https://github.com/ArthurKoba/mcp-bridge/issues/396)
+
+Цель: агент может рефакторить файлы и функции в общем Project Workspace, анализировать символы/ссылки, менять файлы и выполнять связанные команды. **Files и Terminal уже должны видеть один и тот же Project Workspace**, но по смыслу и безопасности это **два отдельных контекста**: Files владеет файловыми операциями, Terminal — процессами, PTY и привилегиями. Пока не объединять их в один домен только ради общей директории. Code/Refactor capabilities могут стать отдельным MCP surface либо адаптером над существующими доменами. Возможные LSP/AST/CST/patch/formatter/Git-инструменты требуют выбора по реальным языкам и задачам; edit permission не означает право на привилегированный shell.
+
+### 12.3 Жизненный цикл задач и агентов — [#397](https://github.com/ArthurKoba/mcp-bridge/issues/397)
+
+Цель: Issue/задача → сбор разрешённого контекста и role/skill prompts → планирование/декомпозиция → назначение Worker → попытка исполнения и наблюдение → evidence/approval → независимое review → завершение/повтор/отказ. Отдельный observability-агент анализирует разрешённые SigNoz/Coolify события и создаёт deduplicated Issues. Текущий [ai-agent-workflow](https://github.com/ArthurKoba/ai-agent-workflow) остаётся библиотекой skill/role, а не автоматически действующим workflow engine.
+
+**Границы:** `Task`, `Subtask`, `WorkflowRun`, `WorkerLease`, `ExecutionAttempt`, `Review` не тождественны AgentSession, чату и Browser/Terminal RuntimeSession. GitHub/GitLab Issues — внешние адаптеры SVC; их webhook/статусы не заменяют долговременный ledger worker leases. Проектировать подтверждённые права, идемпотентность, quota, очередность, retries, cancellation, audit и separation of writer/reviewer. Кандидаты LangGraph/Temporal или небольшой собственный durable worker — **варианты для исследования, ни один не выбран**. Будущий агент может писать тесты лишь после отдельной отмены текущего запрета; сейчас никаких тестов и автоматических прогонов.
+
+### 12.4 Web — разделить режимы — [#398](https://github.com/ArthurKoba/mcp-bridge/issues/398)
+
+Основной домен Web на MVP сохраняет HTTP/curl, внутренний управляемый Chromium и удалённый пользовательский браузер, однако публичные инструменты и справка для агентов должны **строго различать**: stateless HTTP fetch; internal Browser RuntimeSession с собственными вкладками/контекстами/TTL; remote attachment к Chrome пользователя. Disconnect remote не закрывает чужой Chrome. Не путать Browser Session, project workspace, `session_uuid` и Terminal Session. Предстоящий рефакторинг инструментария не отменяет существующие возможности и не входит в текущий фундамент Identity/Projects.
+
+### 12.5 Название продукта — [#399](https://github.com/ArthurKoba/mcp-bridge/issues/399)
+
+Название продукта, публичные обозначения MCP-модулей и единый стиль SVG требуют отдельного выбора. Техническое имя репозитория `mcp-bridge` и текущие домены не равны окончательному бренду. Переименование OAuth issuer/resource audiences/DNS — не косметическая правка и выполняется только по отдельному контракту. До выбора это **не блокирует** разработку.
+
+### 12.6 Сохранение существующего набора возможностей
+
+Новая версия должна воспроизвести **все согласованные существующие категории возможностей** (а не их legacy-state): GitHub/GitLab и workflow API, Files, Terminal, Web HTTP/Chromium/Remote Browser, Analysis/Ghidra, Coolify/SigNoz observability, Gateway/Authorization, Administration, а также возможность добавлять небольшие script-based MCP adapters без новых независимых deploy units на каждый скрипт. Все возможности реализуются по новым Project/Caller/AgentSession контрактам; конкретные subtool lists и provider write-права определяются доступными API и фактическим кодом.
+
+## 13. Подтверждённые исходниками расхождения с целевой архитектурой
+
+**Уровень evidence: SOURCE CONFIRMED** по коду `mcp-bridge/main`, снимок 2026-10-09. Это **не** подтверждённые live defects, runtime readiness, build success или результат тестов. Код — authority текущего поведения, таблица нужна лишь для фиксации междоменных контрактов и важных блокеров. Source paths — ссылки для проверки; технические задачи хранятся в #390.
+
+| Граница | Исходники и подтверждённая дельта | Контракт нового приложения |
+| --- | --- | --- |
+| Bootstrap/User | `services/authorization/runtime.py`, `authorization/repository.py`: startup `ensure_bootstrap_user` создаёт/повышает `superadmin`; `authorization/database.py::UserRecord` хранит role/enabled | Новая пустая Identity с invitation-bootstrap первого `superuser`; без role migration |
+| Admin & approvals | `services/admin-api/src/presentation/web_api.py`: login/approval сейчас ограничены `superadmin`, есть transitional fallback | Нормальные пользователи и участники Project могут управлять разрешёнными сессиями, superuser bypass проверок после аутентификации |
+| Session identity | `services/authorization/access/repository.py`: внешний `uid=secrets.token_urlsafe(32)`; `common/access_contracts.py` и `bridge/access_middleware.py` используют `session_id`/OAuth/surface binding | Новый `session_uuid` UUID v4 строго Project-owned, без legacy adapter |
+| Protected calls/abuse | `authorization/access/control.py`: `unrestricted` выдаёт allow до обязательной Session; `AbuseGuard.failure` при сбое Valkey возвращает `(0,0)` | Защищённые вызовы требуют UUID, no-OAuth caller аутентифицирован, rate limiting и fail-closed |
+| Cache/revoke | `authorization/access/control.py::_load_session` читает snapshot Valkey; `common/cache.py::delete` — best effort | Проектная status/version/revoke authority, bounded stale decisions, без SQL на каждый вызов |
+| OAuth & disabled user | `services/bridge/authorization_client.py` локально проверяет JWT; `authorization/provider.py` проверяет enabled на login/refresh | Отзыв уже выданного подключённого caller не должен оставлять долговременно действующие privileged grants |
+| Realtime | `admin-api/src/realtime_api.py`, `realtime.py`: cookie+topic subscription, без доказанной project-level subscriber filtering | Проектные события/снимки видны только актуальным участникам соответствующего Project |
+| Database/alias collision | `authorization/database.py` и `admin-api/src/infrastructure/database.py` имеют разные `oauth_sessions` схемы, provider aliases сейчас global unique | Новая чистая DB с domain schemas; project-scoped provider aliases, без копирования старых таблиц |
+| Workspace/Reverse IDs | `services/modules/terminal/manager.py` использует `workspace_id` для каталога; `services/modules/analysis/workspace_transfer.py` использует `project_id` для Ghidra | Новый PlatformProjectId не равен Terminal/Ghidra local ID; новые storage roots |
+| Packaging | `Dockerfile`, `uv.lock`, `services/authorization/docker-compose*.yaml` имеют фактические shared inputs | Watch Paths по реальным импортам/build inputs; domain-owned packaging и независимый deployment |
+
+**Внешние технологические кандидаты, не часть принятого ТЗ:** [pgvector](https://github.com/pgvector/pgvector) для PostgreSQL similarity search, [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) для checkpointed agent workflows, [Temporal](https://docs.temporal.io/) для durable task/workflow execution; выбор после архитектурного сравнения в #395/#397. MCP-server не получает чужую историю чата автоматически — для этого должен существовать разрешённый источник данных/клиентская интеграция.
+
