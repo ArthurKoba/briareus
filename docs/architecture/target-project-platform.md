@@ -126,61 +126,55 @@ WebRTC, дополнительные gRPC/Web-протоколы и дальне
 
 ## 4. Аутентификация, подключение, Agent Session и Runtime Session
 
-### 4.1 Разные идентичности и разные сроки жизни
+### 4.1 Канонические сущности и независимость Agent Session от OAuth
+
+**Новое согласованное решение (переопределяет прежние OAuth/chat bindings):** `AgentSession` — принадлежащая одному Project самостоятельная сущность с **каноническим `session_uuid` (UUID v4)**, правами, TTL, статусом и approval history. Сессия **не принадлежит OAuth-сессии, MCP surface, чатy ChatGPT или браузеру**. Один агент использует несколько Session UUID; один Session UUID может использоваться разрешёнными агентами в разных чатах и MCP-модулях того же проекта. Никакого обязательного `chat_id` или OAuth grant family для этого не требуется.
 
 ~~~text
-User / Service Identity / Agent Identity
-           |
-    OAuth authorization / MCP connection
-           | authenticated caller and audience
-           v
-   OAuth authorization context
-           | binding and grant check
-           +---- AgentSession UUID #A (Project P, low privilege, 1 day)
-           +---- AgentSession UUID #B (Project P, elevated, 5 minutes)
-                              |
-                  permitted attachment, NOT ownership
-                              v
-   Project P: Browser RuntimeSession / Terminal RuntimeSession / Jobs
-              (separate idle/hard TTL and cleanup authority)
+User login / OAuth client            Local app / LM Studio / service client
+             |                                      |
+             v                                      v
+     OAuth access token                  Project-scoped connection key
+             |                                      |
+             +----------> Gateway <-----------------+
+                           |
+                  caller / project scope
+                           |
+                           v
+              Authorization: validate project + Session UUID
+                           |
+             AgentSession (session_uuid, project_id, grants, TTL)
+                           |
+                  allowed actions/attachments
+                           v
+             Project-owned Browser/Terminal/Reverse runtime
 ~~~
 
-- **Admin Web Session** (cookie login) существует отдельно от OAuth MCP; не является AgentSession.
-- **OAuth authorization context** идентифицирует конкретную авторизацию MCP-клиента. Access token и refresh token могут ротироваться, не меняя её смысл.
-- **AgentIdentity** представляет автономного агента; User необязателен. Идентичность имеет один Project и может иметь created_by для аудита.
-- **AgentSession** — рабочий контекст агента в Project: UUID, статус, права, срок, история разрешений. Один чат/подключение может одновременно пользоваться несколькими AgentSessions, включая краткосрочную привилегированную.
-- **Session Binding** — проверяемая разрешённая связь конкретного OAuth-контекста с AgentSession, а не свободный доступ по знанию UUID.
-- **RuntimeSession** — общая проектная сессия конкретного исполнителя. Несколько разных AgentSessions (и агентов) могут к ней подключаться при наличии прав, но она не становится дочерней от них.
-- **RuntimeJob** — процесс внутри RuntimeSession, отдельный объект управления и исполнения.
+- **Identity/User** — учётная запись человека; **Admin Web Session** — отдельно от MCP/OAuth.
+- **OAuth Connection** — один из возможных способов аутентифицировать MCP-клиента. Собственный локальный OAuth/JWKS/refresh остаётся и должен работать без регулярных переподключений ChatGPT.
+- **Project Connection Credential** — альтернативный способ подключения для LM Studio, локальных агентов и других клиентов **без OAuth**. Для MVP рекомендуется **отдельный защищённый project-scoped API key**: его выдаёт/отзывает уполномоченный пользователь, он передаётся клиентом при подключении, в БД хранится только проверяемый hash. Не копировать его в tool responses, аргументы вызовов или рабочие файлы. Для локальных и удалённых клиентов действует один серверный policy gate; public MCP без проверяемого caller credential не открывать.
+- **Connection Context** — подтверждённая принадлежность caller к проекту (через OAuth identity + TeamMembership либо project key). OAuth-идентификаторы могут сохраняться **как происхождение события/сессии**, но не являются обязательными полями AgentSession и не используются для обязательного equality binding.
+- **AgentIdentity** — проектная сущность и будущая автономная identity; для MVP не требуется полноценный служебный OAuth/identity provider. **AgentSession** связывается с Project и может хранить optional `created_by_principal_id`/`created_via_connection_id` для аудита; это **не делает** её дочерней от OAuth.
+- **RuntimeSession** — проектный Browser/Terminal/иной runtime со своим session UUID/ID, idle/hard TTL и собственным lifecycle; AgentSession получает доступ, но не владеет runtime или его процессами.
 
-**Согласованный инвариант безопасности:** AgentSession **не переносится в другой независимый OAuth-контекст**. Два отдельно авторизованных MCP-подключения (даже с теми же username/password, User и Project) получают разные полномочия/AgentSessions, но вправе совместно работать с **проектными RuntimeSessions**. UUID сам по себе недостаточен.
+**MVP enforcement (не отложить):** `session_uuid` — идентификатор, **не единственное доказательство полномочий**. Gateway/Authorization проверяет (1) OAuth **или** project credential при доступе к MCP, (2) разрешённость Project для caller, (3) совпадение Project у AgentSession и выбранного MCP/ресурса, (4) действительный статус/TTL/список grants и право использовать привилегию. Эффективные права не превышают ограничений подключившегося caller и самой session. Для доступа к project-only API, где клиент OAuth не имеет, не придумывать анонимную выдачу полных прав. **OAuth revoke** прекращает вызовы через отозванное OAuth-подключение, но **не удаляет** AgentSessions и живые Project RuntimeSessions, которыми могут пользоваться другие разрешённые подключения. Аналогично отзыв project key прекращает использование ключа, но не автоматически удаляет project sessions.
 
-**Требование продукта (согласовано):** каждому новому ChatGPT-чату должна соответствовать собственная AgentSession UUID; внутри одного чата допускается несколько независимых AgentSessions. **Ограничение клиента:** текущий Gateway извлекает из JWT `user_id/client_id/oauth_session_id`, но не получает доверенный `chat_id`; несколько чатов могут делить одно OAuth-подключение. **MVP:** новая AgentSession UUID создаётся при явном `access_session_open` или первом безопасном bootstrap-read без UUID и далее явно передаётся агентом. Не выбирать «одну UUID на OAuth» и не выдавать это за уникальность на чат. Без доверенного client context identifier невозможно серверно доказать, что два вызова пришли из разных чатов; это остаётся **недостигнутой security-level гарантией**, даже если агент корректно использует отдельные UUID.
+**Текущая реализация и миграционная дельта:** в `services/authorization/access/repository.py` внешний `uid` сегодня генерируется через `secrets.token_urlsafe(32)` — **это не UUID**; отдельный внутренний `AgentSessionRecord.id` создаётся как `uuid4()`. В `services/common/access_contracts.py` и `bridge/access_middleware.py` передаётся `session_id`, а SessionSnapshot привязан к `user_id/oauth_session_id/surface_id`. Новый API должен использовать название **`session_uuid`** и валидировать UUID v4; в БД выбрать одно каноническое поле session UUID и сохранить внутренние FK/audit корректно. Существующие opaque `session_id`/UID могут временно поддерживаться адаптером старых маршрутов **до завершения TTL/migration**; никогда не объявлять их валидными UUID и не ломать действующие OAuth-клиенты одной сменой DTO.
 
-**Согласовано для архитектуры; MVP использует безопасный fallback:** разные MCP endpoints остаются независимыми OAuth protected resources/audiences; текущая AgentSession пока строго привязана к surface. Общий AgentSession UUID можно использовать через Web и SVC **только если Authorization доказал их принадлежность одному разрешённому контексту/группе подключений** (authorization grant/connection family), не просто по совпадению User, Project, браузерных cookies или UUID. Подключение/проверку должен выполнять Authorization/Gateway автоматически, без необходимости агенту вызывать инструменты «привязки». Если доказанного общего контекста нет, Authorization открывает **отдельную** AgentSession для нового подключения, а общие Browser/Terminal/Files ресурсы всё равно доступны по проектным правам. Это рабочий безопасный сценарий MVP, а не ошибка. Динамическая безопасная cross-MCP binding — отдельный этап и **не блокирует первую вертикальную поставку**. До её включения нужны отрицательные security-тесты, чтобы чужое подключение не использовало UUID.
+### 4.2 Политики сеансов и англоязычный MCP-интерфейс
 
-### 4.2 Модель прав первой итерации
+**MVP:**
+1. `access_session_open` принимает/определяет Project и создаёт **новый** `session_uuid: UUID v4` с базовыми правами. Для OAuth-клиента с несколькими проектами Project выбирается явно; для project key берётся из credential. Если контекст проекта нельзя определить, вернуть английскую инструкцию `PROJECT_SELECTION_REQUIRED`, не выбирать произвольный Project.
+2. **Первый разрешённый safe bootstrap-read** без `session_uuid` может создать базовую read-only Session UUID и вернуть `session_uuid`, Project, TTL и rights в структурированном ответе/metadata. Допущенные операции — только из проверенного allowlist, а не любые `get/list` или инструменты с `readOnlyHint`. Контролировать скорость автооткрытий, активное число сессий и TTL, чтобы не допустить flood.
+3. Любая операция с проектными ресурсами, подключёнными аккаунтами, приватными данными, записью или привилегиями требует **явного `session_uuid`**. Нет UUID → не исполнять операцию, вернуть `SESSION_UUID_REQUIRED` и подсказку на английском `Provide the session_uuid returned by your previous call, or call access_session_open to create a new session.` Недействительный UUID → `SESSION_UUID_INVALID`/`SESSION_EXPIRED`, **без молчаливого создания/замены**.
+4. Нормальная AgentSession имеет `elevation_policy`: `requestable` (можно просить расширение текущих прав) либо `fixed` (увеличивать права этой сессии нельзя; запросить **отдельную** elevated session). Несколько Session UUID могут использоваться в одном чате/клиенте; нет обязательной привязки по chat_id.
+5. Агент запрашивает права, срок и scope аккаунтов; оператор со своими полномочиями может approve/reject/edit TTL/permissions/revoke. Расширение выше исходного запроса — только явное и аудируемое; политика hard TTL привилегированного процесса не может быть обойдена. Краткая elevated Session UUID (например, пять минут) живёт отдельно от нормальной.
+6. Tool descriptions, параметр **`session_uuid`**, коды ошибок, approval/TTL guidance и сведения о безопасном переиспользовании сессии — **на английском языке** и одинаковы для всех MCP доменов.
+7. Повторный вызов с известным UUID требует **действительного caller credential для текущего Project**; один UUID не используется как способ обойти OAuth, project key, истечение прав или доступ к чужому проекту.
 
-#### MCP-сессия: bootstrap без лишних шагов, строгие права
+**Базовый anti-abuse контракт:** подмена/перебор Session UUID → deny + escalating wait/backoff + source/caller rate limit; повторение нарушений блокирует **нарушающее MCP подключение/ключ**, а не чужую project session по предъявленному UUID. В будущем — отдельное security-ревью и усиление provenance/ACL; MVP не должен допускать DoS отзывом чужого OAuth через перебор UUID.
 
-**Согласованный сценарий MVP:**
-1. `access_session_open` явно создаёт **новую** AgentSession с UUID в Project для конкретного OAuth-контекста. Сервис не выбирает автоматически «последнюю» AgentSession по User или OAuth.
-2. Первый вызов **разрешённого bootstrap-read** без `session_id` может создать новый базовый `read_only` UUID, исполнить только разрешённое чтение и вернуть UUID/Project/TTL/права в структурированном MCP-ответе и metadata. Разрешение автоинициализации определяется **явным audited allowlist**: имена `get/list` и MCP `readOnlyHint` не означают сами по себе, что выдача данных безопасна.
-3. Все операции с подключёнными аккаунтами, приватной информацией, проектными файлами/процессами, изменением состояния и повышением прав требуют **явный `session_id`**. Если его нет, возвращать `SESSION_REQUIRED` без выполнения операции и английскую инструкцию: `Use the session_id from your previous successful tool call. To start a new session, call access_session_open.`
-4. Неверный/истёкший/чужой UUID — отказ и существующая anti-bruteforce защита; **без автоматической замены** на новую сессию. Повторное безопасное чтение без ID может создать ещё одну session: поэтому обязательны rate limit и предельное количество активных сессий на OAuth-контекст, TTL и чистка неиспользуемых UUID.
-5. Tool descriptions, `session_id` parameter help, approval request instructions, error codes и TTL/status guidance — **на английском языке**, одинаковы между MCP. Agent явно переносит выданный UUID в последующие защищённые вызовы.
-6. У обычной AgentSession есть отдельная неизменяемая для агента **elevation policy**: `requestable` (можно запросить повышение) или `fixed` (нельзя повышать текущую AgentSession; агент может запросить **новую** elevated session). Смена политики — по праву оператора, не по аргументу MCP-инструмента.
-7. Для повышенной сессии агент запрашивает scope/доступные аккаунты/TTL, администратор вправе **approve, reject, edit requested permissions and TTL, revoke** в рамках своих полномочий и жёстких политик домена. Он может сократить или увеличить запрос в пределах разрешённого максимума, но любое расширение прав или TTL относительно исходного запроса должно быть явным, подтверждённым и аудируемым; hard TTL привилегированного исполнения обойти нельзя. Привилегированная session может быть отдельной, с hard TTL 5 минут; основная session от этого не меняется.
-
-**Сверка с текущим кодом:** `services/bridge/access_middleware.py` уже добавляет optional `session_id`, умеет отвечать `session_required` и прикладывать `access_session` к ответу. `access_session_open`, `access_session_request_full_access` и `access_session_request_extension` уже есть. Пока **не реализованы** автоматическое открытие на bootstrap-read, проектный UUID вместо surface-scoped сессии, `fixed` elevation policy, надёжный chat binding и изменение запрошенных прав оператором по новому контракту.
-
-
-- Авторизацию, аутентификацию, выпуск/отзыв и финальные access decisions осуществляет Authorization. Gateway проверяет токены, идентификаторы и допускает доменный вызов только с проверенным контекстом.
-- User управляет тем, чем управлять позволяет его Team/Project роль. Если пользователя исключили из Team, **следующий вызов через его пользовательский OAuth-контекст** больше не имеет доступа к Team Projects, независимо от сохранённого в базе project-owned AgentSession UUID. Существующие общие Project RuntimeSessions/Jobs **не удаляются** этим событием; действует их собственный TTL. Исторический AgentSession можно сохранить для аудита, его знание не даёт право доступа. Связь с независимыми Service Identity/Agent grants требует отдельного lifecycle и **не входит в MVP**.
-- AgentSession никогда не получает полномочия другого проекта. При создании дочерней сессии/агента права не должны превышать подтверждённый grant создателя; автономная service identity может иметь независимый выданный grant.
-- Существующие уровни read-only / full-access, запросы повышения прав, ограничения по аккаунтам, краткосрочные grants и approval UI **переиспользуются и расширяются**, а не переписываются ради новой модели.
-- **MVP:** проектная изоляция, право выдать/отозвать grant, подтверждение опасных действий, действующий abuse guard. Подробные действия view/interact/manage/terminate, отдельные RBAC/ABAC политики на каждый ресурс — позже.
-- Admin API аутентифицирует человека через Authorization и передаёт **проверяемый контекст действующего пользователя**. Внутренний service credential подтверждает только identity сервиса; он **не равен** разрешению на произвольное действие от имени любого пользователя.
+**Текущая реализация:** middleware умеет добавлять старый `session_id`, выдавать `session_required` и возвращать session metadata; `access_session_open`, request_full_access/extension существуют. Их переиспользовать, но изменить UUID-format/naming, обязательную связь с OAuth, project-scoping, fallback-auth для non-OAuth client и session-policy согласно новому контракту. До миграции legacy API остаётся рабочим.
 
 ### 4.3 Жизненные циклы и TTL
 
