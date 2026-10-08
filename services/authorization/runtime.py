@@ -11,10 +11,10 @@ from common.observability import announce_runtime_started, build_observability
 from common.settings import AuthorizationServiceSettings, ValkeySettings
 
 from .access.api import build_access_app
+from .access.control import AccessControl
 from .access.database import AccessDatabase
 from .access.events import AccessEventPublisher
 from .access.repository import AccessRepository
-from .access.control import AccessControl
 from .api import build_authorization_app
 from .database import AuthorizationDatabase
 from .provider import LocalOAuthProvider
