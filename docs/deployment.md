@@ -30,9 +30,11 @@ production until parser acceptance):
 
 - Base Directory: `/services/authorization`
 - Docker Compose Location: `/docker-compose.coolify.yaml` (relative to Base)
-- Raw Compose: **off**. Prove `extends.file` is expanded by installed Coolify
-  before switching production; Docker Compose CLI compatibility alone is not
-  sufficient.
+- Raw Compose: **off**. The installed Coolify parser inspects the selected
+  adapter for managed variable discovery **before** Docker Compose expands
+  `extends.file`. The adapter therefore mirrors the portable environment keys
+  (not their secret values). The regression test enforces an exact match. A
+  Docker Compose CLI config/build check verifies the separate inheritance step.
 - Watch Paths: `services/authorization/**`, `services/common/**`,
   `pyproject.toml`, `uv.lock`. Other common dependencies may be added only
   when a concrete consumer actually needs them; unrelated provider changes
