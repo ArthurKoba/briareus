@@ -7,6 +7,7 @@ This directory is intentionally lightweight. Add an ADR when a decision would ot
 Accepted ADRs:
 
 - [ADR 0001: Provider account administration](0001-account-administration.md)
+- [ADR 0003: Service-owned deployment packaging](0003-service-owned-packaging.md)
 
 Proposed ADRs:
 

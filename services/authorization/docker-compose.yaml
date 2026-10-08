@@ -4,8 +4,7 @@ services:
   authorization:
     build:
       context: ../..
-      dockerfile: Dockerfile
-      target: authorization
+      dockerfile: services/authorization/Dockerfile
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
