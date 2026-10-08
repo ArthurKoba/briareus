@@ -413,9 +413,9 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **10.12 Фактические границы MVP.** Чтобы ускорить доставку, не требовать миграцию всего каталога Web/SVC/Infrastructure/Reverse и всех поддоменов **до первой работающей вертикальной версии**. Сначала один Personal/Team Project + безопасные AgentSession/Binding + один существующий MCP домен; затем включение следующих направлений независимо. Точный первый набор доменов определить при планировании после решения 10.1–10.4.
 
-**10.14 ChatGPT chat identity (не доказана).** В текущем `bridge/access_middleware.py::oauth_context` присутствует OAuth session ID, но отсутствует подписанный ChatGPT conversation ID. Потребуется проверить реальное MCP/ChatGPT поведение. Решить, достаточно ли дефолтной AgentSession на OAuth connection в первом MVP и дополнительных явно создаваемых UUID, либо строгая сессия на каждый отдельный чат является обязательным продуктовым требованием. Пока не отождествлять ChatGPT chat и OAuth connection.
-
 **10.13 Семантика проекта, процесса и релиза.** Бизнес-домен `Reverse` объединяет Analysis и Ghidra, но Ghidra при необходимости сохраняет собственный runtime/container внутри его release bundle; аналогично UI/API имеют разные release units без выделения новой доменной сущности. Запрет root Compose на все сервисы не означает запрет общего shared infrastructure Compose для существующих PostgreSQL/Valkey.
+
+**10.14 ChatGPT chat identity (не доказана).** В текущем `bridge/access_middleware.py::oauth_context` присутствует OAuth session ID, но отсутствует подписанный ChatGPT conversation ID. Потребуется проверить реальное MCP/ChatGPT поведение. Решить, достаточно ли дефолтной AgentSession на OAuth connection в первом MVP и дополнительных явно создаваемых UUID, либо строгая сессия на каждый отдельный чат является обязательным продуктовым требованием. Пока не отождествлять ChatGPT chat и OAuth connection.
 
 ## 11. Что считать согласованием спецификации
 
