@@ -38,18 +38,24 @@ separate Coolify resources, but the new Auth is not yet accepted at runtime.
    consumers until their source and runtime acceptance gates pass.
 5. The portable Compose file contains no Coolify `SERVICE_*`, production
    hostnames or physical Docker network names. The adapter adds only the
-   necessary Coolify route, resource limits and external networking. Docker
+   necessary Coolify route and attachment to an existing network. Docker
    Compose `extends.file` is a *candidate*, not proof that Coolify's custom
    parser will materialize inherited build settings and required variables.
 6. PostgreSQL remains durable authority, Valkey a disposable cache. Do not
-   recreate their current Compose stack or volumes. The role/database
-   provisioner needs a separate privileged one-shot execution and is never
-   shipped into the steady-state Auth image with cluster-admin credentials.
-7. Coolify Environment Shared Variables are **not auto-inherited**. The
-   deployment resource must explicitly reference the correct scoped key.
-   Use `${VAR:?}` for required inputs without the error message after `?`.
-   Runtime secrets are not Docker build arguments. Preserve the existing JWT
-   private signing key, service tokens and PostgreSQL role credentials.
+   recreate their current Compose stack or volumes. The database provisioner
+   is a separate trusted one-shot operation, never shipped into the Auth
+   image. Reusing the existing shared DB account is an explicitly accepted
+   interim privilege trade-off; in this mode the provisioner must never
+   alter the existing database account or owner of an existing database.
+7. Coolify Environment Shared Variables are **not auto-inherited**. Auth uses
+   the existing canonical `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
+   `POSTGRES_USER`, `POSTGRES_PASSWORD`, not synthetic `AUTHORIZATION_POSTGRES_*`
+   runtime aliases. Bind `POSTGRES_USER/PASSWORD` to the existing Production
+   Environment Shared Variables. Use `POSTGRES_DB=authorization` for Auth
+   (Admin API has an incompatible `oauth_sessions` schema in `mcp-bridge`).
+   The existing external Docker network is `mcp`, no new network variable.
+   Use `${VAR:?}` for required inputs, runtime secrets are not build arguments.
+   Preserve existing JWT private key and service tokens.
 
 ## Initial Auth dependency inventory
 
@@ -59,7 +65,9 @@ separate Coolify resources, but the new Auth is not yet accepted at runtime.
 - `authorization.runtime` imports the ASGI app and validates nine bootstrap
   settings; its lifespan creates/checks Auth schema in PostgreSQL and then
   provisions the local bootstrap user. Auth cannot become healthy without a
-  valid provisioned PostgreSQL role/database.
+  valid PostgreSQL database and shared credentials. The one-shot provisioner
+  creates the separate Auth database when absent, but does not mutate the
+  shared PostgreSQL role or existing database ownership.
 - The root entrypoint's mkdir/chown of Browser/Terminal/Admin locations is
   unrelated to Auth. The service-owned Auth Dockerfile creates only its own
   runtime dirs as root at build time, and runs ASGI as uid/gid 1000 without
@@ -68,6 +76,8 @@ separate Coolify resources, but the new Auth is not yet accepted at runtime.
   and presentation packages; Web and Analysis also import `modules.files`.
   A mechanical service-folder move without checking these imports is invalid.
 - The root `uv.lock` and common code remain shared inputs during the pilot.
+  Updating shared `settings.py` may trigger rebuilds of other consumers through
+  their existing Watch Paths; this migration cannot yet eliminate that coupling.
   Separate locks/build graphs should be considered only when measured.
 
 ## Auth variable ownership (source-level contract)
@@ -76,16 +86,17 @@ separate Coolify resources, but the new Auth is not yet accepted at runtime.
 | --- | --- | --- |
 | `AUTHORIZATION_PUBLIC_BASE_URL` | Coolify resource, canonical public issuer | Required; URL must match proxy and OAuth issuer |
 | `MCP_PUBLIC_BASE_URL` | Public Gateway route configuration | Required; matches MCP resource audiences |
-| `AUTHORIZATION_POSTGRES_{HOST,PORT,DB}` | Auth deployment runtime | Safe portable DNS defaults, overridable |
-| `AUTHORIZATION_POSTGRES_USER` | Auth DB role owner; exact role not assumed | Required; verify role exists |
-| `AUTHORIZATION_POSTGRES_PASSWORD` | Existing Environment Shared Variable when available | Required; protected runtime-only |
+| `POSTGRES_{HOST,PORT}` | Existing internal PostgreSQL connection | Defaults `postgres`/`5432` |
+| `POSTGRES_DB` | Auth resource | Default `authorization`; MUST NOT reuse Admin API's `mcp-bridge` database |
+| `POSTGRES_USER` | Existing Production Environment Shared Variable | Required `{{environment.POSTGRES_USER}}`; runtime-only |
+| `POSTGRES_PASSWORD` | Existing Production Environment Shared Variable | Required `{{environment.POSTGRES_PASSWORD}}`; runtime-only protected |
 | `AUTHORIZATION_BOOTSTRAP_USERNAME` | Auth operator identity | Required; stable across upgrades |
 | `AUTHORIZATION_BOOTSTRAP_PASSWORD` | Auth bootstrap credential | Required; protected runtime-only |
 | `AUTHORIZATION_JWT_PRIVATE_KEY_PEM` | Auth issuer signing key | Required; protected multiline, runtime-only; preserve key identity |
 | `AUTHORIZATION_GATEWAY_SERVICE_TOKEN` | Auth ↔ Gateway shared secret | Required; same referenced value in consumers |
 | `AUTHORIZATION_ADMIN_SERVICE_TOKEN` | Auth ↔ Admin API shared secret | Required; same referenced value in consumers |
 | `VALKEY_URL` | External disposable cache endpoint | Optional overridable internal DNS default |
-| `AUTHORIZATION_SHARED_NETWORK` | Coolify destination's external Docker network | Required by adapter; cannot be inferred from repository |
+| Docker network | Existing Coolify `mcp` network | Constant in Coolify adapter, not a new environment variable |
 
 For the current environment, Shared Variable names and scopes must be verified
 against the live Coolify Project/Environment control plane. If a required key
@@ -117,7 +128,7 @@ revealing plaintext values. No real environment values belong in this ADR.
 
 This intentionally duplicates a few stable Dockerfile lines while removing
 unnecessary root-container setup. It does **not** claim production readiness.
-Real Coolify `extends` materialization, release-time network aliasing, secret
+Real Coolify `extends` materialization, live PostgreSQL connectivity, secret
 resolution and the stale `POSTGRES_USER=POSTGRES_USER is required` parsing
 issue remain unresolved runtime gates. The existing root infrastructure
 Compose file is left alone to avoid restarting a live database/cache stack.

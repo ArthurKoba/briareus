@@ -37,13 +37,22 @@ production until parser acceptance):
   `pyproject.toml`, `uv.lock`. Other common dependencies may be added only
   when a concrete consumer actually needs them; unrelated provider changes
   must not trigger an Auth deploy.
-- Reuse the correct Coolify destination and shared network selected in that
-  environment. `AUTHORIZATION_SHARED_NETWORK` in the optional adapter is an
-  explicit required external network name; other users supply their own.
-- Required resource variables use `${VAR:?}` in the portable Compose source.
-  Bind them to existing explicit Coolify Shared Variables at their real scope,
-  e.g. `{{environment.AUTHORIZATION_POSTGRES_PASSWORD}}`. Scope references
-  belong in the Coolify resource, not in portable public Git templates.
+- The current Coolify adapter attaches the service to the **already existing**
+  external `mcp` Docker network used by PostgreSQL/Valkey. It requires **no**
+  `AUTHORIZATION_SHARED_NETWORK` variable and creates no new network.
+- Auth uses the canonical `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
+  `POSTGRES_USER` and `POSTGRES_PASSWORD` names, like Admin API. Give the Auth
+  resource `POSTGRES_DB=authorization` (not the Admin API `mcp-bridge` DB):
+  both apps have incompatible `oauth_sessions` table schemas. The host/port
+  defaults are `postgres`/`5432`.
+- Bind the **existing** Production Environment Shared Variables explicitly:
+  `POSTGRES_USER={{environment.POSTGRES_USER}}` and
+  `POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}`. Do not create fresh
+  credentials or reuse stale generated `POSTGRES_USER is required` values.
+  Both keys are runtime-only protected secrets (never build arguments).
+- Required resource variables use `${VAR:?}` in portable Compose. Bind the
+  existing Auth issuer/Bootstrap/JWT/consumer tokens at their actual confirmed
+  Production Shared Variable scope, without guessing missing secret values.
 - Ensure secrets are runtime-only, Protected; PEM signing key is multiline.
   Confirm no stale/duplicated parser-managed variables are being reused.
 - No automatic deploy/domain reassignment until non-production parser, build,
@@ -94,7 +103,7 @@ Authorization owns both OAuth identity and agent-access state in one PostgreSQL 
 python scripts/provision_authorization_database.py
 ```
 
-The provisioner uses the cluster-admin `POSTGRES_*` connection and the service-specific `AUTHORIZATION_POSTGRES_*` credentials. The authorization runtime receives only the authorization database credentials.
+The one-shot provisioner uses the existing `POSTGRES_*` connection. In shared-credential mode, it creates the separate `authorization` database when missing, without altering an existing PostgreSQL role or database owner. `AUTHORIZATION_POSTGRES_USER` and `AUTHORIZATION_POSTGRES_PASSWORD` are **optional provisioner-only** settings for a future explicitly selected dedicated role; they are not required by the Auth runtime. Reusing the shared PostgreSQL account grants Auth the privileges of that account, a security trade-off until a dedicated role is accepted.
 
 Authorization additionally requires `AUTHORIZATION_PUBLIC_BASE_URL`, `MCP_PUBLIC_BASE_URL`, local bootstrap credentials, an ES256 private signing key, one gateway service token and one admin service token. Production authorization is public at `https://authorization.mcp.koba-nexus.ru`; MCP resources stay at `https://mcp.koba-nexus.ru`. Gateway receives `AUTHORIZATION_PUBLIC_BASE_URL`, `MCP_PUBLIC_BASE_URL`, `AUTHORIZATION_JWT_PUBLIC_KEY_PEM` and the gateway token for agent-session checks. Gateway does not proxy OAuth endpoints. Agent-session state uses Valkey as a read-through cache; cache loss falls back to durable state in the same authorization database. Admin API reaches authorization privately through `AUTHORIZATION_INTERNAL_URL` (default `http://authorization:8000`).
 

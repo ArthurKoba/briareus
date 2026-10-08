@@ -124,14 +124,14 @@ jobs:
     env:
       AUTHORIZATION_PUBLIC_BASE_URL: https://authorization.example.test
       MCP_PUBLIC_BASE_URL: https://mcp.example.test
-      AUTHORIZATION_POSTGRES_USER: ci_authorization_user
-      AUTHORIZATION_POSTGRES_PASSWORD: ci-only-dummy-password
+      POSTGRES_DB: authorization
+      POSTGRES_USER: ci_authorization_user
+      POSTGRES_PASSWORD: ci-only-dummy-password
       AUTHORIZATION_BOOTSTRAP_USERNAME: ci-admin
       AUTHORIZATION_BOOTSTRAP_PASSWORD: ci-only-dummy-password
       AUTHORIZATION_JWT_PRIVATE_KEY_PEM: ci-only-dummy-private-key
       AUTHORIZATION_GATEWAY_SERVICE_TOKEN: ci-only-dummy-gateway-token
       AUTHORIZATION_ADMIN_SERVICE_TOKEN: ci-only-dummy-admin-token
-      AUTHORIZATION_SHARED_NETWORK: ci-not-a-production-network
     steps:
       - uses: actions/checkout@v4
       - name: Verify Compose plugin and service inheritance
@@ -143,7 +143,7 @@ jobs:
           docker compose -f services/authorization/docker-compose.coolify.yaml config > /tmp/auth-compose-rendered.yaml
           grep -Fq 'dockerfile: services/authorization/Dockerfile' /tmp/auth-compose-rendered.yaml
           grep -Fq 'AUTHORIZATION_JWT_PRIVATE_KEY_PEM:' /tmp/auth-compose-rendered.yaml
-          grep -Fq 'AUTHORIZATION_POSTGRES_PASSWORD:' /tmp/auth-compose-rendered.yaml
+          grep -Fq 'POSTGRES_PASSWORD:' /tmp/auth-compose-rendered.yaml
       - name: Build only isolated Authorization image
         shell: bash
         run: docker build --file services/authorization/Dockerfile --tag mcp-bridge:auth-packaging-smoke .
