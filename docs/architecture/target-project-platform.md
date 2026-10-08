@@ -61,6 +61,8 @@
 
 **Принятые правила управления:** у Team ровно один `owner` (создатель User); только он принимает/исключает участников и управляет владением Team Project. Владелец личного Project может внести его в Team, участником которой он является; после transfer Owner=Team. Только Team owner может вывести Team Project **в своё личное пространство**, остальные участники не могут присвоить проект. Только superuser может переназначить Team owner или удалить Team. Делегируемые Team admins — post-MVP. Transfer выполняется атомарным use case с явным подтверждением, audit и защитой от гонок. Исключение участника сразу закрывает **его дальнейшие вызовы**, но не уничтожает независимые AgentSession/Project RuntimeSession. Ownership и управление членством — не то же самое, что полный доступ членов к ресурсам проекта.
 
+**Согласовано — удаление User без потери владений (MVP):** удаление User, **включая действие superuser**, блокируется, пока он владеет хотя бы одной Team или личным Project. Superuser предварительно переназначает владельцев всех Team и переводит личные проекты другому User либо в выбранную Team, с явным подтверждением операций, сохранением Files/Terminal/Browser/Ghidra/integrations и журналом передачи. Удаление после успешного transfer не удаляет общие AgentSessions/RuntimeSessions/ресурсы; доступ удалённого User и его login/OAuth connections прекращается. Участие в чужих Team не считается владением и при удалении прекращается. Последнего superuser удалять нельзя, кроме отдельной защищённой recovery-процедуры. **В MVP не предусмотрена опция cascade-delete ресурсов пользователя**, даже для superuser; project backup/erase остаётся post-MVP.
+
 ### 2.2 Регистрация и bootstrap первого superuser
 
 **Согласовано владельцем проекта для MVP:**
@@ -367,6 +369,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 - Независимость Administration frontend, Administration API, Authorization, Gateway и Web/Terminal/Reverse/SVC/Infrastructure runtimes. Не делать UX/API-change trigger чужих деплоев.
 
 **Обязательные приёмочные сценарии:**
+- **User deletion guard:** superuser не может удалить владельца Team или личного Project; после переназначения Team owners и переноса личных Projects удаление разрешено без разрушения общих runtime/data.
 0. На пустой базе startup лог Authorization содержит регистрацию первого superuser; первый успешный пользователь получает эту роль строго один раз; после bootstrap системная ссылка появляется при каждом запуске для обычного пользователя; invite активного участника не выдаёт автоматически проектных/командных прав и не требует активации.
 1. Один личный Project и один Team Project с несколькими User; доступ чужой команды/проекта через ID, Files path и account alias отклонён.
 2. Первый allowlisted safe bootstrap-read без `session_uuid` создаёт свежую базовую UUID v4; защищённый вызов без `session_uuid` возвращает английский `SESSION_UUID_REQUIRED` и **не исполняется**. В одном Project можно независимо открывать несколько normal/elevated sessions, проверяя TTL/`fixed`/`requestable` и операторский approval/edit.
