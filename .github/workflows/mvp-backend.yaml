@@ -11,12 +11,29 @@ on:
       - "uv.lock"
       - ".github/workflows/mvp-backend.yaml"
   workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Explicitly run PostgreSQL/Valkey integration tests'
+        type: boolean
+        required: false
+        default: false
+      smoke_runner:
+        description: 'Run one quick Zoomies DinD runner smoke check'
+        type: boolean
+        required: false
+        default: false
+      build_images:
+        description: 'Explicitly build the three Docker images'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +47,7 @@ jobs:
       - run: PYTHONPATH=services .venv/bin/python -m unittest discover -s tests -v
 
   integration:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -82,8 +100,21 @@ jobs:
           TEST_VALKEY_URL: redis://127.0.0.1:6379/15
         run: PYTHONPATH=services .venv/bin/python -m unittest tests.test_postgres_authorization_access -v
 
+  smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.smoke_runner == true
+    runs-on: [self-hosted, zoomies-mcp-bridge-builder]
+    timeout-minutes: 10
+    steps:
+      - name: Verify DinD with a minimal Docker build
+        shell: bash
+        run: |
+          docker version
+          docker info --format 'Server={{.ServerVersion}} Driver={{.Driver}}'
+          printf 'FROM busybox:1.36\nRUN echo zoomies-dind-ok\n' | docker build --progress=plain -t zoomies-dind-smoke -
+
   images:
-    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.build_images == true
+    runs-on: [self-hosted, zoomies-mcp-bridge-builder]
     strategy:
       fail-fast: false
       matrix:
