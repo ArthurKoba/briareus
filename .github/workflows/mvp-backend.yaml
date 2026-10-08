@@ -102,7 +102,7 @@ jobs:
 
   smoke:
     if: github.event_name == 'workflow_dispatch' && inputs.smoke_runner == true
-    runs-on: [self-hosted, zoomies-mcp-bridge-builder]
+    runs-on: zoomies-mcp-bridge-builder
     timeout-minutes: 10
     steps:
       - name: Verify DinD with a minimal Docker build
@@ -114,7 +114,7 @@ jobs:
 
   images:
     if: github.event_name == 'workflow_dispatch' && inputs.build_images == true
-    runs-on: [self-hosted, zoomies-mcp-bridge-builder]
+    runs-on: zoomies-mcp-bridge-builder
     strategy:
       fail-fast: false
       matrix:
