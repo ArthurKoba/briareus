@@ -42,8 +42,8 @@
 | Project | Контейнер деловых ресурсов и агентских действий | Имеет **ровно одного** владельца: User либо Team; межпроектный доступ по умолчанию запрещён |
 | ProjectIntegration | Подключение внешнего провайдера | Принадлежит одному Project; alias не является полномочием или глобальным идентификатором |
 | AgentIdentity | Идентичность агента/служебного исполнителя | Принадлежит строго одному Project; не требует постоянного человека-владельца |
-| OAuthConnection | Авторизованный MCP-контекст/подключение | Идентифицирует подключившийся principal и разрешённые ресурсы, не владеет проектными артефактами |
-| AgentSession | UUID-сессия работы агента с полномочиями и TTL | Один Project; может использовать разные доменные инструменты при соблюдении OAuth binding |
+| OAuthConnection | Один из методов удостоверить подключение MCP-клиента | Не владеет Project или AgentSession; альтернативой является проектный ключ доступа для клиентов без OAuth |
+| AgentSession | Agent Session с `session_uuid` (канонический UUID v4), правами и TTL | Принадлежит одному Project, переиспользуется в разных MCP/чатах; не привязана к OAuth как жизненный цикл |
 | RuntimeSession | Состояние Browser/Terminal/другого runtime | Принадлежит Project и соответствующему домену, **не** принадлежит AgentSession |
 | RuntimeJob | Процесс/операция внутри RuntimeSession | Имеет свой статус, срок, исполнитель и политику остановки |
 
@@ -128,7 +128,7 @@ WebRTC, дополнительные gRPC/Web-протоколы и дальне
 
 ### 4.1 Канонические сущности и независимость Agent Session от OAuth
 
-**Новое согласованное решение (переопределяет прежние OAuth/chat bindings):** `AgentSession` — принадлежащая одному Project самостоятельная сущность с **каноническим `session_uuid` (UUID v4)**, правами, TTL, статусом и approval history. Сессия **не принадлежит OAuth-сессии, MCP surface, чатy ChatGPT или браузеру**. Один агент использует несколько Session UUID; один Session UUID может использоваться разрешёнными агентами в разных чатах и MCP-модулях того же проекта. Никакого обязательного `chat_id` или OAuth grant family для этого не требуется.
+**Новое согласованное решение (переопределяет прежние OAuth/chat bindings):** `AgentSession` — самостоятельная проектная сущность с **каноническим `session_uuid` (UUID v4)**, правами, TTL, статусом и approval history. Сессия **не принадлежит OAuth-сессии, MCP surface, чату ChatGPT или браузеру**. Один агент использует несколько Session UUID; один Session UUID может использоваться разрешёнными агентами в разных чатах и MCP-модулях одного Project. Никакого обязательного `chat_id` или OAuth grant family для этого не требуется.
 
 ~~~text
 User login / OAuth client            Local app / LM Studio / service client
@@ -180,7 +180,7 @@ User login / OAuth client            Local app / LM Studio / service client
 
 | Контекст | Idle TTL | Hard TTL | Завершение |
 | --- | --- | --- | --- |
-| OAuth authorization | Продление/ротация при использовании; политика неактивности ориентировочно 7–30 дней **как настраиваемый пример** | Техническая политика переавторизации без регулярных разрывов активного ChatGPT; точный предел требует проверки протокола | Запрет новых вызовов и отзыв связанных bindings/AgentSessions |
+| OAuth authorization | Продление/ротация при использовании; idle policy ориентировочно 7–30 дней | Переавторизация по отдельной политике OAuth | Прекращаются вызовы **через это OAuth-подключение**, не Project AgentSessions и RuntimeSessions |
 | AgentSession normal | Настраиваемый | Например, 1 день; продление в пределах политики | Прекращение полномочий AgentSession; общие RuntimeSessions остаются |
 | AgentSession elevated | Может быть короче | Например, **5 минут, без автоматического продления** | Не переносить elevated grant в базовую сессию |
 | Browser RuntimeSession | Например, 5 минут бездействия, продлевается активностью | По умолчанию может отсутствовать; зависит от типа runtime | Закрыть принадлежащие ей контексты, вкладки и локальные cookie/session data; не внешние Chrome |
@@ -189,9 +189,9 @@ User login / OAuth client            Local app / LM Studio / service client
 
 Idle TTL и hard TTL **различны**. Активность продлевает только idle lease. Hard TTL завершает привилегированное исполнение принудительно. Отдельный разрешённый долгоживущий проектный сервер может работать после завершения агента; нельзя «продлить» root-запуск после закрытия его hard lease.
 
-**Отзыв OAuth** запрещает AgentSession-операции этого OAuth-контекста, и worker очищает bindings/проектные access sessions. **Само отключение ChatGPT-транспорта** не обязано отзывать OAuth или удалять общие RuntimeSessions. **Завершение RuntimeSession** закрывает все её собственные ресурсы и процессы; чужие RuntimeSessions не затрагиваются.
+**Отзыв OAuth или проектного ключа** блокирует новые вызовы **через отозванное подключение**; worker чистит связанные технические connection/cache entries, но **не отзывает автоматически независимые project AgentSessions и общие RuntimeSessions**. Истечение/отзыв собственно AgentSession завершает её grant и access, не меняя жизненный цикл Project RuntimeSessions. Отключение транспорта клиента само по себе ничего не удаляет. Завершение RuntimeSession закрывает только её ресурсы/процессы.
 
-**Защита от перебора:** сохранить escalating wait/backoff, security events и блокировку/отзыв конкретного **нарушающего** OAuth-контекста. Неверный AgentSession UUID → отказ; многократные ошибки → задержка/блокировка сессии злоупотребляющего actor; продолжение нарушений → отзыв его OAuth. При доказанном компрометированном **общем** контексте допускается отзыв всех его подтверждённых bindings, но только на основании собственной проверки доверенной связи, **не** по UUID, который прислал атакующий: иначе перебор даёт возможность массово отключать чужие подключения. Отзыв OAuth не удаляет общие проектные RuntimeSessions. При переходе с surface-scoped на project-scoped AgentSession не терять привязку abuse counters к аутентифицированному OAuth actor и общую audit history.
+**Защита от перебора:** существующий escalating backoff и security event audit адаптировать от обязательного OAuth к **аутентифицированному connection credential / project / источнику**. Неверный `session_uuid` → отказ; повторные ошибки → backoff; злоупотребление → отключить/отозвать **атакующее OAuth-подключение или project key**, не чужую AgentSession по введённому UUID. UUID сам по себе не отключает чужие OAuth-контексты и не является единственным доступом.
 
 ## 5. Состояние, хранение, кеш и консистентность
 
@@ -242,7 +242,7 @@ Idle TTL и hard TTL **различны**. Активность продлева
 
 ### 6.2 Маршрутизация и внутренний протокол
 
-- Gateway — тонкая публичная граница: маршруты, OAuth/JWT verification, AgentSession binding + scope check, correlation IDs, доступный контекст проекта, метрики/аудит и MCP проксирование. **Не** источник истины для Team/Project/credentials.
+- Gateway — тонкая публичная граница: маршруты, проверка **OAuth/JWT или отдельного project key** для без-OAuth MCP-клиента, `session_uuid` + project/grants enforcement, correlation IDs, метрики/аудит, MCP proxy. **Не** источник истины для Team/Project/credentials. Ни одна публичная capability не становится доступной по одному UUID без проверки caller и проекта.
 - Существующее FastMCP proxy и discovery **сохраняются**; не придумываем обязательную платформу динамических manifests.
 - Administration backend — независимый BFF/API для пользовательских действий; обращается к стабильным **административным портам** доменов, а не владеет их таблицами.
 - Для синхронных запросов в MVP оставляем поддерживаемый сейчас HTTP/FastMCP/typed interfaces; WebSocket — для операторской интерактивности и realtime; Valkey — для уведомлений/инвалидации.
@@ -334,7 +334,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 - Сепарировать Identity, Teams, Projects, Agents и Authorization как bounded contexts/модули с минимальными контрактами. TeamOwner — User; ProjectOwner — ровно один User либо Team. **Не назначать этим доменам независимые deployment units автоматически.**
 - Зафиксировать project_id, Team/User ownership и минимальные TeamMembership roles; для AgentIdentity/ServiceIdentity — границы и совместимые DTO, **без полноценной автономной служебной авторизации в MVP**. Миграции в общем PostgreSQL не ломают существующие OAuth и Admin API.
 - Сохранить Authorization issuer, refresh rotation, JWT/JWKS, уже работающие MCP-подключения, Gateway/telemetry и Valkey fallback.
-- Ввести AgentSession как **проектную**, а не surface-owned сущность. Несколько UUID на agent/OAuth context и повышение на короткое время; права/approval и anti-bruteforce из текущей реализации.
+- Ввести AgentSession как **проектную**, не OAuth-owned/surface-owned/chat-owned сущность, c каноническим `session_uuid` UUID v4. Добавить альтернативное project key authentication для LM Studio/локальных агентов; сохранить работающий OAuth для ChatGPT и его refresh. Повышение прав/approval/abuse guard из существующего кода переиспользовать.
 
 **Проектные ресурсы / вторая волна:**
 - Проектное владение и access filtering для SVC/infrastructure integrations, Files/Terminal workspace, Web sessions, Reverse artifacts.
@@ -349,19 +349,22 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Обязательные приёмочные сценарии:**
 1. Один личный Project и один Team Project с несколькими User; доступ чужой команды/проекта через ID, Files path и account alias отклонён.
-2. Первый разрешённый bootstrap-read без UUID создаёт новую базовую AgentSession, а защищённый вызов без UUID возвращает английский `SESSION_REQUIRED` и не исполняется. Один OAuth-контекст может иметь несколько AgentSession UUID (например, разные чаты или базовая + 5-минутная elevated); права/TTL и `fixed/requestable` elevation policy проверяются на каждой операции. Оператор может отклонить или сузить запрошенный grant; истечение elevated не влияет на normal.
-3. **Базовый MVP:** независимо авторизованные MCP автоматически создают разные AgentSession, но работают с одними разрешёнными проектными ресурсами. **После доказанного cross-MCP binding:** одна AgentSession работает с двумя MCP-доменами только в доверенно связанной группе OAuth grants; независимая OAuth-сессия тот же UUID не принимает. Реализацию автоматического общего UUID не начинать без подтверждения безопасности пункта 10.1.
+2. Первый allowlisted safe bootstrap-read без `session_uuid` создаёт свежую базовую UUID v4; защищённый вызов без `session_uuid` возвращает английский `SESSION_UUID_REQUIRED` и **не исполняется**. В одном Project можно независимо открывать несколько normal/elevated sessions, проверяя TTL/`fixed`/`requestable` и операторский approval/edit.
+3. **MVP:** `session_uuid` можно использовать для инструментов двух MCP-доменов из **разных OAuth-подключений либо проектного ключа**, если Gateway подтвердил права caller на тот же Project, Session TTL/grants и доступ к операции. Никакого chat ID, OAuth grant-family linking или равенства OAuth sessions не требуется; заведомо чужой Project/отозванный credential/истёкший grant всегда запрещены.
 4. Два независимо авторизованных агента одного Project используют одну проектную Browser/Terminal RuntimeSession; отзыв AgentSession не разрушает runtime.
 5. Истечение Browser Idle TTL очищает её контексты/вкладки; отключение Remote Browser не закрывает пользовательский Chrome.
 6. Истечение root Hard TTL завершает принадлежащее дерево процессов, несмотря на продолжающуюся активность.
-7. Отключение OAuth и abuse revoke останавливают **все связанные AgentSessions/bindings**, не останавливают чужие проектные runtimes; потеря Valkey не теряет истину PostgreSQL.
+7. Отзыв OAuth/project key лишает **это подключение** дальнейших вызовов, но не удаляет AgentSessions Project; завершение самих AgentSessions отнимает их гранты, сохраняя Project RuntimeSessions. Потеря Valkey не теряет PostgreSQL authority.
 8. Смена backend Admin API не обрывает OAuth/Terminal/Browser; коммит Web-only пересобирает Web, не все модули; GitHub+GitLab остаются единым SVC пакетным релизом.
 9. Сброс Files workspace не удаляет импортированные Reverse/Ghidra проекты.
-10. Живой клиент ChatGPT проходит OAuth → выбор Project → AgentSession → вызов инструмента на новом поддомене, сохраняет возможность токен-refresh и не требует переподключения при обычной активности.
+10. ChatGPT OAuth-клиент и LM Studio/агент с project key независимо проходят authentication → выбор Project → `session_uuid` → инструмент MCP. Действующие OAuth-refresh не требуют постоянного переподключения; один Session UUID работает между модулями при наличии доступа.
 
-**Тесты перед включением:** схемы/миграции, изоляция Project, OAuth binding, TTL/revocation, безопасная очистка дерево процессов, восстановление кеша, адресный watch build, внешний ChatGPT smoke. Наличие Green CI или собранного Docker image **не** является live Coolify/MCP acceptance.
+**Тесты перед включением:** данные и миграции (legacy opaque UID → UUID v4), project scope и caller credential, shared Session UUID между MCP/OAuth и project key, отрицательные тесты cross-project/unauthenticated, TTL/revocation, privilege approval, дерево процессов, восстановление Valkey, watch build, ChatGPT/LM Studio smoke. Рабочий Green CI или Docker image **не равен** live Coolify/MCP acceptance.
 
 ### Не в MVP / расширения
+
+**Отдельный post-MVP backlog:** [issue #391](https://github.com/ArthurKoba/mcp-bridge/issues/391); будущий security provenance, granular permissions и расширения не дублируются здесь как статусные задачи.
+
 
 - несколько workspace_id внутри проекта и самостоятельные workspace scopes;
 - делегирование точных view/interact/manage/terminate, RBAC/ABAC, fine-grained repository/file ACL;
@@ -397,7 +400,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Это ревью-вопросы, не молчаливые разрешения на реализацию.**
 
-**10.1 Cross-MCP shared AgentSession — безопасный fallback принят, автоматическое объединение на проверку.** В первой вертикальной поставке автоматически выдаём **разные** AgentSession для независимо авторизованных MCP connections; они делят Project RuntimeSessions. Для общего UUID между Web/SVC Authorization должен доказать общий authorization grant/connection family по доверенному механизму, сохранить per-resource audience и OAuth-session boundaries, **не** использовать равенство User/Project/SSO-cookie как достаточный признак. Точная реализация связи проверяется по реальному FastMCP/ChatGPT OAuth flow и отдельными security tests; отсутствие подтверждения **не блокирует первый проектный MVP**, но блокирует включение общего UUID.
+**10.1 Project-owned Session UUID — архитектура принята; mandatory OAuth binding отменён.** Новый `session_uuid` UUID v4 принадлежит Project, не OAuth/chat/surface; допустим для Web/SVC и любого другого MCP при **независимой проверке project authorization caller** через OAuth или project key. Нельзя использовать UUID как единственное доказательство права доступа. Миграция текущего `uid=token_urlsafe(32)`/surface+OAuth привязки, отрицательные project-scope/credential tests и обработка legacy IDs — обязательный MVP gate. Вопросы расширенного session provenance/audit перенесены в post-MVP issue #391.
 
 **10.2 Критический: согласованное доменное разделение и открытое runtime placement.** **Принято:** пять самостоятельных бизнес-модулей Identity (User), Teams (Team/TeamMembership/owner), Projects (Project/owner reference), Agents (AgentIdentity/child agents), Authorization (OAuth/AgentSession/grants). **Запрещено:** объединять Teams и Projects в один бизнес-модуль или выделять отдельный контейнер на сущность. **Осталось доказать:** composition root(ы), интерфейсы проверки TeamMembership/ProjectOwner/Agent grants, схема изоляции без циклического RPC; точно где работают первые четыре модуля без ненужного deploy overhead. Admin API не является owner другой доменной модели, Authorization не пересоздаётся при деплое админки.
 
@@ -417,27 +420,27 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **10.10 Реальные provider semantics.** Сверить SVC: GitHub tokens vs GitHub App/installation, GitLab; Infrastructure: нынешний Observability read-only и будущие административные операции. Не выдавать write privileges только потому, что домен переименован.
 
-**10.11 Service Identity и delegated bootstrap — отложено за MVP.** Сегодня `OAuthContext` требует `user_id`, а refresh/token lifecycle Auth проверяет доступность локального User. На MVP агент действует через легитимную OAuth-авторизацию и проектную AgentSession с проверкой actor/project при вызове. Автономная AgentIdentity, переживающая блокировку пользователя, требует чёткой модели первичной доверенной выдачи полномочий (provisioning, service credential, rotation, revocation), **не** просто nullable user_id и свободного создания bearer-токенов дочерними агентами. Пока сохраняем доменные границы Agents/Service Identity, но не реализуем автономную авторизацию/спавн без отдельного ТЗ и security acceptance.
+**10.11 Автономная Service Identity — после MVP.** На MVP для безбраузерных клиентов (LM Studio/локальный агент) допустим **project-scoped connection key** вместо OAuth; это способ аутентификации вызова, **не** полнофункциональная автономная AgentIdentity. Позднее добавить service principal lifecycle, делегирование, rotation и governance (post-MVP issue #391). Существующий `OAuthContext` требует User/OAuth, поэтому нужна альтернативная схема caller в Gateway/Authorization, а не `nullable user_id` с анонимной проверкой.
 
 **10.12 Фактические границы MVP.** Чтобы ускорить доставку, не требовать миграцию всего каталога Web/SVC/Infrastructure/Reverse и всех поддоменов **до первой работающей вертикальной версии**. Сначала один Personal/Team Project + безопасные AgentSession/Binding + один существующий MCP домен; затем включение следующих направлений независимо. Точный первый набор доменов определить при планировании после решения 10.1–10.4.
 
 **10.13 Семантика проекта, процесса и релиза.** Бизнес-домен `Reverse` объединяет Analysis и Ghidra, но Ghidra при необходимости сохраняет собственный runtime/container внутри его release bundle; аналогично UI/API имеют разные release units без выделения новой доменной сущности. Запрет root Compose на все сервисы не означает запрет общего shared infrastructure Compose для существующих PostgreSQL/Valkey.
 
-**10.14 ChatGPT chat identity — требование обязательно, способ доказательства открыт.** Для каждого нового чата необходим собственный UUID и возможность нескольких AgentSessions внутри чата. Текущий `bridge/access_middleware.py::oauth_context` не имеет подписанного ChatGPT conversation ID; OAuth сам по себе не идентифицирует чат. MVP может создать fresh UUID при первом безопасном bootstrap-read или явном `access_session_open` и использовать его на следующих вызовах; **строгое серверное отделение чатов не доказано**. Проверить, предоставляет ли реальный MCP/ChatGPT клиент доверенный per-chat context/session identifier. Если нет, нельзя помечать «изоляция по чатам» как выполненную, пока не появится проверяемый способ идентификации клиента.
+**10.14 Chat identity — не требуется.** Прежнее требование «уникальный UUID на чат» **отменено пользователем**. AgentSession UUID — проектная сущность, переиспользуемая между чатами и MCP; одна AgentSession может использоваться во многих чатах, один чат может иметь несколько AgentSessions. Не искать client chat_id и не блокировать MVP из-за его отсутствия. При необходимости отдельная усиленная chat isolation может быть исследована позже (issue #391), но не часть принятой архитектуры.
 
 ## 11. Что считать согласованием спецификации
 
 Документ годен для декомпозиции на параллельные агентские задачи только после:
 
 - подтверждения разделов 1–8 владельцем проекта с учётом замечаний ревью в разделе 10;
-- фиксации решений 10.1–10.4 (безопасность OAuth, владение проектами, БД, отзыв/кеш);
+- проверки технических acceptance gates 10.1–10.4: migration UUID/caller credentials, размещение доменов, единая PostgreSQL DB, Valkey consistency; без требования ChatGPT chat ID или общего OAuth grant family;
 - доказанной карты фактических исходников и инфраструктуры, а не только соответствия гипотезам;
 - утверждения scope/acceptance и границ миграции из разделов 8–9;
 - выделения независимых задач с собственным owner, изменяемыми директориями, контрактами, тестами и порядком интеграции.
 
 **Текущее состояние: DRAFT — обсуждение и ревью; реализации, деплоя, миграции, удаления сервисов и выдачи агентам работ этот документ не запускает.**
 
-**Отслеживание дельты и чек-листов:** [основной migration issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390). Draft PR #389 остаётся каналом текстового ревью; не использовать PR как backlog и не отмечать там готовность миграции.
+**Отслеживание миграции:** [основной issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390); **отложенные проверки и расширения:** [post-MVP issue #391](https://github.com/ArthurKoba/mcp-bridge/issues/391). Draft PR #389 остаётся каналом текстового ревью; не использовать PR как backlog и не отмечать там готовность миграции.
 
 ### Навигация по текущему состоянию
 
