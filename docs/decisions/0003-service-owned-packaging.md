@@ -39,8 +39,10 @@ separate Coolify resources, but the new Auth is not yet accepted at runtime.
 5. The portable Compose file contains no Coolify `SERVICE_*`, production
    hostnames or physical Docker network names. The adapter adds only the
    necessary Coolify route and attachment to an existing network. Docker
-   Compose `extends.file` is a *candidate*, not proof that Coolify's custom
-   parser will materialize inherited build settings and required variables.
+   The installed Coolify parser does not discover required environment inputs
+   inherited only through `extends.file`. Mirror portable environment keys in
+   the selected Coolify adapter; the regression test enforces exact matching.
+   Docker Compose must still expand `extends` at deployment time.
 6. PostgreSQL remains durable authority, Valkey a disposable cache. Do not
    recreate their current Compose stack or volumes. The database provisioner
    is a separate trusted one-shot operation, never shipped into the Auth

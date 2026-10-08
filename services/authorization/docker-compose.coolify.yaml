@@ -1,5 +1,7 @@
 # Existing production network, no extra operator-supplied network variable.
-# Verify actual Coolify Compose parser support for cross-file extends before deploy.
+# Coolify discovers managed environment variables from THIS file before
+# Docker Compose expands extends. Mirror the base service's environment keys
+# to make every required setting visible to the Coolify parser.
 services:
   authorization:
     extends:
@@ -7,6 +9,20 @@ services:
       service: authorization
     environment:
       SERVICE_URL_AUTHORIZATION_8000: /
+      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:?}
+      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-authorization}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      AUTHORIZATION_BOOTSTRAP_USERNAME: ${AUTHORIZATION_BOOTSTRAP_USERNAME:?}
+      AUTHORIZATION_BOOTSTRAP_PASSWORD: ${AUTHORIZATION_BOOTSTRAP_PASSWORD:?}
+      AUTHORIZATION_JWT_PRIVATE_KEY_PEM: ${AUTHORIZATION_JWT_PRIVATE_KEY_PEM:?}
+      AUTHORIZATION_JWT_KEY_ID: ${AUTHORIZATION_JWT_KEY_ID:-authorization-1}
+      AUTHORIZATION_GATEWAY_SERVICE_TOKEN: ${AUTHORIZATION_GATEWAY_SERVICE_TOKEN:?}
+      AUTHORIZATION_ADMIN_SERVICE_TOKEN: ${AUTHORIZATION_ADMIN_SERVICE_TOKEN:?}
+      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
     networks:
       - mcp
 
