@@ -90,6 +90,11 @@ def _checked_file(fd: int, *, device: int) -> os.stat_result:
         raise ProjectFileError("FILE_REGULAR_REQUIRED")
     if info.st_dev != device or info.st_nlink != 1:
         raise ProjectFileError("FILE_UNSAFE_LINK")
+    if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        # A Project worker must not read a file created for a different UID
+        # or accidentally exposed to other Unix users/groups. A mode-0600
+        # source is a necessary (not sufficient) OS isolation invariant.
+        raise ProjectFileError("FILE_OWNER_MODE_UNSAFE")
     return info
 
 
@@ -100,6 +105,8 @@ def _checked_entry(info: os.stat_result, *, device: int) -> None:
         raise ProjectFileError("FILE_SYMLINK_DENIED")
     if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
         raise ProjectFileError("FILE_UNSAFE_LINK")
+    if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise ProjectFileError("FILE_OWNER_MODE_UNSAFE")
     if not stat.S_ISREG(info.st_mode) and not stat.S_ISDIR(info.st_mode):
         raise ProjectFileError("FILE_TYPE_DENIED")
 
@@ -277,6 +284,8 @@ class ProjectFileWriteStage:
             or info.st_ino != self._inode
             or info.st_nlink != 1
             or info.st_size != self._size
+            or info.st_uid != os.geteuid()
+            or info.st_mode & 0o077
         ):
             raise ProjectFileError("FILE_STAGE_CHANGED")
         _rename_no_replace(self._parent_fd, self._temporary, self._parent_fd, self._name)
@@ -424,7 +433,7 @@ class ProjectWorkspaceFiles:
         self._require_action(permit, "files.read")
         parts = _components(path)
         limit = self.max_file_bytes if max_bytes is None else min(self.max_file_bytes, max_bytes)
-        if limit <= 0:
+        if type(limit) is not int or limit < 0:
             raise ProjectFileError("FILE_SIZE_INVALID")
         with self.roots.open(permit) as root_fd:
             with self._parent(root_fd, parts[:-1]) as parent_fd:
@@ -444,6 +453,27 @@ class ProjectWorkspaceFiles:
                         contents = stream.read(limit + 1)
                     if len(contents) > limit:
                         raise ProjectFileError("FILE_TOO_LARGE")
+                    after = _checked_file(fd, device=os.fstat(root_fd).st_dev)
+                    destination = _leaf_stat(parent_fd, parts[-1])
+                    if (
+                        after.st_ino != info.st_ino
+                        or after.st_size != info.st_size
+                        or after.st_mtime_ns != info.st_mtime_ns
+                        or after.st_ctime_ns != info.st_ctime_ns
+                        or len(contents) != info.st_size
+                        or destination is None
+                        or not stat.S_ISREG(destination.st_mode)
+                        or destination.st_dev != info.st_dev
+                        or destination.st_ino != info.st_ino
+                        or destination.st_size != info.st_size
+                        or destination.st_mtime_ns != info.st_mtime_ns
+                        or destination.st_ctime_ns != info.st_ctime_ns
+                        or destination.st_nlink != 1
+                    ):
+                        # Check the current path as well as the pinned FD:
+                        # a rename-away or in-place mutation invalidates
+                        # the signed read result even if its length is same.
+                        raise ProjectFileError("FILE_CHANGED_DURING_READ")
                     self.roots._project_name(permit)
                     return contents
                 finally:
@@ -572,6 +602,18 @@ class ProjectWorkspaceFiles:
                             or before.st_mtime_ns != after.st_mtime_ns
                             or before.st_ctime_ns != after.st_ctime_ns
                             or total != before.st_size
+                        ):
+                            raise ProjectFileError("FILE_CHANGED_DURING_SNAPSHOT")
+                        destination = _leaf_stat(parent_fd, parts[-1])
+                        if (
+                            destination is None
+                            or not stat.S_ISREG(destination.st_mode)
+                            or destination.st_dev != after.st_dev
+                            or destination.st_ino != after.st_ino
+                            or destination.st_size != after.st_size
+                            or destination.st_mtime_ns != after.st_mtime_ns
+                            or destination.st_ctime_ns != after.st_ctime_ns
+                            or destination.st_nlink != 1
                         ):
                             raise ProjectFileError("FILE_CHANGED_DURING_SNAPSHOT")
                         # A long disk read cannot extend a backend decision's

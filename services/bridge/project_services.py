@@ -1,6 +1,6 @@
 """Internal Project Gateway application routing. NEVER a public FastMCP mount.
 
-Only explicit non-destructive tool names are routed. Operation schemas are
+Only exact independently authorized Project tool names are routed. Operation schemas are
 private types, not promised public REST or MCP DTOs. A trusted ProjectInvocation
 from a service-authenticated caller is reauthorized by the owning domain on
 EVERY call; ProjectPermit alone is not network authentication. Domain packages
@@ -87,9 +87,9 @@ class _FileUpload(_Model):
 
 class _FileWriteStatus(_Model):
     operation_uuid: UUID
-    # A6 SignedFilesAuthority.FilesInspect authenticates the original path,
-    # not just an operation UUID. A5 legacy private port allowed UUID only.
-    destination: str | None = Field(default=None, min_length=1, max_length=4096)
+    # A6 SignedFilesAuthority requires the ORIGINAL canonical destination
+    # when inspecting an uncertain upload. Never allow UUID-only fallback.
+    destination: str = Field(min_length=1, max_length=4096)
 
     @field_validator("operation_uuid", mode="before")
     @classmethod
@@ -127,8 +127,8 @@ class PrivateProjectToolClassifier:
 class PrivateProjectModuleForwarder:
     """Private Project Files read/small upload and metadata-only resources.
 
-    Upload requires accepted A5 SQL quota reserve+dispatch+finalize and is
-    NOT a public route. All privileged Terminal/Provider/Ghidra effects still
+    Upload requires accepted A6 signed FilesQuota-v2 reserve/dispatch/attested
+    finalize and is NOT a public route. All privileged Terminal/Provider/Ghidra effects still
     require explicit Backend/OS contracts and independent C1-B2/C2 approval.
     """
 
@@ -181,7 +181,7 @@ class PrivateProjectModuleForwarder:
         }
 
     async def normalize(self, *, backend: str, tool: str, arguments: JsonObject) -> JsonObject:
-        """Validate the concrete tool schema BEFORE creating A5 proof.
+        """Validate concrete tool schema BEFORE creating signed A6 proof.
 
         The result is JSON-canonical (UUID strings, defaults explicit) so the
         signed request fingerprint binds the actual operation and payload,
@@ -271,51 +271,21 @@ class PrivateProjectModuleForwarder:
                 args_status = self._args(_FileWriteStatus, request.arguments)
                 if args_status.operation_uuid != request.request_uuid:
                     raise ProjectGatewayDispatchUnavailable("PROJECT_REQUEST_UUID_MISMATCH")
-                if self.files.a6_quota is not None:
-                    if args_status.destination is None:
-                        raise ProjectGatewayDispatchUnavailable(
-                            "PROJECT_A6_WRITE_STATUS_DESTINATION_REQUIRED"
-                        )
-                    try:
-                        inspected_a6 = await self.files.a6_quota.inspect(
-                            request.invocation,
-                            initial=current,
-                            destination=args_status.destination,
-                            operation_uuid=request.request_uuid,
-                        )
-                    except Exception as exc:
-                        raise ProjectGatewayDispatchUnavailable(
-                            "PROJECT_FILE_STATUS_UNAVAILABLE",
-                            operation_uuid=request.request_uuid,
-                        ) from exc
-                    if inspected_a6 is None:
-                        return {
-                            "operation_uuid": str(request.request_uuid),
-                            "found": False,
-                            "retry_allowed": False,
-                            "outcome": "unverified",
-                        }
-                    return {
-                        "operation_uuid": str(request.request_uuid),
-                        "found": True,
-                        "retry_allowed": False,
-                        "outcome": inspected_a6.status,
-                        "ledger_revision": inspected_a6.reservation_version,
-                        "planned_bytes": inspected_a6.requested_bytes,
-                        "expires_at": inspected_a6.expires_at.isoformat(),
-                        "disk_observation_required": inspected_a6.status
-                        in {"dispatched", "unknown"},
-                    }
-                if self.files.a5_quota is None:
-                    raise ProjectGatewayDispatchUnavailable("PROJECT_FILES_QUOTA_UNAVAILABLE")
-                inspected = await self.files.a5_quota.inspect(
-                    request.invocation,
-                    permit=current,
-                    operation_uuid=request.request_uuid,
-                )
+                if self.files.a6_quota is None:
+                    raise ProjectGatewayDispatchUnavailable("PROJECT_SIGNED_FILES_UNAVAILABLE")
+                try:
+                    inspected = await self.files.a6_quota.inspect(
+                        request.invocation,
+                        initial=current,
+                        destination=args_status.destination,
+                        operation_uuid=request.request_uuid,
+                    )
+                except Exception as exc:
+                    raise ProjectGatewayDispatchUnavailable(
+                        "PROJECT_FILE_STATUS_UNAVAILABLE", operation_uuid=request.request_uuid
+                    ) from exc
                 if inspected is None:
-                    # An absent ledger row is NOT proof an unknown write
-                    # never reached disk. Never grant speculative retry.
+                    # No SQL row is not proof the OS write failed. Never retry.
                     return {
                         "operation_uuid": str(request.request_uuid),
                         "found": False,
@@ -326,19 +296,16 @@ class PrivateProjectModuleForwarder:
                     "operation_uuid": str(request.request_uuid),
                     "found": True,
                     "retry_allowed": False,
-                    "outcome": inspected.state,
-                    "ledger_revision": inspected.revision,
-                    "planned_bytes": inspected.planned_bytes,
+                    "outcome": inspected.status,
+                    "ledger_revision": inspected.reservation_version,
+                    "planned_bytes": inspected.requested_bytes,
                     "expires_at": inspected.expires_at.isoformat(),
-                    "disk_observation_required": inspected.state in {"dispatched", "unknown"},
+                    "disk_observation_required": inspected.status in {"dispatched", "unknown"},
                 }
             if tool == "upload_base64":
                 args_upload = self._args(_FileUpload, request.arguments)
-                # A6 SignedFilesAuthority-v2 is preferred. R8/A5 fallback is
-                # NOT wired into the A6 private composition and cannot
-                # substitute for its signed command/OS attestation.
-                if self.files.a6_quota is None and self.files.a5_quota is None:
-                    raise ProjectGatewayDispatchUnavailable("PROJECT_FILES_QUOTA_REQUIRED")
+                if self.files.a6_quota is None:
+                    raise ProjectGatewayDispatchUnavailable("PROJECT_SIGNED_FILES_UNAVAILABLE")
                 if (
                     args_upload.operation_uuid.version != 4
                     or args_upload.operation_uuid != request.request_uuid
@@ -363,7 +330,7 @@ class PrivateProjectModuleForwarder:
                         operation_uuid=request.request_uuid,
                     )
                 except Exception as exc:
-                    # A6 or A5 reserve/dispatch/rename/finalize can commit before
+                    # A6 signed reserve/dispatch/rename/finalize can commit before
                     # its response is lost. Never leak exception internals or
                     # tell an agent that a second write is safe.
                     raise ProjectGatewayDispatchUnavailable(

@@ -76,6 +76,8 @@ class ProjectIsolationInspector:
         *,
         runtime_session_uuid: UUID,
     ) -> ProjectIsolationAttestation:
+        if not isinstance(runtime_session_uuid, UUID) or runtime_session_uuid.version != 4:
+            raise ProjectIsolationUnavailable("PROJECT_RUNTIME_SESSION_UUID_INVALID")
         if self._supervisor is None:
             raise ProjectIsolationUnavailable("PROJECT_OS_SUPERVISOR_UNAVAILABLE")
         permit = await self.authority.require(invocation, "terminal.attach")
@@ -123,6 +125,8 @@ class ProjectIsolationInspector:
             or refreshed.actor_id != permit.actor_id
             or refreshed.session_uuid != permit.session_uuid
             or refreshed.project_access_revision != permit.project_access_revision
+            or refreshed.decision_version != permit.decision_version
+            or proof.valid_until > refreshed.expires_at
             or refreshed.project_owner_scope != permit.project_owner_scope
             or refreshed.project_owner_id != permit.project_owner_id
         ):
