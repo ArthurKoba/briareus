@@ -19,7 +19,7 @@ build/
 .vscode/
 data/
 # Briareus deploy manifests are SOURCE, not runtime data
-!deploy/coolify/data/
-!deploy/coolify/data/*.yaml
+!deploy/data/
+!deploy/data/**
 artifacts/
 logs/
