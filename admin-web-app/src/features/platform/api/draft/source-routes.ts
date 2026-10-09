@@ -1,5 +1,5 @@
 /**
- * Closed HTTP METHOD+PATH allowlist extracted from the ACCEPTED A5 unmounted
+ * Closed HTTP METHOD+PATH allowlist extracted from the ACCEPTED A6 unmounted
  * platform_api.py, platform_auth_api.py, platform_overview_api.py, resource_api.py, platform_state_api.py and platform_command_status.py declarations.
  * This is a private development surface, NOT a public API activation gate.
  */
@@ -20,8 +20,12 @@ export type SourceMethod = "GET" | "POST" | "PATCH" | "DELETE"
 const methods: Record<SourceMethod, readonly RegExp[]> = {
   GET: [
     route("/(?:me|me/context|users|invitations|teams|projects|operator/summary|providers/catalog)"),
-    route(`${TEAM}/(?:members|member-details|permissions)`),
-    route(`${PROJECT}/(?:permissions|access|agents|sessions|approvals|grants-catalog|operational-state)`),
+    route("/(?:users|invitations)/page"),
+    route(`${TEAM}/(?:members|member-details|member-details/page|permissions)`),
+    route(`${TEAM}/commands/${OPERATION}/status`),
+    route(`${PROJECT}/(?:permissions|access|agents|sessions|sessions/page|approvals|approvals/page|grants-catalog|operational-state)`),
+    route(`${PROJECT}/resource-commands/${OPERATION}/status`),
+    route(`/resources/${UUID}/commands/${OPERATION}/status`),
     route(`${PROJECT}/commands/${OPERATION}/status`),
     route(RESOURCE_PROJECT),
     route(`${RESOURCE_PROJECT}/resolve`),
@@ -46,6 +50,8 @@ const methods: Record<SourceMethod, readonly RegExp[]> = {
 }
 const commandStatus = route(`${PROJECT}/commands/${OPERATION}/status`)
 const operationalState = route(`${PROJECT}/operational-state`)
+const keysetPage = route(`(?:/(?:users|invitations)/page|${TEAM}/member-details/page|${PROJECT}/(?:sessions|approvals)/page)`)
+const scopedStatus=route(`(?:${TEAM}/commands/${OPERATION}/status|${PROJECT}/resource-commands/${OPERATION}/status|/resources/${UUID}/commands/${OPERATION}/status)`)
 const userList = route("/users")
 const projectResource = route(RESOURCE_PROJECT)
 const projectResolve = route(`${RESOURCE_PROJECT}/resolve`)
@@ -79,6 +85,22 @@ export function requireSourceRoute(method: SourceMethod, input: string): void {
     if (Boolean(id) === Boolean(name)) throw new DraftContractError("qualified_resource_required")
     if (id) draftUuid(id)
     if (name && (name.length < 1 || name.length > 128)) throw new DraftContractError("resource_name_invalid")
+  } else if(method==="GET"&&keysetPage.test(pathname)) {
+    if([...values.keys()].some(key=>key!=="limit"&&key!=="after")||
+       values.getAll("limit").length>1||values.getAll("after").length>1) {
+      throw new DraftContractError("source_page_query_invalid")
+    }
+    const limit=values.get("limit")
+    if(limit!==null&&(!/^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|250)$/.test(limit)))
+      throw new DraftContractError("source_page_limit_invalid")
+    const after=values.get("after")
+    if(after!==null) {
+      const cursor=draftUuid(after)
+      if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor))
+        throw new DraftContractError("source_page_after_uuid4_required")
+    }
+  } else if(method==="GET"&&scopedStatus.test(pathname)){
+    if(queryStart!==-1)throw new DraftContractError("source_query_not_declared")
   } else if(method==="GET"&&userList.test(pathname)) {
     // A5 User directory: limit only, 1..250, no cursor/offset. It is NOT
     // possible to prove absence of an older User from a capped response.

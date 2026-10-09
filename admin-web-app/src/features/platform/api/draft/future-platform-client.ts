@@ -1,6 +1,6 @@
 import type { AccessProjection, PlatformPort } from "@/features/platform/model/contracts"
 import { DraftContractError } from "@/features/platform/api/draft/source-contract"
-import { acceptedA5Source } from "@/features/platform/api/draft/source-acceptance"
+import { acceptedA6Source } from "@/features/platform/api/draft/source-acceptance"
 import { createUninstalledDraftConsumer, type DraftConsumer } from "@/features/platform/api/draft/source-port"
 
 /**
@@ -12,7 +12,7 @@ import { createUninstalledDraftConsumer, type DraftConsumer } from "@/features/p
  * the permanently blocked public installer in api/port.ts.
  */
 export interface DisabledFuturePlatformClient {
-  readonly acceptance: typeof acceptedA5Source
+  readonly acceptance: typeof acceptedA6Source
   readonly port: PlatformPort
   /** A5 server-proven principal only; returns null when no memory token. */
   verifyCurrentPrincipal(signal: AbortSignal): Promise<AccessProjection | null>
@@ -20,13 +20,13 @@ export interface DisabledFuturePlatformClient {
 }
 
 export function createUninstalledFuturePlatformClient(explicitSameOriginUrl: string): DisabledFuturePlatformClient {
-  if(acceptedA5Source.publicTransportAuthorized || acceptedA5Source.platformPortInstallAuthorized) {
+  if(acceptedA6Source.publicTransportAuthorized || acceptedA6Source.platformPortInstallAuthorized) {
     throw new DraftContractError("source_only_cutover_required")
   }
   const client:DraftConsumer=createUninstalledDraftConsumer(explicitSameOriginUrl)
   let destroyed=false
   return Object.freeze({
-    acceptance:acceptedA5Source,
+    acceptance:acceptedA6Source,
     port:client.port,
     async verifyCurrentPrincipal(signal:AbortSignal):Promise<AccessProjection|null> {
       if(destroyed||signal.aborted)throw new DraftContractError("future_client_unavailable")

@@ -87,6 +87,9 @@ class _FileUpload(_Model):
 
 class _FileWriteStatus(_Model):
     operation_uuid: UUID
+    # A6 SignedFilesAuthority.FilesInspect authenticates the original path,
+    # not just an operation UUID. A5 legacy private port allowed UUID only.
+    destination: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @field_validator("operation_uuid", mode="before")
     @classmethod
@@ -220,6 +223,7 @@ class PrivateProjectModuleForwarder:
             or current.actor_id != request.permit.actor_id
             or current.session_uuid != request.permit.session_uuid
             or current.project_access_revision != request.permit.project_access_revision
+            or current.decision_version != request.permit.decision_version
             or current.project_owner_id != request.permit.project_owner_id
             or current.project_owner_scope != request.permit.project_owner_scope
         ):
@@ -265,11 +269,45 @@ class PrivateProjectModuleForwarder:
                 return {"path": path_args.path, "sha256": digest}
             if tool == "write_status":
                 args_status = self._args(_FileWriteStatus, request.arguments)
-                if (
-                    args_status.operation_uuid != request.request_uuid
-                    or self.files.a5_quota is None
-                ):
-                    raise ProjectGatewayDispatchUnavailable("PROJECT_A5_WRITE_STATUS_UNAVAILABLE")
+                if args_status.operation_uuid != request.request_uuid:
+                    raise ProjectGatewayDispatchUnavailable("PROJECT_REQUEST_UUID_MISMATCH")
+                if self.files.a6_quota is not None:
+                    if args_status.destination is None:
+                        raise ProjectGatewayDispatchUnavailable(
+                            "PROJECT_A6_WRITE_STATUS_DESTINATION_REQUIRED"
+                        )
+                    try:
+                        inspected_a6 = await self.files.a6_quota.inspect(
+                            request.invocation,
+                            initial=current,
+                            destination=args_status.destination,
+                            operation_uuid=request.request_uuid,
+                        )
+                    except Exception as exc:
+                        raise ProjectGatewayDispatchUnavailable(
+                            "PROJECT_FILE_STATUS_UNAVAILABLE",
+                            operation_uuid=request.request_uuid,
+                        ) from exc
+                    if inspected_a6 is None:
+                        return {
+                            "operation_uuid": str(request.request_uuid),
+                            "found": False,
+                            "retry_allowed": False,
+                            "outcome": "unverified",
+                        }
+                    return {
+                        "operation_uuid": str(request.request_uuid),
+                        "found": True,
+                        "retry_allowed": False,
+                        "outcome": inspected_a6.status,
+                        "ledger_revision": inspected_a6.reservation_version,
+                        "planned_bytes": inspected_a6.requested_bytes,
+                        "expires_at": inspected_a6.expires_at.isoformat(),
+                        "disk_observation_required": inspected_a6.status
+                        in {"dispatched", "unknown"},
+                    }
+                if self.files.a5_quota is None:
+                    raise ProjectGatewayDispatchUnavailable("PROJECT_FILES_QUOTA_UNAVAILABLE")
                 inspected = await self.files.a5_quota.inspect(
                     request.invocation,
                     permit=current,
@@ -296,11 +334,11 @@ class PrivateProjectModuleForwarder:
                 }
             if tool == "upload_base64":
                 args_upload = self._args(_FileUpload, request.arguments)
-                # A generic R6 quota adapter is not the accepted A5 dispatched
-                # write ledger. Refuse that fallback for this first Project
-                # Files vertical even in a private Gateway composition.
-                if self.files.a5_quota is None:
-                    raise ProjectGatewayDispatchUnavailable("PROJECT_A5_FILES_QUOTA_REQUIRED")
+                # A6 SignedFilesAuthority-v2 is preferred. R8/A5 fallback is
+                # NOT wired into the A6 private composition and cannot
+                # substitute for its signed command/OS attestation.
+                if self.files.a6_quota is None and self.files.a5_quota is None:
+                    raise ProjectGatewayDispatchUnavailable("PROJECT_FILES_QUOTA_REQUIRED")
                 if (
                     args_upload.operation_uuid.version != 4
                     or args_upload.operation_uuid != request.request_uuid
@@ -325,7 +363,7 @@ class PrivateProjectModuleForwarder:
                         operation_uuid=request.request_uuid,
                     )
                 except Exception as exc:
-                    # A5 reserve/dispatch/rename/finalize can commit before
+                    # A6 or A5 reserve/dispatch/rename/finalize can commit before
                     # its response is lost. Never leak exception internals or
                     # tell an agent that a second write is safe.
                     raise ProjectGatewayDispatchUnavailable(

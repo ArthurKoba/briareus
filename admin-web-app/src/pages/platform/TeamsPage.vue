@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { canonicalUuid, type TeamView } from "@/features/platform/model/contracts"
+import { canonicalUuid, type TeamMemberView, type TeamView } from "@/features/platform/model/contracts"
 import { useCommand, useDomain } from "@/features/platform/model/use-domain"
 import { refreshAuthenticatedProjection } from "@/features/platform/model/refresh-identity"
 import { projectContext } from "@/features/platform/model/project-context"
+import { platformPort } from "@/features/platform/api/port"
 import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
 import ConfirmAction from "@/features/platform/ui/ConfirmAction.vue"
 import Button from "@/shared/ui/Button.vue"
@@ -20,7 +21,61 @@ const newOwnerId = ref("")
 const pending = ref<{ kind: "remove" | "transfer"; team: TeamView; userId: string; label: string } | null>(null)
 const can = projectContext.can
 const active = computed(() => teams.state.items.find(team => team.id === chosenId.value) ?? null)
-const activeMembers = computed(() => active.value?.members ?? [])
+const moreMembers=ref<TeamMemberView[]>([])
+const memberCursor=ref<string|null>(null)
+const memberHasMore=ref<boolean|null>(null)
+const memberLoading=ref(false)
+const memberError=ref(false)
+let memberRequest:AbortController|null=null
+function resetMemberPages():void {
+  memberRequest?.abort()
+  memberRequest=null
+  moreMembers.value=[]
+  memberCursor.value=null
+  memberHasMore.value=null
+  memberLoading.value=false
+  memberError.value=false
+}
+const activeMembers=computed(() => [...(active.value?.members??[]),...moreMembers.value])
+const canLoadMembers=computed(()=>Boolean(
+  active.value && !memberLoading.value &&
+  (memberHasMore.value ?? active.value.memberHasMore) &&
+  (memberCursor.value ?? active.value.memberNextAfterId) &&
+  platformPort.value?.teams.memberPage,
+))
+async function loadMoreMembers():Promise<void>{
+  const team=active.value
+  const port=platformPort.value
+  const after=memberCursor.value??team?.memberNextAfterId
+  const scope=projectContext.selection()
+  const revision=projectContext.state.revision
+  if(!team||!port?.teams.memberPage||!after||!scope||!canLoadMembers.value)return
+  const ctrl=new AbortController()
+  memberRequest=ctrl
+  memberLoading.value=true
+  memberError.value=false
+  try {
+    const result=await port.teams.memberPage({scope,signal:ctrl.signal,revision,
+      decisionVersion:scope.kind==="team"?projectContext.state.teamDecisionVersions[scope.teamId]??null:
+        scope.kind==="project"?projectContext.state.projectDecisionVersions[scope.projectId]??null:null},team,after)
+    if(ctrl.signal.aborted||revision!==projectContext.state.revision||port!==platformPort.value||
+       active.value?.id!==team.id||active.value.decisionVersion!==team.decisionVersion||
+       active.value.revision!==team.revision)return
+    if(result.hasMore===true&&(!result.nextAfterId||result.nextAfterId===after))throw new Error("Team cursor failed to advance")
+    const known=new Set(activeMembers.value.map(item=>item.userId))
+    if(result.items.some(item=>known.has(item.userId)))throw new Error("Duplicate Team member page")
+    moreMembers.value=[...moreMembers.value,...result.items]
+    memberCursor.value=result.nextAfterId??null
+    memberHasMore.value=result.hasMore===true
+  }catch {
+    if(!ctrl.signal.aborted&&revision===projectContext.state.revision)memberError.value=true
+  }finally{
+    if(memberRequest===ctrl){memberRequest=null;memberLoading.value=false}
+  }
+}
+watch(chosenId,resetMemberPages)
+watch(()=>teams.state.items,resetMemberPages)
+onBeforeUnmount(resetMemberPages)
 watch(() => projectContext.state.revision, () => { chosenId.value = ""; newMemberId.value = ""; newOwnerId.value = ""; pending.value = null })
 // Never silently switch to a DIFFERENT Team after membership removal or a
 // list refresh. Selection is always an explicit User choice.
@@ -98,7 +153,13 @@ function askTransfer() {
         <div v-if="active" class="min-w-0 space-y-4">
           <div><h3 class="text-base font-semibold">{{active.name}}</h3><p class="text-xs text-muted-foreground">{{t('platform.teamOwner')}}: {{active.ownerLabel}}</p></div>
           <p v-if="active.members===null" role="status" class="text-xs text-muted-foreground">{{t('platform.membersNotHydrated')}}</p>
-          <div class="overflow-x-auto"><table class="w-full min-w-[460px] text-left text-sm"><thead class="text-xs text-muted-foreground"><tr><th class="py-2">{{t('platform.user')}}</th><th>{{t('common.status')}}</th><th>{{t('common.actions')}}</th></tr></thead><tbody><tr v-for="member in activeMembers" :key="member.userId" class="border-t border-border"><td class="py-3">{{member.label}} <span v-if="member.owner" class="text-xs text-muted-foreground">({{t('platform.teamOwner')}})</span></td><td>{{member.active?t('platform.active'):t('platform.suspended')}}</td><td><Button variant="outline" size="sm" :disabled="!can('teams.members') || active.allowedActions?.['teams.members']!==true || member.owner || (command.state.busy || command.state.reconciliationRequired)" @click="pending={kind:'remove',team:active,userId:member.userId,label:member.userId}">{{t('platform.removeMember')}}</Button></td></tr></tbody></table></div>
+          <p v-if="memberHasMore ?? active.memberHasMore" role="status" class="text-xs text-muted-foreground">{{t('platform.a6PartialPage')}}</p>
+          <div class="overflow-x-auto"><table class="w-full min-w-[460px] text-left text-sm"><thead class="text-xs text-muted-foreground"><tr><th class="py-2">{{t('platform.user')}}</th><th>{{t('common.status')}}</th><th>{{t('common.actions')}}</th></tr></thead><tbody><tr v-for="member in activeMembers" :key="member.userId" class="border-t border-border"><td class="py-3">{{member.label}} · {{member.userId.slice(0,8)}} <span v-if="member.owner" class="text-xs text-muted-foreground">({{t('platform.teamOwner')}})</span></td><td>{{member.active?t('platform.active'):t('platform.suspended')}}</td><td><Button variant="outline" size="sm" :disabled="!can('teams.members') || active.allowedActions?.['teams.members']!==true || member.owner || (command.state.busy || command.state.reconciliationRequired)" @click="pending={kind:'remove',team:active,userId:member.userId,label:member.userId}">{{t('platform.removeMember')}}</Button></td></tr></tbody></table></div>
+          <div v-if="canLoadMembers || memberLoading" class="flex items-center gap-2">
+            <Button size="sm" variant="outline" :disabled="!canLoadMembers" @click="loadMoreMembers">{{t('platform.loadMoreA6')}}</Button>
+            <span v-if="memberLoading" role="status" class="text-xs text-muted-foreground">{{t('app.loading')}}</span>
+          </div>
+          <p v-if="memberError" role="alert" class="text-xs text-destructive">{{t('platform.a6PageReadFailed')}}</p>
           <form class="flex flex-wrap items-end gap-2" @submit.prevent="addMember"><label class="min-w-52 flex-1 text-xs">{{t('platform.memberUserId')}}<input v-model="newMemberId" class="field mt-1" autocomplete="off" :disabled="!can('teams.members') || (command.state.busy || command.state.reconciliationRequired)" required /></label><Button type="submit" size="sm" :disabled="!can('teams.members') || active.allowedActions?.['teams.members']!==true || (command.state.busy || command.state.reconciliationRequired) || !canonicalUuid(newMemberId.trim())">{{t('platform.addMember')}}</Button><p v-if="newMemberId && !canonicalUuid(newMemberId.trim())" class="w-full text-xs text-destructive" role="status">{{t('platform.invalidUserUuid')}}</p></form>
           <form class="flex flex-wrap items-end gap-2 border-t border-border pt-4" @submit.prevent="askTransfer"><label class="min-w-52 flex-1 text-xs">{{t('platform.transferTeamOwner')}}<select v-model="newOwnerId" class="field mt-1" :disabled="!can('teams.ownership') || (command.state.busy || command.state.reconciliationRequired)"><option value="">{{t('platform.chooseMember')}}</option><option v-for="member in activeMembers.filter(item => item.active && !item.owner)" :key="member.userId" :value="member.userId">{{member.label}}</option></select></label><Button type="submit" size="sm" variant="outline" :disabled="!can('teams.ownership') || active.allowedActions?.['teams.ownership']!==true || (command.state.busy || command.state.reconciliationRequired) || !newOwnerId">{{t('platform.transfer')}}</Button></form>
           <p class="text-xs text-muted-foreground">{{t('platform.teamDeletionDeferred')}} {{t('platform.dangerTargetIdNotice')}}</p>

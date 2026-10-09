@@ -94,7 +94,8 @@ async function adminReassignProject(): Promise<void> {
   const owner = adminTarget.value
   if (!project || !owner || !canReassign.value || project.projectId !== selectedId.value) return
   if(owner.kind==="team"&&!teams.state.items.some(item=>item.id===owner.teamId))return
-  const success = await command.submit("projects.transfer", (port,ctx) => port.projects.adminReassign(ctx, project, owner))
+  const success = await command.submit("projects.transfer", (port,ctx) => port.projects.adminReassign(ctx, project, owner),
+    {operation:"project.admin_reassign",target:{kind:"project",id:project.projectId}})
   if (success) {
     adminConfirmation.value = null
     adminOwnerUserId.value = ""
@@ -117,7 +118,8 @@ async function transferProject() {
     owner={kind:"user",userId:team.ownerId}
   }
   const success=await command.submit("projects.transfer",(port,ctx)=>port.projects.transfer(ctx,project,owner),
-    projectContext.state.scope==="project"&&projectContext.state.activeProjectKey===project.projectId?"project.transfer_owner":null)
+    projectContext.state.scope==="project"&&projectContext.state.activeProjectKey===project.projectId?"project.transfer_owner":
+    projectContext.state.scope==="operator"?{operation:"project.transfer_owner",target:{kind:"project",id:project.projectId}}:null)
   if (success) { confirmation.value=null;targetTeamId.value="";await refreshAuthenticatedProjection();await projects.reload() }
 }
 </script>

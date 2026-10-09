@@ -28,6 +28,16 @@ from .a5_runtime import (
     A5RuntimeLedgerClient,
     A5TrustedRuntimeLedgerPort,
 )
+from .a6_provider import (
+    A6ProviderPeerPort,
+    A6ProviderReadSource,
+    A6SignedProviderPort,
+)
+from .a6_runtime import (
+    A6RuntimePeerPort,
+    A6RuntimeSignedSource,
+    A6SignedRuntimePort,
+)
 from .authorization import ProjectAccessPort, ProjectRuntimeAuthority
 from .backend_access import (
     BackendServiceVerifier,
@@ -54,6 +64,12 @@ if TYPE_CHECKING:
         A5TrustedGhidraInventory,
         A5TrustedNativeImportPort,
     )
+    from modules.analysis.a6_native import (
+        A6NativeInventoryPort,
+        A6ReversePeerPort,
+        A6SignedNativeClient,
+        A6SignedNativePort,
+    )
     from modules.analysis.import_ledger import NativeImportLedgerPort
     from modules.analysis.project_transfer import (
         BackendCall,
@@ -62,6 +78,11 @@ if TYPE_CHECKING:
         ProjectReverseTransfer,
     )
     from modules.files.a5_quota import A5TrustedFileQuotaPort
+    from modules.files.a6_signed import (
+        SignedFilesBackendPort,
+        TrustedFilesStoragePort,
+        VerifiedFilesPeerPort,
+    )
     from modules.files.project_explorer import ProjectFileExplorer
     from modules.files.project_files import ProjectFilesService
     from modules.terminal.project_isolation import ProjectIsolationInspector
@@ -79,12 +100,23 @@ class PrivateProjectRuntime:
 
     roots: ProjectRootRegistry
     a5_mode: bool = False
+    a6_mode: bool = False
     access: ProjectAccessPort | None = None
     integration_port: ProjectIntegrationPort | None = None
     variable_port: ProjectVariablePort | None = None
     credential_port: BackendCredentialUsePort | None = None
     a4_resource_source: A4EffectiveResourcePort | None = None
     a5_quota_source: A5TrustedFileQuotaPort | None = None
+    a6_files_peer: VerifiedFilesPeerPort | None = None
+    a6_files_backend: SignedFilesBackendPort | None = None
+    a6_files_observer: TrustedFilesStoragePort | None = None
+    a6_runtime_peer: A6RuntimePeerPort | None = None
+    a6_runtime_backend: A6SignedRuntimePort | None = None
+    a6_provider_peer: A6ProviderPeerPort | None = None
+    a6_provider_backend: A6SignedProviderPort | None = None
+    a6_native_peer: A6ReversePeerPort | None = None
+    a6_native_backend: A6SignedNativePort | None = None
+    a6_native_inventory: A6NativeInventoryPort | None = None
     a5_authenticated_service: A5AuthenticatedServicePort | None = None
     a5_runtime_source: A5TrustedRuntimeLedgerPort | None = None
     a5_native_source: A5TrustedNativeImportPort | None = None
@@ -199,6 +231,71 @@ class PrivateProjectRuntime:
             credential_port=None,
         )
 
+    @classmethod
+    def from_accepted_a6_sources(
+        cls,
+        *,
+        roots: ProjectRootRegistry,
+        authenticated_service: A5AuthenticatedServicePort,
+        caller_verifier: CurrentCallerVerifier,
+        project_source: A4ProjectProjectionPort,
+        files_peer: VerifiedFilesPeerPort | None = None,
+        files_backend: SignedFilesBackendPort | None = None,
+        files_observer: TrustedFilesStoragePort | None = None,
+        runtime_peer: A6RuntimePeerPort | None = None,
+        runtime_backend: A6SignedRuntimePort | None = None,
+        provider_peer: A6ProviderPeerPort | None = None,
+        provider_backend: A6SignedProviderPort | None = None,
+        native_peer: A6ReversePeerPort | None = None,
+        native_backend: A6SignedNativePort | None = None,
+        native_inventory_port: A6NativeInventoryPort | None = None,
+        resource_source: A4EffectiveResourcePort | None = None,
+        runtime_source: A5TrustedRuntimeLedgerPort | None = None,
+        native_source: A5TrustedNativeImportPort | None = None,
+        native_inventory: A5TrustedGhidraInventory | None = None,
+        provider_source: A5TrustedProviderPort | None = None,
+        cleanup_verifier: A5DomainCleanupVerifier | None = None,
+        job_verifier: A5JobExecutionVerifier | None = None,
+    ) -> PrivateProjectRuntime:
+        """Accepted A6 source boundaries; NO implicit network or OS trust.
+
+        The caller-supplied backend adapter must bind the exact normalized
+        signed A6 ServiceOperationIntent to independently attested TLS/Unix
+        peer, registered Ed25519 key, Backend delegated User and SQL JTI. The
+        Files backend MUST execute actual SignedFilesAuthority per phase.
+        A6 without a real peer/observer remains unmounted and fail-closed.
+        R6/R8 local owner, A5 quota and secret transports are not reused.
+        """
+        access = A5SourceAuthorization(
+            service=authenticated_service,
+            caller=caller_verifier,
+            project=A4ProjectVerifier(project_source),
+        )
+        return cls(
+            roots=roots,
+            a5_mode=True,  # disables legacy R6 owner/reaper/credential route
+            a6_mode=True,
+            access=access,
+            a4_resource_source=resource_source,
+            a6_files_peer=files_peer,
+            a6_files_backend=files_backend,
+            a6_files_observer=files_observer,
+            a6_runtime_peer=runtime_peer,
+            a6_runtime_backend=runtime_backend,
+            a6_provider_peer=provider_peer,
+            a6_provider_backend=provider_backend,
+            a6_native_peer=native_peer,
+            a6_native_backend=native_backend,
+            a6_native_inventory=native_inventory_port,
+            a5_authenticated_service=authenticated_service,
+            a5_runtime_source=runtime_source,
+            a5_native_source=native_source,
+            a5_native_inventory=native_inventory,
+            a5_provider_source=provider_source,
+            a5_cleanup_verifier=cleanup_verifier,
+            a5_job_verifier=job_verifier,
+        )
+
     def _resources(self) -> A4ResourceAdapter | None:
         if self.a4_resource_source is None:
             return None
@@ -207,6 +304,7 @@ class PrivateProjectRuntime:
     def files(self, *, max_file_bytes: int) -> ProjectFilesService:
         # Files package is optional in Gateway/Terminal-only container images.
         from modules.files.a5_quota import A5FileQuotaFlow
+        from modules.files.a6_signed import A6SignedFilesFlow
         from modules.files.project_files import ProjectFilesService
 
         return ProjectFilesService(
@@ -216,7 +314,17 @@ class PrivateProjectRuntime:
             quota=ProjectQuotaGuard(self.quota_port),
             a5_quota=(
                 A5FileQuotaFlow(self.authority, self.a5_quota_source)
-                if self.a5_mode or self.a5_quota_source is not None
+                if not self.a6_mode and (self.a5_mode or self.a5_quota_source is not None)
+                else None
+            ),
+            a6_quota=(
+                A6SignedFilesFlow(
+                    self.authority,
+                    peer_port=self.a6_files_peer,
+                    backend=self.a6_files_backend,
+                    observer=self.a6_files_observer,
+                )
+                if self.a6_mode
                 else None
             ),
         )
@@ -289,8 +397,38 @@ class PrivateProjectRuntime:
     def variables(self) -> ProjectVariableSelector:
         return ProjectVariableSelector(self.authority, self.variable_port or self._resources())
 
+    def a6_runtime(self) -> A6RuntimeSignedSource:
+        """A6 source-only signed DB intent, NEVER process adoption."""
+        return A6RuntimeSignedSource(
+            self.authority,
+            peer=self.a6_runtime_peer,
+            backend=self.a6_runtime_backend,
+        )
+
+    def a6_native(self) -> A6SignedNativeClient:
+        """A6 signed native intents; backend inventory proof required."""
+        from modules.analysis.a6_native import A6SignedNativeClient
+
+        return A6SignedNativeClient(
+            self.authority,
+            peer=self.a6_native_peer,
+            backend=self.a6_native_backend,
+            inventory=self.a6_native_inventory,
+        )
+
+    def a6_provider(self) -> A6ProviderReadSource:
+        """A6 signed, result-hash-only provider READ; never plaintext keys."""
+        return A6ProviderReadSource(
+            self.authority,
+            self.integrations(),
+            peer=self.a6_provider_peer,
+            backend=self.a6_provider_backend,
+        )
+
     def a5_runtime(self) -> A5RuntimeLedgerClient:
         """DB-only A5 lease/job intent; never a shell or browser factory."""
+        if self.a6_mode:
+            raise RuntimeSessionError("A6_RUNTIME_A5_LEDGER_INCOMPATIBLE")
         return A5RuntimeLedgerClient(
             self.authority,
             self.a5_runtime_source,
@@ -301,6 +439,8 @@ class PrivateProjectRuntime:
 
     def a5_native(self) -> A5NativeImportClient:
         """A5 Files-backed native import intent; no Ghidra OS side effect."""
+        if self.a6_mode:
+            raise RuntimeSessionError("A6_NATIVE_A5_LEDGER_INCOMPATIBLE")
         from modules.analysis.a5_native import A5NativeImportClient
 
         return A5NativeImportClient(
@@ -311,6 +451,8 @@ class PrivateProjectRuntime:
 
     def a5_provider(self) -> A5ProviderCapability:
         """Resource-ID-bound read only; no raw secret or write grant."""
+        if self.a6_mode:
+            raise RuntimeSessionError("A6_PROVIDER_A5_RECEIPT_INCOMPATIBLE")
         return A5ProviderCapability(
             self.authority,
             self.integrations(),

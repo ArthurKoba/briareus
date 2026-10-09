@@ -68,8 +68,24 @@ export interface QueryContext {
   decisionVersion?: string | null
 }
 export interface CommandContext extends QueryContext { idempotencyKey: string }
+/** A6 SOURCE idempotency status selectors; each is independently authorized. */
+export type SourceCommandTarget =
+  | {kind:"project";id:PlatformProjectId}
+  | {kind:"team";id:TeamId}
+  | {kind:"project_resource";id:PlatformProjectId}
+  | {kind:"resource";id:string;owner:ResourceOwner}
+export interface SourceCommandBinding {operation:string;target:SourceCommandTarget}
+export interface SourceCommandReceipt {
+  kind:SourceCommandTarget["kind"]
+  id:string;operation:string;state:"not_found"|"pending"|"completed"
+  outcomeHttpStatus:number|null;expiresAt:string|null;reconciliationRequired:boolean
+}
 export interface ListResult<T> {
   items: T[]
+  /** A6 keyset continuation exists ONLY when source returned has_more. */
+  nextAfterId?: string | null
+  hasMore?: boolean
+  pageSize?: number
   revision?: string | null
   /** Source-specific pagination/truncation metadata; no omitted rows inferred. */
   serverLimit?: number
@@ -102,7 +118,12 @@ export interface InvitationView {
   revokedAt?: string | null
 }
 export interface InvitationIssued { invitationUrl: string; expiresAt: string | null }
-export interface TeamView { id: TeamId; name: string; ownerId: UserId; ownerLabel: string; members: TeamMemberView[] | null; revision?: string; decisionVersion?: string; allowedActions?: Partial<Record<UiCapability, boolean>> }
+export interface TeamView {
+  id: TeamId; name: string; ownerId: UserId; ownerLabel: string
+  members: TeamMemberView[] | null; revision?: string; decisionVersion?: string
+  memberNextAfterId?:string|null; memberHasMore?:boolean
+  allowedActions?: Partial<Record<UiCapability, boolean>>
+}
 export interface TeamMemberView { userId: UserId; label: string; active: boolean; owner: boolean }
 export interface ProjectView extends AvailableProject { revision?: string; decisionVersion?: string; allowedActions?: Partial<Record<UiCapability, boolean>> }
 export interface AgentView { id: AgentIdentityId; projectId: PlatformProjectId; label: string; parentAgentId: AgentIdentityId | null; status: string; revision?: string }
@@ -138,6 +159,11 @@ export interface AgentSessionRequestView {
 export interface SessionSnapshot {
   sessions: AgentSessionView[]
   requests: AgentSessionRequestView[]
+  sessionsNextAfterId?:string|null
+  approvalsNextAfterId?:string|null
+  sessionsHasMore?:boolean
+  approvalsHasMore?:boolean
+  sourcePageSize?:number
   availableGrants: GrantOption[]
   normalHardTtlSeconds?: number
   elevatedMaxSeconds?: number
@@ -278,8 +304,8 @@ export interface PlatformPort {
     redeemPasswordReset?(input: { resetToken: string; password: string }, signal: AbortSignal, idempotencyKey:string): Promise<void>
   }
   users: {
-    list(context: QueryContext): Promise<ListResult<UserView>>
-    invitations(context: QueryContext): Promise<ListResult<InvitationView>>
+    list(context: QueryContext, after?: string | null): Promise<ListResult<UserView>>
+    invitations(context: QueryContext, after?: string | null): Promise<ListResult<InvitationView>>
     issueInvitation(context: CommandContext): Promise<InvitationIssued>
     revokeInvitation(context: CommandContext, invitationId: string): Promise<MutationResult>
     changePassword(context: CommandContext, oldPassword: string, newPassword: string): Promise<MutationResult>
@@ -290,6 +316,7 @@ export interface PlatformPort {
   }
   teams: {
     list(context: QueryContext): Promise<ListResult<TeamView>>
+    memberPage?(context:QueryContext,team:TeamView,after:string):Promise<ListResult<TeamMemberView>>
     create(context: CommandContext, name: string): Promise<TeamView>
     addMember(context: CommandContext, team: TeamView, userId: UserId): Promise<MutationResult>
     removeMember(context: CommandContext, team: TeamView, userId: UserId): Promise<MutationResult>
@@ -310,6 +337,8 @@ export interface PlatformPort {
   }
   sessions: {
     list(context: QueryContext): Promise<SessionSnapshot>
+    pageSessions?(context:QueryContext,after:string):Promise<ListResult<AgentSessionView>>
+    pageApprovals?(context:QueryContext,after:string):Promise<ListResult<AgentSessionRequestView>>
     open(context: CommandContext, input: { label: string; kind: "normal" | "elevated"; elevationPolicy: "fixed" | "requestable" }): Promise<AgentSessionView>
     request(context: CommandContext, input: { sessionUuid: AgentSessionUuid; grants: string[]; requestedUntil: string | null }): Promise<MutationResult>
     resolve(context: CommandContext, request: AgentSessionRequestView, approve: boolean, grants: string[], until: string | null, confirmation: { explicitExpansion: boolean }): Promise<MutationResult>
@@ -337,10 +366,7 @@ export interface PlatformPort {
   /** A5 private Project-scoped command-status endpoint; never usable for global
    * or Team-scoped idempotency keys, and NOT a mutation replay endpoint. */
   commandStatus?: {
-    get(context:QueryContext,input:{operation:string;idempotencyKey:string}):Promise<{
-      projectId:string;operation:string;state:"not_found"|"pending"|"completed"
-      outcomeHttpStatus:number|null;expiresAt:string|null;reconciliationRequired:boolean
-    }>
+    get(context:QueryContext,input:{operation:string;idempotencyKey:string;target:SourceCommandTarget}):Promise<SourceCommandReceipt>
   }
   /** Read-only operation summary adapter after accepted C1-B/C2; optional until then. */
   operations?: {

@@ -8,8 +8,9 @@ import {
   type DraftApprovalDisplay, type DraftGrantCatalog, type DraftOperatorSummary,
 } from "@/features/platform/api/draft/source-overview"
 import { parseSourceOperationalState, type SourceProjectOperationalState } from "@/features/platform/api/draft/source-state"
-import { parseSourceCommandStatus, type SourceCommandStatus } from "@/features/platform/api/draft/source-command-status"
+import { parseSourceCommandStatus, parseSourceScopedCommandStatus, type SourceScopedCommandStatus, type SourceCommandStatus } from "@/features/platform/api/draft/source-command-status"
 import { parseSourceProviderCatalog, type SourceProviderCatalog } from "@/features/platform/api/draft/source-provider-catalog"
+import { parseSourcePage, sourcePageQuery, type SourceKeysetPage, A6_PAGE_SIZE } from "@/features/platform/api/draft/source-pages"
 import { DraftSourceHttp, type DraftHttpRequest } from "@/features/platform/api/draft/source-http"
 import {
   DraftContractError, draftUuid, draftSessionUuid, draftVersion, draftList,
@@ -109,6 +110,36 @@ export class DraftPlatformSourceApi {
   async invitations(signal?:AbortSignal):Promise<DraftInvitationDisplay[]> {
     return parsedList(await this.http.request("GET","/invitations",undefined,signalOption(signal)),parseDraftInvitationDisplay)
   }
+  /** Actual A6 bounded UUIDv4 keyset Pages; after cursors never grant access. */
+  async userPage(limit=A6_PAGE_SIZE,after?:string|null,signal?:AbortSignal):Promise<SourceKeysetPage<DraftUserDisplay>> {
+    return parseSourcePage(await this.http.request("GET",`/users/page${sourcePageQuery(limit,after)}`,undefined,signalOption(signal)),
+      parseDraftUserDisplay,item=>item.user_id,limit,after)
+  }
+  async invitationPage(limit=A6_PAGE_SIZE,after?:string|null,signal?:AbortSignal):Promise<SourceKeysetPage<DraftInvitationDisplay>> {
+    return parseSourcePage(await this.http.request("GET",`/invitations/page${sourcePageQuery(limit,after)}`,undefined,signalOption(signal)),
+      parseDraftInvitationDisplay,item=>item.invitation_id,limit,after)
+  }
+  async memberDetailsPage(teamId:string,limit=A6_PAGE_SIZE,after?:string|null,signal?:AbortSignal):Promise<SourceKeysetPage<DraftMemberDisplay>> {
+    const id=draftUuid(teamId)
+    const page=parseSourcePage(await this.http.request("GET",`${team(id)}/member-details/page${sourcePageQuery(limit,after)}`,undefined,signalOption(signal)),
+      parseDraftMemberDisplay,item=>item.user_id,limit,after)
+    must(page.items.every(item=>item.team_id===id),"team_member_page_scope_mismatch")
+    return page
+  }
+  async sessionsPage(projectId:string,limit=A6_PAGE_SIZE,after?:string|null,signal?:AbortSignal):Promise<SourceKeysetPage<DraftSessionDisplay>> {
+    const id=draftUuid(projectId)
+    const page=parseSourcePage(await this.http.request("GET",`${project(id)}/sessions/page${sourcePageQuery(limit,after)}`,undefined,signalOption(signal)),
+      parseDraftSessionDisplay,item=>item.session_uuid,limit,after)
+    must(page.items.every(item=>item.project_id===id),"project_session_page_scope_mismatch")
+    return page
+  }
+  async approvalsPage(projectId:string,limit=A6_PAGE_SIZE,after?:string|null,signal?:AbortSignal):Promise<SourceKeysetPage<DraftApprovalDisplay>> {
+    const id=draftUuid(projectId)
+    const page=parseSourcePage(await this.http.request("GET",`${project(id)}/approvals/page${sourcePageQuery(limit,after)}`,undefined,signalOption(signal)),
+      parseDraftApprovalDisplay,item=>item.request_id,limit,after)
+    must(page.items.every(item=>item.project_id===id),"project_approval_page_scope_mismatch")
+    return page
+  }
   async teamAccess(teamId:string,signal?:AbortSignal):Promise<DraftTeamActions> {
     const id=draftUuid(teamId)
     const result=parseDraftTeamActions(await this.http.request("GET",`${team(id)}/permissions`,undefined,signalOption(signal)))
@@ -165,6 +196,27 @@ export class DraftPlatformSourceApi {
     const result=parseSourceCommandStatus(await this.http.request("GET",`${project(id)}/commands/${operation}/status`,undefined,{signal,idempotencyKey:key}))
     must(result.project_id===id&&result.operation===operation,"command_reconciliation_scope_mismatch")
     return result
+  }
+
+  /** A6 scopes for Team + resource creation and resource lifecycle. */
+  private async scopedCommandStatus(path:string,kind:"team"|"project_resource"|"resource",id:string,operation:string,key:string,signal?:AbortSignal):Promise<SourceScopedCommandStatus> {
+    if(!/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(operation))throw new DraftContractError("source_scoped_operation_invalid")
+    const expected=draftUuid(id)
+    const result=parseSourceScopedCommandStatus(await this.http.request("GET",path,undefined,{signal,idempotencyKey:key}))
+    must(result.scope_kind===kind&&result.scope_id===expected&&result.operation===operation,"source_scoped_command_owner_changed")
+    return result
+  }
+  async teamCommandStatus(teamId:string,operation:string,key:string,signal?:AbortSignal):Promise<SourceScopedCommandStatus> {
+    const id=draftUuid(teamId)
+    return this.scopedCommandStatus(`${team(id)}/commands/${operation}/status`,"team",id,operation,key,signal)
+  }
+  async projectResourceCommandStatus(projectId:string,operation:string,key:string,signal?:AbortSignal):Promise<SourceScopedCommandStatus> {
+    const id=draftUuid(projectId)
+    return this.scopedCommandStatus(`${project(id)}/resource-commands/${operation}/status`,"project_resource",id,operation,key,signal)
+  }
+  async resourceCommandStatus(resourceId:string,operation:string,key:string,signal?:AbortSignal):Promise<SourceScopedCommandStatus> {
+    const id=draftUuid(resourceId)
+    return this.scopedCommandStatus(`/resources/${id}/commands/${operation}/status`,"resource",id,operation,key,signal)
   }
 
   // platform_api.py: Team/Project/Agent commands. All require Idempotency-Key.

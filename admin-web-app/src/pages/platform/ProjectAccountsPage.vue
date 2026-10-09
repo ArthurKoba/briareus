@@ -6,7 +6,7 @@ import { refreshAuthenticatedProjection } from "@/features/platform/model/refres
 import { platformPort } from "@/features/platform/api/port"
 import { useCommand, useDomain } from "@/features/platform/model/use-domain"
 import { providerAuthTypes, providerCatalog, sourceProviderOptions, validResourceAlias, type SourceProviderName } from "@/features/platform/model/provider-options"
-import type { ProjectAccountInput, ProjectAccountView, ResourceOwner, ResourceScope, UiCapability } from "@/features/platform/model/contracts"
+import type { ProjectAccountInput, ProjectAccountView, ResourceOwner, ResourceScope, UiCapability, SourceCommandBinding } from "@/features/platform/model/contracts"
 import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
 import ScopedResourcePicker from "@/features/platform/ui/ScopedResourcePicker.vue"
 import ConfirmAction from "@/features/platform/ui/ConfirmAction.vue"
@@ -74,6 +74,16 @@ const requestedOwner=computed<ResourceOwner|null>(()=>{
   return projectContext.state.activeProjectKey?{kind:"project",projectId:projectContext.state.activeProjectKey}:null
 })
 const actionFor=(owner:ResourceOwner):UiCapability=>owner.kind==="team"?"accounts.teamManage":"accounts.manage"
+/** A6 create idempotency uses owner-prefixed scope, edit uses resource UUID. */
+function statusFor(owner:ResourceOwner,kind:"create"|"update"|"rotate"|"revoke",id?:string):SourceCommandBinding {
+  const operation=`integration.${kind}`
+  if(kind!=="create"){
+    if(!id)throw new Error("Existing source resource ID required for status")
+    return {operation,target:{kind:"resource",id,owner}}
+  }
+  return {operation,target:owner.kind==="team"?{kind:"team",id:owner.teamId}:
+    {kind:"project_resource",id:owner.projectId}}
+}
 function canManage(item:ProjectAccountView):boolean {
   const action=actionFor(item.owner)
   return can(action)&&item.allowedActions?.[action]===true
@@ -137,7 +147,7 @@ async function createOrRename():Promise<void> {
     ...(currentMode==="create"?{authType:form.authType,providerSettings:settings.value??undefined,credential:form.credential}:{}),
     ...(editing.value?{expectedRevision:editing.value.revision}:{})}
   const done=await command.submit(actionFor(owner),(port,ctx)=>port.accounts.save(ctx,input,editing.value?.id),
-    projectContext.state.scope==="project"&&owner.kind==="project" ? (editing.value?"integration.update":"integration.create") : null)
+    statusFor(owner,editing.value?"update":"create",editing.value?.id))
   // Credentials never persist after a failed or uncertain mutation.
   resetSensitive()
   if(done){closeForm();await refreshAuthenticatedProjection();await accounts.reload()}
@@ -151,7 +161,7 @@ async function rotate():Promise<void> {
   if(!account||!canManage(account)||!form.credential.trim())return
   const credential=form.credential
   const done=await command.submit(actionFor(account.owner),(port,ctx)=>port.accounts.rotate(ctx,account,credential),
-    projectContext.state.scope==="project"&&account.owner.kind==="project"?"integration.rotate":null)
+    statusFor(account.owner,"rotate",account.id))
   resetSensitive()
   confirmRotate.value=false
   if(done){closeForm();await refreshAuthenticatedProjection();await accounts.reload()}
@@ -160,7 +170,7 @@ async function remove():Promise<void> {
   const account=toDelete.value
   if(!account||!canManage(account))return
   const done=await command.submit(actionFor(account.owner),(port,ctx)=>port.accounts.remove(ctx,account),
-    projectContext.state.scope==="project"&&account.owner.kind==="project"?"integration.revoke":null)
+    statusFor(account.owner,"revoke",account.id))
   if(done){toDelete.value=null;await refreshAuthenticatedProjection();await accounts.reload()}
 }
 </script>

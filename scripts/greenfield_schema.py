@@ -11,7 +11,7 @@ import argparse
 import asyncio
 from typing import TYPE_CHECKING
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.schema import CreateSchema
 
 from authorization.platform_composition import platform_metadata
@@ -35,14 +35,34 @@ SCHEMAS = (
 
 
 def _require_empty(connection: Connection) -> None:
-    inspector = inspect(connection)
-    for schema in SCHEMAS:
-        if schema in inspector.get_schema_names():
-            tables = inspector.get_table_names(schema=schema)
-            if tables:
-                raise RuntimeError(
-                    f"refusing to initialize nonempty schema: {schema} has {len(tables)} tables"
-                )
+    """Refuse any preexisting *user* relation, including unknown schemas.
+
+    Checking only the ten intended domains could otherwise let a stale
+    public.legacy_users, foreign Project or independent application coexist
+    with a purportedly disposable empty greenfield database. The guard
+    accounts for views, materialized views, sequences and foreign tables.
+    """
+    relation = connection.execute(
+        text(
+            """
+            SELECT n.nspname, c.relname
+              FROM pg_catalog.pg_class AS c
+              JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+             WHERE n.nspname !~ '^pg_'
+               AND n.nspname <> 'information_schema'
+               AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+             ORDER BY n.nspname, c.relname
+             LIMIT 1
+            """
+        )
+    ).first()
+    if relation is not None:
+        # Only non-sensitive object kinds are reported, never connection
+        # details, ownership, table content or credentials.
+        raise RuntimeError(
+            "refusing nonempty disposable dev database: "
+            "preexisting user relation present"
+        )
 
 
 async def initialize() -> None:
@@ -52,8 +72,15 @@ async def initialize() -> None:
     try:
         async with database.engine.begin() as connection:
             name = (await connection.execute(text("SELECT current_database()"))).scalar_one()
-            if not name.endswith("_dev"):
+            if not isinstance(name, str) or not name.endswith("_dev"):
                 raise RuntimeError("refusing database whose name does not end in '_dev'")
+            claimed = (
+                await connection.execute(
+                    text("SELECT pg_try_advisory_xact_lock(47071, 7)")
+                )
+            ).scalar_one()
+            if not claimed:
+                raise RuntimeError("dev schema creation already in progress")
             await connection.run_sync(_require_empty)
             for schema in SCHEMAS:
                 await connection.execute(CreateSchema(schema, if_not_exists=True))

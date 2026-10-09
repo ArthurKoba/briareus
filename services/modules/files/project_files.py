@@ -11,6 +11,7 @@ import hashlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from modules.project_runtime import (
@@ -24,6 +25,7 @@ from modules.project_runtime.storage_quota import ProjectQuotaError, ProjectQuot
 from modules.project_runtime.workspace_roots import ProjectFileError
 
 from .a5_quota import A5FileQuotaFlow, A5FilesLedgerError
+from .a6_signed import A6FilesUnavailable, A6SignedFilesFlow, canonical_files_path
 from .project_workspace import (
     ProjectFileEntry,
     ProjectFilePage,
@@ -64,9 +66,13 @@ class ProjectFilesService:
         max_file_bytes: int,
         quota: ProjectQuotaGuard | None = None,
         a5_quota: A5FileQuotaFlow | None = None,
+        a6_quota: A6SignedFilesFlow | None = None,
     ) -> None:
+        if a5_quota is not None and a6_quota is not None:
+            raise A6FilesUnavailable("A6_A5_QUOTA_PROTOCOL_MIX_FORBIDDEN")
         self.quota = quota or ProjectQuotaGuard()
         self.a5_quota = a5_quota
+        self.a6_quota = a6_quota
         self.authority = authority
         self.roots = roots
         self._store = ProjectWorkspaceFiles(roots, max_file_bytes=max_file_bytes)
@@ -89,7 +95,33 @@ class ProjectFilesService:
             raise ProjectAccessDenied("FILE_PROJECT_ACCESS_STALE")
         return current
 
+    async def _a6_read_permit(
+        self,
+        invocation: ProjectInvocation,
+        permit: ProjectPermit,
+        *,
+        path: str,
+        phase: Literal["read", "list", "metadata"],
+        max_bytes: int,
+    ) -> None:
+        flow = self.a6_quota
+        if flow is None:
+            return
+        scope = invocation.operation_scope
+        if scope is None or scope.action != "files.read":
+            raise A6FilesUnavailable("A6_FILES_READ_SCOPE_REQUIRED")
+        await flow.read_permit(
+            invocation,
+            initial=permit,
+            path=path,
+            phase=phase,
+            max_bytes=max_bytes,
+            operation_uuid=scope.request_uuid,
+        )
+
     async def provision(self, invocation: ProjectInvocation) -> None:
+        if self.a6_quota is not None:
+            raise A6FilesUnavailable("A6_FILES_PROVISIONING_OS_OWNER_REQUIRED")
         permit = await self.authority.require(invocation, "files.manage")
         await asyncio.to_thread(self.roots.provision, permit)
 
@@ -102,12 +134,14 @@ class ProjectFilesService:
         limit: int = 200,
     ) -> ProjectFilePage:
         permit = await self.authority.require(invocation, "files.read")
+        await self._a6_read_permit(invocation, permit, path=path, phase="list", max_bytes=0)
         result = await asyncio.to_thread(self._store.list, permit, path, offset=offset, limit=limit)
         await self._confirm_read(invocation, permit)
         return result
 
     async def info(self, invocation: ProjectInvocation, path: str) -> ProjectFileEntry:
         permit = await self.authority.require(invocation, "files.read")
+        await self._a6_read_permit(invocation, permit, path=path, phase="metadata", max_bytes=0)
         result = await asyncio.to_thread(self._store.info, permit, path)
         await self._confirm_read(invocation, permit)
         return result
@@ -121,8 +155,29 @@ class ProjectFilesService:
         chunk_bytes: int = 1024 * 1024,
     ) -> AsyncIterator[ProjectFileSnapshot]:
         permit = await self.authority.require(invocation, "files.read")
+        snapshot_max: int | None = None
+        if self.a6_quota is not None:
+            # First DEV vertical can only snapshot a file whose complete
+            # contents fit in one A6-signed 1MiB read operation.
+            metadata = await self.info(invocation, path)
+            if metadata.kind != "file" or metadata.size_bytes > 1048576:
+                raise A6FilesUnavailable("A6_FILES_SNAPSHOT_TOO_LARGE")
+            snapshot_max = metadata.size_bytes
+            await self._a6_read_permit(
+                invocation,
+                permit,
+                path=path,
+                phase="read",
+                max_bytes=metadata.size_bytes,
+            )
         task = asyncio.create_task(
-            asyncio.to_thread(self._store.snapshot, permit, path, chunk_bytes=chunk_bytes)
+            asyncio.to_thread(
+                self._store.snapshot,
+                permit,
+                path,
+                chunk_bytes=chunk_bytes,
+                max_snapshot_bytes=snapshot_max,
+            )
         )
         try:
             snapshot = await asyncio.shield(task)
@@ -159,13 +214,42 @@ class ProjectFilesService:
             or snapshot.agent_session_version != permit.decision_version
         ):
             raise ProjectAccessDenied("FILE_SNAPSHOT_SCOPE_DENIED")
+        await self._a6_read_permit(
+            invocation,
+            permit,
+            path=snapshot.path,
+            phase="read",
+            max_bytes=min(length, 1048576),
+        )
         content = await _drain_cancellable_file_io(snapshot.read_chunk, offset, length)
         await self._confirm_read(invocation, permit)
         return content
 
     async def sha256(self, invocation: ProjectInvocation, path: str) -> str:
         permit = await self.authority.require(invocation, "files.read")
-        result = await asyncio.to_thread(self._store.sha256, permit, path)
+        if self.a6_quota is not None:
+            metadata = await self.info(invocation, path)
+            if metadata.kind != "file" or metadata.size_bytes > 1048576:
+                raise A6FilesUnavailable("A6_FILES_HASH_TOO_LARGE")
+            await self._a6_read_permit(
+                invocation,
+                permit,
+                path=path,
+                phase="read",
+                max_bytes=metadata.size_bytes,
+            )
+        if self.a6_quota is not None:
+            # Signed FilesRead.max_bytes must also limit the bytes actually
+            # consumed. A file can grow between the metadata and read phases;
+            # never hash arbitrary new bytes beyond the signed body limit.
+            payload = await asyncio.to_thread(
+                self._store.read, permit, path, max_bytes=metadata.size_bytes
+            )
+            if len(payload) != metadata.size_bytes:
+                raise A6FilesUnavailable("A6_FILES_HASH_CONTENT_CHANGED")
+            result = hashlib.sha256(payload).hexdigest()
+        else:
+            result = await asyncio.to_thread(self._store.sha256, permit, path)
         await self._confirm_read(invocation, permit)
         return result
 
@@ -173,6 +257,17 @@ class ProjectFilesService:
         self, invocation: ProjectInvocation, path: str, *, max_bytes: int | None = None
     ) -> bytes:
         permit = await self.authority.require(invocation, "files.read")
+        if self.a6_quota is not None:
+            limit = self.max_file_bytes if max_bytes is None else max_bytes
+            if type(limit) is not int or not 0 < limit <= 1048576:
+                raise A6FilesUnavailable("A6_FILES_READ_LIMIT_EXCEEDED")
+            await self._a6_read_permit(
+                invocation,
+                permit,
+                path=path,
+                phase="read",
+                max_bytes=limit,
+            )
         result = await asyncio.to_thread(self._store.read, permit, path, max_bytes=max_bytes)
         await self._confirm_read(invocation, permit)
         return result
@@ -189,10 +284,13 @@ class ProjectFilesService:
         operation_uuid: UUID | None = None,
     ) -> ProjectFileEntry:
         initial = await self.authority.require(invocation, "files.write")
-        # Validate a canonical Project-relative namespace BEFORE taking a
-        # durable quota reservation: the idempotency fingerprint must refer
-        # to exactly the pathname that the descriptor-based store will open.
-        destination = "/".join(_components(destination))
+        # FilesQuota-v2 has its own canonical reserved-name namespace,
+        # distinct from the accepted A5 bare-path SHA.
+        destination = (
+            canonical_files_path(destination)
+            if self.a6_quota is not None
+            else "/".join(_components(destination))
+        )
         upper_bound = self.max_file_bytes if expected_size is None else expected_size
         if type(upper_bound) is not int or not 0 <= upper_bound <= self.max_file_bytes:
             raise ProjectQuotaError("FILE_QUOTA_REQUEST_INVALID")
@@ -202,6 +300,20 @@ class ProjectFilesService:
             or any(c not in "0123456789abcdef" for c in expected_sha256)
         ):
             raise ProjectQuotaError("FILE_EXPECTED_SHA256_REQUIRED")
+        if self.a6_quota is not None:
+            if create_parents or type(expected_size) is not int:
+                raise A6FilesUnavailable("A6_FILES_EXACT_SIZE_AND_NO_PARENTS_REQUIRED")
+            if expected_size > 262144 or not isinstance(operation_uuid, UUID):
+                raise A6FilesUnavailable("A6_FILES_FIRST_UPLOAD_256K_LIMIT")
+            return await self._write_stream_a6(
+                invocation,
+                initial=initial,
+                destination=destination,
+                chunks=chunks,
+                expected_sha256=expected_sha256,
+                expected_size=expected_size,
+                operation_uuid=operation_uuid,
+            )
         if self.a5_quota is not None:
             if create_parents:
                 # The A5 bytes ledger has no approved directory-inode quota
@@ -275,6 +387,127 @@ class ProjectFilesService:
             stage.close()
             if not stage.committed:
                 await asyncio.shield(self.quota.release(reservation))
+
+    async def _write_stream_a6(
+        self,
+        invocation: ProjectInvocation,
+        *,
+        initial: ProjectPermit,
+        destination: str,
+        chunks: AsyncIterator[bytes],
+        expected_sha256: str,
+        expected_size: int,
+        operation_uuid: UUID,
+    ) -> ProjectFileEntry:
+        """One independent signed A6 authorization per SQL/OS phase.
+
+        The verified peer and an independently trusted UID/mount/inode Files
+        supervisor are REQUIRED before even reserving quota. A6 v2 cannot
+        silently execute the old A5 finalize(count) or local R6 quota port.
+        """
+        flow = self.a6_quota
+        if flow is None:
+            raise A6FilesUnavailable("A6_FILES_QUOTA_UNAVAILABLE")
+        flow.require_write_ready()
+        reserved = await flow.reserve(
+            invocation,
+            initial=initial,
+            destination=destination,
+            operation_uuid=operation_uuid,
+            size_bytes=expected_size,
+            sha256=expected_sha256,
+        )
+        dispatched = await flow.transition(
+            invocation,
+            initial=initial,
+            before=reserved,
+            phase="dispatch",
+        )
+        # The SQL DISPATCHED ACK precedes all filesystem mutation. An unknown
+        # dispatch outcome is never resumed/replayed from a new UUID.
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                self._store.open_write_stage,
+                initial,
+                destination,
+                create_parents=False,
+                expected_sha256=expected_sha256,
+            )
+        )
+        try:
+            stage = await asyncio.shield(task)
+        except BaseException:
+
+            def dispose_late_stage(done: asyncio.Task[ProjectFileWriteStage]) -> None:
+                if not done.cancelled() and done.exception() is None:
+                    done.result().close()
+
+            task.add_done_callback(dispose_late_stage)
+            with suppress(Exception):
+                await asyncio.shield(
+                    flow.mark_unknown(
+                        invocation,
+                        initial=initial,
+                        dispatched=dispatched,
+                    )
+                )
+            raise
+        try:
+            offset = 0
+            async for chunk in chunks:
+                if not isinstance(chunk, bytes):
+                    raise A6FilesUnavailable("A6_FILES_CHUNK_NOT_BYTES")
+                offset = await _drain_cancellable_file_io(stage.write_chunk, offset, chunk)
+                if offset > expected_size:
+                    raise A6FilesUnavailable("A6_FILES_STREAM_OVERRAN_RESERVATION")
+            if offset != expected_size:
+                raise A6FilesUnavailable("A6_FILES_STREAM_SHORT")
+            current = await self.authority.require(invocation, "files.write")
+            if (
+                current.actor_id != initial.actor_id
+                or current.session_uuid != initial.session_uuid
+                or current.decision_version != initial.decision_version
+                or current.project_access_revision != initial.project_access_revision
+                or current.project_owner_scope != initial.project_owner_scope
+                or current.project_owner_id != initial.project_owner_id
+                or current.expires_at <= datetime.now(UTC)
+                or dispatched.expires_at <= datetime.now(UTC)
+            ):
+                raise A6FilesUnavailable("A6_FILES_OWNER_OR_SESSION_STALE")
+            committed = await _drain_cancellable_file_io(stage.commit, current)
+            inode_digest = await _drain_cancellable_file_io(lambda: stage.observed_inode_digest)
+            # This only validates a pinned descriptor and current destination.
+            # A separate Files storage supervisor MUST attest current mount,
+            # UID, volume digest and inode provenance before SQL finalize.
+            observation = await flow.committed_observation(
+                invocation,
+                initial=initial,
+                dispatched=dispatched,
+                inode_digest=inode_digest,
+                content_sha256=expected_sha256,
+                size_bytes=committed.size_bytes,
+            )
+            await flow.complete(
+                invocation,
+                initial=initial,
+                dispatched=dispatched,
+                command=observation,
+            )
+            return committed
+        except BaseException:
+            # The irreversible rename or SQL commit may already have happened.
+            # An OS/SQL observer must reconcile the ORIGINAL operation UUID.
+            with suppress(Exception):
+                await asyncio.shield(
+                    flow.mark_unknown(
+                        invocation,
+                        initial=initial,
+                        dispatched=dispatched,
+                    )
+                )
+            raise
+        finally:
+            stage.close()
 
     async def _write_stream_a5(
         self,
@@ -407,6 +640,8 @@ class ProjectFilesService:
     async def mkdir(
         self, invocation: ProjectInvocation, path: str, *, parents: bool = False
     ) -> None:
+        if self.a6_quota is not None:
+            raise A6FilesUnavailable("A6_DIRECTORY_INODE_LEDGER_UNAVAILABLE")
         if self.a5_quota is not None:
             raise A5FilesLedgerError("A5_DIRECTORY_QUOTA_UNAVAILABLE")
         permit = await self.authority.require(invocation, "files.write")
@@ -420,6 +655,8 @@ class ProjectFilesService:
         *,
         overwrite: bool = False,
     ) -> None:
+        if self.a6_quota is not None:
+            raise A6FilesUnavailable("A6_FILES_MOVE_METADATA_CAS_UNAVAILABLE")
         if self.a5_quota is not None:
             # A5 FileObject identity is keyed by path digest and DB version.
             # Rename without atomic FileObject metadata CAS would corrupt
@@ -439,6 +676,10 @@ class ProjectFilesService:
         overwrite: bool = False,
         operation_uuid: UUID | None = None,
     ) -> ProjectFileEntry:
+        if self.a6_quota is not None:
+            # A Files-to-Files copy needs a separate A6 signed source READ
+            # audience and destination WRITE intent with independent UUIDs.
+            raise A6FilesUnavailable("A6_FILES_COPY_SOURCE_CAS_UNAVAILABLE")
         if overwrite:
             raise ProjectQuotaError("FILE_QUOTA_OVERWRITE_UNAVAILABLE")
         async with self.open_snapshot(invocation, source) as snapshot:
@@ -471,6 +712,10 @@ class ProjectFilesService:
         older_than_seconds: float = 3600.0,
         limit: int = 128,
     ) -> int:
+        if self.a6_quota is not None:
+            # Even abandoned stages may correspond to dispatched/UNKNOWN SQL
+            # reservations. A5 manage is not an A6 cleanup capability.
+            raise A6FilesUnavailable("A6_FILES_ORPHAN_CLEANUP_LEDGER_REQUIRED")
         permit = await self.authority.require(invocation, "files.manage")
         return await asyncio.to_thread(
             self._store.cleanup_orphan_uploads,
@@ -481,6 +726,8 @@ class ProjectFilesService:
         )
 
     async def delete(self, invocation: ProjectInvocation, path: str) -> None:
+        if self.a6_quota is not None:
+            raise A6FilesUnavailable("A6_FILES_DELETE_METADATA_CAS_UNAVAILABLE")
         # Deleting a charged file/directory requires durable quota release,
         # expected filesystem revision and Project retention policy. None is
         # accepted in C1-B2, so even a source-injected files.manage permit

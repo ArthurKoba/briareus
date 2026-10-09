@@ -5,7 +5,7 @@ Factory only. Existing Authorization/Admin runtimes are NOT switched over.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pydantic import Field
 from sqlalchemy import MetaData
@@ -21,6 +21,7 @@ from projects._runtime_ledger import RuntimeLedger
 from ._external_operations import ExternalOperationLedger
 from ._files_vertical import SignedFilesAuthority
 from ._idempotency import IdempotentCommandExecutor
+from ._mtls_peer import PinnedMTLSPeerVerifier, PinnedServiceCertificate
 from ._native_vertical import SignedNativeImportAuthority
 from ._outbox import OutboxDispatcher
 from ._platform_application import PlatformApplication
@@ -172,4 +173,35 @@ def compose_platform(settings: PlatformDatabaseSettings) -> PlatformServices:
         native_imports=native_imports,
         scoped_events=scoped_events,
         scoped_outbox=scoped_outbox,
+    )
+
+
+def bind_explicit_dev_mtls(
+    services: PlatformServices,
+    *,
+    pins: tuple[PinnedServiceCertificate, ...],
+) -> PlatformServices:
+    """Opt-in service transport composition after independent D1 trust review.
+
+    The pins MUST be supplied by an authenticated infrastructure supervisor
+    from its trusted release configuration. No operator/browser/controller
+    request body, proxy headers or unauthenticated environment value may
+    create a trusted service binding. This neither binds an HTTP listener nor
+    mounts private/project routes; external activation remains C1-B2/C2.
+    """
+    if services.service_identity is None:
+        raise ValueError("DEV service identity is not enabled with trusted signing material")
+    verifier = PinnedMTLSPeerVerifier(pins)
+    controller = PrivateServiceAuthorizationController(
+        services.service_identity, peer_authenticator=verifier
+    )
+    return replace(
+        services,
+        service_transport=controller,
+        signed_files=SignedFilesAuthority(controller, services.file_quotas),
+        signed_runtime=SignedRuntimeAuthority(controller, services.runtimes),
+        signed_native_imports=SignedNativeImportAuthority(controller, services.native_imports),
+        signed_provider_reads=SignedProviderReadAuthority(
+            controller, services.resources, services.credential_use, services.external_operations
+        ),
     )

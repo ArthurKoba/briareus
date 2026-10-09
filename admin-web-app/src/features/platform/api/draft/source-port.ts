@@ -270,6 +270,22 @@ function toOperationalRows(data:SourceProjectOperationalState,area:OperationalAr
   }
 }
 
+/** A6 has no source detail GET; the frontend can verify an explicit UUID by
+ * bounded, authenticated keyset reads. Exceeding the window is UNKNOWN, not
+ * proof of deletion or permission to create a new mutation key. */
+async function lookupA6Page<T>(load:(after:string|null)=>Promise<{items:T[];has_more:boolean;next_after_id:string|null}>,
+  identify:(item:T)=>string,target:string):Promise<T|undefined>{
+  let after:string|null=null
+  for(let i=0;i<32;i++){
+    const page=await load(after)
+    const match=page.items.find(item=>identify(item)===target)
+    if(match)return match
+    if(!page.has_more)return undefined
+    if(!page.next_after_id||page.next_after_id===after)return missingContract("source_page_cursor_stalled")
+    after=page.next_after_id
+  }
+  return missingContract("source_page_lookup_limit_reached")
+}
 /** Bound readonly fan-out; huge Team/Project membership must not launch N simultaneous calls. */
 async function mapLimited<T, R>(
   items: readonly T[], signal: AbortSignal, fn: (item: T) => Promise<R>,
@@ -291,13 +307,15 @@ async function mapLimited<T, R>(
 }
 
 async function mapTeam(client: DraftPlatformSourceApi, item: DraftTeam, signal:AbortSignal):Promise<TeamView> {
-  const [members,permit] = await Promise.all([
-    client.memberDetails(item.team_id,signal),client.teamAccess(item.team_id,signal),
+  const [page,permit] = await Promise.all([
+    client.memberDetailsPage(item.team_id,100,null,signal),client.teamAccess(item.team_id,signal),
   ])
+  const members=page.items
   const owner=members.find(member=>member.user_id===item.owner_user_id)
   return {
     id:item.team_id,name:item.name,ownerId:item.owner_user_id,ownerLabel:owner?.username??item.owner_user_id,
     revision:String(item.version),decisionVersion:permit.decision_version,
+    memberNextAfterId:page.next_after_id,memberHasMore:page.has_more,
     allowedActions:teamActions(permit),
     members:members.map(member=>({
       userId:member.user_id,label:member.username,active:member.active&&member.enabled,
@@ -480,28 +498,37 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
       async redeemPasswordReset(input,signal,idempotencyKey){await source.resetPassword({token:input.resetToken,new_password:input.password},idempotencyKey,signal)},
     },
     users:{
-      async list(ctx){
+      async list(ctx,after){
         if(ctx.scope.kind!=="operator")return missingContract("operator_scope_required")
-        const [current,users,teams,projects]=await Promise.all([
-          source.context(ctx.signal),source.users(ctx.signal),source.teams(ctx.signal),source.projects(ctx.signal),
-        ])
-        if(!current.global_operator || !current.user.allowed_actions.includes("identity.users.list"))return missingContract("verified_user_directory_required")
-        return {items:users.map(user=>mapUser(
-          user,teams.filter(team=>team.owner_user_id===user.user_id).length,
-          projects.filter(project=>project.owner_user_id===user.user_id).length,current,
-        ))}
+        const before=await source.context(ctx.signal)
+        if(!before.global_operator||!before.user.enabled||
+           !before.user.allowed_actions.includes("identity.users.list"))return missingContract("verified_user_directory_required")
+        const page=await source.userPage(100,after,ctx.signal)
+        const current=await source.context(ctx.signal)
+        if(snapshotKey(before)!==snapshotKey(current))return missingContract("user_directory_acl_epoch_changed")
+        return {
+          items:page.items.map(item=>mapUser(item,undefined,undefined,current)),
+          nextAfterId:page.next_after_id,hasMore:page.has_more,pageSize:page.page_size,
+          possiblyTruncated:page.has_more,serverLimit:page.page_size,
+        }
       },
-      async invitations(ctx){
-        const [current,items]=await Promise.all([source.context(ctx.signal),source.invitations(ctx.signal)])
-        return {items:items.map(item=>{
-          if(!["registration","password_reset"].includes(item.kind))return missingContract("invitation_kind_unsupported")
-          if(!current.global_operator && item.issuer_id!==current.user.user_id)return missingContract("invitation_scope_mismatch")
-          return {
-            id:item.invitation_id,kind:item.kind as "registration"|"password_reset",createdAt:item.created_at,
-            issuerLabel:item.issuer_id??"—",expiresAt:item.expires_at,
-            consumedAt:item.used_at,revokedAt:item.revoked_at,
-          }
-        })}
+      async invitations(ctx,after){
+        const before=await source.context(ctx.signal)
+        if(!before.user.enabled)return missingContract("disabled_user_invitation_read")
+        const page=await source.invitationPage(100,after,ctx.signal)
+        const current=await source.context(ctx.signal)
+        if(snapshotKey(before)!==snapshotKey(current))return missingContract("invitation_acl_epoch_changed")
+        return {
+          items:page.items.map(item=>{
+            if(!["registration","password_reset"].includes(item.kind))return missingContract("invitation_kind_unsupported")
+            if(!current.global_operator&&item.issuer_id!==current.user.user_id)return missingContract("invitation_scope_mismatch")
+            return {id:item.invitation_id,kind:item.kind as "registration"|"password_reset",createdAt:item.created_at,
+              issuerLabel:item.issuer_id??"—",expiresAt:item.expires_at,
+              consumedAt:item.used_at,revokedAt:item.revoked_at}
+          }),
+          nextAfterId:page.next_after_id,hasMore:page.has_more,pageSize:page.page_size,
+          possiblyTruncated:page.has_more,serverLimit:page.page_size,
+        }
       },
       async issueInvitation(ctx){const result=await source.issueInvitation(ctx.idempotencyKey,ctx.signal);return {invitationUrl:result.url,expiresAt:null}},
       async revokeInvitation(ctx,id){const result=await source.revokeInvitation(id,ctx.idempotencyKey,ctx.signal);if(!result.revoked) return missingContract("invitation_revoke_unconfirmed");return {}},
@@ -519,6 +546,19 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
     },
     teams:{
       async list(ctx){const raw=await source.teams(ctx.signal);return {items:await mapLimited(raw,ctx.signal,team=>mapTeam(source,team,ctx.signal))}},
+      async memberPage(ctx,team,after){
+        const before=await source.teamAccess(team.id,ctx.signal)
+        if(!team.decisionVersion||before.decision_version!==team.decisionVersion)
+          return missingContract("team_member_page_decision_changed")
+        const page=await source.memberDetailsPage(team.id,100,after,ctx.signal)
+        const current=await source.teamAccess(team.id,ctx.signal)
+        if(current.decision_version!==before.decision_version)return missingContract("team_member_page_decision_changed")
+        return {
+          items:page.items.map(item=>({userId:item.user_id,label:item.username,
+            active:item.enabled&&item.active,owner:item.user_id===team.ownerId})),
+          hasMore:page.has_more,nextAfterId:page.next_after_id,pageSize:page.page_size,
+        }
+      },
       async create(ctx,name){
         const raw=await source.createTeam(name,ctx.idempotencyKey,ctx.signal)
         // Team creation response does not include members. Do NOT issue a
@@ -594,25 +634,45 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
       async list(ctx){
         const id=scopeProject(ctx)
         const before=await source.projectAccess(id,ctx.signal)
-        const [rows,approvals,catalog]=await Promise.all([
-          source.sessions(id,ctx.signal),source.approvals(id,ctx.signal),source.grantCatalog(id,ctx.signal),
+        const [sPage,aPage,catalog]=await Promise.all([
+          source.sessionsPage(id,100,null,ctx.signal),source.approvalsPage(id,100,null,ctx.signal),
+          source.grantCatalog(id,ctx.signal),
         ])
         const after=await source.projectAccess(id,ctx.signal)
         if(before.decision_version!==after.decision_version)return missingContract("session_decision_changed")
         requireSourceDecision(ctx,after.decision_version)
-        if(new Set(rows.map(item=>item.session_uuid)).size!==rows.length||
-           new Set(approvals.map(item=>item.request_id)).size!==approvals.length)
-          return missingContract("session_approval_snapshot_duplicate")
-        // A4 limits each list to 250. An approval's base session can be
-        // outside the current page; that approval remains visible but cannot
-        // be approved until a fresh authoritative base is available.
         return {
-          sessions:rows.map(item=>mapSession(item,after)),
-          requests:approvals.map(item=>mapApproval(item,after,rows)),
+          sessions:sPage.items.map(item=>mapSession(item,after)),
+          requests:aPage.items.map(item=>mapApproval(item,after,sPage.items)),
+          sessionsHasMore:sPage.has_more,approvalsHasMore:aPage.has_more,
+          sessionsNextAfterId:sPage.next_after_id,approvalsNextAfterId:aPage.next_after_id,
+          sourcePageSize:100,
           availableGrants:catalog.supported_grants.map(id=>({id,label:id})),
           normalHardTtlSeconds:catalog.normal_hard_ttl_seconds,
           elevatedMaxSeconds:catalog.elevated_max_seconds,
         }
+      },
+      async pageSessions(ctx,after){
+        const id=scopeProject(ctx)
+        const before=await source.projectAccess(id,ctx.signal)
+        requireSourceDecision(ctx,before.decision_version)
+        const page=await source.sessionsPage(id,100,after,ctx.signal)
+        const current=await source.projectAccess(id,ctx.signal)
+        if(current.decision_version!==before.decision_version)return missingContract("session_page_acl_changed")
+        return {items:page.items.map(item=>mapSession(item,current)),
+          nextAfterId:page.next_after_id,hasMore:page.has_more,pageSize:page.page_size}
+      },
+      async pageApprovals(ctx,after){
+        const id=scopeProject(ctx)
+        const before=await source.projectAccess(id,ctx.signal)
+        requireSourceDecision(ctx,before.decision_version)
+        const [page,initialSessions]=await Promise.all([
+          source.approvalsPage(id,100,after,ctx.signal),source.sessionsPage(id,100,null,ctx.signal),
+        ])
+        const current=await source.projectAccess(id,ctx.signal)
+        if(current.decision_version!==before.decision_version)return missingContract("approval_page_acl_changed")
+        return {items:page.items.map(item=>mapApproval(item,current,initialSessions.items)),
+          nextAfterId:page.next_after_id,hasMore:page.has_more,pageSize:page.page_size}
       },
       async open(ctx,input){
         if(input.kind!=="normal"||input.label.trim())return missingContract("session_label_or_elevated_open_unsupported")
@@ -625,9 +685,11 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
       async request(ctx,input){
         const id=scopeProject(ctx)
         if(!canonicalUuid4(input.sessionUuid))return missingContract("session_uuid_invalid")
-        const [rows,catalog,permit]=await Promise.all([source.sessions(id,ctx.signal),source.grantCatalog(id,ctx.signal),source.projectAccess(id,ctx.signal)])
+        const [session,catalog,permit]=await Promise.all([
+          lookupA6Page(after=>source.sessionsPage(id,100,after,ctx.signal),item=>item.session_uuid,input.sessionUuid),
+          source.grantCatalog(id,ctx.signal),source.projectAccess(id,ctx.signal),
+        ])
         requireSourceDecision(ctx,permit.decision_version)
-        const session=rows.find(item=>item.session_uuid===input.sessionUuid)
         if(!session||session.status!=="active"||session.is_elevated||session.elevation_policy!=="requestable"||
            Date.parse(session.hard_expires_at)<=Date.now())return missingContract("session_not_requestable")
         if(!input.grants.length||input.grants.length>32||input.grants.some(item=>!catalog.supported_grants.includes(item)))
@@ -645,14 +707,14 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
         const id=scopeProject(ctx)
         if(request.projectId!==id||!canonicalUuid4(request.sessionUuid)||!request.snapshotKey)
           return missingContract("approval_scope_or_snapshot_missing")
-        const [permit,approvals,catalog,rows]=await Promise.all([
-          source.projectAccess(id,ctx.signal),source.approvals(id,ctx.signal),
-          source.grantCatalog(id,ctx.signal),source.sessions(id,ctx.signal),
+        const [permit,current,catalog,base]=await Promise.all([
+          source.projectAccess(id,ctx.signal),
+          lookupA6Page(after=>source.approvalsPage(id,100,after,ctx.signal),item=>item.request_id,request.id),
+          source.grantCatalog(id,ctx.signal),
+          lookupA6Page(after=>source.sessionsPage(id,100,after,ctx.signal),item=>item.session_uuid,request.sessionUuid),
         ])
         requireSourceDecision(ctx,permit.decision_version)
         if(!permit.can_approve_agent_sessions)return missingContract("approval_permission_revoked")
-        const current=approvals.find(item=>item.request_id===request.id)
-        const base=rows.find(item=>item.session_uuid===request.sessionUuid)
         if(!current||current.status!=="pending"||approvalSnapshot(current)!==request.snapshotKey||
            !base||base.status!=="active"||Date.parse(base.hard_expires_at)<=Date.now()||
            Date.parse(current.requested_expires_at)<=Date.now())return missingContract("approval_snapshot_stale")
@@ -676,9 +738,11 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
       async revoke(ctx,session){
         const id=scopeProject(ctx)
         if(session.projectId!==id||!canonicalUuid4(session.sessionUuid))return missingContract("session_scope_mismatch")
-        const [rows,permit]=await Promise.all([source.sessions(id,ctx.signal),source.projectAccess(id,ctx.signal)])
+        const [current,permit]=await Promise.all([
+          lookupA6Page(after=>source.sessionsPage(id,100,after,ctx.signal),item=>item.session_uuid,session.sessionUuid),
+          source.projectAccess(id,ctx.signal),
+        ])
         requireSourceDecision(ctx,permit.decision_version)
-        const current=rows.find(item=>item.session_uuid===session.sessionUuid)
         if(!current||current.status!=="active"||Date.parse(current.hard_expires_at)<=Date.now()||
            draftVersion(session.revision)!==current.version)return missingContract("session_revocation_stale")
         const result=await source.revokeSession(id,session.sessionUuid,ctx.idempotencyKey,ctx.signal)
@@ -794,13 +858,79 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
     },
     commandStatus:{
       async get(ctx,input){
-        const id=scopeProject(ctx)
-        const before=await source.projectAccess(id,ctx.signal)
-        requireSourceDecision(ctx,before.decision_version)
-        const status=await source.commandStatus(id,input.operation,input.idempotencyKey,ctx.signal)
-        const after=await source.projectAccess(id,ctx.signal)
-        if(after.decision_version!==before.decision_version)return missingContract("command_status_scope_changed")
-        return {projectId:status.project_id,operation:status.operation,state:status.state,
+        const target=input.target
+        const statusScope=target.id
+        const current=ctx.scope
+        const verifyTeam=async():Promise<string>=>{
+          const permit=await source.teamAccess(statusScope,ctx.signal)
+          if(!permit.can_manage_resources)return missingContract("team_source_manage_revoked")
+          if(current.kind==="team"){
+            if(statusScope!==current.teamId)return missingContract("team_status_scope_mismatch")
+            requireSourceDecision(ctx,permit.decision_version)
+          }else if(current.kind==="project"){
+            const project=await source.projectAccess(current.projectId,ctx.signal)
+            requireSourceDecision(ctx,project.decision_version)
+            if(project.owner_scope!=="team"||project.owner_id!==statusScope||!project.can_manage_team_resources)
+              return missingContract("team_status_not_current_project_owner")
+          }else return missingContract("team_status_wrong_selected_scope")
+          return permit.decision_version
+        }
+        const verifyProject=async():Promise<string>=>{
+          if(current.kind==="operator"&&["project.admin_reassign","project.transfer_owner"].includes(input.operation)){
+            // An actual verified source superuser, never a role-name hint,
+            // may query the target Project's original idempotency outcome.
+            await requireOperatorCommand(source,ctx)
+          }else if(current.kind!=="project"||current.projectId!==statusScope){
+            return missingContract("project_status_scope_mismatch")
+          }
+          const permit=await source.projectAccess(statusScope,ctx.signal)
+          if(current.kind==="project")requireSourceDecision(ctx,permit.decision_version)
+          return permit.decision_version
+        }
+        let before:string
+        let status
+        if(target.kind==="project"){
+          before=await verifyProject()
+          status=await source.commandStatus(statusScope,input.operation,input.idempotencyKey,ctx.signal)
+          if(await verifyProject()!==before)return missingContract("command_status_permission_revoked")
+          return {kind:target.kind,id:status.project_id,operation:status.operation,state:status.state,
+            outcomeHttpStatus:status.outcome_http_status,expiresAt:status.expires_at,reconciliationRequired:status.reconciliation_required}
+        }
+        if(target.kind==="project_resource"){
+          before=await verifyProject()
+          status=await source.projectResourceCommandStatus(statusScope,input.operation,input.idempotencyKey,ctx.signal)
+          if(await verifyProject()!==before)return missingContract("command_status_permission_revoked")
+        }else if(target.kind==="team"){
+          before=await verifyTeam()
+          status=await source.teamCommandStatus(statusScope,input.operation,input.idempotencyKey,ctx.signal)
+          if(await verifyTeam()!==before)return missingContract("command_status_permission_revoked")
+        }else{
+          if(current.kind!=="team"&&current.kind!=="project")return missingContract("resource_status_scope_invalid")
+          const kind=input.operation.startsWith("integration.")?"integrations":
+            input.operation.startsWith("variable.")?"variables":null
+          if(!kind)return missingContract("resource_status_operation_invalid")
+          // Revoked records disappear from the effective resource list even
+          // after a successful committed request. The accepted A6 status
+          // endpoint itself locks/re-authorizes the underlying owner row;
+          // checking only the active resource list first would make an ACKed
+          // revoke permanently unreconcilable. Non-revoke operations still
+          // require a currently visible exact resource/owner record.
+          if(!input.operation.endsWith(".revoke")){
+            const record=await readScopedResource(source,ctx,kind,statusScope)
+            if(record.owner_scope!==target.owner.kind||record.owner_id!==
+               (target.owner.kind==="team"?target.owner.teamId:target.owner.projectId))
+              return missingContract("resource_status_owner_changed")
+          }
+          await requireOwner(source,ctx,target.owner)
+          before=current.kind==="team"?(await source.teamAccess(current.teamId,ctx.signal)).decision_version:
+            (await source.projectAccess(current.projectId,ctx.signal)).decision_version
+          requireSourceDecision(ctx,before)
+          status=await source.resourceCommandStatus(statusScope,input.operation,input.idempotencyKey,ctx.signal)
+          const after=current.kind==="team"?(await source.teamAccess(current.teamId,ctx.signal)).decision_version:
+            (await source.projectAccess(current.projectId,ctx.signal)).decision_version
+          if(before!==after)return missingContract("resource_status_permission_changed")
+        }
+        return {kind:status.scope_kind,id:status.scope_id,operation:status.operation,state:status.state,
           outcomeHttpStatus:status.outcome_http_status,expiresAt:status.expires_at,reconciliationRequired:status.reconciliation_required}
       },
     },

@@ -510,6 +510,7 @@ class ProjectWorkspaceFiles:
         path: str,
         *,
         chunk_bytes: int = 1024 * 1024,
+        max_snapshot_bytes: int | None = None,
     ) -> ProjectFileSnapshot:
         """Copy a bounded regular file into an unlinked, owner-private inode.
 
@@ -521,6 +522,11 @@ class ProjectWorkspaceFiles:
         self._require_action(permit, "files.read")
         if not 0 < chunk_bytes <= 16 * 1024 * 1024:
             raise ProjectFileError("FILE_SNAPSHOT_CHUNK_INVALID")
+        upper_bound = self.max_file_bytes
+        if max_snapshot_bytes is not None:
+            if type(max_snapshot_bytes) is not int or not 0 <= max_snapshot_bytes <= upper_bound:
+                raise ProjectFileError("FILE_SNAPSHOT_LIMIT_INVALID")
+            upper_bound = max_snapshot_bytes
         if not hasattr(os, "O_TMPFILE"):
             raise ProjectFileError("FILE_SNAPSHOT_UNAVAILABLE")
         parts = _components(path)
@@ -529,7 +535,7 @@ class ProjectWorkspaceFiles:
                 source_fd = _open_beneath(parent_fd, parts[-1], _FILE_FLAGS)
                 try:
                     before = _checked_file(source_fd, device=os.fstat(root_fd).st_dev)
-                    if before.st_size > self.max_file_bytes:
+                    if before.st_size > upper_bound:
                         raise ProjectFileError("FILE_TOO_LARGE")
                     try:
                         snapshot_fd = os.open(
@@ -550,7 +556,7 @@ class ProjectWorkspaceFiles:
                             if not data:
                                 break
                             total += len(data)
-                            if total > self.max_file_bytes:
+                            if total > upper_bound:
                                 raise ProjectFileError("FILE_TOO_LARGE")
                             digest.update(data)
                             view = memoryview(data)
