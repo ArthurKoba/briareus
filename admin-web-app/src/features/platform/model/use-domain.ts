@@ -5,7 +5,7 @@ import { normalizeUiError, type UiError } from "@/features/platform/model/errors
 import { scopedEvents } from "@/features/platform/model/project-events"
 import { refreshAuthenticatedProjection } from "@/features/platform/model/refresh-identity"
 import { commandCoordinator, resourceForAction, type CommandResource, type PendingCommand } from "@/features/platform/model/command-coordinator"
-import type { CommandContext, PlatformPort, QueryContext, ScopeSelection, UiCapability } from "@/features/platform/model/contracts"
+import type { CommandContext, PlatformPort, QueryContext, ScopeSelection, UiCapability, SourceCommandBinding } from "@/features/platform/model/contracts"
 
 function verifiedDecisionVersion(scope: ScopeSelection): string | null {
   if(scope.kind==="project")return projectContext.state.projectDecisionVersions[scope.projectId]??null
@@ -77,18 +77,21 @@ async function readActionDomain(port:PlatformPort, context:QueryContext, resourc
 async function confirmedProjectEffect(port:PlatformPort,context:QueryContext,entry:PendingCommand):Promise<boolean>{
   // A5 command status exists ONLY for Project-owned operations. Refreshing a
   // Team/global list is NOT a proof that an already-sent write did not commit.
-  if(!entry.sourceOperation)return false
-  if(context.scope.kind!=="project"||!port.commandStatus)return false
+  if(!entry.sourceOperation||!entry.sourceTarget||!port.commandStatus)return false
   const status=await port.commandStatus.get(context,{
-    operation:entry.sourceOperation,idempotencyKey:entry.commandId,
+    operation:entry.sourceOperation,idempotencyKey:entry.commandId,target:entry.sourceTarget,
   })
-  return status.projectId===context.scope.projectId&&status.operation===entry.sourceOperation&&
+  return status.kind===entry.sourceTarget.kind&&status.id===entry.sourceTarget.id&&
+    status.operation===entry.sourceOperation&&
     status.state==="completed"&&!status.reconciliationRequired&&
     status.outcomeHttpStatus!==null&&status.outcomeHttpStatus>=200&&status.outcomeHttpStatus<300
 }
 
-export interface DomainLoad<T> { items: T[]; revision?: string | null; serverLimit?: number; possiblyTruncated?: boolean; observedAt?: string }
-export type ReadDomain<T> = (port: PlatformPort, context: QueryContext) => Promise<DomainLoad<T>>
+export interface DomainLoad<T> {
+  items:T[]; revision?:string|null; serverLimit?:number; possiblyTruncated?:boolean; observedAt?:string
+  nextAfterId?:string|null; hasMore?:boolean; pageSize?:number
+}
+export type ReadDomain<T> = (port: PlatformPort, context: QueryContext, after?:string|null) => Promise<DomainLoad<T>>
 export type WriteDomain = (port: PlatformPort, context: CommandContext) => Promise<unknown>
 export type LoadStatus = "blocked" | "idle" | "loading" | "ready" | "empty" | "error"
 
@@ -131,6 +134,11 @@ export function useDomain<T>(
     serverLimit: null as number | null,
     possiblyTruncated: false,
     observedAt: null as string | null,
+    nextAfterId: null as string | null,
+    hasMore: false,
+    pageSize: null as number | null,
+    loadingMore: false,
+    loadMoreError: null as UiError | null,
     error: null as UiError | null,
     busy: false,
     actionError: null as UiError | null,
@@ -140,6 +148,7 @@ export function useDomain<T>(
   let readRun = 0
   let writeRun = 0
   let controller: AbortController | null = null
+  let pagination: AbortController | null = null
   let mutation: AbortController | null = null
   let activeWrite: PendingCommand | null = null
   let disposed = false
@@ -153,6 +162,8 @@ export function useDomain<T>(
     ++readRun
     ++writeRun
     controller?.abort()
+    pagination?.abort()
+    pagination=null
     // A discarded in-flight response is an UNKNOWN server write outcome.
     if (activeWrite) commandCoordinator.uncertain(activeWrite)
     activeWrite = null
@@ -164,6 +175,11 @@ export function useDomain<T>(
     state.serverLimit = null
     state.possiblyTruncated = false
     state.observedAt = null
+    state.nextAfterId=null
+    state.hasMore=false
+    state.pageSize=null
+    state.loadingMore=false
+    state.loadMoreError=null
     state.error = null
     state.actionError = null
     state.reconciliationRequired = false
@@ -181,6 +197,13 @@ export function useDomain<T>(
   async function reload(): Promise<boolean> {
     ++readRun
     controller?.abort()
+    pagination?.abort()
+    pagination=null
+    state.loadingMore=false
+    state.loadMoreError=null
+    state.nextAfterId=null
+    state.hasMore=false
+    state.pageSize=null
     controller = null
     state.error = null
     state.items = []
@@ -205,6 +228,9 @@ export function useDomain<T>(
       state.serverLimit = result.serverLimit ?? null
       state.possiblyTruncated = result.possiblyTruncated === true
       state.observedAt = result.observedAt ?? null
+      state.nextAfterId=result.nextAfterId??null
+      state.hasMore=result.hasMore===true
+      state.pageSize=result.pageSize??null
       state.status = result.items.length ? "ready" : "empty"
       return true
     } catch (cause) {
@@ -218,7 +244,47 @@ export function useDomain<T>(
       if (controller === abort) controller = null
     }
   }
-  async function execute(action: UiCapability, write: WriteDomain, sourceOperation: string | null = null): Promise<boolean> {
+  /** One bounded A6 keyset GET, never a background auto-fetch or fake snapshot. */
+  async function loadMore():Promise<boolean> {
+    if(disposed||!usable()||!state.hasMore||!state.nextAfterId||state.loadingMore||
+       state.status==="loading"||state.busy)return false
+    const port=platformPort.value
+    if(!port)return false
+    const cursor=state.nextAfterId
+    const version=readRun
+    const abort=new AbortController()
+    pagination=abort
+    const context=snapshot(abort.signal)
+    if(!context)return false
+    state.loadingMore=true
+    state.loadMoreError=null
+    try {
+      const result=await read(port,context,cursor)
+      if(disposed||abort.signal.aborted||version!==readRun||
+         !sameScope(context.scope,context.revision)||port!==platformPort.value)return false
+      if(result.hasMore===true&&(!result.nextAfterId||result.nextAfterId===cursor)){
+        throw new Error("A6 keyset cursor failed to advance")
+      }
+      // Page N is authorized independently; it is not an immutable snapshot.
+      // Entity action confirmations are cleared by the caller's list watcher
+      // if server authority changes; no newer Project/User is auto-selected.
+      state.items=[...state.items,...result.items]
+      state.nextAfterId=result.nextAfterId??null
+      state.hasMore=result.hasMore===true
+      state.pageSize=result.pageSize??state.pageSize
+      state.status=state.items.length?"ready":"empty"
+      return true
+    }catch(error){
+      if(!disposed&&!abort.signal.aborted&&version===readRun&&sameScope(context.scope,context.revision)){
+        const issue=normalizeUiError(error)
+        if(!handlePermissionError(issue,context.scope))state.loadMoreError=issue
+      }
+      return false
+    }finally{
+      if(pagination===abort){pagination=null;state.loadingMore=false}
+    }
+  }
+  async function execute(action: UiCapability, write: WriteDomain, sourceOperation: string | SourceCommandBinding | null = null): Promise<boolean> {
     const port = platformPort.value
     if (!usable() || !projectContext.can(action) || state.busy || state.reconciliationRequired || !port || disposed ||
         commandCoordinator.lookup(projectContext.state.user?.key ?? "", projectContext.selection())) return false
@@ -329,7 +395,7 @@ export function useDomain<T>(
     if (event.resource === resource || event.resource === "all") void reload()
   })
   onBeforeUnmount(() => { disposed = true; stop(); unsubscribe(); invalidate() })
-  return { state, reload, execute, reconcile, usable }
+  return { state, reload, loadMore, execute, reconcile, usable }
 }
 
 /** Standalone mutation needs a verified list-read to unlock uncertain results. */
@@ -364,7 +430,7 @@ export function useCommand(scopes: ScopeSelection["kind"][] = ["account", "team"
   }
   const stop = projectContext.onTransition(invalidate)
   const stopAdapter = watch(platformPort, invalidate)
-  async function submit(ability: UiCapability, action: WriteDomain, sourceOperation: string | null = null): Promise<boolean> {
+  async function submit(ability: UiCapability, action: WriteDomain, sourceOperation: string | SourceCommandBinding | null = null): Promise<boolean> {
     const port = platformPort.value
     const scope = projectContext.selection()
     if (disposed || state.busy || state.reconciliationRequired || !port || !scope || !scopes.includes(scope.kind) || !projectContext.can(ability)) return false

@@ -1,5 +1,5 @@
 import type { AccessProjection, PlatformPort } from "@/features/platform/model/contracts"
-import { acceptedA5Source } from "@/features/platform/api/draft/source-acceptance"
+import { acceptedA6Source } from "@/features/platform/api/draft/source-acceptance"
 
 /**
  * The cutover is intentionally NOT a runtime feature flag. It requires an
@@ -31,11 +31,11 @@ export interface ReviewedPlatformRuntimeComposition {
 
 export const platformCutoverReadiness: Readonly<{
   state:"blocked"
-  acceptedSource:typeof acceptedA5Source.source
+  acceptedSource:typeof acceptedA6Source.source
   missing:readonly PlatformCutoverPrerequisite[]
 }> = Object.freeze({
   state:"blocked",
-  acceptedSource:acceptedA5Source.source,
+  acceptedSource:acceptedA6Source.source,
   missing:Object.freeze([
     "approved-public-api-contract",
     "server-verified-active-principal",

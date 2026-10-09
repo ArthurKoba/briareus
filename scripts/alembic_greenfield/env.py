@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from alembic import context
+from alembic.script import ScriptDirectory
 from pydantic import Field, SecretStr
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
@@ -27,6 +28,20 @@ if not url.startswith("postgresql+asyncpg://"):
     raise ValueError("PLATFORM_DATABASE_URL must use postgresql+asyncpg")
 
 target_metadata = platform_metadata()
+
+
+def _require_approved_migration_head() -> None:
+    # No source-tracked initial Alembic revision exists yet. Silently
+    # running "upgrade head" against a new dev DB would otherwise report
+    # success after creating an empty version table but NO platform tables.
+    # Revisions are generated and independently accepted in local/ only.
+    if not ScriptDirectory.from_config(config).get_heads():
+        raise RuntimeError(
+            "no approved greenfield Alembic revision exists; "
+            "use the guarded disposable-dev schema initializer only"
+        )
+
+
 SCHEMAS = (
     "identity",
     "teams",
@@ -83,6 +98,7 @@ async def _run_online() -> None:
         await engine.dispose()
 
 
+_require_approved_migration_head()
 if context.is_offline_mode():
     run_migrations_offline()
 else:

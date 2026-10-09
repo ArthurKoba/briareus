@@ -5,7 +5,7 @@ import { projectContext } from "@/features/platform/model/project-context"
 import { refreshAuthenticatedProjection } from "@/features/platform/model/refresh-identity"
 import { useCommand, useDomain } from "@/features/platform/model/use-domain"
 import { validVariableName } from "@/features/platform/model/provider-options"
-import type { ProjectVariableInput, ProjectVariableView, ResourceOwner, ResourceScope, UiCapability } from "@/features/platform/model/contracts"
+import type { ProjectVariableInput, ProjectVariableView, ResourceOwner, ResourceScope, UiCapability, SourceCommandBinding } from "@/features/platform/model/contracts"
 import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
 import ScopedResourcePicker from "@/features/platform/ui/ScopedResourcePicker.vue"
 import ConfirmAction from "@/features/platform/ui/ConfirmAction.vue"
@@ -47,6 +47,15 @@ const confirmRotation=ref(false)
 const canManageTeam=computed(()=>Boolean(teamId.value&&can("variables.teamManage")))
 const canCreate=computed(()=>projectContext.state.scope==="team"?canManageTeam.value:can("variables.manage")||canManageTeam.value)
 const actionFor=(owner:ResourceOwner):UiCapability=>owner.kind==="team"?"variables.teamManage":"variables.manage"
+function statusFor(owner:ResourceOwner,kind:"create"|"update"|"rotate"|"revoke",id?:string):SourceCommandBinding {
+  const operation=`variable.${kind}`
+  if(kind!=="create"){
+    if(!id)throw new Error("Existing source variable UUID required")
+    return {operation,target:{kind:"resource",id,owner}}
+  }
+  return {operation,target:owner.kind==="team"?{kind:"team",id:owner.teamId}:
+    {kind:"project_resource",id:owner.projectId}}
+}
 const requestedOwner=computed<ResourceOwner|null>(()=>{
   if(editing.value)return editing.value.owner
   if(projectContext.state.scope==="team"||ownerKind.value==="team")return teamId.value?{kind:"team",teamId:teamId.value}:null
@@ -100,7 +109,7 @@ async function save():Promise<void> {
   const input=payload()
   if(!input)return
   const done=await command.submit(actionFor(input.owner),(port,ctx)=>port.variables.save(ctx,input,editing.value?.id),
-    projectContext.state.scope==="project"&&input.owner.kind==="project"? (editing.value?"variable.update":"variable.create") : null)
+    statusFor(input.owner,editing.value?"update":"create",editing.value?.id))
   form.value=""
   if(done){clearForm();await refreshAuthenticatedProjection();await variables.reload()}
 }
@@ -109,7 +118,7 @@ async function rotate():Promise<void> {
   const input=payload()
   if(!valid.value||mode.value!=="rotate"||!input||!editing.value)return
   const done=await command.submit(actionFor(input.owner),(port,ctx)=>port.variables.save(ctx,input,editing.value?.id),
-    projectContext.state.scope==="project"&&input.owner.kind==="project"?"variable.rotate":null)
+    statusFor(input.owner,"rotate",editing.value.id))
   form.value=""
   confirmRotation.value=false
   if(done){clearForm();await refreshAuthenticatedProjection();await variables.reload()}
@@ -118,7 +127,7 @@ async function remove():Promise<void> {
   const item=toRemove.value
   if(!item||!canManage(item))return
   const done=await command.submit(actionFor(item.owner),(port,ctx)=>port.variables.remove(ctx,item),
-    projectContext.state.scope==="project"&&item.owner.kind==="project"?"variable.revoke":null)
+    statusFor(item.owner,"revoke",item.id))
   if(done){toRemove.value=null;await refreshAuthenticatedProjection();await variables.reload()}
 }
 </script>
