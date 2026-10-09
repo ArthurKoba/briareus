@@ -338,6 +338,28 @@ Gateway/Administration обеспечивают историю безопасн�
 
 ### 7.1 Основное правило deployment units
 
+**Уточнение владельца, 9 октября 2026 — ОБЯЗАТЕЛЬНЫЙ исходный layout:** `deploy/<functional-module>/`, НЕ `deploy/coolify/<module>/` и НЕ `deploy/<orchestrator>/<module>/`. У каждого deployment unit собственные `Dockerfile` (если требуется собственный образ), переносимый `docker-compose.yaml`, `docker-compose.coolify.yaml` как единственный Coolify-специфичный адаптер, а также принадлежащие модулю инструменты, bootstrap/config/скрипты внутри его каталога (`scripts/`, `config/` по необходимости). Сборочные зависимости могут ссылаться на реальные исходники в `services/**` или `admin-web-app/**`; это не предписывает дублировать код в `deploy/`. Общее orchestration metadata допустимо лишь когда действительно относится сразу к нескольким приложениям — в `deploy/` без искусственного каталога провайдера. Не создавать нового Coolify Application ради таких метаданных.
+
+Пример:
+
+~~~text
+deploy/
+  authorization/  Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml  scripts/
+  gateway/        Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  admin-api/      Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  admin-ui/       Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  data/           docker-compose.yaml  docker-compose.coolify.yaml  config/
+  files/          Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  terminal/       Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  web/            Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  svc/            Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  infrastructure/ Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+  reverse/        Dockerfile  docker-compose.yaml  docker-compose.coolify.yaml
+~~~
+
+Coolify Base directory для соответствующего приложения — `/deploy/<module>`, Compose location — `/docker-compose.coolify.yaml` (относительно Base directory). Watch Paths указываются относительно корня Git, учитывают Dockerfile/COPY/shared/lock и не включают документацию или соседние сервисы, если они не являются реальными build inputs. **Независимая сеть `briareus-net` — external во всех Compose, её жизненный цикл не принадлежит `data`/PostgreSQL или другому модулю.** Вся переносимая конфигурация не зависит от Coolify.
+
+
 **Согласовано:** каждому независимо развёртываемому направлению — **свой Dockerfile + собственный Compose (+ Coolify adapter), свой Coolify Application, Watch Paths и доменные workers**. Не создавать «главный Compose, который нужно вручную отредактировать при удалении Ghidra». Добавление/удаление домена — изменение его пакета и декларативной регистрации публичного маршрута/ресурса, а не каскадная правка каждого runtime.
 
 Пример целевого исходного layout, **не инструкция механически переименовать текущие папки**:

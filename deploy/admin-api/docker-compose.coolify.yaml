@@ -1,0 +1,38 @@
+x-watch-path-coolify:
+  - "deploy/admin-api/Dockerfile"
+  - "deploy/admin-api/docker-compose.yaml"
+  - "deploy/admin-api/docker-compose.coolify.yaml"
+  - "pyproject.toml"
+  - "uv.lock"
+  - "services/common/**"
+  - "services/authorization/**"
+  - "services/identity/**"
+  - "services/teams/**"
+  - "services/projects/**"
+  - "services/agents/**"
+  - "services/admin-api/src/**"
+
+# Coolify override for a single independent Git-backed Application.
+# Coolify variable discovery happens before resolving extends; mirror env keys.
+# Scope secret variable VALUES to Coolify's development environment. No secret in Git.
+# No public SERVICE_FQDN_* until security acceptance.
+services:
+  briareus-dev-admin-api:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-dev-admin-api
+    environment:
+      PLATFORM_DATABASE_URL: "${PLATFORM_DATABASE_URL:?}"
+      PLATFORM_INVITATION_ENCRYPTION_KEY: "${PLATFORM_INVITATION_ENCRYPTION_KEY:?}"
+      PLATFORM_IDEMPOTENCY_ENCRYPTION_KEY: "${PLATFORM_IDEMPOTENCY_ENCRYPTION_KEY:?}"
+      PLATFORM_RESOURCE_ENCRYPTION_KEY: "${PLATFORM_RESOURCE_ENCRYPTION_KEY:?}"
+      PLATFORM_ADMIN_JWT_SIGNING_KEY: "${PLATFORM_ADMIN_JWT_SIGNING_KEY:?}"
+      PLATFORM_REGISTRATION_BASE_URL: "${PLATFORM_REGISTRATION_BASE_URL:?}"
+      PLATFORM_ADMIN_PREVIEW_ENABLED: "true"
+      PLATFORM_ADMIN_PREVIEW_LOG_SYSTEM_INVITE: "false"
+      PLATFORM_SERVICE_IDENTITY_ENABLED: "false"
+      TZ: "${TZ:-UTC}"
+networks:
+  briareus:
+    external: true
+    name: briareus-net
