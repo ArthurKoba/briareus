@@ -217,7 +217,10 @@ class ProjectSessionService:
             session, caller, project_id, ProjectPermission.APPROVE_AGENT_SESSION, for_write=True
         )
         request = await session.scalar(
-            select(SessionApprovalRow).where(SessionApprovalRow.id == request_id).with_for_update()
+            select(SessionApprovalRow)
+            .where(SessionApprovalRow.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if request is None or request.project_id != project_id:
             raise AccessDenied("Project access denied")

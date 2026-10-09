@@ -23,7 +23,7 @@ class TeamRepository:
     ) -> TeamRow | None:
         query = select(TeamRow).where(TeamRow.id == team_id)
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return cast(TeamRow | None, await session.scalar(query))
 
     async def active_member(self, session: AsyncSession, team_id: TeamId, user_id: UserId) -> bool:
@@ -47,6 +47,7 @@ class TeamRepository:
                 select(TeamMembershipRow)
                 .where(TeamMembershipRow.team_id == team_id, TeamMembershipRow.user_id == user_id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             ),
         )
 

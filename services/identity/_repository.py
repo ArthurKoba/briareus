@@ -34,7 +34,10 @@ class IdentityRepository:
             .on_conflict_do_nothing(index_elements=["id"])
         )
         result = await session.scalar(
-            select(BootstrapRow).where(BootstrapRow.id == 1).with_for_update()
+            select(BootstrapRow)
+            .where(BootstrapRow.id == 1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         assert result is not None
         return result
@@ -44,7 +47,7 @@ class IdentityRepository:
     ) -> UserRow | None:
         query: Select[tuple[UserRow]] = select(UserRow).where(UserRow.id == user_id)
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return cast(UserRow | None, await session.scalar(query))
 
     async def username_taken(self, session: AsyncSession, username: str) -> bool:
@@ -63,7 +66,7 @@ class IdentityRepository:
     ) -> InvitationRow | None:
         query = select(InvitationRow).where(InvitationRow.id == invitation_id)
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return cast(InvitationRow | None, await session.scalar(query))
 
     async def peek_invitation(
@@ -85,6 +88,7 @@ class IdentityRepository:
                 select(InvitationRow)
                 .where(InvitationRow.token_digest == token_digest)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             ),
         )
 

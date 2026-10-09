@@ -29,7 +29,7 @@ class ProjectRepository:
     ) -> ProjectRow | None:
         query = select(ProjectRow).where(ProjectRow.id == project_id)
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return cast(ProjectRow | None, await session.scalar(query))
 
     async def by_owners(

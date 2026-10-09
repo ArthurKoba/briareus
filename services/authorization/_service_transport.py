@@ -19,11 +19,15 @@ from uuid import UUID, uuid4
 import jwt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.platform_errors import AccessDenied, AuthenticationRequired, InvalidInput
 from common.platform_ids import AgentSessionUuid, PlatformProjectId
+from projects._runtime_ledger import RuntimeLease
+from projects._runtime_persistence import RuntimeSessionRow
 
+from ._runtime_lease_attestation import SignedRuntimeLeaseReceipt
 from ._service_identity import (
     ACTION_AUDIENCES,
     AUTHORIZATION_AUDIENCE,
@@ -174,6 +178,44 @@ class PrivateServiceAuthorizationController:
             # may not survive its authenticated connection.
             raise AuthenticationRequired("transport identity expires before operation")
         return decision
+
+    async def attest_runtime_lease(
+        self,
+        lease: RuntimeLease,
+        decision: ServiceAuthorizationDecision,
+    ) -> SignedRuntimeLeaseReceipt:
+        """Only issue after committed ledger and fresh current grant/revision.
+
+        The receipt's nonce/owner/version are loaded from PostgreSQL under
+        lock AFTER service/User/Team/Project/AgentSession validation. Any
+        intervening revoke/takeover/CAS change makes this proof unavailable.
+        """
+        if self._authority is None or self._peer_authenticator is None:
+            raise AuthenticationRequired("C2 verified Runtime service transport unavailable")
+        async with self._authority.app.db.transaction() as tx:
+            await self._authority.verify_live_decision(tx, decision)
+            row = await tx.scalar(
+                select(RuntimeSessionRow)
+                .where(RuntimeSessionRow.runtime_session_uuid == lease.runtime_session_uuid)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if (
+                row is None
+                or row.project_id != decision.project_id
+                or row.agent_session_uuid != decision.session_uuid
+                or row.actor_user_id != decision.actor_id
+                or row.owner_service_id != decision.service_id
+                or row.owner_instance != lease.owner_instance
+                or row.lease_nonce != lease.lease_nonce
+                or row.version != lease.version
+                or row.status != lease.status
+                or row.cleanup_state != lease.cleanup_state
+                or row.hard_expires_at != lease.hard_expires_at
+                or row.lease_expires_at != lease.lease_expires_at
+            ):
+                raise AccessDenied("Runtime lease changed before authoritative attestation")
+            return self._authority.sign_verified_runtime_lease(lease, decision)
 
     async def authorize_project_operation(
         self,

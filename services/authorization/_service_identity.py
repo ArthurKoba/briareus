@@ -15,7 +15,7 @@ import json
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID, uuid4
 
 import jwt
@@ -44,8 +44,13 @@ from ._project_sessions import SUPPORTED_GRANTS, ProjectSessionService
 from ._service_identity_persistence import ConsumedAssertionRow, ServiceKeyRow
 from ._session_persistence import ProjectAgentSessionRow
 
+if TYPE_CHECKING:
+    from projects._runtime_ledger import RuntimeLease
+
+    from ._runtime_lease_attestation import SignedRuntimeLeaseReceipt
+
 AUTHORIZATION_AUDIENCE = "platform-authorization"
-DELEGATION_ISSUER = "mcp-bridge-platform-authorization"
+DELEGATION_ISSUER = "briareus-authorization"
 ALLOWED_AUDIENCES = frozenset(
     {
         "gateway",
@@ -904,3 +909,17 @@ class ServiceIdentityAuthority:
                 expected_resource_id=expected_resource_id,
             )
         return result  # noqa: RET504 - return only after transaction commit
+
+    def sign_verified_runtime_lease(
+        self,
+        lease: RuntimeLease,
+        decision: ServiceAuthorizationDecision,
+    ) -> SignedRuntimeLeaseReceipt:
+        """Restricted internal signer; caller verifies live SQL proof separately.
+
+        This signs a typed Backend ledger snapshot only, never arbitrary
+        client JSON. A JWS is an attestation, not an OS permit or grant.
+        """
+        from ._runtime_lease_attestation import issue_signed_runtime_lease
+
+        return issue_signed_runtime_lease(lease, decision=decision, authority_signer=self._signer)
