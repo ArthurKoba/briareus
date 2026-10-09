@@ -102,7 +102,7 @@ def main() -> int:
         print("DRY RUN: no COOLIFY_API_TOKEN; no remote state checked or changed")
         return 0 if not args.apply else 2
     current = request_json(args.coolify_url, token, "GET", f"applications/{args.application_uuid}")
-    if current.get("git_repository", "").casefold() != "arthurkoba/mcp-bridge":
+    if current.get("git_repository", "").casefold() != "arthurkoba/briareus":
         raise SyncError("unexpected Git repository; refusing update")
     if current.get("git_branch") != args.branch:
         raise SyncError("unexpected published Git branch; refusing update")
