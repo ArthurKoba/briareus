@@ -29,7 +29,8 @@ const operatorRows=useDomain<OperationalItemView>(
   async(port, context)=>{
     if(!port.operations || context.scope.kind!=="project") throw new Error("Scoped read-only adapter not configured")
     const result=await port.operations.list(context,props.resource)
-    if(result.items.some(item=>item.projectId!==context.scope.projectId)) throw new Error("Cross-Project operational response denied")
+    const projectId=context.scope.projectId
+    if(result.items.some(item=>item.projectId!==projectId)) throw new Error("Cross-Project operational response denied")
     return result
   },
   ["project"],

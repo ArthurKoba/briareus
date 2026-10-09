@@ -19,11 +19,12 @@ const icons: Record<PlatformPageId, Component> = {
   dashboard:Activity,calls:Blocks,oauth:Wrench,files:FileText,terminal:TerminalSquare,
   "browser-managed":AppWindow,"browser-external":Globe,analysis:Database,settings:Settings,
 }
-function navigate(id:PlatformPageId){ location.hash=`platform/${id}` }
+function navigate(id:PlatformPageId){ window.location.hash=`platform/${id}` }
+function returnLegacy(){ window.location.hash="dashboard" }
 </script>
 <template>
   <nav :aria-label="t('platform.navigation.title')" class="space-y-4">
-    <button v-if="preview" class="mb-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent" @click="location.hash='dashboard'"><ArrowLeft class="size-4 shrink-0" /><span v-if="!collapsed">{{t('platform.legacyBack')}}</span></button>
+    <button v-if="preview" class="mb-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent" @click="returnLegacy"><ArrowLeft class="size-4 shrink-0" /><span v-if="!collapsed">{{t('platform.legacyBack')}}</span></button>
     <div v-for="section in sections" :key="section.key" class="space-y-1">
       <div v-if="!collapsed" class="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{{section.label}}</div>
       <button v-for="item in items.filter(item=>item.section===section.key)" :key="item.id" type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs transition-colors" :class="activePage===item.id?'bg-accent font-semibold text-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-current="activePage===item.id?'page':undefined" :title="collapsed?t(`platform.navigation.${item.title}`):undefined" @click="navigate(item.id)">

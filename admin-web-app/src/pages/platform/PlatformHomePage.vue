@@ -23,6 +23,7 @@ const globalSummary=useDomain<OperatorSnapshot>(
   },["operator"],port=>Boolean(port.operator),
 )
 const totals=computed(()=>globalSummary.state.items[0]??null)
+function openProjects(){ window.location.hash="platform/projects" }
 </script>
 <template>
   <div class="space-y-6">
@@ -44,7 +45,7 @@ const totals=computed(()=>globalSummary.state.items[0]??null)
       </div>
       <p class="text-xs text-muted-foreground">{{t('platform.operatorSummaryNotProject')}}</p>
     </section>
-    <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.nextStep')}}</h2><p class="text-sm text-muted-foreground">{{projectContext.state.scope==='choose-project'?t('platform.chooseScope'):t('platform.homeScopeHint')}}</p><Button size="sm" variant="outline" @click="location.hash='platform/projects'">{{t('platform.navigation.projects')}}</Button></section>
+    <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.nextStep')}}</h2><p class="text-sm text-muted-foreground">{{projectContext.state.scope==='choose-project'?t('platform.chooseScope'):t('platform.homeScopeHint')}}</p><Button size="sm" variant="outline" @click="openProjects">{{t('platform.navigation.projects')}}</Button></section>
     <section v-if="!projectContext.state.projects.length && projectContext.state.user" class="rounded-lg border border-border p-4 text-sm text-muted-foreground">{{t('platform.noProjects')}}</section>
   </div>
 </template>

@@ -19,15 +19,16 @@ const teamId=computed(()=>projectContext.state.scope==="team"?projectContext.sta
 const scopeFilter=ref<ResourceScope>("all")
 const readScope=computed<ResourceScope>(()=>projectContext.state.scope==="team"?"team":scopeFilter.value)
 const variables=useDomain<ProjectVariableView>("variables","variables.read",async(port,ctx)=>{
-  if(ctx.scope.kind!=="project"&&ctx.scope.kind!=="team")throw new Error("Resource scope required")
+  const ctxScope=ctx.scope
+  if(ctxScope.kind!=="project"&&ctxScope.kind!=="team")throw new Error("Resource scope required")
   const scope=readScope.value
   const result=await port.variables.list(ctx,{scope})
   const mismatch=result.items.some(item=>{
     if(scope==="team"&&item.owner.kind!=="team")return true
     if(scope==="project"&&item.owner.kind!=="project")return true
-    if(ctx.scope.kind==="team")return item.visibleIn.kind!=="team"||item.visibleIn.teamId!==ctx.scope.teamId||item.owner.kind!=="team"||item.owner.teamId!==ctx.scope.teamId||item.inherited
-    if(item.visibleIn.kind!=="project"||item.visibleIn.projectId!==ctx.scope.projectId)return true
-    if(item.owner.kind==="project")return item.owner.projectId!==ctx.scope.projectId||item.inherited
+    if(ctxScope.kind==="team")return item.visibleIn.kind!=="team"||item.visibleIn.teamId!==ctxScope.teamId||item.owner.kind!=="team"||item.owner.teamId!==ctxScope.teamId||item.inherited
+    if(item.visibleIn.kind!=="project"||item.visibleIn.projectId!==ctxScope.projectId)return true
+    if(item.owner.kind==="project")return item.owner.projectId!==ctxScope.projectId||item.inherited
     return item.owner.teamId!==teamId.value||!item.inherited
   })
   if(mismatch)throw new Error("Scoped variable ownership mismatch")

@@ -34,15 +34,16 @@ function catalogStatus(provider:string):string {
   return publishedProviders.state.items.find(item=>item.provider===provider)?.connectivityStatus??""
 }
 const accounts=useDomain<ProjectAccountView>("accounts","accounts.read",async(port,ctx)=>{
-  if(ctx.scope.kind!=="project" && ctx.scope.kind!=="team")throw new Error("Resource scope required")
+  const ctxScope=ctx.scope
+  if(ctxScope.kind!=="project" && ctxScope.kind!=="team")throw new Error("Resource scope required")
   const chosen=readScope.value
   const result=await port.accounts.list(ctx,{scope:chosen})
   const invalid=result.items.some(item=>{
     if(chosen==="team"&&item.owner.kind!=="team")return true
     if(chosen==="project"&&item.owner.kind!=="project")return true
-    if(ctx.scope.kind==="team")return item.visibleIn.kind!=="team"||item.visibleIn.teamId!==ctx.scope.teamId||item.owner.kind!=="team"||item.owner.teamId!==ctx.scope.teamId||item.inherited
-    if(item.visibleIn.kind!=="project"||item.visibleIn.projectId!==ctx.scope.projectId)return true
-    if(item.owner.kind==="project")return item.owner.projectId!==ctx.scope.projectId||item.inherited
+    if(ctxScope.kind==="team")return item.visibleIn.kind!=="team"||item.visibleIn.teamId!==ctxScope.teamId||item.owner.kind!=="team"||item.owner.teamId!==ctxScope.teamId||item.inherited
+    if(item.visibleIn.kind!=="project"||item.visibleIn.projectId!==ctxScope.projectId)return true
+    if(item.owner.kind==="project")return item.owner.projectId!==ctxScope.projectId||item.inherited
     return item.owner.teamId!==selectedTeamId.value||!item.inherited
   })
   if(invalid)throw new Error("Scoped resource provenance mismatch")
