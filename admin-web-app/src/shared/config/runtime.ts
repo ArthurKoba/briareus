@@ -1,50 +1,25 @@
-export type EventTransportMode = "mock" | "websocket"
-
+/**
+ * Retired legacy Admin configuration shim. Briareus never imports this file.
+ * There is no automatic admin.* -> api.* hostname rewrite, no legacy cookie
+ * proxy, no preview principal and no browser-configurable transport/telemetry.
+ * The old modules remain outside the Briareus application import graph and
+ * these fail-closed exports prevent an accidental runtime fallback.
+ */
+export type EventTransportMode = "websocket"
 export interface AdminUiRuntimeConfig {
-  preview: boolean
-  apiBaseUrl: string
-  telemetry: { enabled: boolean; endpoint: string; sampleRate: number }
-  events: { mode: EventTransportMode }
+  preview: false
+  apiBaseUrl: ""
+  telemetry: {enabled:false;endpoint:"";sampleRate:0}
+  events: {mode:EventTransportMode}
 }
-
-declare global {
-  interface Window {
-    __KOBA_ADMIN_UI_CONFIG__?: Partial<AdminUiRuntimeConfig> & {
-      telemetry?: Partial<AdminUiRuntimeConfig["telemetry"]>
-      events?: Partial<AdminUiRuntimeConfig["events"]>
-    }
-  }
+export const runtimeConfig={
+  preview:false,apiBaseUrl:"",
+  telemetry:{enabled:false,endpoint:"",sampleRate:0},
+  events:{mode:"websocket"},
+} as const satisfies AdminUiRuntimeConfig
+export function adminApiUrl(_path=""):never {
+  throw new Error("Legacy Admin routing is not part of Briareus")
 }
-
-function inferredApiBaseUrl(): string {
-  const url = new URL(location.origin)
-  if (url.hostname.startsWith("admin.")) url.hostname = `api.${url.hostname.slice("admin.".length)}`
-  url.pathname = "/v1"
-  return url.toString().replace(/\/$/, "")
-}
-
-const raw = window.__KOBA_ADMIN_UI_CONFIG__
-const configuredApiBase = raw?.apiBaseUrl?.trim().replace(/\/+$/, "")
-const apiBaseUrl = configuredApiBase || inferredApiBaseUrl()
-
-export const runtimeConfig: AdminUiRuntimeConfig = {
-  preview: raw?.preview ?? false,
-  apiBaseUrl,
-  telemetry: {
-    enabled: raw?.telemetry?.enabled ?? true,
-    endpoint: `${apiBaseUrl}/telemetry`,
-    sampleRate: raw?.telemetry?.sampleRate ?? 1,
-  },
-  events: { mode: raw?.events?.mode ?? "websocket" },
-}
-
-export function adminApiUrl(path = ""): string {
-  const suffix = path ? (path.startsWith("/") ? path : `/${path}`) : ""
-  return `${runtimeConfig.apiBaseUrl}${suffix}`
-}
-
-export function adminApiWebSocketUrl(path = ""): string {
-  const url = new URL(adminApiUrl(path))
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
+export function adminApiWebSocketUrl(_path=""):never {
+  throw new Error("Legacy Admin realtime is not part of Briareus")
 }

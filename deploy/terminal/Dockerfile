@@ -18,9 +18,7 @@ RUN apt-get update \
         procps psmisc lsof strace gdb iproute2 socat netcat-openbsd picocom python3-serial \
     && rm -rf /var/lib/apt/lists/*
 ENV ASGI_APP=modules.terminal.runtime:app \
-    HOME=/home/agent \
-    TERMINAL_WORKSPACE_ROOT=/workspace \
-    TERMINAL_HOME=/home/agent
+    HOME=/home/agent
 COPY services/common ./services/common
 COPY services/modules/__init__.py ./services/modules/__init__.py
 COPY services/modules/project_runtime ./services/modules/project_runtime

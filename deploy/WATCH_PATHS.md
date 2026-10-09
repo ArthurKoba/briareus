@@ -34,8 +34,6 @@ admin-web-app/vite.config.ts
 admin-web-app/src/**
 admin-web-app/public/**
 admin-web-app/nginx.conf.template
-admin-web-app/runtime-config.template.js
-admin-web-app/docker-entrypoint.d/**
 ```
 
 ## authorization

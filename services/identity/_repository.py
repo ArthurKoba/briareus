@@ -88,22 +88,6 @@ class IdentityRepository:
             ),
         )
 
-    async def pending_system(self, session: AsyncSession) -> InvitationRow | None:
-        return cast(
-            InvitationRow | None,
-            await session.scalar(
-                select(InvitationRow)
-                .where(
-                    InvitationRow.kind == "system",
-                    InvitationRow.used_at.is_(None),
-                    InvitationRow.revoked_at.is_(None),
-                )
-                .order_by(InvitationRow.created_at, InvitationRow.id)
-                .limit(1)
-                .with_for_update()
-            ),
-        )
-
     async def revoke_outstanding_invitations(
         self, session: AsyncSession, issuer: UserId, when: datetime
     ) -> None:

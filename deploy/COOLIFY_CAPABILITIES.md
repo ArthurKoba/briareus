@@ -15,7 +15,7 @@ Public Coolify `v4.3.23` source was inspected as a compatibility reference, not 
 - public Git Application creation using `build_pack=dockercompose`, `base_directory`, `docker_compose_location`, `destination_uuid`, `git_branch`, `watch_paths`, disabled auto/instant deploy and explicit no-domain configuration;
 - `PATCH /api/v1/applications/{uuid}` including `watch_paths`;
 - Application environment variable GET/PATCH with `is_runtime` / `is_buildtime` controls;
-- environment-scoped shared variables.
+- Project Shared Variables.
 
 `bootstrap_coolify.py` is limited to those reviewed contracts. It requires an exact live `--expected-version` before any `--apply`, so an installed-version mismatch stops mutation rather than assuming `v4.3.23` semantics.
 

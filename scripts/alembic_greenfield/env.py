@@ -6,26 +6,19 @@ import asyncio
 
 from alembic import context
 from alembic.script import ScriptDirectory
-from pydantic import Field, SecretStr
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.schema import CreateSchema
 
 from authorization.platform_composition import platform_metadata
-from common.settings import ProcessSettings
+from common.platform_db import PlatformDatabaseSettings
 
 config = context.config
 
 
-class DevMigrationSettings(ProcessSettings):
-    database_url: SecretStr = Field(validation_alias="PLATFORM_DATABASE_URL")
-
-
-settings = DevMigrationSettings()
-url = settings.database_url.get_secret_value()
-if not url.startswith("postgresql+asyncpg://"):
-    raise ValueError("PLATFORM_DATABASE_URL must use postgresql+asyncpg")
+settings = PlatformDatabaseSettings()
+url = settings.url.render_as_string(hide_password=False)
 
 target_metadata = platform_metadata()
 

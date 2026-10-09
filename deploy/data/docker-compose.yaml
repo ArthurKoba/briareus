@@ -7,9 +7,9 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      POSTGRES_DB: "briareus_dev"
-      POSTGRES_USER: "${PLATFORM_DEV_DB_USER:?}"
-      POSTGRES_PASSWORD: "${PLATFORM_DEV_DB_PASSWORD:?}"
+      POSTGRES_DB: "${POSTGRES_DB:-briareus_dev}"
+      POSTGRES_USER: "${POSTGRES_USER:-briareus}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
       TZ: "${TZ:-UTC}"
     expose:
       - "5432"
@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      VALKEY_PASSWORD: "${PLATFORM_DEV_VALKEY_PASSWORD:?}"
+      VALKEY_PASSWORD: "${VALKEY_PASSWORD:?}"
       TZ: "${TZ:-UTC}"
     expose:
       - "6379"

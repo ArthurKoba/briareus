@@ -112,7 +112,6 @@ watch(()=>operatorRows.state.items,()=>{
         <p class="text-xs text-muted-foreground">{{t('platform.operationalMetadataOnly')}}</p>
         <Button size="sm" variant="outline" @click="selectedRecordId=''">{{t('common.close')}}</Button>
       </section>
-      <p class="text-xs text-muted-foreground">{{t('platform.legacyAvailable')}}</p>
     </section>
   </div>
 </template>

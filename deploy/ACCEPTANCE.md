@@ -1,40 +1,20 @@
-# Briareus D2 — module-first deployment staging acceptance
+# Briareus D3-ENV deployment-source handoff
 
-Status: **SOURCE/STATIC staging only; pending independent review.**
+Status: **READY_FOR_REVIEW candidate — SOURCE/STATIC only. No live variable migration or deployment performed.**
 
-## Owner requirement implemented
+## Unified A8/B12/R10 deployment alignment
 
-The deployment source root is `deploy/<functional-module>/`, not a provider-named parent. Each module owns its Dockerfile, portable Compose, Coolify Compose and module deployment scripts. Shared registry/bootstrap/review artifacts live directly at `deploy/` and create no runtime resource.
+- Data uses only `POSTGRES_PASSWORD` and `VALKEY_PASSWORD` as required operator secrets; `POSTGRES_USER=briareus`, `POSTGRES_DB=briareus_dev`, `TZ=UTC` are safe defaults.
+- No `PLATFORM_*` or `PLATFORM_DEV_*` appears in staged Compose/Dockerfiles.
+- Admin API current A8 ASGI default is health-only, so D does not pre-provision database/JWT/credential/UI URL settings into that Application.
+- Authorization remains fail-closed and receives no future signing/database secrets until its accepted signed composition is activated.
+- Admin UI packaging removes obsolete runtime-config ENV, template/entrypoint COPYs and Watch Paths. Its staged runtime ENV is only `TZ`.
+- Gateway/Files/Terminal/Web/Reverse pseudo-ENV requested by R10 are removed; their guarded exit-78 activation boundary remains unchanged.
+- Project Shared is the only secret scope. Bootstrap maps only **currently required** secret variables to `{{project.KEY}}` and never reads Shared secret values.
+- Staged `deploy/data/greenfield_schema.py` is byte-identical to hardened A7 source with global user-relation emptiness guard, advisory transaction lock and `_dev` database guard.
 
-Expected source after fan-in contains exactly 11 module directories: `data`, `authorization`, `gateway`, `admin-api`, `admin-ui`, `files`, `terminal`, `web`, `svc`, `infrastructure`, `reverse`. Old deployment directories must be deleted rather than left as aliases or duplicates.
+## Evidence
 
-## Source/static acceptance points
+`verify_deploy_static.py` must prove: 11 module directories, 22 Compose files, 11 Dockerfiles, external `briareus-net`, no host ports, Compose/Coolify env parity, COPY→Watch coverage, no pseudo/legacy ENV names, exactly two current required operator secrets, and hardened schema equality.
 
-- 11 module-owned Dockerfiles; no first-party Application builds from the repository root Dockerfile.
-- 22 Compose files; every Coolify override extends its portable sibling.
-- First-party build context is repository root (`../..`) and Dockerfile is `deploy/<module>/Dockerfile`.
-- Coolify Base directory is `/deploy/<module>`; Compose location remains `/docker-compose.coolify.yaml`.
-- Each Application has exact repo-relative `x-watch-path-coolify`; actual Docker `COPY` inputs are statically cross-checked.
-- Admin UI Dockerfile copies explicit build inputs rather than the whole frontend directory.
-- Authorization and Admin API have separate Dockerfiles; Admin-only edits do not rebuild Authorization.
-- Data is one owner-approved release with Postgres + Valkey containers; schema initializer belongs to Data but is manual one-shot and does not trigger data service redeploy.
-- External network is exact `briareus-net` in all 22 Compose files; no module creates/owns it.
-- `APPLICATIONS.json`, bootstrap/watch tooling and review documents are at provider-neutral `deploy/` level.
-- `bootstrap_coolify.py` is dry-run-first, idempotent/expected-state oriented, disables auto-deploy, never calls Application start/restart/deploy and refuses missing shared secrets.
-- No legacy service, OAuth issuer, DNS or existing identifier is changed.
-
-## Not accepted by this staging
-
-Docker image builds, installed Coolify parser/version behavior, live Destination creation, secret values, DB initialization, Application deployment, actual protected service transport, C1-B2/C2, OS Files/Terminal isolation, or product readiness. Those require later explicit live DEV acceptance after source review/publication.
-
-## D2 static evidence completed
-
-- `verify_deploy_static.py`: **PASS** for 11 module directories, 22 YAML Compose files, 11 module Dockerfiles, 12 long-running Compose service definitions, exact `extends`/environment mirrors, external `briareus-net`, no host `ports`, future build contexts resolving to repository root, and registry Base directories `/deploy/<module>`.
-- Docker `COPY` → repo-relative Watch Paths: **PASS** for every first-party module Dockerfile; all COPY sources exist in accepted source or the staged module package. Root shared `Dockerfile`/`docker-entrypoint.sh` are no longer build/watch inputs.
-- Admin UI deployment Dockerfile copies explicit build/runtime files rather than the whole frontend directory.
-- Data Valkey shell command: `sh -n` **PASS**. `deploy/data/greenfield_schema.py` is byte-identical to the accepted source initializer at staging time.
-- Python syntax/compile: bootstrap, watch synchronizer, static verifier and schema initializer **PASS**.
-- `bootstrap_coolify.py --branch main` without a write credential: source-only dry-run **PASS**, enumerating exactly 11 Apps and performing zero remote reads/writes.
-- Live read-only Coolify evidence: Tambov exists, legacy MCP remains healthy, existing legacy app reports Compose parser state version `5`, no new Briareus applications observed. Connected Coolify credential is read-only, so exact installed Coolify version and write-path parser behavior remain unverified.
-
-No Docker daemon/image build, Coolify resource creation, DB schema application, deployment, DNS/OAuth change, or protected runtime activation was performed.
+Python source compilation and full package SHA256 verification are required at handoff. This evidence does not establish image BUILD, Coolify parser behavior, DEV_RUNTIME or C1-B2/C2 protected runtime acceptance.

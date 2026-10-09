@@ -10,8 +10,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-ENV ASGI_APP=modules.analysis.runtime:app \
-    FILE_WORKSPACE_ROOT=/workspace
+ENV ASGI_APP=modules.analysis.runtime:app
 COPY services/common ./services/common
 COPY services/modules/__init__.py ./services/modules/__init__.py
 COPY services/modules/project_runtime ./services/modules/project_runtime

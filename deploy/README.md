@@ -1,6 +1,6 @@
 # Briareus deployment source — module-first layout
 
-Status: **D2 staging, not published and not deployed.** Intended tracked root after review: `repo/deploy/`. Target Coolify account/server: `koba` / `tambov`. Legacy `mcp-bridge` and `ghidra-mcp` are outside this package and must remain untouched.
+Status: **D3-ENV cleanup staging; aligned to A8/B12/R10 handoffs, not yet integrated or applied to Coolify.** Intended tracked root after review: `repo/deploy/`. Target Coolify account/server: `koba` / `tambov`. Legacy `mcp-bridge` and `ghidra-mcp` are outside this package and must remain untouched.
 
 ## Layout
 
@@ -64,10 +64,10 @@ Authorization, Gateway, Files, Terminal, Web, SVC, Infrastructure and Reverse re
 2. independent `briareus-net` Destination on Tambov;
 3. the 11 exact Git-backed Applications from `APPLICATIONS.json`;
 4. Base directory, Compose path, branch, disabled auto-deploy and exact Watch Paths;
-5. required Application variables to already-existing `{{environment.KEY}}` shared variable references, runtime-only/buildtime-disabled.
+5. required Application variables to already-existing `{{project.KEY}}` shared variable references, runtime-only/buildtime-disabled.
 
-It never deploys/starts Applications, never generates or prints secret values, never touches legacy applications, never changes DNS/OAuth, and never blindly retries a failed create. Missing environment-scoped shared secrets or pending Compose parser materialization stop reconciliation.
+It never deploys/starts Applications, never generates or prints secret values, never touches legacy applications, never changes DNS/OAuth, and never blindly retries a failed create. Missing current Project Shared secret bindings, required Application inputs, or pending Compose parser materialization stop reconciliation.
 
 ## Evidence boundary
 
-D2 static validation may prove paths, COPY→Watch dependencies, YAML structure, registry consistency and script syntax. It is **not** Docker image BUILD or Coolify parser/runtime acceptance. Installed Coolify version and authenticated Destination/Application bootstrap remain live evidence gates before the first deployment.
+D3-ENV static validation may prove paths, COPY→Watch dependencies, YAML structure, registry consistency and script syntax. It is **not** Docker image BUILD or Coolify parser/runtime acceptance. Installed Coolify version and authenticated Destination/Application bootstrap remain live evidence gates before the first deployment.

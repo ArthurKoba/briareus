@@ -13,7 +13,7 @@ x-watch-path-coolify:
 
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.
-# Scope secret variable VALUES to Coolify's development environment. No secret in Git.
+# Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
 # No public SERVICE_FQDN_* until security acceptance.
 services:
   briareus-dev-infrastructure:

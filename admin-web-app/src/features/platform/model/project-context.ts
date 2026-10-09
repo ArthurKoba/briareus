@@ -29,7 +29,7 @@ export interface ResolvedUserProjects {
   projectDecisionVersions?: Record<string, string>
   teamDecisionVersions?: Record<string, string>
 }
-export type ShellScope = "signed-out" | "legacy" | "choose-project" | "project" | "team" | "operator" | "suspended" | "offline"
+export type ShellScope = "signed-out" | "choose-project" | "project" | "team" | "operator" | "suspended" | "offline"
 
 const state = reactive({
   scope: "signed-out" as ShellScope,
@@ -91,10 +91,6 @@ function resetIdentity(): void {
   state.operatorPermissions = {}
   state.projectDecisionVersions = {}
   state.teamDecisionVersions = {}
-}
-function beginLegacySession(): void {
-  resetIdentity()
-  transition("legacy")
 }
 function clear(): void {
   resetIdentity()
@@ -240,7 +236,7 @@ function onTransition(listener: () => void): () => void {
 /** The server must independently authorize EVERY protected call and event. */
 export const projectContext = {
   state: readonly(state),
-  beginLegacySession, clear, offline, suspend,
+  clear, offline, suspend,
   installServerProjection,
   selectProject, selectTeam, selectOperator, selectNone,
   selection, can, onTransition,

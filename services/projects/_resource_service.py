@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 
 class ResourceSettings(ProcessSettings):
-    encryption_key: SecretStr = Field(validation_alias="PLATFORM_RESOURCE_ENCRYPTION_KEY")
+    encryption_key: SecretStr = Field(validation_alias="CREDENTIAL_ENCRYPTION_KEY")
 
 
 def utcnow() -> datetime:

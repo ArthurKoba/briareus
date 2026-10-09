@@ -1,6 +1,6 @@
 import { reactive, readonly } from "vue"
 
-import { adminApiWebSocketUrl, runtimeConfig } from "@/shared/config/runtime"
+import { adminApiWebSocketUrl } from "@/shared/config/runtime"
 import { pageActivity } from "@/shared/lib/page-activity"
 import { frontendTelemetry } from "@/shared/telemetry/client"
 
@@ -66,7 +66,7 @@ function sendSubscription(type: "subscribe" | "unsubscribe", topic: EventTopic):
 }
 
 function scheduleReconnect(): void {
-  if (!canConnect() || !state.active || runtimeConfig.events.mode === "mock") return
+  if (!canConnect() || !state.active) return
   clearTimeout(reconnectTimer)
   const delay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempt++, 5))
   state.retryAttempt = reconnectAttempt
@@ -77,7 +77,7 @@ function scheduleReconnect(): void {
 }
 
 function connectWebSocket(): void {
-  if (!canConnect() || !state.active || runtimeConfig.events.mode === "mock" || socket) return
+  if (!canConnect() || !state.active || socket) return
   state.status = reconnectAttempt ? "reconnecting" : "connecting"
   const url = adminApiWebSocketUrl("/realtime")
   const generation = ++socketGeneration
@@ -140,11 +140,6 @@ function connectTopics(): void {
   }
   if (!state.sessionActive || !handlers.size) {
     state.status = "idle"
-    return
-  }
-  if (runtimeConfig.events.mode === "mock") {
-    state.status = "mock"
-    state.transport = "mock"
     return
   }
   if (!state.active) {
@@ -216,7 +211,7 @@ pageActivity.subscribe((active) => {
     reconnectTimer = 0
     return
   }
-  if (canConnect() && !socket && runtimeConfig.events.mode !== "mock") {
+  if (canConnect() && !socket) {
     clearTimeout(reconnectTimer)
     reconnectTimer = 0
     connectWebSocket()

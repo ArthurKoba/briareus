@@ -93,10 +93,17 @@ def validate_public_attachment_url(value: str) -> _PublicEndpoint:
 def _trusted_proxy(endpoint: _PublicEndpoint) -> _EgressProxy | None:
     host = endpoint.uri.hostname
     assert host is not None
-    # `getproxies_environment` handles HTTPS_PROXY, https_proxy and ALL_PROXY
-    # with CGI-safe casing. NO_PROXY is checked only against a validated host.
+    # One canonical operator-controlled HTTPS egress setting. ALL_PROXY is
+    # not a safe implicit alias: it may be inherited from an unrelated
+    # service/container, silently changing the target's network trust path.
+    # `getproxies_environment` normalizes HTTPS_PROXY and https_proxy safely.
+    # NO_PROXY is honored only after target DNS resolves to public IPs.
     proxies = urllib.request.getproxies_environment()
-    configured = proxies.get("https") or proxies.get("all")
+    configured = proxies.get("https")
+    if not configured and proxies.get("all"):
+        # Never silently turn an intended proxy-only policy into direct
+        # internet egress. Operator must choose HTTPS_PROXY explicitly.
+        raise WorkspaceFileError("HTTPS_PROXY required; ALL_PROXY is not supported")
     host_port = (
         f"[{host}]:{endpoint.uri.port or 443}"
         if ":" in host

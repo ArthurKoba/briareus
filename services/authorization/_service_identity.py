@@ -19,6 +19,7 @@ from typing import Literal, Protocol
 from uuid import UUID, uuid4
 
 import jwt
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -78,9 +79,7 @@ class ServiceReplayDetected(Conflict):
 
 
 class ServiceIdentitySettings(ProcessSettings):
-    delegation_private_key_b64: SecretStr = Field(
-        validation_alias="PLATFORM_SERVICE_DELEGATION_PRIVATE_KEY_B64"
-    )
+    delegation_private_key: SecretStr = Field(validation_alias="DELEGATION_SIGNING_PRIVATE_KEY")
 
 
 class ServiceAssertionClaims(BaseModel):
@@ -257,15 +256,20 @@ class ServiceIdentityAuthority:
         admin_auth: PlatformAdminBearerAuth,
         settings: ServiceIdentitySettings,
     ) -> None:
-        raw = settings.delegation_private_key_b64.get_secret_value()
+        raw = settings.delegation_private_key.get_secret_value()
         try:
-            material = base64.b64decode(raw, validate=True)
-            if len(material) != 32:
-                raise ValueError("invalid private Ed25519 key length")
-            self._signer = Ed25519PrivateKey.from_private_bytes(material)
+            key = serialization.load_pem_private_key(raw.encode("utf-8"), password=None)
+            if not isinstance(key, Ed25519PrivateKey):
+                raise ValueError("delegation signer must be an Ed25519 private key")
+            self._signer = key
+            material = key.private_bytes(
+                serialization.Encoding.Raw,
+                serialization.PrivateFormat.Raw,
+                serialization.NoEncryption(),
+            )
             self._decision_key = hashlib.sha256(material + b"platform-decision-proof-v1").digest()
         except (ValueError, TypeError) as exc:
-            raise ValueError("PLATFORM_SERVICE_DELEGATION_PRIVATE_KEY_B64 invalid") from exc
+            raise ValueError("DELEGATION_SIGNING_PRIVATE_KEY must be Ed25519 PEM") from exc
         self.app = application
         self.sessions = sessions
         self.resources = resources

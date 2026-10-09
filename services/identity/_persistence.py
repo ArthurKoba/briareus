@@ -82,7 +82,6 @@ class InvitationRow(PlatformBase):
     target_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("identity.users.id", ondelete="RESTRICT"), nullable=True
     )
-    system_token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

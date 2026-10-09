@@ -21,8 +21,6 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --group web --no-install-project
 ENV ASGI_APP=modules.web.runtime:app \
-    FILE_WORKSPACE_ROOT=/workspace \
-    BROWSER_PROFILE_PATH=/browser/profile \
     BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
     BROWSER_DEVTOOLS_MCP_SCRIPT_PATH=/opt/chrome-devtools-mcp/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js \
     CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1 \

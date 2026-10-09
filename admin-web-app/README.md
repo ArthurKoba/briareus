@@ -1,43 +1,28 @@
-# Admin UI
+# Briareus Admin UI
 
-Standalone Vue 3 + TypeScript + Vite + Tailwind CSS administration frontend.
-
-## Production contract
-
-- UI: `https://admin.mcp.koba-nexus.ru/`
-- Admin API: `https://api.mcp.koba-nexus.ru/v1`
-- Realtime: `wss://api.mcp.koba-nexus.ru/v1/realtime`
-- Browser Operator: `wss://api.mcp.koba-nexus.ru/v1/browser/operator/ws`
-
-The Admin UI is served from `/`. It does not use the MCP Gateway as an HTTP proxy.
-
-Runtime variables:
-
-```text
-ADMIN_UI_PREVIEW=false
-ADMIN_API_BASE_URL=https://api.mcp.koba-nexus.ru/v1
-ADMIN_UI_TELEMETRY_ENABLED=true
-ADMIN_UI_TELEMETRY_SAMPLE_RATE=1
-ADMIN_UI_EVENTS_MODE=websocket
-```
-
-If `ADMIN_API_BASE_URL` is empty, the browser derives it from an `admin.<zone>` hostname by
-replacing `admin.` with `api.` and appending `/v1`.
-
-Cross-origin Admin API requests use `credentials: include`. The Admin API must allow the
-configured `ADMIN_UI_ORIGIN` and keep the session cookie HttpOnly.
-
-The browser never receives the upstream OTLP bearer credential.
-`admin-ui` does not reference `OTLP_ENDPOINT` or `OTLP_BEARER_TOKEN`; Admin API owns OTLP export.
-
-## Local preview
-
-Set `ADMIN_UI_PREVIEW=true` to render preview state without Admin API requests.
+Vue 3, TypeScript, Vite and the Briareus Project-scoped administration views.
+The old MCP Bridge operator UI is not part of this application entrypoint.
 
 ## Build
 
-```text
-bun install --frozen-lockfile
-bun run --bun typecheck
-bun run --bun build
-```
+- `bun install --frozen-lockfile`
+- `bun run typecheck`
+- `bun run build`
+
+Local dev and Vite preview bind to `127.0.0.1` only. There is no automatic
+legacy Admin API proxy, `admin.*` hostname rewriting, public CORS assumption,
+mock login or preview bypass. The built HTML has no runtime-config injection.
+
+## Authentication and production routing
+
+The Briareus `PlatformPort` remains **uninstalled** until an independently
+accepted C1-B2/C2 same-origin HTTPS and current-User authentication contract
+is available. Without it the UI fails closed and shows the unavailable state.
+The UI has **no operator-editable ENV variables** at this stage. Backend
+credentials, JWTs, database/Valkey passwords and service signing keys do not
+belong in the browser image or browser runtime config.
+
+Deployment owns the service Dockerfile and Compose cleanup, and must remove
+the obsolete `runtime-config.template.js` and `docker-entrypoint.d` COPYs
+before deleting those source placeholders. Publication and external TLS
+routing require separate orchestrator review.
