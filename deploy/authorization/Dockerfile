@@ -1,0 +1,22 @@
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONPATH=/app/services
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY services/common ./services/common
+COPY services/authorization ./services/authorization
+COPY services/identity ./services/identity
+COPY services/teams ./services/teams
+COPY services/projects ./services/projects
+COPY services/agents ./services/agents
+RUN useradd -u 1000 -m -d /home/platform platform
+USER 1000:1000
+EXPOSE 8000
+CMD ["/bin/sh", "-ec", "echo 'Briareus authorization transport pending C1-B2' >&2; exit 78"]
