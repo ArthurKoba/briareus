@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from sqlalchemy import MetaData
 
 from common.platform_db import PlatformDatabase, PlatformDatabaseSettings
+from identity._operator_channel import UnixFirstAdminOperatorGate
 from identity._service import IdentityService
 from identity._settings import IdentityLinkSettings
 from projects._file_quota import FileQuotaLedger
@@ -98,6 +99,7 @@ def compose_platform(
     settings: PlatformDatabaseSettings,
     *,
     signed_authorization: ServiceIdentitySettings | None = None,
+    first_admin_operator_gate: UnixFirstAdminOperatorGate | None = None,
 ) -> PlatformServices:
     platform_metadata()
     database = PlatformDatabase(settings)
@@ -111,7 +113,9 @@ def compose_platform(
         encryption_key=storage_key,
     )
     sessions = ProjectSessionService(application)
-    identity = IdentityService(database, IdentityLinkSettings())
+    identity = IdentityService(
+        database, IdentityLinkSettings(), operator_gate=first_admin_operator_gate
+    )
     admin_auth = PlatformAdminBearerAuth(
         identity,
         AdminBearerSettings(),

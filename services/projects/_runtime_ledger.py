@@ -58,6 +58,7 @@ class RuntimeLease:
     agent_session_uuid: UUID
     actor_user_id: UUID
     kind: str
+    owner_service_id: UUID
     owner_instance: UUID
     lease_nonce: UUID
     status: str
@@ -85,6 +86,7 @@ def _lease(row: RuntimeSessionRow) -> RuntimeLease:
         agent_session_uuid=row.agent_session_uuid,
         actor_user_id=row.actor_user_id,
         kind=row.kind,
+        owner_service_id=row.owner_service_id,
         owner_instance=row.owner_instance,
         lease_nonce=row.lease_nonce,
         status=row.status,
@@ -363,8 +365,15 @@ class RuntimeLedger:
         runtime_uuid: UUID,
         *,
         expected_version: int,
+        lease_nonce: UUID,
     ) -> RuntimeLease:
-        row = await self._owned(tx, decision, runtime_uuid, expected_version=expected_version)
+        row = await self._owned(
+            tx,
+            decision,
+            runtime_uuid,
+            expected_version=expected_version,
+            nonce=lease_nonce,
+        )
         if row.status in {"closed", "revoked", "expired"}:
             return _lease(row)
         row.status = "revoked"
@@ -388,8 +397,15 @@ class RuntimeLedger:
         runtime_uuid: UUID,
         *,
         expected_version: int,
+        lease_nonce: UUID,
     ) -> RuntimeLease:
-        row = await self._owned(tx, decision, runtime_uuid, expected_version=expected_version)
+        row = await self._owned(
+            tx,
+            decision,
+            runtime_uuid,
+            expected_version=expected_version,
+            nonce=lease_nonce,
+        )
         if row.status != "active" or row.lease_expires_at > _now():
             raise RuntimeLeaseConflict("runtime owner lease is not lost")
         row.status = "lost"
@@ -470,6 +486,8 @@ class RuntimeLedger:
         *,
         expected_version: int,
         new_instance: UUID,
+        previous_instance: UUID,
+        previous_lease_nonce: UUID,
     ) -> RuntimeLease:
         """Reconnect only after trusted cleanup ACK; never adopt a live process."""
         if self._instance(new_instance) != decision.instance_uuid:
@@ -479,6 +497,8 @@ class RuntimeLedger:
             decision,
             runtime_uuid,
             expected_version=expected_version,
+            nonce=previous_lease_nonce,
+            instance=self._instance(previous_instance),
             allow_recovery=True,
         )
         now = _now()
@@ -517,6 +537,8 @@ class RuntimeLedger:
         runtime_uuid: UUID,
         *,
         expected_version: int,
+        lease_nonce: UUID,
+        previous_instance: UUID,
     ) -> RuntimeLease:
         # Cleanup is attested by a different healthy instance after the
         # original owner has stopped. It is safe to close an already stopped
@@ -526,6 +548,8 @@ class RuntimeLedger:
             decision,
             runtime_uuid,
             expected_version=expected_version,
+            nonce=lease_nonce,
+            instance=self._instance(previous_instance),
             allow_recovery=True,
         )
         if row.status not in {"lost", "expired", "revoked", "closed"}:

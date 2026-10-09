@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -30,6 +30,7 @@ from common.platform_errors import (
 )
 from common.platform_ids import UserId
 from identity._domain import User, canonical_username
+from identity._operator_channel import UnixFirstAdminOperatorGate
 from identity._persistence import InvitationRow, LoginAttemptRow, UserRow
 from identity._repository import IdentityRepository, to_user
 from identity._settings import IdentityLinkSettings
@@ -39,16 +40,17 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class VerifiedFirstAdminOperator(Protocol):
-    def require_verified_operator(self) -> None:
-        """Pure assertion from a protected operator-only channel; no network I/O."""
-        ...
-
-
 class IdentityService:
-    def __init__(self, database: PlatformDatabase, settings: IdentityLinkSettings) -> None:
+    def __init__(
+        self,
+        database: PlatformDatabase,
+        settings: IdentityLinkSettings,
+        *,
+        operator_gate: UnixFirstAdminOperatorGate | None = None,
+    ) -> None:
         self.database = database
         self.repository = IdentityRepository()
+        self._operator_gate = operator_gate
         self.admin_ui_public_url = settings.admin_ui_public_url
         self._dummy_password_digest = hash_password(random_token())
 
@@ -67,20 +69,22 @@ class IdentityService:
 
     async def issue_first_admin_setup(
         self,
-        operator: VerifiedFirstAdminOperator,
-        *,
-        session: AsyncSession | None = None,
+        operator_socket: socket.socket,
     ) -> SecretStr:
         """One-time restricted setup delivery; no general HTTP/logging path.
 
-        A trusted supervisor must independently authenticate the human
-        operator BEFORE invoking this function. Only a SHA-256 token digest
-        is persisted. If the operator loses the code, another operator-
-        authorized issue revokes the previous unredeemed code until the
-        first superuser successfully registers.
+        The actual restricted Unix channel MUST already be accepted and
+        its server socket connected to a distinct, D4-approved operator UID.
+        Only a SHA-256 digest is persisted. Re-issue revokes the previous
+        unredeemed code until the first superuser successfully registers.
         """
-        operator.require_verified_operator()
-        async with self._transaction(session) as tx:
+        if self._operator_gate is None:
+            raise AccessDenied("first-admin verified operator channel is not configured")
+        self._operator_gate.verify_accepted_peer(operator_socket)
+        # Return ONLY after this owned DB transaction commits. A caller-
+        # supplied outer transaction could roll back after exposing a code
+        # that never existed in the authoritative bootstrap state.
+        async with self.database.transaction() as tx:
             bootstrap = await self.repository.lock_bootstrap(tx)
             if bootstrap.first_superuser_claimed:
                 raise Conflict("initial superuser is already established")
@@ -116,6 +120,7 @@ class IdentityService:
             if issuer is None or not issuer.enabled:
                 raise AccessDenied("current user is not active")
             raw = random_token()
+            issued_link = self._link("invite", raw)
             tx.add(
                 InvitationRow(
                     id=uuid4(),
@@ -125,7 +130,7 @@ class IdentityService:
                     expires_at=utcnow() + timedelta(days=7),
                 )
             )
-        return self._link("invite", raw)
+        return issued_link
 
     async def register(
         self, *, invitation: str, username: str, password: str, session: AsyncSession | None = None
@@ -320,6 +325,7 @@ class IdentityService:
             if user is None or not user.enabled:
                 raise ResourceMissing("target user not found")
             raw = random_token()
+            issued_link = self._link("reset", raw)
             tx.add(
                 InvitationRow(
                     id=uuid4(),
@@ -330,7 +336,7 @@ class IdentityService:
                     expires_at=utcnow() + timedelta(minutes=15),
                 )
             )
-        return self._link("reset", raw)
+        return issued_link
 
     async def reset_password(
         self, token: str, password: str, *, session: AsyncSession | None = None

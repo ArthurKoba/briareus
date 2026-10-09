@@ -18,6 +18,7 @@
   --accent: oklch(0.94 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.58 0.23 27);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.91 0 0);
   --input: oklch(0.91 0 0);
   --ring: oklch(0.56 0 0);
@@ -38,6 +39,7 @@
   --accent: oklch(0.26 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.7 0.19 22);
+  --destructive-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.55 0 0);
@@ -57,10 +59,11 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
-  --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
+  --color-ring: var(--ring);
 }
 
 * { border-color: var(--border); }
@@ -68,52 +71,8 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--backgro
 
 .field { width:100%; min-height:2.25rem; border:1px solid var(--input); border-radius:.375rem; background:var(--background); padding:.45rem .7rem; color:var(--foreground); outline:none; }
 .field:focus { box-shadow:0 0 0 2px color-mix(in oklab,var(--ring) 45%,transparent); }
-.btn-link { display:inline-flex; align-items:center; min-height:2rem; padding:0 .5rem; font-size:.75rem; font-weight:500; text-decoration:underline; text-underline-offset:3px; }
 .settings-card { border:1px solid var(--border); border-radius:.75rem; background:var(--card); padding:1.25rem; box-shadow:0 1px 2px rgb(0 0 0 / .04); }
 .settings-card>h2 { margin:0 0 .8rem; font-size:.9rem; font-weight:600; }
-.setting-row { display:flex; min-height:3.25rem; align-items:center; justify-content:space-between; gap:1rem; border-top:1px solid var(--border); padding:.75rem 0; font-size:.8rem; }
-.setting-row small { display:block; margin-top:.2rem; color:var(--muted-foreground); font-weight:400; }
-.browser-screen { display:flex; min-height:360px; align-items:center; justify-content:center; overflow:hidden; background:#090909; }
-.browser-screen img { display:block; max-height:75vh; max-width:100%; user-select:none; -webkit-user-drag:none; }
-.browser-screen img:focus { outline:2px solid var(--ring); outline-offset:-2px; }
 
 .toast-enter-active,.toast-leave-active { transition: all .18s ease; }
 .toast-enter-from,.toast-leave-to { opacity:0; transform:translateY(-8px) scale(.98); }
-
-.ts-table { scrollbar-color: color-mix(in oklab,var(--muted-foreground) 28%,transparent) transparent; }
-.ts-table::-webkit-scrollbar,.ts-table *::-webkit-scrollbar { width:10px; height:10px; }
-.ts-table::-webkit-scrollbar-thumb,.ts-table *::-webkit-scrollbar-thumb { background:color-mix(in oklab,var(--muted-foreground) 22%,transparent); border-radius:999px; border:3px solid transparent; background-clip:content-box; }
-.ts-table-row { transition: background-color .12s ease; }
-.ts-table-row > div { overflow:hidden; }
-.browser-tool { display:grid; width:2rem; height:2rem; place-items:center; border-radius:.5rem; color:var(--muted-foreground); transition:background-color .12s ease,color .12s ease; }
-.browser-tool:hover:not(:disabled) { background:var(--accent); color:var(--foreground); }
-.browser-tool:disabled { opacity:.35; cursor:not-allowed; }
-.browser-menu-row { display:flex; width:100%; align-items:center; gap:.65rem; border-radius:.45rem; padding:.5rem .55rem; text-align:left; }
-.browser-menu-row:hover { background:var(--accent); }
-.dark .ant-modal-content,
-.dark .ant-modal-header,
-.dark .ant-select-dropdown,
-.dark .ant-picker-dropdown .ant-picker-panel-container {
-  background: var(--card) !important;
-  color: var(--foreground) !important;
-}
-.dark .ant-modal-title,
-.dark .ant-modal-close,
-.dark .ant-select-item,
-.dark .ant-select-selection-item,
-.dark .ant-select-selection-placeholder {
-  color: var(--foreground) !important;
-}
-.dark .ant-select-item-option-active:not(.ant-select-item-option-disabled),
-.dark .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
-  background: var(--accent) !important;
-}
-.dark .ant-select-selector,
-.dark .ant-input-number,
-.dark .ant-input-number-input,
-.dark .ant-input,
-.dark .ant-input-affix-wrapper {
-  background: var(--background) !important;
-  border-color: var(--border) !important;
-  color: var(--foreground) !important;
-}

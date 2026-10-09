@@ -1,32 +1,27 @@
-"""Private Project Web adapters: stateless HTTP files and independent browser leases.
+"""Unmounted Briareus Web→Files transfer and protected Browser trust gate.
 
-Only a service-authenticated Project authorizer may enable these adapters.
-The existing Web MCP `browser_*`, `devtools_*` and `external_*` tools are NOT
-re-mounted here: their current global profile and remote policy are legacy.
+All Project file effects require the exact signed A6 FilesQuota-v2 operation.
+No R6 local browser lease, global profile, inherited process environment or
+external user's Chrome process is adopted as a trusted RuntimeSession owner.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
+import math
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Protocol
-from uuid import UUID, uuid4
+from typing import Literal, Protocol
+from uuid import UUID
 
 from modules.files._attachment_transport import open_public_attachment
 from modules.files.project_files import ProjectFilesService, _drain_cancellable_file_io
 from modules.files.project_workspace import ProjectFileEntry
 from modules.project_runtime import (
     ProjectInvocation,
-    ProjectPermit,
-    ProjectRootRegistry,
     ProjectRuntimeAuthority,
-    RuntimeLease,
-    RuntimeLeaseRegistry,
 )
-from modules.project_runtime.runtime_owner import ProjectRuntimeOwner
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,247 +89,33 @@ class ProjectWebRuntimeUnavailable(Exception):
 
 
 class ProjectWebRuntime:
+    """Stateless external HTTPS transfer, no Browser OS/process ownership."""
+
     def __init__(
         self,
         *,
         authority: ProjectRuntimeAuthority,
-        roots: ProjectRootRegistry,
         files: ProjectFilesService,
-        leases: RuntimeLeaseRegistry,
-        internal_factory: InternalBrowserFactory | None = None,
-        remote_connector: RemoteBrowserConnector | None = None,
-        owner: ProjectRuntimeOwner | None = None,
     ) -> None:
         self.authority = authority
-        self.roots = roots
         self.files = files
-        self.leases = leases
-        self._internal_factory = internal_factory
-        self._remote_connector = remote_connector
-        self._owner = owner
-        # Generation tokens prevent a stale cleanup callback from closing a
-        # new context that happens to reuse the same provider-defined UUID.
-        self._context_owners: dict[UUID, tuple[UUID, UUID]] = {}
-        self._profile_owners: dict[UUID, tuple[UUID, UUID]] = {}
-        self._attachment_owners: dict[UUID, tuple[UUID, UUID]] = {}
-        self._owner_lock = asyncio.Lock()
 
-    def _require_owner(self) -> ProjectRuntimeOwner:
-        if self._owner is None:
-            raise ProjectWebRuntimeUnavailable("PROJECT_DURABLE_LEASE_UNAVAILABLE")
-        self._owner.require_available()
-        return self._owner
-
-    async def _check_root(self, permit: ProjectPermit) -> None:
-        # Verify the configured owner-controlled root, never a guessed path.
-        def open_without_access() -> None:
-            with self.roots.open(permit):
-                pass
-
-        await asyncio.to_thread(open_without_access)
-
-    async def open_internal(
+    async def require_browser_owner(
         self,
         invocation: ProjectInvocation,
         *,
-        idle_seconds: float,
-        hard_seconds: float,
-    ) -> RuntimeLease:
-        owner = self._require_owner()
-        if self._internal_factory is None:
-            raise ProjectWebRuntimeUnavailable("PROJECT_BROWSER_ISOLATION_UNAVAILABLE")
-        permit = await self.authority.require(invocation, "web.internal")
-        await self._check_root(permit)
-        browser = await self._internal_factory.open_isolated(project_id=permit.project_id)
-        attested = browser.isolation
-        if (
-            browser.project_id != permit.project_id
-            or not isinstance(browser.context_uuid, UUID)
-            or browser.context_uuid.version != 4
-            or not isinstance(attested, IsolatedBrowserProfile)
-            or attested.project_id != permit.project_id
-            or attested.context_uuid != browser.context_uuid
-            or not isinstance(attested.profile_uuid, UUID)
-            or attested.profile_uuid.version != 4
-            or not all(
-                (
-                    attested.profile_isolated is True,
-                    attested.cookies_isolated is True,
-                    attested.cache_isolated is True,
-                    attested.downloads_project_scoped is True,
-                    attested.host_browser_unmodified is True,
-                )
-            )
-        ):
-            # A foreign context is not ours to destroy, even during rejection.
-            raise ProjectWebRuntimeUnavailable("PROJECT_BROWSER_PROFILE_UNVERIFIED")
-        generation = uuid4()
-        owned = (permit.project_id, generation)
-        async with self._owner_lock:
-            if (
-                browser.context_uuid in self._context_owners
-                or attested.profile_uuid in self._profile_owners
-            ):
-                raise ProjectWebRuntimeUnavailable("PROJECT_BROWSER_CONTEXT_OR_PROFILE_REUSED")
-            self._context_owners[browser.context_uuid] = owned
-            self._profile_owners[attested.profile_uuid] = owned
-        cleanup_lock = asyncio.Lock()
-
-        async def close_context() -> None:
-            # Both the owner failure path and lease reaper may request cleanup.
-            # Serialize against overlapping callback invocations, while a
-            # stale generation must never close a replacement browser.
-            async with cleanup_lock:
-                async with self._owner_lock:
-                    if self._context_owners.get(browser.context_uuid) != owned:
-                        return
-                await browser.close_owned_context()
-                # Failed cleanup keeps the generation reserved for reconcile.
-                async with self._owner_lock:
-                    if self._context_owners.get(browser.context_uuid) == owned:
-                        del self._context_owners[browser.context_uuid]
-                    if self._profile_owners.get(attested.profile_uuid) == owned:
-                        del self._profile_owners[attested.profile_uuid]
-
-        try:
-            return await owner.open(
-                permit,
-                kind="internal_browser",
-                idle_seconds=idle_seconds,
-                hard_seconds=hard_seconds,
-                cleanup=close_context,
-            )
-        except BaseException:
-            await close_context()
-            raise
-
-    async def open_remote(
-        self,
-        invocation: ProjectInvocation,
-        *,
-        idle_seconds: float,
-        hard_seconds: float,
-    ) -> RuntimeLease:
-        owner = self._require_owner()
-        if self._remote_connector is None:
-            raise ProjectWebRuntimeUnavailable("PROJECT_REMOTE_BROWSER_UNAVAILABLE")
-        permit = await self.authority.require(invocation, "web.remote")
-        await self._check_root(permit)
-        attachment = await self._remote_connector.attach(project_id=permit.project_id)
-        ownership = attachment.ownership
-        if (
-            attachment.project_id != permit.project_id
-            or not isinstance(attachment.attachment_uuid, UUID)
-            or attachment.attachment_uuid.version != 4
-            or not isinstance(ownership, RemoteBrowserAttachment)
-            or ownership.project_id != permit.project_id
-            or ownership.attachment_uuid != attachment.attachment_uuid
-            or ownership.consent_verified is not True
-            or ownership.operator_browser_owned is not True
-            or ownership.process_termination_forbidden is not True
-        ):
-            # Do not disconnect or terminate an attachment owned by another
-            # Project/browser. Consent is an approved connector's attestation,
-            # not a checkbox supplied by a remote MCP user.
-            raise ProjectWebRuntimeUnavailable("PROJECT_REMOTE_OWNER_UNVERIFIED")
-        generation = uuid4()
-        owned = (permit.project_id, generation)
-        async with self._owner_lock:
-            if attachment.attachment_uuid in self._attachment_owners:
-                raise ProjectWebRuntimeUnavailable("PROJECT_REMOTE_ATTACHMENT_REUSED")
-            self._attachment_owners[attachment.attachment_uuid] = owned
-        cleanup_lock = asyncio.Lock()
-
-        async def disconnect_attachment() -> None:
-            # This callback NEVER closes the user's actual Chrome/profile.
-            async with cleanup_lock:
-                async with self._owner_lock:
-                    if self._attachment_owners.get(attachment.attachment_uuid) != owned:
-                        return
-                await attachment.disconnect()
-                # A failed disconnect stays reserved, not reassigned.
-                async with self._owner_lock:
-                    if self._attachment_owners.get(attachment.attachment_uuid) == owned:
-                        del self._attachment_owners[attachment.attachment_uuid]
-
-        try:
-            return await owner.open(
-                permit,
-                kind="remote_browser",
-                idle_seconds=idle_seconds,
-                hard_seconds=hard_seconds,
-                cleanup=disconnect_attachment,
-            )
-        except BaseException:
-            await disconnect_attachment()
-            raise
-
-    async def attach(
-        self,
-        invocation: ProjectInvocation,
-        runtime_session_uuid: UUID,
-        *,
-        remote: bool = False,
-    ) -> RuntimeLease:
-        permit = await self.authority.require(
-            invocation, "web.remote" if remote else "web.internal"
+        mode: Literal["managed", "remote"],
+    ) -> None:
+        if mode not in {"managed", "remote"}:
+            raise ProjectWebRuntimeUnavailable("PROJECT_BROWSER_MODE_INVALID")
+        await self.authority.require(
+            invocation, "web.internal" if mode == "managed" else "web.remote"
         )
-        return await self._require_owner().attach(permit, runtime_session_uuid)
-
-    async def close(
-        self,
-        invocation: ProjectInvocation,
-        runtime_session_uuid: UUID,
-        *,
-        expected_revision: int,
-        remote: bool = False,
-    ) -> RuntimeLease:
-        permit = await self.authority.require(
-            invocation, "web.remote" if remote else "web.internal"
-        )
-        return await self._require_owner().close(
-            permit, runtime_session_uuid, expected_revision=expected_revision
-        )
-
-    async def mark_transport_lost(
-        self,
-        invocation: ProjectInvocation,
-        runtime_session_uuid: UUID,
-        *,
-        expected_revision: int,
-        remote: bool = False,
-    ) -> RuntimeLease:
-        permit = await self.authority.require(
-            invocation, "web.remote" if remote else "web.internal"
-        )
-        return await self._require_owner().mark_lost(
-            permit, runtime_session_uuid, expected_revision=expected_revision
-        )
-
-    async def reconnect_remote(
-        self,
-        invocation: ProjectInvocation,
-        lost_session_uuid: UUID,
-        *,
-        expected_revision: int,
-        idle_seconds: float,
-        hard_seconds: float,
-    ) -> RuntimeLease:
-        """Explicit recovery with a NEW lease, never implicit command replay.
-
-        First verify that the old remote MCP attachment was disconnected.
-        If cleanup is uncertain, refuse a second attachment. External Chrome
-        itself is intentionally preserved across both operations.
-        """
-        permit = await self.authority.require(invocation, "web.remote")
-        closed = await self._require_owner().cleanup_lost(
-            permit, lost_session_uuid, expected_revision=expected_revision
-        )
-        if closed.state != "closed":
-            raise ProjectWebRuntimeUnavailable("PROJECT_REMOTE_CLEANUP_UNCERTAIN")
-        return await self.open_remote(
-            invocation, idle_seconds=idle_seconds, hard_seconds=hard_seconds
-        )
+        # A9 has not accepted the signed owner nonce. An internal Chromium
+        # needs an attested Project-only UID/mount/profile/cgroup worker; a
+        # remote user Chrome needs a verified consent-bound transport owner.
+        # Neither can use an in-memory R6 lease or global CDP/browser profile.
+        raise ProjectWebRuntimeUnavailable("PROJECT_BROWSER_SIGNED_OWNER_UNAVAILABLE")
 
     async def download_public_https(
         self,
@@ -346,27 +127,39 @@ class ProjectWebRuntime:
         expected_sha256: str,
         operation_uuid: UUID,
         max_seconds: float = 600.0,
-        chunk_bytes: int = 1024 * 1024,
+        chunk_bytes: int = 65536,
     ) -> ProjectFileEntry:
-        """Safely fetch public HTTPS into this Project's transactional Files.
+        """Public pinned HTTPS into A6 Files, using one durable write UUID.
 
-        Private unmounted operation. No client-provided proxy, workspace root
-        or auth cookie can be set. The legacy attachment egress validates each
-        HTTPS redirect, public target IP and original-host TLS. Files owns
-        quota, SHA staging, current Project rights and atomic commit.
+        This is not an HTTP/MCP route. A separate signed Files service+human
+        proof must validate each quota/dispatch/storage/commit effect; no
+        credential-bearing HTTP response or proxy URL is forwarded to Files.
         """
         if (
-            not 0 < max_seconds <= 600.0
-            or not 0 < chunk_bytes <= 1024 * 1024
+            not isinstance(max_seconds, (int, float))
+            or not math.isfinite(max_seconds)
+            or not 0 < max_seconds <= 600.0
+            or type(chunk_bytes) is not int
+            or not 0 < chunk_bytes <= 262144
             or type(expected_size) is not int
-            or not 0 <= expected_size <= self.files.max_file_bytes
+            or not 0 <= expected_size <= min(self.files.max_file_bytes, 262144)
             or not isinstance(operation_uuid, UUID)
             or operation_uuid.version != 4
             or not isinstance(expected_sha256, str)
             or len(expected_sha256) != 64
-            or any(char not in "0123456789abcdef" for char in expected_sha256)
+            or any(c not in "0123456789abcdef" for c in expected_sha256)
         ):
             raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_DOWNLOAD_INVALID")
+        scope = invocation.operation_scope
+        if (
+            scope is None
+            or scope.action != "files.write"
+            or scope.project_id != invocation.project_id
+            or scope.agent_session_uuid != invocation.session_uuid
+            or scope.request_uuid != operation_uuid
+        ):
+            raise ProjectWebRuntimeUnavailable("PROJECT_FILES_SIGNED_OPERATION_REQUIRED")
+        # Check the current caller/grant BEFORE opening any external socket.
         await self.authority.require(invocation, "files.write")
         deadline = time.monotonic() + max_seconds
         try:
@@ -374,34 +167,34 @@ class ProjectWebRuntime:
         except Exception as exc:
             raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_EGRESS_UNAVAILABLE") from exc
         try:
-            declared = response.headers.get_all("Content-Length", [])
-            if len(declared) > 1:
+            lengths = response.headers.get_all("Content-Length", [])
+            if len(lengths) > 1:
                 raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_LENGTH_AMBIGUOUS")
-            if declared:
+            if lengths:
                 try:
-                    content_length = int(declared[0])
+                    actual = int(lengths[0])
                 except ValueError as exc:
                     raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_LENGTH_INVALID") from exc
-                if content_length != expected_size:
+                if actual != expected_size:
                     raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_LENGTH_MISMATCH")
 
             async def chunks() -> AsyncIterator[bytes]:
                 digest = hashlib.sha256()
-                total = 0
+                count = 0
                 while True:
                     if time.monotonic() >= deadline:
                         raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_DEADLINE_EXCEEDED")
-                    block = await _drain_cancellable_file_io(response.read, chunk_bytes)
+                    piece = await _drain_cancellable_file_io(response.read, chunk_bytes)
                     if time.monotonic() >= deadline:
                         raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_DEADLINE_EXCEEDED")
-                    if not block:
+                    if not piece:
                         break
-                    total += len(block)
-                    if total > expected_size:
+                    count += len(piece)
+                    if count > expected_size:
                         raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_TOO_LARGE")
-                    digest.update(block)
-                    yield block
-                if total != expected_size or digest.hexdigest() != expected_sha256:
+                    digest.update(piece)
+                    yield piece
+                if count != expected_size or digest.hexdigest() != expected_sha256:
                     raise ProjectWebRuntimeUnavailable("PROJECT_HTTP_CHECKSUM_MISMATCH")
 
             return await self.files.write_stream(
@@ -413,6 +206,8 @@ class ProjectWebRuntime:
                 operation_uuid=operation_uuid,
             )
         finally:
+            # A canceled caller may leave a worker performing a blocking TLS
+            # read; _drain_cancellable_file_io shields its FD lifecycle.
             await _drain_cancellable_file_io(response.__exit__, None, None, None)
 
     async def save_http_download(
@@ -421,15 +216,14 @@ class ProjectWebRuntime:
         destination: str,
         content: bytes,
         *,
-        overwrite: bool = False,
-        operation_uuid: UUID | None = None,
+        operation_uuid: UUID,
     ) -> ProjectFileEntry:
-        """Stateless curl download, with its own Files write authorization."""
+        """Selected bounded content is still an independently signed write."""
         return await self.files.write(
             invocation,
             destination,
             content,
-            overwrite=overwrite,
+            overwrite=False,
             create_parents=False,
             operation_uuid=operation_uuid,
         )
@@ -440,18 +234,16 @@ class ProjectWebRuntime:
         destination: str,
         chunks: AsyncIterator[bytes],
         *,
-        expected_sha256: str = "",
-        operation_uuid: UUID | None = None,
+        expected_size: int,
+        expected_sha256: str,
+        operation_uuid: UUID,
     ) -> ProjectFileEntry:
-        """Stateless curl data into bounded, atomic Project Files staging.
-
-        Existing Web tools are not switched to this method until C1-B/C2;
-        the provider never receives arbitrary filesystem or Terminal access.
-        """
+        """No speculative byte size, idempotency fallback or raw key env."""
         return await self.files.write_stream(
             invocation,
             destination,
             chunks,
+            expected_size=expected_size,
             expected_sha256=expected_sha256,
             operation_uuid=operation_uuid,
         )

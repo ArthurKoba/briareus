@@ -5,7 +5,6 @@ import logging
 import queue
 import threading
 import time
-import urllib.parse
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext, suppress
 
@@ -27,8 +26,8 @@ from .account_contracts import InvocationEvent
 from .admin_api_client import AdminApiClient
 from .settings import ObservabilitySettings
 
-logger = logging.getLogger("mcp_bridge.observability")
-_AUDIT_TRACER = trace.get_tracer("mcp-bridge.admin-api-audit")
+logger = logging.getLogger("briareus.observability")
+_AUDIT_TRACER = trace.get_tracer("briareus.admin-api-audit")
 if not logger.handlers:
     _console_handler = logging.StreamHandler()
     _console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
@@ -218,46 +217,32 @@ class _ExcludeOpenTelemetryLogs(logging.Filter):
         return not record.name.startswith("opentelemetry")
 
 
-def _parse_key_values(value: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for raw_item in value.split(","):
-        item = raw_item.strip()
-        if not item or "=" not in item:
-            continue
-        key, raw_value = item.split("=", 1)
-        key = urllib.parse.unquote(key.strip())
-        decoded = urllib.parse.unquote(raw_value.strip())
-        if key:
-            result[key] = decoded
-    return result
-
-
 def resource_attributes(
     settings: ObservabilitySettings,
     scope: str,
     *,
     service_name: str | None = None,
 ) -> dict[str, object]:
-    attributes: dict[str, object] = dict(_parse_key_values(settings.resource_attributes))
-    attributes.update(
-        {
-            "service.name": service_name or settings.service_name,
-            "service.version": settings.service_version,
-            "service.instance.id": settings.resolved_instance_id,
-            "deployment.environment.name": settings.environment,
-            "mcp.scope": scope,
-        }
-    )
-    if settings.service_namespace:
-        attributes["service.namespace"] = settings.service_namespace
-    return attributes
+    """Official OTel identity only; no unbounded mutable attributes ENV."""
+    actual_service_name = service_name or settings.service_name
+    if not actual_service_name:
+        raise ValueError("OTEL_SERVICE_NAME required for enabled Briareus telemetry")
+    return {
+        "service.name": actual_service_name,
+        "service.namespace": settings.service_namespace,
+        "service.version": settings.service_version,
+        "service.instance.id": settings.resolved_instance_id,
+        "deployment.environment.name": settings.environment,
+        "mcp.scope": scope,
+    }
 
 
 def otlp_headers(settings: ObservabilitySettings) -> dict[str, str] | None:
-    headers = _parse_key_values(settings.legacy_headers)
-    if settings.bearer_token:
-        headers["Authorization"] = f"Bearer {settings.bearer_token}"
-    return headers or None
+    """Only canonical scoped bearer, not arbitrary injected OTLP headers."""
+    credential = settings.bearer_token
+    if credential is None or not credential.get_secret_value():
+        return None
+    return {"Authorization": f"Bearer {credential.get_secret_value()}"}
 
 
 def telemetry_resource(
@@ -266,9 +251,7 @@ def telemetry_resource(
     *,
     service_name: str | None = None,
 ) -> Resource:
-    return Resource.create(
-        resource_attributes(settings, scope, service_name=service_name)
-    )
+    return Resource.create(resource_attributes(settings, scope, service_name=service_name))
 
 
 def _logging_level(value: str) -> int:
@@ -311,7 +294,7 @@ class OpenTelemetrySink(ObservabilitySink):
             )
         )
         trace.set_tracer_provider(self.tracer_provider)
-        self.tracer = self.tracer_provider.get_tracer(f"mcp-bridge.{scope}")
+        self.tracer = self.tracer_provider.get_tracer(f"briareus.{scope}")
 
         metric_exporter = OTLPMetricExporter(
             endpoint=settings.signal_endpoint("metrics"),
@@ -328,7 +311,7 @@ class OpenTelemetrySink(ObservabilitySink):
             metric_readers=[self.metric_reader],
         )
         metrics.set_meter_provider(self.meter_provider)
-        self.meter = self.meter_provider.get_meter(f"mcp-bridge.{scope}")
+        self.meter = self.meter_provider.get_meter(f"briareus.{scope}")
 
         self.runtime_started = self.meter.create_counter(
             "mcp.runtime.started",
@@ -385,7 +368,7 @@ class OpenTelemetrySink(ObservabilitySink):
             "uvicorn.error",
             "uvicorn.access",
             "fastmcp",
-            "mcp_bridge.observability",
+            "briareus.observability",
         ):
             target = logging.getLogger(name)
             if not target.propagate and handler not in target.handlers:
@@ -483,13 +466,9 @@ def build_observability(
     if admin_api is not None:
         sinks.append(AdminApiAuditSink(admin_api))
     if configured.enabled:
-        try:
-            sinks.append(OpenTelemetrySink(scope, configured))
-        except Exception:
-            logger.exception(
-                "OpenTelemetry initialization failed scope=%s; continuing without exporter",
-                scope,
-            )
+        if not configured.service_name:
+            raise ValueError("OTEL_SERVICE_NAME is required when OTLP_ENDPOINT is configured")
+        sinks.append(OpenTelemetrySink(scope, configured))
     else:
         logger.info(
             "OpenTelemetry disabled scope=%s reason=endpoint_not_configured",

@@ -30,7 +30,7 @@ class AgentIdentityRepository:
     ) -> AgentIdentityRow | None:
         query = select(AgentIdentityRow).where(AgentIdentityRow.id == agent_id)
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return cast(
             AgentIdentityRow | None,
             await session.scalar(query),

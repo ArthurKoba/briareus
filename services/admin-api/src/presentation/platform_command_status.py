@@ -173,18 +173,37 @@ def build_unmounted_command_status_router(
     ) -> ScopedCommandStatus:
         _validate_query(operation, key)
         async with app.db.transaction() as tx:
-            await team_permit(tx, app, caller, TeamId(team_id))
+            # Lock the active User then the authoritative Team before reading
+            # a previously committed command. A Team member cannot inspect
+            # an owner's membership/ownership mutation just by guessing a key.
+            await app.current_user(tx, caller, lock=True)
+            team = await app.teams.get(tx, TeamId(team_id), lock=True)
+            if team is None:
+                raise AccessDenied("Team unavailable")
+            permit = await team_permit(tx, app, caller, TeamId(team_id))
+            stored_operation = operation
             if operation in {"integration.create", "variable.create"}:
+                if not permit.can_manage_resources:
+                    raise AccessDenied("Team resource permission required")
                 scope = f"team:{team_id}"
-            elif operation.startswith(("team.member.", "team.transfer_owner")):
-                scope = str(team_id)
+            elif operation in {
+                "team.member.add", "team.member.remove", "team.transfer_owner"
+            }:
+                if not permit.can_manage_members:
+                    raise AccessDenied("current Team owner permission required")
+                # The original accepted write API persists these commands
+                # in the GLOBAL actor scope with Team UUID in operation.
+                # Never change the durable dedupe identity to fit a read API,
+                # and never search alternate/fallback scopes after UNKNOWN.
+                scope = "global"
+                stored_operation = f"{operation}:{team_id}"
             else:
                 raise InvalidInput("unsupported Team command status operation")
             row = await _command_record(
                 tx,
                 actor_id=caller.user_id,
                 scope=scope,
-                operation=operation,
+                operation=stored_operation,
                 key=key,
             )
             return _scope_response("team", team_id, operation, row)

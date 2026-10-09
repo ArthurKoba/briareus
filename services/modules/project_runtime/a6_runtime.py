@@ -278,58 +278,110 @@ class A6RuntimeSignedSource:
         }
         if kind not in action_map:
             raise A6RuntimeUnavailable("A6_RUNTIME_KIND_INVALID")
+        if (
+            not isinstance(runtime_session_uuid, UUID)
+            or runtime_session_uuid.version != 4
+            or not isinstance(operation_uuid, UUID)
+            or operation_uuid.version != 4
+            or type(idle_seconds) is not int
+            or type(hard_seconds) is not int
+            or not 30 <= idle_seconds <= hard_seconds <= 86400
+            or hard_seconds < 60
+        ):
+            raise A6RuntimeUnavailable("A6_RUNTIME_INTENT_INVALID")
+        action, _ = action_map[kind]
+        await self.authority.require(invocation, action)
+        # No A9 signed owner nonce/owner_service receipt has been accepted.
+        # Even DB-only open would strand a falsely active RuntimeSession
+        # that no trusted OS worker can heartbeat, clean up or reattach.
+        raise A6RuntimeUnavailable("A9_RUNTIME_SIGNED_LEASE_OWNER_REQUIRED")
+
+    async def request_revoke_intent(
+        self,
+        invocation: ProjectInvocation,
+        *,
+        kind: Literal["files", "terminal", "web_managed", "web_remote", "reverse"],
+        runtime_session_uuid: UUID,
+        operation_uuid: UUID,
+        expected_version: int,
+    ) -> RuntimeLeaseReceipt:
+        """Signed A6 revocation REQUEST; never OS child-tree cleanup proof.
+
+        Accepted A6 RuntimeLedger.revoke requires a valid signed actor,
+        Project, runtime UUID and CAS revision, but not the missing owner
+        nonce. Revocation prevents further lease use; OS cleanup remains a
+        separate trusted cgroup/UID/mount/nonce obligation after A9/C2.
+        """
+        action_map: dict[
+            str,
+            tuple[
+                Literal[
+                    "files.write", "terminal.attach", "web.internal", "web.remote", "reverse.import"
+                ],
+                Literal["files", "terminal", "web", "reverse"],
+            ],
+        ] = {
+            "files": ("files.write", "files"),
+            "terminal": ("terminal.attach", "terminal"),
+            "web_managed": ("web.internal", "web"),
+            "web_remote": ("web.remote", "web"),
+            "reverse": ("reverse.import", "reverse"),
+        }
+        if kind not in action_map:
+            raise A6RuntimeUnavailable("A6_RUNTIME_KIND_INVALID")
         action, audience = action_map[kind]
+        if (
+            type(expected_version) is not int
+            or expected_version < 1
+            or not isinstance(runtime_session_uuid, UUID)
+            or runtime_session_uuid.version != 4
+            or not isinstance(operation_uuid, UUID)
+            or operation_uuid.version != 4
+        ):
+            raise A6RuntimeUnavailable("A6_RUNTIME_REVOCATION_CAS_INVALID")
         permit, peer = await self._authorize(
             invocation,
             action=action,
             expected_audience=audience,
             operation_uuid=operation_uuid,
         )
-        command = RuntimeOpenCommand(
+        command = RuntimeLeaseCommand(
             operation_uuid=operation_uuid,
             runtime_session_uuid=runtime_session_uuid,
-            instance_uuid=peer.instance_uuid,
-            kind=kind,
-            idle_seconds=idle_seconds,
-            hard_seconds=hard_seconds,
-            idempotency_key=str(operation_uuid),
+            expected_version=expected_version,
+            lease_nonce=None,
+            phase="revoke",
         )
         assert self.backend is not None
         try:
             async with asyncio.timeout(self.timeout_seconds):
-                result = await self.backend.open(
+                receipt = await self.backend.transition(
                     invocation,
                     command=command,
                     fingerprint=runtime_payload_fingerprint(command),
                     peer=peer,
                 )
         except Exception as exc:
-            raise A6RuntimeUnavailable("A6_RUNTIME_OPEN_OUTCOME_UNKNOWN") from exc
+            raise A6RuntimeUnavailable("A6_RUNTIME_REVOKE_OUTCOME_UNKNOWN") from exc
         if (
-            not isinstance(result, RuntimeLeaseReceipt)
-            or result.runtime_session_uuid != runtime_session_uuid
-            or result.project_id != permit.project_id
-            or result.agent_session_uuid != permit.session_uuid
-            or result.actor_user_id != permit.actor_id
-            or result.owner_instance_uuid != peer.instance_uuid
-            or result.kind != kind
-            or result.state != "active"
-            or result.revision < 1
-            or not all(
-                isinstance(exp, datetime) and exp.tzinfo is not None
-                for exp in (
-                    result.idle_expires_at,
-                    result.hard_expires_at,
-                    result.lease_expires_at,
-                )
-            )
-            or result.lease_expires_at > result.hard_expires_at
-            or result.hard_expires_at <= datetime.now(UTC)
+            not isinstance(receipt, RuntimeLeaseReceipt)
+            or receipt.runtime_session_uuid != runtime_session_uuid
+            or receipt.project_id != permit.project_id
+            or receipt.agent_session_uuid != permit.session_uuid
+            or receipt.actor_user_id != permit.actor_id
+            or receipt.kind != kind
+            or receipt.state not in {"revoked", "closed", "expired"}
+            or receipt.revision < expected_version
+            or not isinstance(receipt.owner_instance_uuid, UUID)
+            or receipt.owner_instance_uuid.version != 4
+            or receipt.hard_expires_at.tzinfo is None
+            or receipt.lease_expires_at.tzinfo is None
+            or receipt.idle_expires_at.tzinfo is None
         ):
-            raise A6RuntimeUnavailable("A6_RUNTIME_OPEN_RECEIPT_INVALID")
-        # No lease_nonce in A6 RuntimeLeaseReceipt! This is NOT an OS-owner
-        # authorization and CANNOT launch a project-scoped Terminal/Chrome.
-        return result
+            raise A6RuntimeUnavailable("A6_RUNTIME_REVOKE_RECEIPT_INVALID")
+        # A revoked SQL row never authorizes an OS kill-by-PID, nor claims
+        # managed Chromium or external personal Chrome was terminated.
+        return receipt
 
     async def heartbeat_or_job(self, *_args: object, **_kwargs: object) -> None:
         """Missing A6 trusted nonce/instance custody makes CAS unsafe."""

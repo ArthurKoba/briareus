@@ -19,10 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common.platform_errors import AccessDenied, InvalidInput
 from projects._runtime_ledger import (
     RuntimeJob,
-    RuntimeLease,
     RuntimeLedger,
 )
 
+from ._runtime_lease_attestation import SignedRuntimeLeaseReceipt
 from ._service_identity import ServiceAuthorizationDecision
 from ._service_transport import PrivateServiceAuthorizationController, ServiceAuthorizeInput
 
@@ -65,7 +65,7 @@ class RuntimeOpenCommand(RuntimeCommand):
 class RuntimeLeaseCommand(RuntimeCommand):
     runtime_session_uuid: UUID
     expected_version: int = Field(ge=1)
-    lease_nonce: UUID | None = None
+    lease_nonce: UUID
     phase: Literal["heartbeat", "revoke", "lost", "cleanup", "close", "reconnect"]
     previous_instance_uuid: UUID | None = None
 
@@ -110,22 +110,6 @@ class RuntimeJobTransition(RuntimeCommand):
         return value
 
 
-class RuntimeLeaseReceipt(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-    runtime_session_uuid: UUID
-    project_id: UUID
-    agent_session_uuid: UUID
-    actor_user_id: UUID
-    owner_instance_uuid: UUID
-    kind: str
-    state: str
-    revision: int = Field(ge=1)
-    idle_expires_at: datetime
-    hard_expires_at: datetime
-    lease_expires_at: datetime
-    cleanup_state: str
-
-
 class RuntimeJobReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
     job_uuid: UUID
@@ -147,23 +131,6 @@ def runtime_payload_fingerprint(command: RuntimeCommand) -> str:
             "utf-8"
         )
     ).hexdigest()
-
-
-def _lease(receipt: RuntimeLease) -> RuntimeLeaseReceipt:
-    return RuntimeLeaseReceipt(
-        runtime_session_uuid=receipt.runtime_session_uuid,
-        project_id=receipt.project_id,
-        agent_session_uuid=receipt.agent_session_uuid,
-        actor_user_id=receipt.actor_user_id,
-        owner_instance_uuid=receipt.owner_instance,
-        kind=receipt.kind,
-        state=receipt.status,
-        revision=receipt.version,
-        idle_expires_at=receipt.idle_expires_at,
-        hard_expires_at=receipt.hard_expires_at,
-        lease_expires_at=receipt.lease_expires_at,
-        cleanup_state=receipt.cleanup_state,
-    )
 
 
 def _job(receipt: RuntimeJob) -> RuntimeJobReceipt:
@@ -211,7 +178,7 @@ class SignedRuntimeAuthority:
         command: RuntimeOpenCommand,
         *,
         peer_evidence: object,
-    ) -> RuntimeLeaseReceipt:
+    ) -> SignedRuntimeLeaseReceipt:
         if command.instance_uuid != proof.intent.instance_uuid:
             raise AccessDenied("Runtime opening instance does not match signed service")
         async with self.ledger.app.db.transaction() as tx:
@@ -226,7 +193,7 @@ class SignedRuntimeAuthority:
                 hard_seconds=command.hard_seconds,
                 idempotency_key=command.idempotency_key,
             )
-            return _lease(value)
+        return await self.auth.attest_runtime_lease(value, decision)
 
     async def transition(
         self,
@@ -234,13 +201,15 @@ class SignedRuntimeAuthority:
         command: RuntimeLeaseCommand,
         *,
         peer_evidence: object,
-    ) -> RuntimeLeaseReceipt:
+    ) -> SignedRuntimeLeaseReceipt:
+        if command.phase in {"cleanup", "reconnect", "close"} and (
+            command.previous_instance_uuid is None
+        ):
+            raise InvalidInput("cleanup/reconnect/close require prior signed owner instance")
         async with self.ledger.app.db.transaction() as tx:
             decision = await self._consume(tx, proof, command, peer_evidence)
             phase = command.phase
             if phase == "heartbeat":
-                if command.lease_nonce is None:
-                    raise InvalidInput("Runtime heartbeat requires original lease nonce")
                 result = await self.ledger.heartbeat(
                     tx,
                     decision,
@@ -255,6 +224,7 @@ class SignedRuntimeAuthority:
                     decision,
                     command.runtime_session_uuid,
                     expected_version=command.expected_version,
+                    lease_nonce=command.lease_nonce,
                 )
             elif phase == "lost":
                 result = await self.ledger.mark_lost(
@@ -262,10 +232,11 @@ class SignedRuntimeAuthority:
                     decision,
                     command.runtime_session_uuid,
                     expected_version=command.expected_version,
+                    lease_nonce=command.lease_nonce,
                 )
             elif phase == "cleanup":
-                if command.lease_nonce is None or command.previous_instance_uuid is None:
-                    raise InvalidInput("cleanup requires old instance and original nonce")
+                if command.previous_instance_uuid is None:
+                    raise InvalidInput("cleanup requires old owner instance")
                 result = await self.ledger.confirm_cleanup(
                     tx,
                     decision,
@@ -275,23 +246,31 @@ class SignedRuntimeAuthority:
                     lease_nonce=command.lease_nonce,
                 )
             elif phase == "reconnect":
+                if command.previous_instance_uuid is None:
+                    raise InvalidInput("reconnect requires previous signed owner instance")
                 result = await self.ledger.reconnect(
                     tx,
                     decision,
                     command.runtime_session_uuid,
                     expected_version=command.expected_version,
                     new_instance=decision.instance_uuid,
+                    previous_instance=command.previous_instance_uuid,
+                    previous_lease_nonce=command.lease_nonce,
                 )
             elif phase == "close":
+                if command.previous_instance_uuid is None:
+                    raise InvalidInput("closed Runtime requires previous verified instance")
                 result = await self.ledger.close(
                     tx,
                     decision,
                     command.runtime_session_uuid,
                     expected_version=command.expected_version,
+                    lease_nonce=command.lease_nonce,
+                    previous_instance=command.previous_instance_uuid,
                 )
             else:
                 raise InvalidInput("unsupported Runtime lease transition")
-            return _lease(result)
+        return await self.auth.attest_runtime_lease(result, decision)
 
     async def queue_job(
         self,

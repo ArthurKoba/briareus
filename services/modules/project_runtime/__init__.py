@@ -1,4 +1,4 @@
-"""Private project-runtime boundaries; intentionally no MCP registrations."""
+"""Briareus Project-scoped authorization/resource boundaries; no MCP mounts."""
 
 from .authorization import (
     ProjectAccessDenied,
@@ -10,9 +10,6 @@ from .authorization import (
     ProjectRuntimeAuthority,
     canonical_request_fingerprint,
 )
-from .backend_access import BackendSourceAccessAdapter
-from .credential_use import ProjectProviderCapability
-from .durable_leases import ProjectRuntimeJournal
 from .integrations import (
     ProjectIntegrationError,
     ProjectIntegrationPort,
@@ -21,14 +18,10 @@ from .integrations import (
 )
 from .resource_query import ResourceQuery, ResourceSelectionError
 from .resource_scope import EffectiveResourceScope, ProjectResourceScopeError
-from .runtime_owner import ProjectRuntimeOwner
-from .sessions import RuntimeLease, RuntimeLeaseRegistry, RuntimeSessionError
-from .storage_quota import ProjectQuotaGuard
 from .variables import ProjectVariableError, ProjectVariableRef, ProjectVariableSelector
 from .workspace_roots import ProjectFileError, ProjectRootRegistry
 
 __all__ = [
-    "BackendSourceAccessAdapter",
     "EffectiveResourceScope",
     "ProjectAccessDenied",
     "ProjectAccessPort",
@@ -41,20 +34,13 @@ __all__ = [
     "ProjectInvocation",
     "ProjectOperationScope",
     "ProjectPermit",
-    "ProjectProviderCapability",
-    "ProjectQuotaGuard",
     "ProjectResourceScopeError",
     "ProjectRootRegistry",
     "ProjectRuntimeAuthority",
-    "ProjectRuntimeJournal",
-    "ProjectRuntimeOwner",
     "ProjectVariableError",
     "ProjectVariableRef",
     "ProjectVariableSelector",
     "ResourceQuery",
     "ResourceSelectionError",
-    "RuntimeLease",
-    "RuntimeLeaseRegistry",
-    "RuntimeSessionError",
     "canonical_request_fingerprint",
 ]

@@ -26,8 +26,8 @@ from identity._service import IdentityService
 
 from ._project_access import AuthenticationMethod, CallerPrincipal
 
-ISSUER = "mcp-bridge-platform-identity"
-AUDIENCE = "mcp-bridge-platform-admin"
+ISSUER = "briareus-identity"
+AUDIENCE = "briareus-admin"
 TTL = timedelta(minutes=15)
 
 

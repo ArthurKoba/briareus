@@ -1,10 +1,22 @@
 from __future__ import annotations
 
-from os import getenv
+import re
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Annotated
+from socket import gethostname
+from typing import Annotated, ClassVar
+from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _DEFAULT_PRIVATE_HOSTS = (
@@ -230,102 +242,107 @@ class BridgeSettings(ProcessSettings):
 
 
 class ObservabilitySettings(ProcessSettings):
-    service_name: str = Field("mcp-bridge", validation_alias="OTEL_SERVICE_NAME")
-    service_namespace: str = Field("", validation_alias="SERVICE_NAMESPACE")
-    service_version: str = Field("0.1.0", validation_alias="OTEL_SERVICE_VERSION")
-    service_instance_id: str = Field("", validation_alias="OTEL_SERVICE_INSTANCE_ID")
-    environment: str = Field(
-        "production",
-        validation_alias=AliasChoices("DEPLOYMENT_ENVIRONMENT", "OTEL_ENVIRONMENT"),
-    )
-    endpoint: str = Field(
-        "",
-        validation_alias=AliasChoices("OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
-    )
-    bearer_token: str = Field("", validation_alias="OTLP_BEARER_TOKEN")
-    logs_endpoint_override: str = Field(
-        "",
-        validation_alias="OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
-    )
-    traces_endpoint_override: str = Field(
-        "",
-        validation_alias="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-    )
-    metrics_endpoint_override: str = Field(
-        "",
-        validation_alias="OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-    )
-    legacy_headers: str = Field(
-        "",
-        validation_alias="OTEL_EXPORTER_OTLP_HEADERS",
-    )
-    resource_attributes: str = Field("", validation_alias="OTEL_RESOURCE_ATTRIBUTES")
-    log_level: str = Field("INFO", validation_alias="OTEL_LOG_LEVEL")
-    timeout_ms: int = Field(
-        10_000,
-        ge=100,
-        le=120_000,
-        validation_alias="OTEL_EXPORTER_OTLP_TIMEOUT",
-    )
-    metric_export_interval_ms: int = Field(
-        30_000,
-        ge=1_000,
-        le=300_000,
-        validation_alias="OTEL_METRIC_EXPORT_INTERVAL",
-    )
+    """Briareus-only OpenTelemetry identity with one canonical OTLP endpoint.
 
-    @field_validator(
-        "service_name",
-        "service_namespace",
-        "service_version",
-        "service_instance_id",
-        "environment",
-        "endpoint",
-        "bearer_token",
-        "logs_endpoint_override",
-        "traces_endpoint_override",
-        "metrics_endpoint_override",
-        "legacy_headers",
-        "resource_attributes",
-        "log_level",
-        mode="before",
-    )
+    D4 controls the Project/Environment shared identity and the per-release
+    application service.name. Version and instance are actual local release /
+    container facts, never a mutable shared environment override. No legacy
+    OTEL_ENVIRONMENT, exporter endpoint-per-signal, OTEL headers or
+    resource-attributes alias can silently defeat scope redaction.
+    """
+
+    service_name: str = Field("", validation_alias="OTEL_SERVICE_NAME")
+    service_namespace: str = Field("briareus", validation_alias="SERVICE_NAMESPACE")
+    environment: str = Field("development", validation_alias="DEPLOYMENT_ENVIRONMENT")
+    endpoint: str = Field("", validation_alias="OTLP_ENDPOINT")
+    bearer_token: SecretStr | None = Field(default=None, validation_alias="OTLP_BEARER_TOKEN")
+    # Stable implementation limits, NOT another operator ENV surface.
+    timeout_ms: ClassVar[int] = 10_000
+    metric_export_interval_ms: ClassVar[int] = 30_000
+    log_level: ClassVar[str] = "INFO"
+
+    @field_validator("service_name")
     @classmethod
-    def _strip_observability_strings(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
+    def _service_name(cls, value: str) -> str:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{1,63}", value) and value != "":
+            raise ValueError("OTEL_SERVICE_NAME must identify one Briareus application")
+        return value
+
+    @field_validator("service_namespace")
+    @classmethod
+    def _namespace(cls, value: str) -> str:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{1,63}", value):
+            raise ValueError("SERVICE_NAMESPACE must be a valid product namespace")
+        return value
+
+    @field_validator("environment")
+    @classmethod
+    def _environment(cls, value: str) -> str:
+        if value not in {"development", "staging", "production"}:
+            raise ValueError("DEPLOYMENT_ENVIRONMENT must be a known release environment")
+        return value
+
+    @field_validator("endpoint")
+    @classmethod
+    def _collector_origin(cls, value: str) -> str:
+        if not value:
+            return ""
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"https", "http"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or len(value) > 2048
+            or parsed.path.endswith(("/v1/logs", "/v1/traces", "/v1/metrics"))
+        ):
+            raise ValueError("OTLP_ENDPOINT must be one valid collector base URL")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def _collector_security(self) -> ObservabilitySettings:
+        # Shared collector credentials must never travel over plaintext
+        # non-loopback HTTP, nor become an inert App-specific secret.
+        bearer = self.bearer_token
+        if bearer is not None and bearer.get_secret_value():
+            if not self.endpoint:
+                raise ValueError("OTLP_BEARER_TOKEN requires OTLP_ENDPOINT")
+            parsed = urlsplit(self.endpoint)
+            if parsed.scheme != "https" and parsed.hostname not in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }:
+                raise ValueError("OTLP_BEARER_TOKEN requires TLS collector transport")
+        if self.endpoint:
+            if not self.service_name:
+                raise ValueError("OTEL_SERVICE_NAME required for active OTLP")
+            if self.service_version == "unknown":
+                raise ValueError("active Briareus OTLP requires known installed release version")
+        return self
 
     @property
     def enabled(self) -> bool:
-        return bool(
-            self.endpoint
-            or self.logs_endpoint_override
-            or self.traces_endpoint_override
-            or self.metrics_endpoint_override
-        )
+        return bool(self.endpoint)
 
     @property
     def resolved_instance_id(self) -> str:
-        return self.service_instance_id or getenv("HOSTNAME") or "unknown"
+        return gethostname()
+
+    @property
+    def service_version(self) -> str:
+        """Immutable source distribution version, not release mutable ENV."""
+        try:
+            return distribution_version("mcp-bridge")
+        except PackageNotFoundError:
+            return "unknown"
 
     def signal_endpoint(self, signal: str) -> str:
-        overrides = {
-            "logs": self.logs_endpoint_override,
-            "traces": self.traces_endpoint_override,
-            "metrics": self.metrics_endpoint_override,
-        }
-        if signal not in overrides:
-            raise ValueError(f"unsupported OTLP signal: {signal}")
-        override = overrides[signal]
-        if override:
-            return override
-        if not self.endpoint:
-            return ""
-        endpoint = self.endpoint.rstrip("/")
-        for suffix in ("/v1/logs", "/v1/traces", "/v1/metrics"):
-            if endpoint.endswith(suffix):
-                endpoint = endpoint[: -len(suffix)]
-                break
-        return f"{endpoint}/v1/{signal}"
+        if signal not in {"logs", "traces", "metrics"}:
+            raise ValueError("unsupported OTLP signal")
+        return f"{self.endpoint}/v1/{signal}" if self.endpoint else ""
 
     @property
     def timeout_seconds(self) -> float:
@@ -386,10 +403,19 @@ class AuthorizationServiceSettings(ProcessSettings):
         return self.session_cache_ttl_seconds
 
     @field_validator(
-        "public_base_url", "mcp_public_base_url", "postgres_host", "postgres_db", "postgres_user",
-        "postgres_password", "bootstrap_username", "bootstrap_password",
-        "jwt_private_key_pem", "jwt_key_id", "gateway_service_token",
-        "admin_service_token", mode="before",
+        "public_base_url",
+        "mcp_public_base_url",
+        "postgres_host",
+        "postgres_db",
+        "postgres_user",
+        "postgres_password",
+        "bootstrap_username",
+        "bootstrap_password",
+        "jwt_private_key_pem",
+        "jwt_key_id",
+        "gateway_service_token",
+        "admin_service_token",
+        mode="before",
     )
     @classmethod
     def _strip_strings(cls, value: object) -> object:

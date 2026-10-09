@@ -116,7 +116,7 @@ async function submit(){
     <p v-if="completed" role="status" class="text-sm">{{t('platform.publicComplete')}}</p>
     <p v-if="uncertain" role="alert" class="rounded-md border border-destructive/30 p-3 text-sm text-destructive">{{t('platform.publicMutationUncertain')}}</p>
     <form v-else-if="!completed" class="space-y-3" @submit.prevent="submit">
-      <label class="block text-xs">{{mode==='invitation'?t('platform.invitationToken'):t('platform.resetToken')}}<input v-model="fields.token" class="field mt-1" autocomplete="off" :maxlength="mode==='invitation'?512:undefined" :disabled="!enabled || busy" required /></label>
+      <label class="block text-xs">{{mode==='invitation'?t('platform.invitationToken'):t('platform.resetToken')}}<input v-model="fields.token" class="field mt-1" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" :maxlength="mode==='invitation'?512:undefined" :disabled="!enabled || busy" required /></label>
       <label v-if="mode==='invitation'" class="block text-xs">{{t('app.username')}}<input v-model="fields.username" class="field mt-1" autocomplete="username" minlength="3" maxlength="128" :disabled="!enabled || busy" required /></label>
       <label class="block text-xs">{{t('platform.newPassword')}}<input v-model="fields.password" class="field mt-1" type="password" autocomplete="new-password" minlength="12" maxlength="4096" :disabled="!enabled || busy" required /></label>
       <label class="block text-xs">{{t('platform.confirmPassword')}}<input v-model="fields.confirm" class="field mt-1" type="password" autocomplete="new-password" minlength="12" maxlength="4096" :disabled="!enabled || busy" required /></label>
