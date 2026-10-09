@@ -28,6 +28,7 @@ function setSynced(value: boolean): void {
 }
 
 function accept(value: SettingsState): void {
+  if (!sessionActive) return
   if (state.value?.revision !== value.revision) state.value = value
   state.hydrated = true
   setSynced(true)
@@ -42,6 +43,7 @@ function scheduleReconcile(delay = 25): void {
 }
 
 function handle(event: BusEvent): void {
+  if (!sessionActive) return
   eventEpoch += 1
   if (event.type === "settings.updated") {
     const data = event.data as Partial<SettingsState>
@@ -57,6 +59,7 @@ function handle(event: BusEvent): void {
 }
 
 async function reconcile(notifyErrors = false): Promise<SettingsState> {
+  if (!sessionActive) throw new Error("Settings context is inactive")
   const run = ++requestRun
   const startedAtEpoch = eventEpoch
   state.loading = true
@@ -88,6 +91,7 @@ function setSessionActive(active: boolean): void {
     window.clearTimeout(reconcileTimer)
     reconcileTimer = 0
     state.value = null
+    state.loading = false
     state.hydrated = false
     state.synced = false
     state.error = ""

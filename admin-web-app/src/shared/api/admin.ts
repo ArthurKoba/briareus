@@ -1,11 +1,10 @@
 import { adminApiUrl, runtimeConfig } from "@/shared/config/runtime"
-import { AdminApiError } from "@/shared/api/error"
-import { frontendTelemetry } from "@/shared/telemetry/client"
-import { notifications } from "@/shared/notifications/bus"
-import { i18n } from "@/shared/i18n"
 import type { SettingsUpdatePayload } from "@/shared/settings/payload"
+import { request, jsonBody, type RequestOptions } from "@/shared/api/legacy-client"
+import { legacyAccountApi } from "@/features/accounts/api/legacy-accounts"
+export type { RequestOptions } from "@/shared/api/legacy-client"
+export type { AccountRecord, AccountPayload, AccountCandidatePayload, AccountCandidateResult } from "@/features/accounts/model/legacy-api-types"
 
-export interface RequestOptions { notifyErrors?: boolean }
 export interface SessionState { authenticated: boolean; username: string | null }
 export interface NavigationItem { id: string; label: string; enabled: boolean }
 export interface AdminBootstrap { product: string; environment: string; navigation: NavigationItem[] }
@@ -28,18 +27,6 @@ export interface DashboardState {
   analysis: { projects: number; active_sessions: number; workers: number; running_workers: number }
   analysis_meta: DashboardSnapshotMeta
 }
-
-export interface AccountRecord {
-  id: string; alias: string; provider: "github" | "gitlab" | "signoz" | "coolify"; auth_type: string
-  base_url: string; external_id: string | null; verify_tls: boolean; ca_cert_pem: string | null
-  enabled: boolean; created_at: string; updated_at: string
-}
-export interface AccountPayload {
-  alias: string; provider: AccountRecord["provider"]; auth_type: string; base_url?: string; external_id?: string
-  verify_tls?: boolean; ca_cert_pem?: string; enabled?: boolean; credential?: string
-}
-export interface AccountCandidatePayload extends AccountPayload { account_id?: string; draft_revision: string }
-export interface AccountCandidateResult { ok: true; provider: AccountRecord["provider"]; draft_revision: string }
 
 export interface InvocationRecord {
   id: string; request_id: string; module: string; tool: string; account_id: string; provider: string
@@ -176,70 +163,13 @@ const previewBootstrap: AdminBootstrap = {
   ],
 }
 
-async function request<T>(path: string, init: RequestInit = {}, options: RequestOptions = {}): Promise<T> {
-  const headers = new Headers(init.headers)
-  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json")
-  const method = init.method ?? "GET"
-  const started = performance.now()
-  let response: Response
-  try {
-    response = await fetch(adminApiUrl(path), { credentials: "include", ...init, headers })
-  } catch (caught) {
-    if (caught instanceof DOMException && caught.name === "AbortError") {
-      throw new AdminApiError("Request cancelled", "aborted", null, "", "", { cause: caught })
-    }
-    frontendTelemetry.error("api.network_error", caught, { path, method, duration_ms: performance.now() - started })
-    const message = caught instanceof Error ? caught.message : String(caught)
-    const error = new AdminApiError(message, "network", null, "", "", { cause: caught })
-    if (options.notifyErrors !== false) notifications.error(
-      String(i18n.global.t("notifications.apiError")),
-      `${method} ${new URL(adminApiUrl(path)).pathname} — ${message}`,
-      `api:network:${method}:${new URL(adminApiUrl(path)).pathname}`,
-    )
-    throw error
-  }
-
-  frontendTelemetry.api(adminApiUrl(path), method, response.status, performance.now() - started)
-  if (!response.ok) {
-    let detail = `Admin API request failed: ${response.status}`
-    let code = ""
-    try {
-      const body = await response.json() as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
-      const nested = body.detail && typeof body.detail === "object" ? body.detail as Record<string, unknown> : null
-      const message = body.error?.message ?? nested?.message ?? body.detail
-      if (typeof message === "string" && message) detail = message
-      else if (message !== undefined) detail = JSON.stringify(message)
-      const errorCode = body.error?.code ?? nested?.code
-      if (typeof errorCode === "string") code = errorCode
-    } catch { /* non-JSON upstream error */ }
-    const requestId = response.headers.get("x-request-id") ?? response.headers.get("x-correlation-id") ?? ""
-    const error = new AdminApiError(detail, "http", response.status, code, requestId)
-    if (response.status === 401) window.dispatchEvent(new CustomEvent("admin:auth-expired"))
-    if (options.notifyErrors !== false) notifications.error(
-      `${response.status} · ${String(i18n.global.t("notifications.apiError"))}`,
-      `${method} ${new URL(adminApiUrl(path)).pathname} — ${detail}${requestId ? ` · ${requestId}` : ""}`,
-      `api:${response.status}:${method}:${new URL(adminApiUrl(path)).pathname}`,
-    )
-    throw error
-  }
-  const contentType = response.headers.get("content-type") || ""
-  return (contentType.includes("application/json") ? await response.json() : await response.text()) as T
-}
-
-function jsonBody(value: unknown): BodyInit { return JSON.stringify(value) }
-
 export const adminApi = {
   session: (): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: true, username: "preview" }) : request("/session"),
   login: (username: string, password: string): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: true, username: username || "preview" }) : request("/login", { method: "POST", body: jsonBody({ username, password }) }),
   logout: (): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: false, username: null }) : request("/logout", { method: "POST", body: "{}" }),
   bootstrap: (): Promise<AdminBootstrap> => runtimeConfig.preview ? Promise.resolve(previewBootstrap) : request("/bootstrap"),
   dashboard: (options: RequestOptions = {}): Promise<DashboardState> => request("/dashboard", {}, options),
-  accounts: (options: RequestOptions = {}): Promise<{ accounts: AccountRecord[]; count: number }> => request("/accounts", {}, options),
-  createAccount: (payload: AccountPayload): Promise<AccountRecord> => request("/accounts", { method: "POST", body: jsonBody(payload) }),
-  updateAccount: (record: AccountRecord, payload: AccountPayload): Promise<AccountRecord> => request(`/accounts/${record.provider}/${record.id}`, { method: "PUT", body: jsonBody({ ...payload, expected_updated_at: record.updated_at }) }),
-  deleteAccount: (record: AccountRecord): Promise<unknown> => request(`/accounts/${record.provider}/${record.id}`, { method: "DELETE" }),
-  verifyAccount: (record: AccountRecord): Promise<Record<string, unknown>> => request(`/accounts/${record.provider}/${record.id}/verify`, { method: "POST", body: "{}" }, { notifyErrors: false }),
-  verifyAccountCandidate: (payload: AccountCandidatePayload): Promise<AccountCandidateResult> => request("/accounts/verify-candidate", { method: "POST", body: jsonBody(payload) }, { notifyErrors: false }),
+  ...legacyAccountApi,
   calls: (query: number | InvocationQuery = 100, options: RequestOptions = {}): Promise<InvocationPage> => {
     const normalized: InvocationQuery = typeof query === "number" ? { limit: query } : query
     const params = new URLSearchParams()

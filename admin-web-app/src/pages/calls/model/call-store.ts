@@ -121,6 +121,7 @@ function scheduleReconcile(delay = 25): void {
 }
 
 function handle(event: BusEvent): void {
+  if (!sessionActive) return
   eventEpoch += 1
   if (event.type === "snapshot") {
     const payload = event.data as { events?: InvocationRecord[] }
@@ -138,6 +139,7 @@ function handle(event: BusEvent): void {
 }
 
 async function reconcileRecent(): Promise<void> {
+  if (!sessionActive) return
   const run = ++recentRun
   const startedAtEpoch = eventEpoch
   state.recentLoading = true
@@ -157,6 +159,7 @@ async function reconcileRecent(): Promise<void> {
 }
 
 async function reconcile(notifyErrors = false): Promise<void> {
+  if (!sessionActive) return
   const run = ++requestRun
   const startedAtEpoch = eventEpoch
   state.loading = true
@@ -186,22 +189,25 @@ async function reconcile(notifyErrors = false): Promise<void> {
 }
 
 async function loadMore(): Promise<void> {
-  if (state.loading || state.loadingMore || !state.hasMore || !state.nextCursor) return
+  if (!sessionActive || state.loading || state.loadingMore || !state.hasMore || !state.nextCursor) return
+  const run = requestRun
   state.loadingMore = true
   try {
     const page = await adminApi.calls(queryFilters({ limit: CALL_CHUNK_SIZE, cursor: state.nextCursor }), { notifyErrors: false })
+    if (!sessionActive || run !== requestRun) return
     state.rows = mergeCallJournal(state.rows, page.events)
     state.nextCursor = page.next_cursor
     state.hasMore = page.has_more
     state.total = page.total
   } catch (caught) {
-    state.error = caught instanceof Error ? caught.message : "Unable to load older calls"
+    if (sessionActive && run === requestRun) state.error = caught instanceof Error ? caught.message : "Unable to load older calls"
   } finally {
-    state.loadingMore = false
+    if (run === requestRun) state.loadingMore = false
   }
 }
 
 async function loadPage(page = state.page, notifyErrors = false): Promise<void> {
+  if (!sessionActive) return
   const normalizedPage = Math.max(1, page)
   const run = ++pageRun
   const startedAtEpoch = eventEpoch
@@ -313,6 +319,8 @@ function setSessionActive(active: boolean): void {
     state.recentHydrated = false
     state.recentLoading = false
     state.pageHydrated = false
+    state.loading = false
+    state.loadingMore = false
     state.synced = false
     state.error = ""
     return

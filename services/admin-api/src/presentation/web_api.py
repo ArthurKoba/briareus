@@ -329,8 +329,8 @@ def build_admin_api_router(
             ) from exc
         if not identity.enabled:
             raise HTTPException(status_code=403, detail="local user disabled")
-        if identity.role != "superadmin":
-            raise HTTPException(status_code=403, detail="superadmin required")
+        if identity.role != "superuser":
+            raise HTTPException(status_code=403, detail="superuser required")
         return identity
 
     def authorization_access_control(api: WebApiServices) -> AuthorizationAccessAdminClient:
@@ -386,8 +386,8 @@ def build_admin_api_router(
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
                 )
-            if not identity.enabled or identity.role != "superadmin":
-                raise HTTPException(status_code=403, detail="superadmin required")
+            if not identity.enabled or identity.role != "superuser":
+                raise HTTPException(status_code=403, detail="superuser required")
             username = identity.username
         else:
             # Transitional fallback during authorization cutover. Remove after production

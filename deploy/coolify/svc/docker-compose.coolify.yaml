@@ -1,0 +1,23 @@
+x-watch-path-coolify:
+  - "deploy/coolify/svc/docker-compose.yaml"
+  - "deploy/coolify/svc/docker-compose.coolify.yaml"
+  - "deploy/coolify/svc/Dockerfile"
+  - "pyproject.toml"
+  - "uv.lock"
+  - "services/common/**"
+  - "services/modules/__init__.py"
+  - "services/modules/project_runtime/**"
+  - "services/modules/github/**"
+  - "services/modules/gitlab/**"
+
+services:
+  briareus-dev-svc:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-dev-svc
+    environment:
+      TZ: "${TZ:-UTC}"
+networks:
+  briareus:
+    external: true
+    name: briareus-net

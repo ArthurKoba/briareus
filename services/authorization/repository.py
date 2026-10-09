@@ -34,8 +34,8 @@ class AuthorizationRepository:
                 select(UserRecord).where(UserRecord.username == canonical)
             )
             if existing is not None:
-                if existing.role != "superadmin":
-                    existing.role = "superadmin"
+                if existing.role != "superuser":
+                    existing.role = "superuser"
                     existing.updated_at = _now()
                     await session.commit()
                     await session.refresh(existing)
@@ -43,7 +43,7 @@ class AuthorizationRepository:
             record = UserRecord(
                 username=canonical,
                 password_hash=hash_password(password),
-                role="superadmin",
+                role="superuser",
                 enabled=True,
             )
             session.add(record)

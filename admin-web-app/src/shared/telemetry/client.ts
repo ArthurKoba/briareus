@@ -30,14 +30,31 @@ const MAX_BATCH = 40
 const MAX_PENDING = MAX_BATCH * 5
 const FLUSH_INTERVAL_MS = 5000
 const MAX_BACKOFF_MS = 60000
-const SENSITIVE_KEY = /(password|passwd|credential|token|cookie|authorization|secret|payload|body|private[_-]?key)/i
-const SECRET_ASSIGNMENT = /(password|passwd|credential|token|cookie|authorization|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi
+const SENSITIVE_KEY = /(password|passwd|credential|token|cookie|authorization|secret|payload|body|private[_-]?key|invite|invitation|reset|raw|request[_-]?body|query|href|full[_-]?url|source[_-]?url|file[_-]?(?:content|path|name)|env[_-]?value|command[_-]?line|page[_-]?id|session[_-]?id|user[_-]?id|team[_-]?id|project[_-]?id|account[_-]?id|agent[_-]?id|resource[_-]?id|subscriber[_-]?id|traceback|stack|endpoint|topic|hostname|address)/i
+const SECRET_ASSIGNMENT = /(password|passwd|credential|token|cookie|authorization|secret|api[_-]?key|invite|invitation|reset)\s*[:=]\s*[^\s,;]+/gi
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+\-/]+=*/gi
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g
 const PROVIDER_TOKEN = /\b(?:ghp_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{12,}\b/g
 let failures = 0
 let nextAttemptAt = 0
 let flushing = false
+let legacySessionActive = false
+let deliveryGeneration = 0
+let activeDelivery: AbortController | null = null
+
+/** Never deliver unscoped frontend telemetry with a Project/other User context. */
+function setLegacySessionActive(active: boolean): void {
+  if (legacySessionActive === active) return
+  legacySessionActive = active
+  ++deliveryGeneration
+  activeDelivery?.abort()
+  activeDelivery = null
+  pending.length = 0
+  buffer.splice(0)
+  delivery.pending = 0
+  delivery.status = active && runtimeConfig.telemetry.enabled ? "idle" : "disabled"
+}
+
 
 function redactText(value: string): string {
   if (/-----BEGIN [^-]*PRIVATE KEY-----/i.test(value)) return "[redacted private key]"
@@ -59,17 +76,26 @@ function safeAttributes(input: Record<string, unknown> = {}): Record<string, str
   return output
 }
 
+/** Browser URL, hash and query can all carry one-use links or credentials. */
 function safeRoute(): string {
-  if (/^#[A-Za-z0-9._\-/]+$/.test(location.hash)) return location.hash
-  return location.pathname
+  const hash = location.hash.slice(1)
+  const [root, child] = hash.split("/")
+  const platformPages = new Set([
+    "home","users","teams","projects","agents","sessions","integrations","variables",
+    "dashboard","calls","oauth","files","terminal","browser-managed","browser-external",
+    "analysis","settings",
+  ])
+  if (root === "platform") return platformPages.has(child ?? "") ? `#platform/${child}` : "#platform"
+  const legacy = new Set(["dashboard","overview","git","observability","calls","files","terminal","browser","analysis","access","oauth","settings"])
+  if (legacy.has(root ?? "")) return `#${root}`
+  return "[unclassified-route]"
 }
 
-function safeApiPath(path: string): string {
-  try {
-    return new URL(path, location.origin).pathname
-  } catch {
-    return "[invalid-path]"
-  }
+function safeApiPath(_path: string): string {
+  // A Files, Reverse, OAuth or Agent URL may contain user-chosen filenames,
+  // tokens and Project IDs in the PATH (not only in the query string).
+  // Retaining the exact path is unsafe even after generic regex redaction.
+  return "[legacy-admin-api]"
 }
 
 function telemetryEndpoint(): string {
@@ -83,11 +109,11 @@ function sampled(): boolean {
 
 function syncDeliveryState(): void {
   delivery.pending = pending.length
-  if (!runtimeConfig.telemetry.enabled || !telemetryEndpoint()) delivery.status = "disabled"
+  if (!legacySessionActive || !runtimeConfig.telemetry.enabled || !telemetryEndpoint()) delivery.status = "disabled"
 }
 
 function queue(item: FrontendTelemetryEvent): void {
-  if (!uiPreferences.telemetryEnabled.value || !runtimeConfig.telemetry.enabled || !sampled() || !telemetryEndpoint()) return
+  if (!legacySessionActive || !uiPreferences.telemetryEnabled.value || !runtimeConfig.telemetry.enabled || !sampled() || !telemetryEndpoint()) return
   pending.push(item)
   if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING)
   syncDeliveryState()
@@ -115,9 +141,12 @@ function markFailure(message: string, response?: Response): void {
 async function flush(): Promise<void> {
   const endpoint = telemetryEndpoint()
   syncDeliveryState()
-  if (!runtimeConfig.telemetry.enabled || !endpoint || !pending.length || flushing) return
+  if (!legacySessionActive || !runtimeConfig.telemetry.enabled || !endpoint || !pending.length || flushing) return
   if (Date.now() < nextAttemptAt) return
 
+  const generation = deliveryGeneration
+  const controller = new AbortController()
+  activeDelivery = controller
   const events = pending.splice(0, MAX_BATCH)
   flushing = true
   delivery.status = "sending"
@@ -128,8 +157,9 @@ async function flush(): Promise<void> {
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events }),
-      keepalive: true,
+      signal: controller.signal,
     })
+    if (generation !== deliveryGeneration || controller.signal.aborted) return
     if (!response.ok) {
       pending.unshift(...events)
       if (response.status === 401 || response.status === 403) {
@@ -148,18 +178,24 @@ async function flush(): Promise<void> {
     delivery.lastError = ""
     delivery.retryAt = ""
   } catch (caught) {
-    pending.unshift(...events)
-    markFailure(caught instanceof Error ? caught.message : String(caught))
+    if (generation === deliveryGeneration && !controller.signal.aborted) {
+      pending.unshift(...events)
+      // Transport errors can embed bearer data and full request URLs.
+      markFailure("legacy_telemetry_transport_error")
+    }
   } finally {
-    if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING)
-    delivery.pending = pending.length
+    if (activeDelivery === controller) activeDelivery = null
+    if (generation === deliveryGeneration) {
+      if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING)
+      delivery.pending = pending.length
+    }
     flushing = false
   }
 }
 
 function flushBeacon(): void {
   const endpoint = telemetryEndpoint()
-  if (!runtimeConfig.telemetry.enabled || !endpoint || !pending.length || !navigator.sendBeacon) return
+  if (!legacySessionActive || !runtimeConfig.telemetry.enabled || !endpoint || !pending.length || !navigator.sendBeacon) return
   const events = pending.splice(0, MAX_BATCH)
   const accepted = navigator.sendBeacon(
     endpoint,
@@ -192,13 +228,13 @@ function event(
 }
 
 function error(name: string, caught: unknown, attributes: Record<string, unknown> = {}): FrontendTelemetryEvent {
-  const err = caught instanceof Error ? caught : null
-  return event(name, {
-    ...attributes,
-    error_type: err?.name ?? "unknown",
-    error_message: redactText(err?.message ?? String(caught)),
-    error_stack: err?.stack ? redactText(err.stack) : null,
-  }, { level: "error" })
+  // Error.message/stack and String(unknown) can contain arbitrary credentials,
+  // invitation URLs, session identifiers and request parameters. Regex
+  // redaction is not a proof that they are safe to record or transmit.
+  const category = caught instanceof DOMException ? "dom-exception" :
+    caught instanceof TypeError ? "type-error" :
+    caught instanceof Error ? "application-error" : "unknown"
+  return event(name, { ...attributes, error_type:category }, { level: "error" })
 }
 
 window.setInterval(() => void flush(), FLUSH_INTERVAL_MS)
@@ -210,19 +246,30 @@ document.addEventListener("visibilitychange", () => {
 export const frontendTelemetry = {
   events: readonly(buffer),
   delivery: readonly(delivery),
+  setLegacySessionActive,
   event,
   error,
   flush,
   get pendingCount() { return pending.length },
-  get deliveryConfigured() { return runtimeConfig.telemetry.enabled && Boolean(telemetryEndpoint()) },
+  get deliveryConfigured() { return legacySessionActive && runtimeConfig.telemetry.enabled && Boolean(telemetryEndpoint()) },
   api(path: string, method: string, status: number, durationMs: number) {
     return event("api.request", { path: safeApiPath(path), method, status }, {
       level: status >= 500 ? "error" : status >= 400 ? "warn" : "info",
       durationMs,
     })
   },
-  navigation(id: string) { return event("navigation", { page: id }) },
+  navigation(id: string) {
+    // A navigation label is NOT a raw hash, file name, Project UUID or URL.
+    const allowed=new Set(["dashboard","git","observability","calls","files","terminal",
+      "browser","analysis","access","oauth","settings","home","users","teams",
+      "projects","agents","sessions","integrations","variables","browser-managed","browser-external"])
+    return event("navigation", {page:allowed.has(id)?id:"other"})
+  },
   websocket(state: string, topic?: string, transport?: string) {
-    return event("realtime.websocket", { state, topic: topic ?? null, transport: transport ?? null })
+    // Topic names may include private User/Team/Project identities or URLs.
+    // Keep only transport taxonomy and topic presence for telemetry.
+    const category=["connected","disconnected","connecting","reconnecting","error","idle"].includes(state)?state:"unknown"
+    const safeTransport=["websocket","ws","poll","polling","sse"].includes(transport??"")?transport:"unknown"
+    return event("realtime.websocket", { state:category, has_topic:Boolean(topic), transport:safeTransport })
   },
 }

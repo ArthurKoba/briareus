@@ -1,0 +1,29 @@
+x-watch-path-coolify:
+  - "deploy/coolify/infrastructure/docker-compose.yaml"
+  - "deploy/coolify/infrastructure/docker-compose.coolify.yaml"
+  - "Dockerfile"
+  - "docker-entrypoint.sh"
+  - "pyproject.toml"
+  - "uv.lock"
+  - "services/common/**"
+  - "services/modules/__init__.py"
+  - "services/modules/project_runtime/**"
+  - "services/modules/observability/**"
+  - "services/modules/signoz/**"
+  - "services/modules/coolify/**"
+
+# Coolify override for a single independent Git-backed Application.
+# Coolify variable discovery happens before resolving extends; mirror env keys.
+# Scope secret variable VALUES to Coolify's development environment. No secret in Git.
+# No public SERVICE_FQDN_* until security acceptance.
+services:
+  briareus-dev-infrastructure:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-dev-infrastructure
+    environment:
+      TZ: "${TZ:-UTC}"
+networks:
+  briareus:
+    external: true
+    name: briareus-net

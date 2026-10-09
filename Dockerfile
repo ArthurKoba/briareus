@@ -37,7 +37,6 @@ RUN chmod 0755 /usr/local/bin/bridge-entrypoint \
     && chown -R 1000:1000 /authorization /admin-api /home/bridge
 
 COPY services/common ./services/common
-COPY scripts/provision_authorization_database.py ./scripts/provision_authorization_database.py
 
 EXPOSE 8000
 
@@ -50,17 +49,21 @@ CMD ["/app/.venv/bin/python", "-m", "common.asgi"]
 
 FROM runtime-base AS authorization
 COPY services/authorization ./services/authorization
+COPY scripts/provision_authorization_database.py ./scripts/provision_authorization_database.py
 ENV ASGI_APP=authorization.runtime:app
 
 
 FROM runtime-base AS gateway
 COPY services/bridge ./services/bridge
+COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 ENV ASGI_APP=bridge.server:app
 
 
 FROM runtime-base AS admin-api
 COPY services/admin-api/src ./services/admin-api/src
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/files ./services/modules/files
 ENV ASGI_APP=runtime:app \
     PYTHONPATH=/app/services:/app/services/admin-api/src \
@@ -73,6 +76,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/github ./services/modules/github
 ENV ASGI_APP=modules.github.runtime:app
 
@@ -82,12 +86,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/gitlab ./services/modules/gitlab
 ENV ASGI_APP=modules.gitlab.runtime:app
 
 
 FROM runtime-base AS files
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/files ./services/modules/files
 ENV ASGI_APP=modules.files.runtime:app \
     FILE_WORKSPACE_ROOT=/workspace
@@ -106,6 +112,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && uv sync --frozen --no-dev --group web --no-install-project
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/files ./services/modules/files
 COPY services/modules/web ./services/modules/web
 ENV ASGI_APP=modules.web.runtime:app \
@@ -132,6 +139,7 @@ RUN apt-get update \
         picocom python3-serial \
     && rm -rf /var/lib/apt/lists/*
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/terminal ./services/modules/terminal
 ENV ASGI_APP=modules.terminal.runtime:app \
     HOME=/home/agent \
@@ -141,6 +149,7 @@ ENV ASGI_APP=modules.terminal.runtime:app \
 
 FROM runtime-base AS analysis
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/files ./services/modules/files
 COPY services/modules/analysis ./services/modules/analysis
 ENV ASGI_APP=modules.analysis.runtime:app \
@@ -155,6 +164,7 @@ ENV ASGI_APP=modules.ghidra.runtime:app
 
 FROM runtime-base AS observability
 COPY services/modules/__init__.py ./services/modules/__init__.py
+COPY services/modules/project_runtime ./services/modules/project_runtime
 COPY services/modules/signoz ./services/modules/signoz
 COPY services/modules/coolify ./services/modules/coolify
 COPY services/modules/observability ./services/modules/observability

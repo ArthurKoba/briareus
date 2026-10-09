@@ -1,0 +1,123 @@
+{
+  "schema": "briareus-coolify-dev-registry-v1",
+  "server": "tambov",
+  "coolify_project": "briareus",
+  "environment": "development",
+  "network_destination": "briareus-net",
+  "repository": "ArthurKoba/briareus",
+  "branch": "TO_BE_SET_TO_REVIEWED_PUBLISHED_DEV_REF",
+  "applications": [
+    {
+      "name": "briareus-dev-data",
+      "base_directory": "/deploy/coolify/data",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-postgres",
+        "briareus-dev-valkey"
+      ],
+      "watch_paths_source": "deploy/coolify/data/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "candidate_private_data"
+    },
+    {
+      "name": "briareus-dev-authorization",
+      "base_directory": "/deploy/coolify/authorization",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-authorization"
+      ],
+      "watch_paths_source": "deploy/coolify/authorization/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-admin-api",
+      "base_directory": "/deploy/coolify/admin-api",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-admin-api"
+      ],
+      "watch_paths_source": "deploy/coolify/admin-api/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "candidate_private_preview"
+    },
+    {
+      "name": "briareus-dev-admin-ui",
+      "base_directory": "/deploy/coolify/admin-ui",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-admin-ui"
+      ],
+      "watch_paths_source": "deploy/coolify/admin-ui/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "static_not_connected"
+    },
+    {
+      "name": "briareus-dev-gateway",
+      "base_directory": "/deploy/coolify/gateway",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-gateway"
+      ],
+      "watch_paths_source": "deploy/coolify/gateway/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-files",
+      "base_directory": "/deploy/coolify/files",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-files"
+      ],
+      "watch_paths_source": "deploy/coolify/files/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-terminal",
+      "base_directory": "/deploy/coolify/terminal",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-terminal"
+      ],
+      "watch_paths_source": "deploy/coolify/terminal/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-web",
+      "base_directory": "/deploy/coolify/web",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-web"
+      ],
+      "watch_paths_source": "deploy/coolify/web/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-svc",
+      "base_directory": "/deploy/coolify/svc",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-svc"
+      ],
+      "watch_paths_source": "deploy/coolify/svc/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-infrastructure",
+      "base_directory": "/deploy/coolify/infrastructure",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-infrastructure"
+      ],
+      "watch_paths_source": "deploy/coolify/infrastructure/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    },
+    {
+      "name": "briareus-dev-reverse",
+      "base_directory": "/deploy/coolify/reverse",
+      "docker_compose_location": "/docker-compose.coolify.yaml",
+      "compose_services": [
+        "briareus-dev-reverse"
+      ],
+      "watch_paths_source": "deploy/coolify/reverse/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "blocked_pending_C1_B2_C2"
+    }
+  ],
+  "provisioning_status": "desired_state_only_not_yet_applied"
+}

@@ -31,6 +31,7 @@ function setSynced(value: boolean): void {
 }
 
 function upsert(record: AccountRecord): void {
+  if (!sessionActive) return
   const key = recordIdentity(record)
   const current = state.accounts.find(item => recordIdentity(item) === key)
   if (current && current.updated_at > record.updated_at) return
@@ -40,6 +41,7 @@ function upsert(record: AccountRecord): void {
 }
 
 function remove(provider: string, id: string): void {
+  if (!sessionActive) return
   const key = identity(provider, id)
   state.accounts = state.accounts.filter(item => recordIdentity(item) !== key)
 }
@@ -53,6 +55,7 @@ function scheduleReconcile(delay = 25): void {
 }
 
 function handle(event: BusEvent): void {
+  if (!sessionActive) return
   eventEpoch += 1
   if (event.type === "snapshot") {
     setSynced(false)
@@ -70,6 +73,7 @@ function handle(event: BusEvent): void {
 }
 
 async function reconcile(notifyErrors = false): Promise<void> {
+  if (!sessionActive) return
   const run = ++requestRun
   const startedAtEpoch = eventEpoch
   state.loading = true
@@ -101,6 +105,7 @@ function setSessionActive(active: boolean): void {
     window.clearTimeout(reconcileTimer)
     reconcileTimer = 0
     state.accounts = []
+    state.loading = false
     state.hydrated = false
     state.synced = false
     state.error = ""

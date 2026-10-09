@@ -1,0 +1,41 @@
+# Briareus DEV-only greenfield build. Shared SOURCE build contract; separate Coolify Applications.
+# NOT a public C1-B2/C2 activation. Do not copy credentials into images.
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS core
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    PYTHONPATH=/app/services:/app/services/admin-api/src
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY services/common ./services/common
+COPY services/authorization ./services/authorization
+COPY services/identity ./services/identity
+COPY services/teams ./services/teams
+COPY services/projects ./services/projects
+COPY services/agents ./services/agents
+RUN useradd -u 1000 -m -d /home/platform platform \
+    && mkdir -p /home/platform/.cache \
+    && chown -R 1000:1000 /home/platform
+USER 1000:1000
+EXPOSE 8000
+
+FROM core AS admin-preview
+COPY services/admin-api/src ./services/admin-api/src
+ENV PLATFORM_ADMIN_PREVIEW_ENABLED=false
+# Real DEV loopback boundary: no public ports and no proxy header trust.
+# Enable only for a verified isolated empty *_dev PostgreSQL schema.
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "platform_runtime:app", "--host", "127.0.0.1", "--port", "8000", "--no-proxy-headers"]
+
+FROM core AS authorization-staged
+# Greenfield Authentication service listener/transport is not approved or mounted.
+# Never replace this with legacy authorization.runtime (creates legacy tables).
+CMD ["/bin/sh", "-ec", "echo 'Briareus authorization transport pending C1-B2' >&2; exit 78"]
+
+FROM core AS schema-init
+COPY scripts/greenfield_schema.py ./scripts/greenfield_schema.py
+# Never starts automatically. Explicitly approved disposable empty *_dev DB only.
+CMD ["/app/.venv/bin/python", "/app/scripts/greenfield_schema.py", "--i-confirm-disposable-empty-dev-db"]

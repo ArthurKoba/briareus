@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -89,7 +90,9 @@ class BackendRouter:
         if self._timeout_provider is None:
             return 5.0
         try:
-            return max(1.0, float(await self._timeout_provider()))
+            async with asyncio.timeout(5.0):
+                seconds = float(await self._timeout_provider())
+            return min(300.0, max(1.0, seconds)) if math.isfinite(seconds) else 5.0
         except Exception:
             return 5.0
 
@@ -128,7 +131,7 @@ class BackendRouter:
             raw = await self._sessions[backend.name].list_tools(timeout)
             tools = list(cast(list[_RemoteTool], raw))
             self._catalog_cache[backend.name] = (
-                now + self._catalog_ttl_seconds,
+                time.monotonic() + self._catalog_ttl_seconds,
                 tools,
             )
             return tools
@@ -198,8 +201,14 @@ class BackendRouter:
                 timeout,
             )
         except Exception as exc:
-            message = str(exc)[:1000]
-            timed_out = "timed out" in message.casefold() or isinstance(exc, TimeoutError)
+            # Never expose upstream exception text: SDK errors may include
+            # bearer URLs, provider credentials, arguments or response bodies.
+            timed_out = isinstance(exc, TimeoutError) or "timed out" in str(exc).casefold()
+            message = (
+                "The backend call timed out."
+                if timed_out
+                else "The backend call failed; inspect redacted runtime diagnostics."
+            )
             return {
                 "backend": backend.name,
                 "tool": tool_name,
@@ -207,10 +216,23 @@ class BackendRouter:
                 "error_type": "MCP_BACKEND_TIMEOUT" if timed_out else type(exc).__name__,
                 "message": message,
                 "hint": (
-                    "Retry, narrow the request, or use an asynchronous job tool when available."
+                    "The outcome may be unknown. Inspect the backend result or "
+                    "job state before any retry."
                     if timed_out
                     else ""
                 ),
+            }
+        if getattr(result, "is_error", False):
+            # A tool can return `is_error=True` without raising an exception.
+            # Such content may be a provider SDK trace containing credentials;
+            # never misreport it as success or echo raw private error bodies.
+            return {
+                "backend": backend.name,
+                "tool": tool_name,
+                "status": "error",
+                "error_type": "MCP_BACKEND_TOOL_ERROR",
+                "message": "The backend tool reported an error.",
+                "hint": "Check the operation outcome before any retry.",
             }
         return {
             "backend": backend.name,
@@ -218,5 +240,6 @@ class BackendRouter:
             "status": "ok",
             "result": _decode_call_result(result),
         }
+
     async def close(self) -> None:
         await asyncio.gather(*(session.close() for session in self._sessions.values()))

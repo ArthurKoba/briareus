@@ -1,85 +1,50 @@
 from __future__ import annotations
 
 import hashlib
-import http.client
-import ipaddress
 import os
-import socket
-import urllib.parse
-import urllib.request
+import time
 import uuid
-from contextlib import suppress
-from typing import IO, cast
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
+from pathlib import Path
 
 from common.models import JsonObject, validated_call
+from modules.project_runtime.workspace_roots import ProjectFileError
 
+from ._attachment_transport import open_public_attachment, validate_public_attachment_url
 from .models import ClientFile
+from .project_workspace import _rename_no_replace
 from .workspace_store import WorkspaceFileError, WorkspaceFileStore
 
 
 def _validate_sha256(value: str) -> str:
     digest = value.strip().casefold()
-    if digest and (
-        len(digest) != 64
-        or any(char not in "0123456789abcdef" for char in digest)
-    ):
+    if digest and (len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
         raise WorkspaceFileError("expected_sha256 must be a 64-character hex digest")
     return digest
 
 
-def _validate_remote_file_url(file: str) -> urllib.parse.SplitResult:
-    parsed = urllib.parse.urlsplit(file.strip())
-    if parsed.scheme.casefold() != "https":
-        raise WorkspaceFileError(
-            "file must resolve to an HTTPS attachment URL; pass the client "
-            "attachment/file argument directly"
-        )
-    if not parsed.hostname:
-        raise WorkspaceFileError("attachment URL has no hostname")
-    if parsed.username or parsed.password:
-        raise WorkspaceFileError("attachment URL must not contain userinfo")
+@contextmanager
+def _legacy_pinned_parent(root: Path, parent: Path) -> Iterator[int]:
+    """Pin the real destination directory, denying symlink swaps.
+
+    Unlike Project Files, the old global workspace has no per-Project actor,
+    quota or mount namespace; this only removes the obvious path-following
+    window from external attachment writes. No public Files API is changed.
+    """
+    relative = parent.relative_to(root)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(root, flags)
     try:
-        addresses = socket.getaddrinfo(
-            parsed.hostname,
-            parsed.port or 443,
-            type=socket.SOCK_STREAM,
-        )
-    except OSError as exc:
-        raise WorkspaceFileError("attachment hostname cannot be resolved") from exc
-    if not addresses:
-        raise WorkspaceFileError("attachment hostname cannot be resolved")
-    for item in addresses:
-        raw_ip = str(item[4][0]).split("%", 1)[0]
-        try:
-            address = ipaddress.ip_address(raw_ip)
-        except ValueError as exc:
-            raise WorkspaceFileError(
-                "attachment hostname resolved to an invalid address"
-            ) from exc
-        if not address.is_global:
-            raise WorkspaceFileError(
-                "attachment URL resolves to a non-public address"
-            )
-    return parsed
-
-
-class _AttachmentRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: IO[bytes],
-        code: int,
-        msg: str,
-        headers: http.client.HTTPMessage,
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        _validate_remote_file_url(str(newurl))
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-def _open_remote_file(request: urllib.request.Request) -> http.client.HTTPResponse:
-    opener = urllib.request.build_opener(_AttachmentRedirectHandler())
-    return cast(http.client.HTTPResponse, opener.open(request, timeout=60))
+        for part in relative.parts:
+            with suppress(FileExistsError):
+                os.mkdir(part, 0o700, dir_fd=fd)
+            child = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
 
 
 @validated_call
@@ -94,89 +59,121 @@ def ingest_workspace_file(
     max_bytes: int,
 ) -> JsonObject:
     download_url = file.download_url.strip()
-    _validate_remote_file_url(download_url)
+    validate_public_attachment_url(download_url)
     expected_digest = _validate_sha256(expected_sha256)
     if expected_size is not None and (expected_size < 0 or expected_size > max_bytes):
-        raise WorkspaceFileError(
-            f"expected_size must be between 0 and {max_bytes}"
-        )
+        raise WorkspaceFileError(f"expected_size must be between 0 and {max_bytes}")
 
+    if max_bytes <= 0:
+        raise WorkspaceFileError("maximum attachment size must be positive")
     target = workspace.target_path(destination)
     if target.exists() and not overwrite:
         raise WorkspaceFileError(f"destination already exists: {destination}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.parent / f".{target.name}.upload-{uuid.uuid4().hex}.part"
-    request = urllib.request.Request(
-        download_url,
-        headers={"User-Agent": "mcp-bridge/0.1 workspace-ingress"},
-    )
     digest = hashlib.sha256()
     total = 0
+    deadline = time.monotonic() + 600.0
 
-    try:
+    # A persistent directory descriptor prevents a concurrent symlink swap
+    # between initial validation, download and the final atomic placement.
+    with _legacy_pinned_parent(workspace.root, target.parent) as parent_fd:
+        temp_name = f".{target.name}.upload-{uuid.uuid4().hex}.part"
         try:
-            response = _open_remote_file(request)
-        except Exception as exc:
-            if isinstance(exc, WorkspaceFileError):
-                raise
-            raise WorkspaceFileError(
-                f"attachment download failed: {type(exc).__name__}"
-            ) from exc
+            try:
+                response = open_public_attachment(download_url)
+            except Exception as exc:
+                if isinstance(exc, WorkspaceFileError):
+                    raise
+                raise WorkspaceFileError(
+                    f"attachment download failed: {type(exc).__name__}"
+                ) from exc
 
-        with response:
-            _validate_remote_file_url(str(response.geturl()))
-            declared = response.headers.get("Content-Length")
-            if declared:
-                try:
-                    declared_size = int(declared)
-                except ValueError as exc:
-                    raise WorkspaceFileError(
-                        "attachment returned invalid Content-Length"
-                    ) from exc
-                if declared_size < 0 or declared_size > max_bytes:
-                    raise WorkspaceFileError(
-                        "attachment exceeds the configured upload size limit"
-                    )
-                if expected_size is not None and declared_size != expected_size:
-                    raise WorkspaceFileError(
-                        "attachment Content-Length does not match expected_size"
-                    )
-
-            with temporary.open("xb") as handle:
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > max_bytes:
+            with response:
+                length_headers = response.headers.get_all("Content-Length", [])
+                if len(length_headers) > 1:
+                    raise WorkspaceFileError("attachment returned conflicting Content-Length")
+                declared = length_headers[0] if length_headers else None
+                declared_size: int | None = None
+                if declared is not None:
+                    try:
+                        declared_size = int(declared)
+                    except ValueError as exc:
                         raise WorkspaceFileError(
-                            "attachment exceeds the configured upload size limit"
+                            "attachment returned invalid Content-Length"
+                        ) from exc
+                    if declared_size < 0 or declared_size > max_bytes:
+                        raise WorkspaceFileError("attachment exceeds configured upload size limit")
+                    if expected_size is not None and declared_size != expected_size:
+                        raise WorkspaceFileError(
+                            "attachment Content-Length does not match expected_size"
                         )
-                    digest.update(chunk)
-                    handle.write(chunk)
-                handle.flush()
-                os.fsync(handle.fileno())
 
-        actual_digest = digest.hexdigest()
-        if expected_size is not None and total != expected_size:
-            raise WorkspaceFileError(
-                f"attachment size mismatch: expected {expected_size}, received {total}"
-            )
-        if expected_digest and actual_digest != expected_digest:
-            raise WorkspaceFileError(
-                "attachment SHA-256 mismatch: "
-                f"expected {expected_digest}, found {actual_digest}"
-            )
-        if target.exists() and not overwrite:
-            raise WorkspaceFileError(
-                f"destination already exists: {destination}"
-            )
-        os.replace(temporary, target)
-        result = workspace.info(workspace.relative(target))
-        result["sha256"] = actual_digest
-        result["completed"] = True
-        result["transport"] = "client-file"
-        return result
-    finally:
-        with suppress(FileNotFoundError):
-            temporary.unlink()
+                temp_fd = os.open(
+                    temp_name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    0o600,
+                    dir_fd=parent_fd,
+                )
+                with os.fdopen(temp_fd, "wb") as handle:
+                    while True:
+                        if time.monotonic() >= deadline:
+                            raise WorkspaceFileError("attachment download time limit exceeded")
+                        chunk = response.read(1024 * 1024)
+                        if time.monotonic() >= deadline:
+                            raise WorkspaceFileError("attachment download time limit exceeded")
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise WorkspaceFileError(
+                                "attachment exceeds configured upload size limit"
+                            )
+                        digest.update(chunk)
+                        handle.write(chunk)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+
+            actual_digest = digest.hexdigest()
+            if declared_size is not None and total != declared_size:
+                # read1 can return EOF before a declared HTTP body length.
+                # Never persist a truncated attachment as completed data.
+                raise WorkspaceFileError("attachment body is shorter than Content-Length")
+            if expected_size is not None and total != expected_size:
+                raise WorkspaceFileError(
+                    f"attachment size mismatch: expected {expected_size}, received {total}"
+                )
+            if expected_digest and actual_digest != expected_digest:
+                raise WorkspaceFileError(
+                    f"attachment SHA-256 mismatch: expected {expected_digest}, "
+                    f"found {actual_digest}"
+                )
+            if overwrite:
+                # os.replace(dir_fd) replaces the entry itself, never follows
+                # a newly swapped final symlink outside the configured root.
+                os.replace(
+                    temp_name,
+                    target.name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                )
+            else:
+                try:
+                    _rename_no_replace(parent_fd, temp_name, parent_fd, target.name)
+                except ProjectFileError as exc:
+                    if exc.code == "FILE_EXISTS":
+                        raise WorkspaceFileError(
+                            f"destination already exists: {destination}"
+                        ) from exc
+                    raise WorkspaceFileError("atomic attachment placement unavailable") from exc
+            try:
+                os.fsync(parent_fd)
+            except OSError as exc:
+                # Atomic rename already occurred: never imply safe retry.
+                raise WorkspaceFileError("attachment commit outcome uncertain") from exc
+            result = workspace.info(workspace.relative(target))
+            result["sha256"] = actual_digest
+            result["completed"] = True
+            result["transport"] = "client-file"
+            return result
+        finally:
+            with suppress(FileNotFoundError):
+                os.unlink(temp_name, dir_fd=parent_fd)

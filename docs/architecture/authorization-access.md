@@ -696,7 +696,7 @@ The user who logs into the administration UI is a local `authorization` user.
 
 That identity manages sessions belonging to that user's OAuth-connected MCP contexts.
 
-The bootstrap authorization user has the `superadmin` role and is the initial full-access administration identity. Admin API delegates credential verification to authorization; it does not own a second administrator password after cutover. Additional users may be added later with narrower roles and policies.
+The bootstrap authorization user has the `superuser` role and is the initial full-access administration identity. Admin API delegates credential verification to authorization; it does not own a second administrator password after cutover. Additional users may be added later with narrower roles and policies.
 
 A future service user may authenticate through `authorization` under a distinct identity type and policy.
 
