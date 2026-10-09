@@ -87,7 +87,7 @@ AUTHORIZATION_ADMIN_SERVICE_TOKEN=<same admin service token configured on author
 ADMIN_API_SESSION_HTTPS_ONLY=true
 ```
 
-Local OAuth and administration identity are owned by `authorization`. The bootstrap authorization user is created as `superadmin` and is the account used to sign in to Admin UI. `ADMIN_API_USERNAME` / `ADMIN_API_PASSWORD` remain only as a temporary fallback during cutover and may be removed after `AUTHORIZATION_ADMIN_SERVICE_TOKEN` is configured and authorization-backed login is accepted. Provider accounts remain separate integration data exposed through the administration surface.
+Local OAuth and administration identity are owned by `authorization`. The bootstrap authorization user is created as `superuser` and is the account used to sign in to Admin UI. `ADMIN_API_USERNAME` / `ADMIN_API_PASSWORD` remain only as a temporary fallback during cutover and may be removed after `AUTHORIZATION_ADMIN_SERVICE_TOKEN` is configured and authorization-backed login is accepted. Provider accounts remain separate integration data exposed through the administration surface.
 
 ## Legacy SQLite cutover
 

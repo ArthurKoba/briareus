@@ -49,7 +49,14 @@ function push(value: Omit<AppNotification, "id">): number {
   return item.id
 }
 
+function clearAll(): void {
+  for (const timer of timers.values()) window.clearTimeout(timer)
+  timers.clear()
+  items.value = []
+}
+
 export const notifications = {
+  clearAll,
   items: readonly(items),
   push,
   remove,

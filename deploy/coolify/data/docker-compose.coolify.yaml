@@ -1,0 +1,31 @@
+x-watch-path-coolify:
+  - "deploy/coolify/data/docker-compose.yaml"
+  - "deploy/coolify/data/docker-compose.coolify.yaml"
+
+# Per-Application Coolify adapter: vendor services deploy together as one data release.
+services:
+  briareus-dev-postgres:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-dev-postgres
+    environment:
+      POSTGRES_DB: "briareus_dev"
+      POSTGRES_USER: "${PLATFORM_DEV_DB_USER:?}"
+      POSTGRES_PASSWORD: "${PLATFORM_DEV_DB_PASSWORD:?}"
+      TZ: "${TZ:-UTC}"
+  briareus-dev-valkey:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-dev-valkey
+    environment:
+      VALKEY_PASSWORD: "${PLATFORM_DEV_VALKEY_PASSWORD:?}"
+      TZ: "${TZ:-UTC}"
+volumes:
+  postgres-data:
+    name: briareus-dev-postgres-v1
+  valkey-data:
+    name: briareus-dev-valkey-v1
+networks:
+  briareus:
+    external: true
+    name: briareus-net

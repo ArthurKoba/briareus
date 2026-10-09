@@ -1,0 +1,111 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue"
+import { useI18n } from "vue-i18n"
+import { canonicalUuid, type TeamView } from "@/features/platform/model/contracts"
+import { useCommand, useDomain } from "@/features/platform/model/use-domain"
+import { refreshAuthenticatedProjection } from "@/features/platform/model/refresh-identity"
+import { projectContext } from "@/features/platform/model/project-context"
+import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
+import ConfirmAction from "@/features/platform/ui/ConfirmAction.vue"
+import Button from "@/shared/ui/Button.vue"
+import PageHeader from "@/shared/ui/PageHeader.vue"
+
+const { t } = useI18n()
+const teams = useDomain<TeamView>("teams", "teams.read", (port, ctx) => port.teams.list(ctx))
+const command = useCommand()
+const teamName = ref("")
+const chosenId = ref("")
+const newMemberId = ref("")
+const newOwnerId = ref("")
+const pending = ref<{ kind: "remove" | "transfer"; team: TeamView; userId: string; label: string } | null>(null)
+const can = projectContext.can
+const active = computed(() => teams.state.items.find(team => team.id === chosenId.value) ?? null)
+const activeMembers = computed(() => active.value?.members ?? [])
+watch(() => projectContext.state.revision, () => { chosenId.value = ""; newMemberId.value = ""; newOwnerId.value = ""; pending.value = null })
+// Never silently switch to a DIFFERENT Team after membership removal or a
+// list refresh. Selection is always an explicit User choice.
+watch(() => teams.state.items.map(team => team.id).join("|"), () => {
+  if(chosenId.value&&!teams.state.items.some(item=>item.id===chosenId.value)){
+    chosenId.value=""
+    newMemberId.value=""
+    newOwnerId.value=""
+    pending.value=null
+  }
+})
+watch(chosenId,()=>{
+  newMemberId.value=""
+  newOwnerId.value=""
+  pending.value=null
+})
+// Team member/owner changes invalidate old confirmation snapshots even when
+// the selected Team ID stays the same across a list refresh.
+watch(() => teams.state.items, () => {
+  const attempt=pending.value
+  if (!attempt) return
+  const now=teams.state.items.find(team=>team.id===attempt.team.id)
+  if (!now || now.revision!==attempt.team.revision ||
+      now.decisionVersion!==attempt.team.decisionVersion ||
+      now.ownerId!==attempt.team.ownerId ||
+      (attempt.kind==="remove" && !now.members?.some(member=>member.userId===attempt.userId && member.active && !member.owner))) {
+    pending.value=null
+  }
+})
+
+async function createTeam() {
+  const name = teamName.value.trim()
+  if (!name) return
+  const success = await command.submit("teams.create", (port, ctx) => port.teams.create(ctx, name))
+  if (success) { teamName.value = ""; await refreshAuthenticatedProjection(); await teams.reload() }
+}
+async function addMember() {
+  const team = active.value
+  if (!team || team.allowedActions?.["teams.members"] !== true || !can("teams.members") || !canonicalUuid(newMemberId.value.trim())) return
+  const success = await command.submit("teams.members", (port, ctx) => port.teams.addMember(ctx, team, newMemberId.value.trim()))
+  if (success) { newMemberId.value = ""; await refreshAuthenticatedProjection(); await teams.reload() }
+}
+async function confirmAction() {
+  const action = pending.value
+  const current=active.value
+  if (!action || !current || current.id!==action.team.id ||
+      current.revision!==action.team.revision || current.decisionVersion!==action.team.decisionVersion ||
+      current.ownerId!==action.team.ownerId ||
+      !can(action.kind === "transfer" ? "teams.ownership" : "teams.members")) return
+  if (current.allowedActions?.[action.kind === "transfer" ? "teams.ownership" : "teams.members"] !== true) return
+  const success = await command.submit(action.kind === "transfer" ? "teams.ownership" : "teams.members", (port, ctx) => action.kind === "transfer"
+    ? port.teams.transferOwner(ctx, current, action.userId)
+    : port.teams.removeMember(ctx, current, action.userId))
+  if (success) { pending.value = null; newOwnerId.value = ""; await refreshAuthenticatedProjection(); await teams.reload() }
+}
+function askTransfer() {
+  const team = active.value
+  if (!team || !can("teams.ownership") || team.allowedActions?.["teams.ownership"] !== true || !canonicalUuid(newOwnerId.value) || newOwnerId.value === team.ownerId) return
+  pending.value = { kind: "transfer", team, userId: newOwnerId.value, label: team.id }
+}
+</script>
+<template>
+  <div class="space-y-6">
+    <PageHeader :title="t('platform.teams')" :description="t('platform.teamHint')"><Button variant="outline" size="sm" :disabled="!can('teams.read')" @click="teams.reload">{{t('common.refresh')}}</Button></PageHeader>
+    <section class="settings-card space-y-3">
+      <h2 class="font-semibold">{{t('platform.createTeam')}}</h2>
+      <form class="flex flex-wrap items-end gap-3" @submit.prevent="createTeam"><label class="min-w-52 flex-1 text-xs">{{t('platform.teamName')}}<input v-model="teamName" class="field mt-1" maxlength="255" :disabled="!can('teams.create') || (command.state.busy || command.state.reconciliationRequired)" required /></label><Button size="sm" type="submit" :disabled="!can('teams.create') || (command.state.busy || command.state.reconciliationRequired) || !teamName.trim()">{{t('common.add')}}</Button></form>
+    </section>
+    <section class="settings-card space-y-4">
+      <h2 class="font-semibold">{{t('platform.myTeams')}}</h2>
+      <PlatformFeedback :status="teams.state.status" :error="teams.state.error" @retry="teams.reload" />
+      <div v-if="teams.state.items.length" class="grid gap-5 lg:grid-cols-[250px_minmax(0,1fr)]">
+        <nav class="space-y-1" :aria-label="t('platform.teams')"><button v-for="team in teams.state.items" :key="team.id" type="button" class="block w-full rounded-md px-3 py-2 text-left text-sm" :aria-pressed="team.id===chosenId" :class="team.id === chosenId ? 'bg-accent font-medium' : 'hover:bg-muted'" @click="chosenId=team.id">{{team.name}}<span class="block text-xs font-normal text-muted-foreground">{{team.ownerLabel}} · {{team.id.slice(0,8)}}</span></button></nav>
+        <p v-if="!active" role="status" class="rounded-md border border-border p-3 text-xs text-muted-foreground">{{t('platform.chooseExplicitTeam')}}</p>
+        <div v-if="active" class="min-w-0 space-y-4">
+          <div><h3 class="text-base font-semibold">{{active.name}}</h3><p class="text-xs text-muted-foreground">{{t('platform.teamOwner')}}: {{active.ownerLabel}}</p></div>
+          <p v-if="active.members===null" role="status" class="text-xs text-muted-foreground">{{t('platform.membersNotHydrated')}}</p>
+          <div class="overflow-x-auto"><table class="w-full min-w-[460px] text-left text-sm"><thead class="text-xs text-muted-foreground"><tr><th class="py-2">{{t('platform.user')}}</th><th>{{t('common.status')}}</th><th>{{t('common.actions')}}</th></tr></thead><tbody><tr v-for="member in activeMembers" :key="member.userId" class="border-t border-border"><td class="py-3">{{member.label}} <span v-if="member.owner" class="text-xs text-muted-foreground">({{t('platform.teamOwner')}})</span></td><td>{{member.active?t('platform.active'):t('platform.suspended')}}</td><td><Button variant="outline" size="sm" :disabled="!can('teams.members') || active.allowedActions?.['teams.members']!==true || member.owner || (command.state.busy || command.state.reconciliationRequired)" @click="pending={kind:'remove',team:active,userId:member.userId,label:member.userId}">{{t('platform.removeMember')}}</Button></td></tr></tbody></table></div>
+          <form class="flex flex-wrap items-end gap-2" @submit.prevent="addMember"><label class="min-w-52 flex-1 text-xs">{{t('platform.memberUserId')}}<input v-model="newMemberId" class="field mt-1" autocomplete="off" :disabled="!can('teams.members') || (command.state.busy || command.state.reconciliationRequired)" required /></label><Button type="submit" size="sm" :disabled="!can('teams.members') || active.allowedActions?.['teams.members']!==true || (command.state.busy || command.state.reconciliationRequired) || !canonicalUuid(newMemberId.trim())">{{t('platform.addMember')}}</Button><p v-if="newMemberId && !canonicalUuid(newMemberId.trim())" class="w-full text-xs text-destructive" role="status">{{t('platform.invalidUserUuid')}}</p></form>
+          <form class="flex flex-wrap items-end gap-2 border-t border-border pt-4" @submit.prevent="askTransfer"><label class="min-w-52 flex-1 text-xs">{{t('platform.transferTeamOwner')}}<select v-model="newOwnerId" class="field mt-1" :disabled="!can('teams.ownership') || (command.state.busy || command.state.reconciliationRequired)"><option value="">{{t('platform.chooseMember')}}</option><option v-for="member in activeMembers.filter(item => item.active && !item.owner)" :key="member.userId" :value="member.userId">{{member.label}}</option></select></label><Button type="submit" size="sm" variant="outline" :disabled="!can('teams.ownership') || active.allowedActions?.['teams.ownership']!==true || (command.state.busy || command.state.reconciliationRequired) || !newOwnerId">{{t('platform.transfer')}}</Button></form>
+          <p class="text-xs text-muted-foreground">{{t('platform.teamDeletionDeferred')}} {{t('platform.dangerTargetIdNotice')}}</p>
+        </div>
+      </div>
+    </section>
+    <PlatformFeedback status="idle" :action-error="command.state.error" :reconciled="command.state.reconciliationNotice" :busy="command.state.busy" @reconcile="command.reconcile" />
+    <ConfirmAction :open="!!pending" :busy="command.state.busy" :title="t('platform.confirmDanger')" :detail="t('platform.dangerHint')" :target="pending?.label??''" @cancel="pending=null" @confirm="confirmAction" />
+  </div>
+</template>

@@ -5,17 +5,19 @@ import fcntl
 import grp
 import json
 import logging
+import math
 import os
 import pty
 import re
 import shutil
 import signal
+import stat
 import struct
 import termios
 import time
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,6 +29,8 @@ from common.settings import TerminalSettings
 logger = logging.getLogger(__name__)
 
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+_DRAIN_GRACE_SECONDS = 2.0
 
 
 class TerminalError(RuntimeError):
@@ -56,6 +60,7 @@ class Job:
     reader_task: asyncio.Task[None] | None = None
     watcher_task: asyncio.Task[None] | None = None
     timeout_seconds: float = 0
+    cancel_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def _timestamp(value: float | None) -> str | None:
@@ -359,6 +364,8 @@ class TerminalManager:
             raise TerminalError("max_output_bytes must be > 0")
         limit = min(requested_limit, self.settings.max_exec_output_bytes)
         policy = self._runtime_policy()
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise TerminalError("timeout_seconds must be finite and positive")
         effective_timeout = min(
             max(0.1, timeout_seconds),
             float(policy.max_exec_timeout_seconds),
@@ -388,13 +395,24 @@ class TerminalManager:
             timed_out = True
             await self._terminate_process(process)
         except asyncio.CancelledError:
-            await self._terminate_process(process)
+            try:
+                await self._terminate_process(process)
+            finally:
+                # Even if process termination fails, close both output tasks;
+                # leaving inherited pipes open can strand a cancelled call.
+                stdout_task.cancel()
+                stderr_task.cancel()
+                await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            raise
+        # A shell can exit while a detached descendant still owns stdout or
+        # stderr. Never wait indefinitely for pipe EOF after the root exited.
+        streams = asyncio.gather(stdout_task, stderr_task)
+        try:
+            await asyncio.wait_for(asyncio.shield(streams), timeout=_DRAIN_GRACE_SECONDS)
+        except TimeoutError:
             stdout_task.cancel()
             stderr_task.cancel()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            raise
-        stdout, stdout_truncated = await stdout_task
-        stderr, stderr_truncated = await stderr_task
+        (stdout, stdout_truncated), (stderr, stderr_truncated) = await streams
         ended = time.time()
         stdout_value = stdout.decode("utf-8", errors="replace")
         stderr_value = stderr.decode("utf-8", errors="replace")
@@ -417,12 +435,17 @@ class TerminalManager:
     async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
             return
-        self._signal_process_group(process.pid, signal.SIGTERM)
+        if process.returncode is None:
+            self._signal_process_group(process.pid, signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), timeout=2)
         except TimeoutError:
-            self._signal_process_group(process.pid, signal.SIGKILL)
+            if process.returncode is None:
+                self._signal_process_group(process.pid, signal.SIGKILL)
             await process.wait()
+        # Do not signal a numeric PGID *after* the reaped leader exits:
+        # PID reuse can make that PGID belong to an unrelated process group.
+        # Detached descendants need a real cgroup/process supervisor.
 
     @staticmethod
     async def _drain_bounded(
@@ -431,19 +454,51 @@ class TerminalManager:
     ) -> tuple[bytes, bool]:
         buffer = bytearray()
         truncated = False
-        while True:
-            chunk = await stream.read(65536)
-            if not chunk:
-                break
-            remaining = max(0, limit - len(buffer))
-            if remaining:
-                buffer.extend(chunk[:remaining])
-            if len(chunk) > remaining:
-                truncated = True
+        try:
+            while True:
+                chunk = await stream.read(65536)
+                if not chunk:
+                    break
+                remaining = max(0, limit - len(buffer))
+                if remaining:
+                    buffer.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    truncated = True
+        except asyncio.CancelledError:
+            # Preserve already collected output; a detached writer may hold
+            # the descriptor forever, even after the shell has been reaped.
+            truncated = True
         return bytes(buffer), truncated
 
     def _job_dir(self, job_id: str) -> Path:
         return self.jobs_root / job_id
+
+    @staticmethod
+    def _open_owned_job_file(folder: Path, name: str, flags: int) -> int:
+        """Pin one regular job file beneath a non-symlink owner directory."""
+        if name not in {"metadata.json", "output.log"}:
+            raise TerminalError("job file name is not recognized")
+        directory = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            owner = os.fstat(directory)
+            if owner.st_uid != os.geteuid() or not stat.S_ISDIR(owner.st_mode):
+                raise TerminalError("job metadata directory owner invalid")
+            fd = os.open(name, flags | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
+            try:
+                info = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != owner.st_uid
+                    or info.st_dev != owner.st_dev
+                    or info.st_nlink != 1
+                ):
+                    raise TerminalError("job log/metadata file owner invalid")
+            except BaseException:
+                os.close(fd)
+                raise
+            return fd
+        finally:
+            os.close(directory)
 
     def _persist(self, job: Job) -> None:
         job.metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -465,22 +520,79 @@ class TerminalManager:
             "log_truncated": job.log_truncated,
             "timeout_seconds": job.timeout_seconds,
         }
-        tmp = job.metadata_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(job.metadata_path)
+        # Random exclusive temporary leaf + pinned dirfd prevents replacing
+        # a predictable .tmp symlink with an out-of-tree file. Atomic rename
+        # of an entry never follows the target leaf's symlink.
+        folder_fd = os.open(
+            job.metadata_path.parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        temporary = f".metadata-{uuid.uuid4().hex}.tmp"
+        try:
+            if os.fstat(folder_fd).st_uid != os.geteuid():
+                raise TerminalError("job metadata owner invalid")
+            temporary_fd = os.open(
+                temporary,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=folder_fd,
+            )
+            try:
+                with os.fdopen(temporary_fd, "wb") as stream:
+                    stream.write(json.dumps(payload, ensure_ascii=False, indent=2).encode())
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(
+                    temporary,
+                    "metadata.json",
+                    src_dir_fd=folder_fd,
+                    dst_dir_fd=folder_fd,
+                )
+                os.fsync(folder_fd)
+            finally:
+                with suppress(FileNotFoundError):
+                    os.unlink(temporary, dir_fd=folder_fd)
+        finally:
+            os.close(folder_fd)
 
     def _load_persisted_jobs(self) -> None:
         for metadata_path in sorted(self.jobs_root.glob("*/metadata.json")):
             try:
-                data = json.loads(metadata_path.read_text(encoding="utf-8"))
+                # JSON metadata is a recovery hint, not a trusted path/PGID.
+                # A shell sharing our Unix UID can modify its own job files;
+                # never follow its saved absolute log path after restart.
+                folder = metadata_path.parent
+                if (
+                    metadata_path.is_symlink()
+                    or folder.is_symlink()
+                    or not re.fullmatch(r"[0-9a-f]{32}", folder.name)
+                ):
+                    continue
+                log_path = folder / "output.log"
+                try:
+                    owned_log_fd = self._open_owned_job_file(folder, "output.log", os.O_RDONLY)
+                    os.close(owned_log_fd)
+                    metadata_fd = self._open_owned_job_file(folder, "metadata.json", os.O_RDONLY)
+                    with os.fdopen(metadata_fd, "r", encoding="utf-8") as input_file:
+                        if os.fstat(input_file.fileno()).st_size > 1024 * 1024:
+                            continue
+                        data = json.load(input_file)
+                except (OSError, TerminalError):
+                    continue
+                if data.get("job_id") != folder.name:
+                    continue
+                workspace_id = self._workspace_id(str(data["workspace_id"]))
                 state = str(data.get("state", "unknown"))
                 ended_at = data.get("ended_at")
                 if state in {"running", "cancelling"}:
+                    # A restarted manager cannot prove PID ownership; never
+                    # signal or replay the stale process referenced by disk.
                     state = "interrupted"
                     ended_at = time.time()
+                    data["pid"] = None
                 job = Job(
-                    job_id=str(data["job_id"]),
-                    workspace_id=str(data["workspace_id"]),
+                    job_id=folder.name,
+                    workspace_id=workspace_id,
                     command=str(data.get("command", "")),
                     cwd=str(data.get("cwd", "")),
                     interactive=bool(data.get("interactive", False)),
@@ -491,8 +603,10 @@ class TerminalManager:
                     ended_at=float(ended_at) if ended_at is not None else None,
                     exit_code=data.get("exit_code"),
                     signal_number=data.get("signal_number"),
-                    pid=data.get("pid"),
-                    log_path=Path(data.get("log_path") or metadata_path.parent / "output.log"),
+                    # PID ownership never survives service restart, even for
+                    # metadata that claimed an active/completed job.
+                    pid=None,
+                    log_path=log_path,
                     metadata_path=metadata_path,
                     log_truncated=bool(data.get("log_truncated", False)),
                     timeout_seconds=float(data.get("timeout_seconds", 0) or 0),
@@ -518,52 +632,69 @@ class TerminalManager:
             raise TerminalError("command is required")
         workspace_id = self._workspace_id(workspace_id)
         workdir = self.resolve_cwd(workspace_id, cwd)
-        job_id = uuid.uuid4().hex
-        job_dir = self._job_dir(job_id)
-        job_dir.mkdir(parents=True, exist_ok=False)
-        log_path = job_dir / "output.log"
-        log_path.touch()
-        metadata_path = job_dir / "metadata.json"
         policy = self._runtime_policy()
         requested_timeout = (
             float(timeout_seconds)
             if timeout_seconds is not None
             else float(policy.max_job_runtime_seconds)
         )
-        effective_timeout = min(
-            max(0.1, requested_timeout),
-            float(policy.max_job_runtime_seconds),
-        )
+        if not math.isfinite(requested_timeout) or requested_timeout <= 0:
+            raise TerminalError("timeout_seconds must be finite and positive")
+        effective_timeout = min(max(0.1, requested_timeout), float(policy.max_job_runtime_seconds))
+        if interactive and not 1 <= cols <= 1000:
+            raise TerminalError("terminal cols must be between 1 and 1000")
+        if interactive and not 1 <= rows <= 1000:
+            raise TerminalError("terminal rows must be between 1 and 1000")
+        environment = self._environment(env)
         now = time.time()
-
-        if interactive:
-            master_fd, slave_fd = pty.openpty()
-            self._resize_fd(master_fd, cols, rows)
-            try:
+        job_id = uuid.uuid4().hex
+        job_dir = self._job_dir(job_id)
+        job_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+        log_path = job_dir / "output.log"
+        metadata_path = job_dir / "metadata.json"
+        master_fd: int | None = None
+        slave_fd: int | None = None
+        try:
+            log_path.touch(exist_ok=False)
+            if interactive:
+                master_fd, slave_fd = pty.openpty()
+                # A PTY reader must be cancellable without stranding an OS
+                # thread blocked in a read held open by an exited child.
+                os.set_blocking(master_fd, False)
+                self._resize_fd(master_fd, cols, rows)
                 process = await asyncio.create_subprocess_shell(
                     command,
                     executable=self.settings.shell,
                     cwd=workdir,
-                    env=self._environment(env),
+                    env=environment,
                     stdin=slave_fd,
                     stdout=slave_fd,
                     stderr=slave_fd,
                     start_new_session=True,
                 )
-            finally:
-                os.close(slave_fd)
-        else:
-            master_fd = None
-            process = await asyncio.create_subprocess_shell(
-                command,
-                executable=self.settings.shell,
-                cwd=workdir,
-                env=self._environment(env),
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
-            )
+            else:
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    executable=self.settings.shell,
+                    cwd=workdir,
+                    env=environment,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    start_new_session=True,
+                )
+        except BaseException:
+            # Failing to validate PTY size/create a child must not leak FDs
+            # or leave an untracked empty job folder in persistent storage.
+            if master_fd is not None:
+                with suppress(OSError):
+                    os.close(master_fd)
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise
+        finally:
+            if slave_fd is not None:
+                with suppress(OSError):
+                    os.close(slave_fd)
 
         job = Job(
             job_id=job_id,
@@ -586,9 +717,27 @@ class TerminalManager:
             timeout_seconds=effective_timeout,
         )
         self._jobs[job_id] = job
-        self._persist(job)
-        job.reader_task = asyncio.create_task(self._read_job_output(job))
-        job.watcher_task = asyncio.create_task(self._watch_job(job))
+        try:
+            self._persist(job)
+            job.reader_task = asyncio.create_task(self._read_job_output(job))
+            job.watcher_task = asyncio.create_task(self._watch_job(job))
+        except BaseException:
+            # The shell was already spawned; metadata/scheduling failure
+            # must never leave it running without a recoverable Job owner.
+            self._jobs.pop(job_id, None)
+            try:
+                await self._terminate_process(process)
+            finally:
+                pending = [task for task in (job.reader_task, job.watcher_task) if task is not None]
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                if master_fd is not None:
+                    with suppress(OSError):
+                        os.close(master_fd)
+                shutil.rmtree(job_dir, ignore_errors=True)
+            raise
         return self._job_public(job)
 
     async def _read_job_output(self, job: Job) -> None:
@@ -597,7 +746,10 @@ class TerminalManager:
                 assert job.master_fd is not None
                 while True:
                     try:
-                        chunk = await asyncio.to_thread(os.read, job.master_fd, 65536)
+                        chunk = os.read(job.master_fd, 65536)
+                    except BlockingIOError:
+                        await asyncio.sleep(0.05)
+                        continue
                     except OSError:
                         break
                     if not chunk:
@@ -618,20 +770,20 @@ class TerminalManager:
                 job.master_fd = None
 
     def _append_job_output(self, job: Job, chunk: bytes) -> None:
-        try:
-            size = job.log_path.stat().st_size
-        except FileNotFoundError:
-            size = 0
-        remaining = max(0, self.settings.max_job_log_bytes - size)
+        with os.fdopen(
+            self._open_owned_job_file(job.log_path.parent, "output.log", os.O_WRONLY | os.O_APPEND),
+            "ab",
+        ) as stream:
+            size = os.fstat(stream.fileno()).st_size
+            remaining = max(0, self.settings.max_job_log_bytes - size)
+            if remaining:
+                stream.write(chunk[:remaining])
         if remaining <= 0:
             if not job.log_truncated:
                 job.log_truncated = True
                 self._persist(job)
             return
-        data = chunk[:remaining]
-        with job.log_path.open("ab") as stream:
-            stream.write(data)
-        if len(data) < len(chunk):
+        if remaining < len(chunk):
             job.log_truncated = True
             self._persist(job)
 
@@ -645,15 +797,23 @@ class TerminalManager:
             )
         except TimeoutError:
             timed_out = True
-            self._signal_process_group(job.process.pid, signal.SIGTERM)
-            try:
-                returncode = await asyncio.wait_for(job.process.wait(), timeout=2)
-            except TimeoutError:
-                self._signal_process_group(job.process.pid, signal.SIGKILL)
+            async with job.cancel_lock:
+                # Timeout supervisor and explicit job_cancel must not send
+                # overlapping signals to one numeric process group.
+                await self._terminate_process(job.process)
                 returncode = await job.process.wait()
         if job.reader_task is not None:
-            with suppress(Exception):
-                await job.reader_task
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(job.reader_task), timeout=_DRAIN_GRACE_SECONDS
+                )
+            except TimeoutError:
+                # Some subprocesses keep output pipes or a PTY alive after
+                # the original command exits; do not hang job finalization.
+                job.reader_task.cancel()
+                job.log_truncated = True
+            except Exception:
+                job.log_truncated = True
         job.ended_at = time.time()
         job.exit_code = returncode
         job.signal_number = -returncode if returncode < 0 else None
@@ -677,7 +837,11 @@ class TerminalManager:
 
     def _job_public(self, job: Job) -> JsonObject:
         try:
-            output_bytes = job.log_path.stat().st_size
+            log_fd = self._open_owned_job_file(job.log_path.parent, "output.log", os.O_RDONLY)
+            try:
+                output_bytes = os.fstat(log_fd).st_size
+            finally:
+                os.close(log_fd)
         except FileNotFoundError:
             output_bytes = 0
         return {
@@ -746,7 +910,11 @@ class TerminalManager:
         reason: str = "explicit_job_delete",
     ) -> JsonObject:
         job = self._get_job(job_id)
-        if job.state in {"running", "cancelling"}:
+        if (
+            job.state in {"running", "cancelling"}
+            or (job.watcher_task is not None and not job.watcher_task.done())
+            or (job.reader_task is not None and not job.reader_task.done())
+        ):
             logger.info(
                 "job cleanup skipped job_id=%s workspace_id=%s reason=active_job state=%s",
                 job.job_id,
@@ -855,10 +1023,16 @@ class TerminalManager:
         if requested_limit <= 0:
             raise TerminalError("max_bytes must be > 0")
         limit = min(requested_limit, self.settings.max_job_read_bytes)
-        deadline = time.monotonic() + max(0, min(wait_seconds, 30))
+        if not math.isfinite(wait_seconds) or wait_seconds < 0:
+            raise TerminalError("wait_seconds must be finite and nonnegative")
+        deadline = time.monotonic() + min(wait_seconds, 30)
         while True:
             try:
-                size = job.log_path.stat().st_size
+                fd = self._open_owned_job_file(job.log_path.parent, "output.log", os.O_RDONLY)
+                try:
+                    size = os.fstat(fd).st_size
+                finally:
+                    os.close(fd)
             except FileNotFoundError:
                 size = 0
             if size > cursor or job.state not in {"running", "cancelling"}:
@@ -869,7 +1043,9 @@ class TerminalManager:
 
         if cursor > size:
             raise TerminalError(f"cursor {cursor} is beyond retained output size {size}")
-        with job.log_path.open("rb") as stream:
+        with os.fdopen(
+            self._open_owned_job_file(job.log_path.parent, "output.log", os.O_RDONLY), "rb"
+        ) as stream:
             stream.seek(cursor)
             data = stream.read(limit)
         next_cursor = cursor + len(data)
@@ -890,8 +1066,20 @@ class TerminalManager:
             raise TerminalError("job is not interactive")
         if job.state != "running" or job.master_fd is None:
             raise TerminalError(f"interactive job is not running: {job.state}")
-        written = os.write(job.master_fd, data.encode("utf-8"))
-        return {"job_id": job.job_id, "written_bytes": written}
+        payload = data.encode("utf-8")
+        if len(payload) > min(self.settings.max_job_read_bytes, 1024 * 1024):
+            raise TerminalError("interactive input exceeds the bounded PTY write limit")
+        # R3 made the PTY nonblocking: EAGAIN is backpressure, not a fatal
+        # Terminal error. Partial writes remain visible to the caller.
+        try:
+            written = os.write(job.master_fd, payload)
+        except BlockingIOError:
+            written = 0
+        return {
+            "job_id": job.job_id,
+            "written_bytes": written,
+            "backpressured": written < len(payload),
+        }
 
     def job_resize(self, job_id: str, cols: int, rows: int) -> JsonObject:
         job = self._get_job(job_id)
@@ -910,30 +1098,40 @@ class TerminalManager:
 
     async def job_wait(self, job_id: str, timeout_seconds: float = 30) -> JsonObject:
         job = self._get_job(job_id)
+        if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
+            raise TerminalError("timeout_seconds must be finite and nonnegative")
         if job.watcher_task is not None and job.state in {"running", "cancelling"}:
             with suppress(TimeoutError):
                 await asyncio.wait_for(
                     asyncio.shield(job.watcher_task),
-                    timeout=max(0, min(timeout_seconds, 300)),
+                    timeout=min(timeout_seconds, 300),
                 )
         return self._job_public(job)
 
     async def job_cancel(self, job_id: str, grace_seconds: float = 3) -> JsonObject:
         job = self._get_job(job_id)
-        process = job.process
-        if process is None or job.state not in {"running", "cancelling"}:
-            return self._job_public(job)
-        job.state = "cancelling"
-        self._persist(job)
-        self._signal_process_group(process.pid, signal.SIGTERM)
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(process.wait()),
-                timeout=max(0.1, min(grace_seconds, 30)),
-            )
-        except TimeoutError:
-            self._signal_process_group(process.pid, signal.SIGKILL)
-            await process.wait()
+        if not math.isfinite(grace_seconds) or grace_seconds <= 0:
+            raise TerminalError("grace_seconds must be finite and positive")
+        async with job.cancel_lock:
+            process = job.process
+            if process is None or job.state not in {"running", "cancelling"}:
+                return self._job_public(job)
+            if job.state == "running":
+                job.state = "cancelling"
+                self._persist(job)
+            if process.returncode is None:
+                self._signal_process_group(process.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(process.wait()),
+                    timeout=max(0.1, min(grace_seconds, 30)),
+                )
+            except TimeoutError:
+                if process.returncode is None:
+                    self._signal_process_group(process.pid, signal.SIGKILL)
+                await process.wait()
+        # Do not await the watcher WHILE holding cancel_lock: watcher may be
+        # in the same timeout path and need that lock to finish bookkeeping.
         if job.watcher_task is not None:
             with suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(job.watcher_task), timeout=2)

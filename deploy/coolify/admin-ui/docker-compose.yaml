@@ -1,0 +1,32 @@
+# Standalone Admin UI; DO NOT publish until new Admin auth/API boundary is accepted.
+services:
+  briareus-dev-admin-ui:
+    build:
+      context: ../../../admin-web-app
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      ADMIN_API_BASE_URL: "${ADMIN_API_BASE_URL:-}"
+      ADMIN_UI_PREVIEW: "false"
+      ADMIN_UI_TELEMETRY_ENABLED: "false"
+      TZ: "${TZ:-UTC}"
+    expose:
+      - "8080"
+    networks:
+      briareus:
+        aliases: ["briareus-dev-admin-ui"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+networks:
+  briareus:
+    external: true
+    name: briareus-net

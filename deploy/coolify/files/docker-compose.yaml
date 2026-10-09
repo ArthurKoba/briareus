@@ -1,0 +1,34 @@
+# Portable Compose. One service / one Coolify Application; staged, not deployed.
+# No dependency on legacy MCP resources, volumes, databases or networks.
+services:
+  briareus-dev-files:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: files
+    restart: "no"
+    # No legacy provider/server startup until C1-B2/C2 is accepted.
+    command: ["/bin/sh", "-ec", "echo DEV_RUNTIME_TRANSPORT_PENDING >&2; exit 78"]
+    stop_grace_period: 30s
+    environment:
+      FILE_WORKSPACE_ROOT: "/workspace"
+      TZ: "${TZ:-UTC}"
+    expose:
+      - "8000"
+    networks:
+      briareus:
+        aliases: ["briareus-dev-files"]
+    volumes:
+      - data:/workspace
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 96
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  data:
+    name: briareus-dev-files-v1
+networks:
+  briareus:
+    external: true
+    name: briareus-net

@@ -1,6 +1,8 @@
-# MCP Bridge — целевая архитектура проектной платформы
+# Briareus — целевая архитектура проектной MCP-платформы
 
 **Статус:** DRAFT — согласован продуктовый каркас MVP, но технические контракты и будущие подсистемы ещё на ревью. Это не подтверждение runtime/production-готовности.  
+**Новое обязательное имя продукта (решение владельца 2026-10-09): Briareus.** Название MCP Bridge остаётся только историческим названием действующего монолита и существующего Git-репозитория, пока отдельная контролируемая процедура миграции идентификаторов не будет одобрена. Новые deployment-пакеты, комментарии о целевой платформе и её интерфейс должны использовать **Briareus**; переименование само по себе не разрешает менять OAuth issuer/audience, DNS, действующие ключи или legacy endpoints.
+**Общая Docker-сеть новой платформы (решение владельца): `briareus-net`.** Её lifecycle принадлежит отдельному инфраструктурному уровню/ресурсу, **НЕ PostgreSQL и НЕ какому-либо доменному Coolify Application**. Сеть должна существовать до создания подключающихся приложений; каждый независимый Compose объявляет её как external с точным именем `briareus-net`. Ни deploy, ни rollback, ни удаление PostgreSQL/Admin UI/Gateway/Files/другого сервиса не создаёт/пересоздаёт/удаляет `briareus-net`. Точный способ создания и учёта сети в установленном Coolify проверяет Infrastructure D ДО публикации Compose; не подменять это ручной неучтённой настройкой Docker на хосте. Существующую сеть legacy `mcp` не использовать и не изменять.
 **Срез обсуждения:** 2026-10-09.  
 **Источник продуктовых требований:** последовательное согласование с владельцем проекта в чате Koba Infrastructure.  
 **НОВОЕ РЕШЕНИЕ ВЛАДЕЛЬЦА (2026-10-09): GREENFIELD / CLEAN START.** В новую MCP Bridge **не переносим legacy данные, пользователей, OAuth, AgentSessions, интеграции, файлы, Ghidra, профили браузера, учётные записи или старые MCP API**. Создаём новую пустую PostgreSQL DB, volumes, конфигурацию и учётные записи. Допускается переиспользовать полезный исходный код, но не миграционные скрипты, legacy adapters и routes. **Тесты пока не пишем, не запускаем и не используем вообще** (unit/integration/e2e/smoke/CI test jobs); не добавляем тестовые файлы или testing policies. Это архитектурное решение не даёт автоматического разрешения на удаление текущего production без точного определения ресурсов.
@@ -23,7 +25,7 @@
 1. **Один продукт и один доменный язык, но не обязательно один процесс.** Clean Architecture / DDD и модульные границы исходников. Не строить множество автономных Python-микросервисов только ради количества доменов.
 2. **Домен ≠ модуль ≠ deployment unit ≠ worker ≠ контейнер.** Единый домен может содержать несколько адаптеров; в MVP он обычно поставляется как один независимо обновляемый пакет контейнеров.
 3. **Стабильные жизненные циклы.** Изменение Admin UI/API не перезапускает Authorization; изменение Web не перезапускает Terminal/Ghidra/Gateway; доменные воркеры обновляются вместе со своим доменом.
-4. **Проект — граница ресурсов и обычной агентской работы.** Нет межпроектных агентов, невидимого доступа через alias/UUID и неограниченного общего файлового пространства.
+4. **Проект — граница выполнения и изолированных ресурсов; Team — граница повторного использования.** Личные Project не наследуют Team-ресурсы только из-за членства User; Project, принадлежащий Team, наследует разрешённые общие подключения и переменные этой Team. Нет межпроектных агентов, доступа по alias/UUID и неограниченного общего файлового пространства.
 5. **Переиспользование исходного кода, а не legacy.** Можно брать существующие FastMCP/Gateway/OAuth/JWT/Valkey/Web/Terminal/Ghidra/UI реализации, но не переносить данные, API, state, sessions, credentials и старые маршруты.
 6. **Быстрый MVP без чрезмерной инфраструктуры.** Новые протоколы, тонкие ACL, множество воркеров, независимые сборки каждого адаптера и отдельные базы на проект не являются обязательными.
 7. **Одна контрольная точка отказа не должна означать каскадный перезапуск.** Доступность конкретного доменного runtime не должна определять доступность остальных MCP-доменов.
@@ -40,7 +42,8 @@
 | Team | Объединение пользователей для совместной работы | У команды ровно один владелец-User; участники и роли команды управляются отдельно от Project |
 | TeamMembership | Участие User в Team | Определяет доступ к командным проектам и предел административных полномочий |
 | Project | Контейнер деловых ресурсов и агентских действий | Имеет **ровно одного** владельца: User либо Team; межпроектный доступ по умолчанию запрещён |
-| ProjectIntegration | Подключение внешнего провайдера | Принадлежит одному Project; alias не является полномочием или глобальным идентификатором |
+| IntegrationConnection | Подключение GitHub/GitLab/Coolify/SigNoz/другого провайдера | **Ровно один owner scope: Team или Project.** Team connection доступно всем Project этой Team, Project connection — только своему Project. Alias не является полномочием |
+| ScopedVariable | Переиспользуемая переменная настройки/секрет | Принадлежит ровно одной Team либо одному Project; эффективное значение определяется в контексте конкретного Project, не глобального процесса |
 | AgentIdentity | Идентичность агента/служебного исполнителя | Принадлежит строго одному Project; не требует постоянного человека-владельца |
 | ConnectionAuthentication | Независимый от AgentSession вход MCP-клиента | Существующий локальный OAuth с формой логин/пароль (в том числе LM Studio); для клиента без OAuth — отдельный проверяемый login/password-over-HTTPS adapter при доказанной совместимости клиента и Gateway; отдельные project access keys не нужны для MVP |
 | AgentSession | Agent Session с `session_uuid` (канонический UUID v4), правами и TTL | Принадлежит одному Project, переиспользуется в разных MCP/чатах; не привязана к OAuth как жизненный цикл |
@@ -52,7 +55,7 @@
 - Team имеет одного владельца — User, и набор TeamMembership с ролями/полномочиями. Team не является разновидностью Project, а Project — не внутренней сущностью Team.
 - Личный Project принадлежит User. Пригласить туда других пользователей нельзя. Для совместной работы владелец переносит Project в Team.
 - Командный Project принадлежит одной Team. **MVP: действующий TeamMembership открывает полный доступ ко всем Project этой Team, включая ресурсы, интеграции и одобрение агентских привилегий**. Управление Team membership и присвоением/извлечением Project остаётся у Team owner; granular ACL и Team administrators отложены.
-- Пользователи в первую очередь **управляют и оркестрируют** агентами. Файлы, вкладки, терминальные окружения, аккаунты и артефакты принадлежат проектам, а не отдельному чату.
+- Пользователи в первую очередь **управляют и оркестрируют** агентами. Файлы, вкладки, терминальные окружения, AgentSession и артефакты принадлежат проектам, а не отдельному чату. **Интеграционные подключения и переиспользуемые настройки/секреты могут принадлежать Team либо Project**, но использование Team-ресурса всегда происходит в авторизованном контексте конкретного Team-owned Project.
 - **Superuser** — единственная глобальная привилегированная роль. После подтверждения личности получает полный доступ к людям, командам, проектам, подключениям и сессиям **без обычных проверок RBAC/проектного ownership/approval**. Это не разрешение на анонимный вход: аутентификация superuser, audit и предупреждения/подтверждение опасных операций сохраняются.
 - AgentIdentity и AgentSession строго проектные. Агент может создать дочернего агента в том же проекте в пределах разрешённых полномочий. Дочерний агент и родитель работают независимо и могут завершаться/возобновляться в разное время.
 - Не вводим domain Environment (production/develop) как обязательную часть модели проектов. Coolify Environment как инфраструктурное понятие не становится Project Environment внутри MCP Bridge.
@@ -75,7 +78,7 @@
 - **Безопасность startup logs:** вывод действующего registration token — сознательно принятое требование, поэтому доступ к логам Authorization эквивалентен возможности приглашать новых пользователей. Секреты не должны попадать в общие MCP invocation logs, traces, публичные метрики, tool responses или URL-запросы сторонним провайдерам. Повторный показ той же ссылки при рестарте потребует защищённого recoverable хранения/детерминированного восстановления токена: **одного hash в БД недостаточно для перепечатывания**. Точный криптографический механизм выбрать при реализации, без хранения открытого токена в обычных таблицах.
 - **Защита от повторного захвата superuser:** статус «первая установка» определяется пустой историей пользователей/явным persistent bootstrap state, а не только текущим отсутствием superuser. После первичной инициализации обычная ссылка регистрации **никогда** не создаёт нового superuser. Последнего superuser нельзя удалить без предусмотренного recovery; восстановление при потере всех superuser — отдельная привилегированная recovery-процедура, не массовая публичная регистрация.
 
-**Source finding:** текущий код создаёт legacy `superadmin` через `ensure_bootstrap_user`. В новой чистой DB создать первого `superuser` через invitation bootstrap, **без миграции** старых Users и roles.
+**Source finding:** текущий код всё ещё вызывает `ensure_bootstrap_user`, который на каждом startup создаёт либо автоматически повышает `superuser`. В целевой чистой DB заменить этот механизм одноразовым invitation bootstrap первого `superuser`, **без миграции** старых Users и roles.
 
 ### 2.3 Локальные политики учётных записей — согласовано для MVP (2026-10-09)
 
@@ -87,7 +90,7 @@
 6. **Базовая политика TTL.** Normal AgentSession — исходно **24 часа** с продлением только по явной/разрешённой политике; elevated AgentSession — **5 минут hard TTL без автоматического продления**. Внутренний Browser RuntimeSession — **5 минут idle TTL** с продлением активностью, при этом idle timeout не закрывает внешний Chrome. Привилегированные Terminal/root процессы ограничены собственным независимым **hard TTL** (по умолчанию 5 минут), который останавливает принадлежащее дерево процессов даже при активности. Другие процессы/долговременные проектные задачи используют собственную lease policy, не наследуют автоматически AgentSession TTL. OAuth refresh lifecycle остаётся независимым.
 7. **ОТЛОЖЕНО — удаление Team и выход Team owner.** Пользователь **не утвердил** предложенный дополнительный workflow удаления команды и выхода владельца; не считать детали этого сценария принятыми MVP acceptance. Уже согласованные инварианты **не меняются**: у Team ровно один owner; superuser может сменить owner; удаление User с владениями требует предварительной передачи, проекты не уничтожаются автоматически. Условия удаления Team/выхода Team owner будут определены отдельно до соответствующей операции/реализации, без молчаливой политики каскадного удаления.
 
-**Source-level границы clean start:** новый bootstrap заменяет legacy `superadmin`, Admin API сразу обслуживает обычных пользователей и `superuser`, login/token fencing блокирует User, realtime подписки фильтруются по Project. Старые роли, таблицы и API не сохранять. Исходниковая ревизия — не тестирование.
+**Source-level границы clean start:** новый invitation bootstrap заменяет старое автоматическое создание/повышение роли при startup; Admin API должен обслуживать обычных пользователей и `superuser`, login/token fencing блокирует User, realtime подписки фильтруются по Project. Старые таблицы и API не сохранять. Исходниковая ревизия — не тестирование.
 
 **Граница:** это продуктовые решения, **не реализованные endpoints/ORM/UI**. Не считать наличие текста доказательством приёмки текущей Authorization/Admin API.
 
@@ -120,15 +123,34 @@
 
 **Граница процесса остаётся открытой:** логические модули Identity/Teams/Projects/Agents допустимо упаковать вместе в минимальное число существующих backend-runtimes на MVP, но не помещать Auth внутрь Admin API и не возобновлять для этого массовые перезапуски. Расположение composition roots/потребителей выбирается после реального графа зависимостей.
 
-### 3.1 SVC и Infrastructure: проектные подключения
+### 3.1 SVC, Infrastructure и переиспользуемые ресурсы Team/Project — решение владельца 2026-10-09
 
-- В одном Project может быть сколько угодно GitHub/ GitLab-подключений различных типов (personal token, GitHub App/installation и пр.), с разными alias.
-- Такие же реальные credentials можно зарегистрировать **заново** в другом проекте. Это **отдельная запись и отдельная область доступа**. На MVP не требуется глобальный credential registry и автоматическая дедупликация.
-- Infrastructure использует такую же семантику ProjectIntegration для Coolify, SigNoz, Grafana, Zoomies и новых провайдеров.
-- Общая модель записи с provider/auth_type + **валидируемым по типу JSONB payload** возможна, но это **вариант хранения, не утверждённая ORM-схема**. Поставщик-специфичная логика/валидация остаётся в адаптере.
-- Токены, private keys и webhook secrets **зашифрованы в PostgreSQL**, не сохраняются в Git и не выдаются агенту в обычных ответах. Runtime-ключ шифрования поставляется через защищённую Coolify Shared Variable, не в build args. Существующий шифрующий механизм Admin API — кандидат для переиспользования.
-- Проектный Terminal может выполнять Git-операции через разрешённую SVC-интеграцию. Передача credentials организуется краткоживущим helper/credential flow; постоянный ключ не записывается в workspace или логи.
-- Тип подключения, полномочия и поддерживаемые операции нельзя выводить только из отображаемого alias.
+**Согласовано, supersedes прежнюю модель исключительно ProjectIntegration:** одна Team может централизованно хранить и предоставлять своим проектам общие GitHub/GitLab/Coolify/SigNoz/Grafana/Zoomies подключения, конфигурацию провайдеров и собственные application variables/secrets. Любой Project может иметь **свои** подключения и переменные, доступные только ему. Для командного Project система предоставляет **эффективный набор = Team-owned shared + Project-owned local**, не копируя записи или секреты в проект.
+
+**Инварианты доменной модели и границы:**
+
+- `ResourceOwnerScope` содержит `TEAM` или `PROJECT` и **ровно один** `owner_team_id` / `owner_project_id` (XOR), с DB CHECK/FK/unique constraint и явным типом владельца. Это не «credential принадлежит всем проектам сразу»: у Team-подключения ровно один owner, а Project получает только вычисленное право USE. Не использовать глобальный alias или `owner_user_id` как замену scope.
+- Для командного Project `P` разрешённые SharedResources — только от Team, которая **сейчас** владеет P. Для личного Project `P` доступен только Project-owned набор P, даже если его владелец состоит в нескольких Team. Ресурсы других Team/Project недоступны. `superuser` имеет глобальные полномочия **после аутентификации**, но это не раскрывает секреты произвольному MCP-клиенту.
+- **Использование и управление — принято для MVP:** **все активные участники Team** могут **использовать, создавать, редактировать, ротировать и удалять** Team-owned shared connections и Team-owned application variables/secrets после подтверждения Team membership и полномочий на действие. Действующий `superuser` также может ими управлять. Право редактирования **не означает права читать/экспортировать открытый секрет**: UI/API выдаёт masked metadata, секрет раскрывается только разрешённому service adapter/credential helper в пределах операции. Team owner по-прежнему единолично управляет участниками/владением Team и выводом её Projects; **к Team shared resources owner-only запрет НЕ применяется**. Управление Project-owned ресурсами выполняют авторизованные участники Project. Granular per-resource manage/use permission — **позже**, не MVP.
+- Переменные бывают обычными настройками и секретами. Доступ к названиям/разрешённым отображаемым значениям не означает доступ к raw credential, PEM или закрытому секрету. Секреты шифруются at rest и **не показываются в Admin UI/API/MCP, trace, shell env, workspace по умолчанию**. При необходимости tool получает короткоживущий scoped credential/handle только на разрешённую операцию, с redaction и аудитом.
+- Для любого `effectiveResource`/`resolvedVariable` возвращается источник (`owner_scope`, `owner_id`, `resource_id`, masked metadata), чтобы UI показывал «из команды» или «локально». Отзыв Team membership, смена владельца Project, удаление/ротация Team secret или Project-specific override должны инвалидировать проектные effective-resolvers и authorization cache. Valkey может помогать инвалидировать, но PostgreSQL — authority; опасные операции fail-closed при невозможности подтвердить право.
+- При переводе личного Project в Team его собственные ресурсы **остаются Project-owned**, и добавляются ссылки на общие Team-ресурсы; при выводе из Team доступ к общему набору прекращается без копирования Team credentials. Ни transfer, ни удаление Team connection не должны молча удалять Project-owned записи или подменять provenance.
+- Одно Team connection может использоваться несколькими проектами, поэтому Project-scoped quota/audit/account-selection на MCP-call включает фактические `project_id`, `actor_id`, `connection_id`, `owner_team_id` и статус grants. Credential use не выдаёт пользователю Team-owner privileges.
+- Обязательный MVP scope — **provider integrations и application variables/configuration secrets**. Files, Terminal jobs, Browser RuntimeSessions, Ghidra project state, AgentIdentity и AgentSession остаются **Project-owned**; никакого автоматического шаринга файлового корня/процессов/агентов между Project. Другие reusable resource kinds вводить по явно согласованному контракту, не через универсальный arbitrary JSON доступ.
+- SVC и Infrastructure каждый остаётся владельцем логики проверки `provider/auth_type` и capability API. Общий DB-тип может иметь `provider/auth_type` + валидируемый типизированный JSONB payload, но **схема хранения ещё должна быть согласована с Backend**. Существующий шифрующий механизм Admin API может быть переиспользован; secrets key — deployment secret, не build arg.
+
+**Согласованная семантика `scope` и конфликтов имён (решение владельца 2026-10-09):**
+
+- Для чтения/перечисления Team/Project integrations и reusable variables параметр `scope` **необязателен**: **отсутствие параметра = `all`**. Допустимые значения: `all`, `team`, `project` (строчные канонические API-значения). `all` в контексте **выбранного Project** возвращает объединённую **коллекцию записей** из его разрешённой Team и самого Project. Это **не** доступ ко всем Team/Project платформы. В личном Project `all` возвращает только Project-owned записи.
+- `scope=team` перечисляет ресурсы **явно авторизованной Team** по `team_id` или Team-владельца выбранного командного Project; `scope=project` — локальные ресурсы **конкретного** авторизованного `project_id`. Селектор не обходит проверку User, TeamMembership, Project owner, Session grants и действия. Если контекст не определён или неоднозначен, требуется явный `team_id`/`project_id` — не выбирать случайную Team/Project.
+- Каждая запись ответа независимо от `scope` содержит **метаданные происхождения**: `resource_id`, `name`/`alias`, `owner_scope` (`team` или `project`), `owner_id`, при необходимости `team_id`/`project_id`, `inherited`/`origin`, тип и masked/allowed metadata. UI показывает группировку «Команда»/«Проект». Raw credentials/secret values не возвращаются через list/details.
+- **Одинаковые имена/alias в Team и Project разрешены.** В `scope=all` вернуть **обе** записи с метаданными, **без автоматического перекрытия** (`Project > Team` отменено) и без потери значения/источника. Для операции, которая ожидает **единственное** значение/подключение, неоднозначное совпадение имени должно возвращать структурированную ошибку и требовать `resource_id` либо явно квалифицированный owner scope/id. Опасная операция/credential lookup **не может** молча выбрать одноимённый источник; при однозначном имени всё равно применяются Project/caller/grants checks.
+- `all` не означает автоматическое массовое слияние имён в плоский env или предоставление Team секретов процессам Terminal/Web. Секреты, session grants и периметр выполняемой операции проверяются отдельно; injection — только разрешённый scoped credential flow с redaction/audit.
+- Роль Team owner **не нужна** для редактирования Team-owned подключения/переменной на MVP: это могут делать **все активные Team members** после серверной авторизации, с конкурентной защитой, идемпотентностью и журналом изменений. Более точные права отдельных пользователей/ресурсов откладываются до granular permissions.
+
+**C1-B остаётся инженерным gate только для точных DTO/маршрутов, безопасного транспорта секретов, cache invalidation и реальной авторизации**; политики `scope=all` и Team member management уже приняты, повторного архитектурного согласования не требуют.
+
+**Нет legacy migrations:** новая схема сразу моделирует `Team/Project` ownership, и старые глобальные Admin accounts не переносятся. Pydantic Settings обслуживает стартовые process/deployment параметры; редактируемые Team/Project provider settings и reusable variables — это **данные приложения в PostgreSQL**, а не по новой DevOps environment variable на каждый provider.
 
 ### 3.2 Files, Terminal и единый проектный workspace
 
@@ -231,7 +253,7 @@ Idle TTL и hard TTL **различны**. Активность продлева
 
 **MVP:** создать **новую пустую логическую PostgreSQL DB** с доменными schemas (`identity`, `projects`, `authorization`, `version_control`, `infrastructure`, `sessions`) и прямым начальным DDL. Не переносить старые DB, `oauth_sessions`, files и accounts. PostgreSQL host может быть общим, но новая DB и новые volumes не используют legacy state.
 
-- project_id явно присутствует в данных и запросах ресурса, когда ресурс проектный.
+- Для Project-owned записей требуется `project_id`; для Team-owned reusable integrations/variables — `team_id`. Применить **XOR ownership** и ограничения в новой схеме. Любой эффективный access/query/аудит ресурсов Team в Project должен передавать `project_id` и проверять текущие ownership/TeamMembership/grants; cross-project/global lookup только по alias запрещён.
 - Каждый модуль владеет начальным DDL и репозиториями своего контекста. Отсутствует прямое изменение чужих таблиц из произвольного провайдера.
 - Внутри одного процесса и транзакционной границы возможен общий Unit of Work; **одна PostgreSQL DB не делает транзакции атомарными через сетевые вызовы независимо работающих runtime**. Междоменный workflow, пересекающий API/worker, требует явных outbox/idempotency/compensation правил, а не предполагаемой общей SQL-транзакции. Это ещё одна причина не вводить отдельную БД на Project в MVP.
 - Существующие Authorization/Admin `oauth_sessions` — только исходниковый контекст, не источник данных. Новые таблицы спроектировать сразу по целевой схеме; никакого объединения или переноса.
@@ -431,7 +453,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 ### Не в MVP / расширения
 
-**Отдельный post-MVP backlog:** [issue #391](https://github.com/ArthurKoba/mcp-bridge/issues/391); будущий security provenance, granular permissions и расширения не дублируются здесь как статусные задачи.
+**Отложенные направления и безопасность:** все находятся в [едином issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390), секции F1–F7; контракт и границы расширяемости — в этом документе.
 
 
 - несколько workspace_id внутри проекта и самостоятельные workspace scopes;
@@ -483,13 +505,13 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **10.10 Реальные provider semantics.** Сверить SVC: GitHub tokens vs GitHub App/installation, GitLab; Infrastructure: нынешний Observability read-only и будущие административные операции. Не выдавать write privileges только потому, что домен переименован.
 
-**10.11 Автономная Service Identity — после MVP.** На MVP — локальный User login/password через существующий OAuth для GUI и только после transport proof минимальный no-OAuth login adapter. Не заводить дополнительный project/public access key. Существующий `OAuthContext` требует User/OAuth, поэтому нужен отдельный authenticated principal adapter с проверенными Team/Project rights; запрещено `nullable user_id` как анонимный обход. Настоящие machine-to-machine client credentials, ServiceIdentity/delegation/rotation — post-MVP #391.
+**10.11 Автономная Service Identity — после MVP.** На MVP — локальный User login/password через существующий OAuth для GUI и только после transport proof минимальный no-OAuth login adapter. Не заводить дополнительный project/public access key. Существующий `OAuthContext` требует User/OAuth, поэтому нужен отдельный authenticated principal adapter с проверенными Team/Project rights; запрещено `nullable user_id` как анонимный обход. Настоящие machine-to-machine client credentials, ServiceIdentity/delegation/rotation — post-MVP, секция F6 в #390.
 
 **10.12 Фактические границы MVP.** Для быстрой поставки сначала Personal/Team Project + `session_uuid` UUID v4 + минимальная проверка caller через OAuth либо подтверждённый no-OAuth login + один MCP-домен. Следующим срезом внедрить cross-MCP reuse (тот же UUID при Project scope), не требуя все провайдеры/новые поддомены в одном cutover. Начальный набор модулей выбрать после проверки реального import/build graph.
 
 **10.13 Семантика проекта, процесса и релиза.** Бизнес-домен `Reverse` объединяет Analysis и Ghidra, но Ghidra при необходимости сохраняет собственный runtime/container внутри его release bundle; аналогично UI/API имеют разные release units без выделения новой доменной сущности. Запрет root Compose на все сервисы не означает запрет общего shared infrastructure Compose для существующих PostgreSQL/Valkey.
 
-**10.14 Chat identity — не требуется.** Прежнее требование «уникальный UUID на чат» **отменено пользователем**. AgentSession UUID — проектная сущность, переиспользуемая между чатами и MCP; одна AgentSession может использоваться во многих чатах, один чат может иметь несколько AgentSessions. Не искать client chat_id и не блокировать MVP из-за его отсутствия. При необходимости отдельная усиленная chat isolation может быть исследована позже (issue #391), но не часть принятой архитектуры.
+**10.14 Chat identity — не требуется.** Прежнее требование «уникальный UUID на чат» **отменено пользователем**. AgentSession UUID — проектная сущность, переиспользуемая между чатами и MCP; одна AgentSession может использоваться во многих чатах, один чат может иметь несколько AgentSessions. Не искать client chat_id и не блокировать MVP из-за его отсутствия. При необходимости отдельная усиленная chat isolation может быть исследована позже (секция F6 в #390), но не часть принятой архитектуры.
 
 ## 11. Что считать согласованием спецификации
 
@@ -503,7 +525,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Текущее состояние: DRAFT — архитектурный review, без реализации, тестов, deploy или очистки работающей среды.**
 
-**Учёт действий:** [текущая greenfield-реализация — issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390); [отложенная безопасность/платформенные расширения — #391](https://github.com/ArthurKoba/mcp-bridge/issues/391). Pull Request содержит только diff и ревью, а не копию задач или источник продуктовой истины.
+**Разделение контроля:** [issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390) — единственный рабочий backlog реализации и развития; [issue #391](https://github.com/ArthurKoba/mcp-bridge/issues/391) — отдельная независимая постфактум-проверка после завершения и первой стабильной стадии. PR — только diff/ревью, не backlog.
 
 ### Навигация по текущему состоянию
 
@@ -518,7 +540,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 Нижеследующие требования озвучены 2026-10-09 как **дальнейший продуктовый план**, а не как разрешение менять согласованный MVP или сейчас запускать агентов. По мере уточнения устойчивые решения переносятся в разделы 2–8; статус, задачи и очередность ведутся в тематических issues.
 
-### 12.1 История чатов, проектное хранилище и поиск — [#395](https://github.com/ArthurKoba/mcp-bridge/issues/395)
+### 12.1 История чатов, проектное хранилище и поиск — [#390, F1](https://github.com/ArthurKoba/mcp-bridge/issues/390)
 
 Цель: авторизованная информация об общении пользователей и агентов, сообщениях, вызовах MCP, документах и результатах работы сохраняется **в контексте Project**, чтобы впоследствии строить embeddings и полнотекстовый/семантический/гибридный поиск. Это отдельное **долговременное knowledge/data storage**, не новая интерпретация `AgentSession`. Предлагаемые сущности `Conversation`, `Message`, `ToolInvocation`, `SourceArtifact`, `KnowledgeChunk`, `Embedding` обладают собственными ID и retention; `session_uuid` остаётся независимым идентификатором разрешений агента, а не чата.
 
@@ -526,21 +548,21 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Открытое продуктовое решение:** «свои базы у проектов» пока не определяет физическую модель. Отличать платформенные `Identity/Teams/Projects/Authorization` (контрольная DB) от проектного content/knowledge хранилища; варианты — логическая изоляция по `project_id`/schema/partition в общем PostgreSQL или отдельная физическая DB на Project. **Ни один вариант ещё не одобрен**, первоначальное физическое разделение на каждую Team/Project не следует молчаливо из принятой архитектуры. Предусмотреть порт ProjectStorage, чтобы storage strategy могла меняться независимо от project/domain API. `pgvector` + PostgreSQL full-text — исследуемый вариант, не утверждённая инфраструктура. Перенос в отдельные DB не требует переносить **legacy**: это проектирование новой системы.
 
-### 12.2 Работа с кодом — [#396](https://github.com/ArthurKoba/mcp-bridge/issues/396)
+### 12.2 Работа с кодом — [#390, F2](https://github.com/ArthurKoba/mcp-bridge/issues/390)
 
 Цель: агент может рефакторить файлы и функции в общем Project Workspace, анализировать символы/ссылки, менять файлы и выполнять связанные команды. **Files и Terminal уже должны видеть один и тот же Project Workspace**, но по смыслу и безопасности это **два отдельных контекста**: Files владеет файловыми операциями, Terminal — процессами, PTY и привилегиями. Пока не объединять их в один домен только ради общей директории. Code/Refactor capabilities могут стать отдельным MCP surface либо адаптером над существующими доменами. Возможные LSP/AST/CST/patch/formatter/Git-инструменты требуют выбора по реальным языкам и задачам; edit permission не означает право на привилегированный shell.
 
-### 12.3 Жизненный цикл задач и агентов — [#397](https://github.com/ArthurKoba/mcp-bridge/issues/397)
+### 12.3 Жизненный цикл задач и агентов — [#390, F3](https://github.com/ArthurKoba/mcp-bridge/issues/390)
 
 Цель: Issue/задача → сбор разрешённого контекста и role/skill prompts → планирование/декомпозиция → назначение Worker → попытка исполнения и наблюдение → evidence/approval → независимое review → завершение/повтор/отказ. Отдельный observability-агент анализирует разрешённые SigNoz/Coolify события и создаёт deduplicated Issues. Текущий [ai-agent-workflow](https://github.com/ArthurKoba/ai-agent-workflow) остаётся библиотекой skill/role, а не автоматически действующим workflow engine.
 
 **Границы:** `Task`, `Subtask`, `WorkflowRun`, `WorkerLease`, `ExecutionAttempt`, `Review` не тождественны AgentSession, чату и Browser/Terminal RuntimeSession. GitHub/GitLab Issues — внешние адаптеры SVC; их webhook/статусы не заменяют долговременный ledger worker leases. Проектировать подтверждённые права, идемпотентность, quota, очередность, retries, cancellation, audit и separation of writer/reviewer. Кандидаты LangGraph/Temporal или небольшой собственный durable worker — **варианты для исследования, ни один не выбран**. Будущий агент может писать тесты лишь после отдельной отмены текущего запрета; сейчас никаких тестов и автоматических прогонов.
 
-### 12.4 Web — разделить режимы — [#398](https://github.com/ArthurKoba/mcp-bridge/issues/398)
+### 12.4 Web — разделить режимы — [#390, F4](https://github.com/ArthurKoba/mcp-bridge/issues/390)
 
 Основной домен Web на MVP сохраняет HTTP/curl, внутренний управляемый Chromium и удалённый пользовательский браузер, однако публичные инструменты и справка для агентов должны **строго различать**: stateless HTTP fetch; internal Browser RuntimeSession с собственными вкладками/контекстами/TTL; remote attachment к Chrome пользователя. Disconnect remote не закрывает чужой Chrome. Не путать Browser Session, project workspace, `session_uuid` и Terminal Session. Предстоящий рефакторинг инструментария не отменяет существующие возможности и не входит в текущий фундамент Identity/Projects.
 
-### 12.5 Название продукта — [#399](https://github.com/ArthurKoba/mcp-bridge/issues/399)
+### 12.5 Название продукта — [#390, F5](https://github.com/ArthurKoba/mcp-bridge/issues/390)
 
 Название продукта, публичные обозначения MCP-модулей и единый стиль SVG требуют отдельного выбора. Техническое имя репозитория `mcp-bridge` и текущие домены не равны окончательному бренду. Переименование OAuth issuer/resource audiences/DNS — не косметическая правка и выполняется только по отдельному контракту. До выбора это **не блокирует** разработку.
 
@@ -554,17 +576,65 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 | Граница | Исходники и подтверждённая дельта | Контракт нового приложения |
 | --- | --- | --- |
-| Bootstrap/User | `services/authorization/runtime.py`, `authorization/repository.py`: startup `ensure_bootstrap_user` создаёт/повышает `superadmin`; `authorization/database.py::UserRecord` хранит role/enabled | Новая пустая Identity с invitation-bootstrap первого `superuser`; без role migration |
-| Admin & approvals | `services/admin-api/src/presentation/web_api.py`: login/approval сейчас ограничены `superadmin`, есть transitional fallback | Нормальные пользователи и участники Project могут управлять разрешёнными сессиями, superuser bypass проверок после аутентификации |
+| Bootstrap/User | `services/authorization/runtime.py`, `authorization/repository.py`: startup `ensure_bootstrap_user` создаёт/повышает роль `superuser` автоматически; `authorization/database.py::UserRecord` хранит role/enabled | Новая пустая Identity с invitation-bootstrap первого `superuser`; без role migration |
+| Admin & approvals | `services/admin-api/src/presentation/web_api.py`: login/approval сейчас ограничены `superuser`, есть transitional fallback | Нормальные пользователи и участники Project могут управлять разрешёнными сессиями, superuser bypass проверок после аутентификации |
 | Session identity | `services/authorization/access/repository.py`: внешний `uid=secrets.token_urlsafe(32)`; `common/access_contracts.py` и `bridge/access_middleware.py` используют `session_id`/OAuth/surface binding | Новый `session_uuid` UUID v4 строго Project-owned, без legacy adapter |
 | Protected calls/abuse | `authorization/access/control.py`: `unrestricted` выдаёт allow до обязательной Session; `AbuseGuard.failure` при сбое Valkey возвращает `(0,0)` | Защищённые вызовы требуют UUID, no-OAuth caller аутентифицирован, rate limiting и fail-closed |
 | Cache/revoke | `authorization/access/control.py::_load_session` читает snapshot Valkey; `common/cache.py::delete` — best effort | Проектная status/version/revoke authority, bounded stale decisions, без SQL на каждый вызов |
 | OAuth & disabled user | `services/bridge/authorization_client.py` локально проверяет JWT; `authorization/provider.py` проверяет enabled на login/refresh | Отзыв уже выданного подключённого caller не должен оставлять долговременно действующие privileged grants |
 | Realtime | `admin-api/src/realtime_api.py`, `realtime.py`: cookie+topic subscription, без доказанной project-level subscriber filtering | Проектные события/снимки видны только актуальным участникам соответствующего Project |
-| Database/alias collision | `authorization/database.py` и `admin-api/src/infrastructure/database.py` имеют разные `oauth_sessions` схемы, provider aliases сейчас global unique | Новая чистая DB с domain schemas; project-scoped provider aliases, без копирования старых таблиц |
+| Database/alias collision | `authorization/database.py` и `admin-api/src/infrastructure/database.py` имеют разные `oauth_sessions` схемы, provider aliases сейчас global unique | Новая чистая DB с domain schemas; **scope-specific Team/Project provider aliases и scoped variables**, без копирования старых таблиц |
 | Workspace/Reverse IDs | `services/modules/terminal/manager.py` использует `workspace_id` для каталога; `services/modules/analysis/workspace_transfer.py` использует `project_id` для Ghidra | Новый PlatformProjectId не равен Terminal/Ghidra local ID; новые storage roots |
 | Packaging | `Dockerfile`, `uv.lock`, `services/authorization/docker-compose*.yaml` имеют фактические shared inputs | Watch Paths по реальным импортам/build inputs; domain-owned packaging и независимый deployment |
 | Async ORM/schema lifecycle | `pyproject.toml` содержит `sqlalchemy[asyncio]>=2.0,<2.1` и `asyncpg>=0.31`; `authorization/database.py` и `admin-api/src/infrastructure/database.py` уже используют `AsyncEngine/AsyncSession`, а initial tables создаются через `Base.metadata.create_all`, Alembic в dependencies нет | FastAPI/async SQLAlchemy adapters, начальный DDL и локально генерируемые Alembic dev revisions; черновые migration scripts не версионировать до первого стабильного baseline |
 
 **Внешние технологические кандидаты, не часть принятого ТЗ:** [pgvector](https://github.com/pgvector/pgvector) для PostgreSQL similarity search, [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) для checkpointed agent workflows, [Temporal](https://docs.temporal.io/) для durable task/workflow execution; выбор после архитектурного сравнения в #395/#397. MCP-server не получает чужую историю чата автоматически — для этого должен существовать разрешённый источник данных/клиентская интеграция.
+
+
+
+## 14. Admin UI / Admin API — impact текущего рефакторинга (SOURCE REVIEW, 2026-10-09)
+
+**Статус:** исходниковый анализ, **не реализация** и не UX/runtime acceptance. Данный раздел закрепляет необходимые границы изменения в рамках основного [issue #390](https://github.com/ArthurKoba/mcp-bridge/issues/390). Независимая проверка после полного рефакторинга — [issue #391](https://github.com/ArthurKoba/mcp-bridge/issues/391), не часть текущего исполнения. Ни одного отдельного issue для Administration не создавать.
+
+### 14.1 Фактическое устройство (SOURCE CONFIRMED)
+
+- **Frontend:** Vue 3 + TypeScript + Vite, i18n (RU/EN), существующие reusable UI/table components, частичная структура `app/pages/features/shared`. `admin-web-app/src/app/App.vue` содержит логин, навигацию по 11 основным страницам, hash-based page selection, realtime/session bootstrap. «Projects», «Teams», «Users» и project selector отсутствуют в текущем navigation shell. `bootstrap.navigation` приходит с API, но текущая навигация собирается на стороне UI в `App.vue`, а не по server-side разрешениям.
+- **Frontend API:** `admin-web-app/src/shared/api/admin.ts` объединяет session, Accounts, Calls, Access, OAuth, Files, Terminal, Analysis, Browser и Settings REST вызовы. Его `SessionState` знает лишь `authenticated/username`; `AccountRecord` не имеет `project_id`; `AccessSessionRecord` содержит legacy `uid`, `user_id`, `oauth_session_id`, `surface_id` и `unrestricted`/`session_enforced`. Отсутствуют общие типы User/Team/Project/AgentIdentity и новые project-scoped DTO.
+- **Admin backend:** `services/admin-api/src/runtime.py` уже использует FastAPI. `services/admin-api/src/presentation/web_api.py` — большой единый `/v1` router, обслуживающий те же области. `login` требует роль `superuser` (либо fallback с legacy логином при отключённом service token). `require_user()` берёт имя из cookie-сессии; многие account, files, terminal, settings endpoints используют только её, **без отдельной проверки текущего `enabled`/Project membership на каждом запросе**. Более строгий `local_user()` сейчас применяется главным образом к Access-роутам, требует `superuser`. Это **предстоящий risk boundary** при разрешении обычных пользователей; не утверждать утечку данных в текущем production без runtime доказательства.
+- **Realtime:** `services/admin-api/src/realtime_api.py` принимает `/v1/realtime` по origin+cookie login, позволяет подписку на глобальные темы (`mcp.calls`, `access.sessions`, `admin.events`, метрики и т.д.) и возвращает topic-wide snapshots. Не реализована текущая Project-level фильтрация при subscribe/delivery/snapshot и принудительное закрытие существующего WS при блокировке User. Frontend `shared/events/bus.ts` подписывается по имени темы, без Project authority context.
+- **Integrations:** `services/admin-api/src/infrastructure/database.py` определяет отдельные записи GitHub/GitLab/SigNoz/Coolify с глобально уникальным alias; `features/accounts/model/account-store.ts` хранит общий список по `provider:id`; `features/accounts/AccountsPanel.vue` переиспользуется для provider forms. В целевой модели записи и alias принадлежат одному Project, но provider validation/forms полезно оставить.
+- **Settings:** `pages/settings/SettingsPage.vue` и `shared/settings` уже поддерживают UI vs application runtime settings, optimistic revision conflict. Согласовать владельцев: `pydantic-settings` — startup process configuration/secrets, DB application settings — операционные и провайдерные настройки (под текущими permissions); Project vs platform scope не смешивать.
+- **Operator tools:** BrowserPage имеет отдельный `/browser/operator/ws` transport, Settings управляет внешним браузером, TerminalPage показывает общие workspaces/jobs, FilesPage работает через path, AnalysisPage — Ghidra internal projects, CallsPage — вызовы/аргументы/результаты, Dashboard — системные счётчики. Эти страницы **существуют и содержат полезную UI-логику**, но пока не имеют Project ownership boundary; разные понятия Project (Platform/Terminal/Ghidra) нельзя путать.
+
+### 14.2 Масштаб изменений по областям
+
+| Область | Impact | Изменения при refactor | Что переиспользовать |
+| --- | --- | --- | --- |
+| Admin API/BFF, session/security | **Критический: переустройство контрактов и прав** | Новый `CallerPrincipal` (User ID, active/suspended, superuser, team/project access), строгая серверная проверка **каждого** endpoint и mutation, idempotency/audit; убрать legacy-login fallback и не доверять только session cookie | FastAPI runtime, middleware patterns, existing adapters, HTTP error handling, отдельный UI/API deployment |
+| Global shell/Project selection | **Высокий: новая продуктовая навигация** | Обязательный active Project selector (Personal/Team), server-driven available actions, superuser global operator mode, project switching/revoke cleanup, route/auth guards, auth renewal | App.vue shell, Sidebar, theme, i18n, login controls, lazy page components |
+| User/Team/Project screens | **Новые обязательные сценарии** | User list/invite/register/reset/suspend/superuser; Team owner/members; personal/team Project create/transfer/select; ownership guard и confirmation | Общие таблицы, формы, notifications, typed API client, UI primitives |
+| Agent Sessions/Approvals | **Высокий: замена legacy screen** | Убрать surface-wide `unrestricted` editor; project-owned UUID4, normal/elevated grants, TTL and approval by **any active Project member**, audit, scoped realtime | Композицию AccessPage, таблицы и редакторы, status/actions; менять DTO/use cases |
+| Git/SVC, Observability/Infrastructure accounts | **Высокий: изменить ownership и API** | Team **или** Project scoped accounts, разрешённые inherited Team connections, scoped alias constraints, effective-resource resolver, owner/provenance metadata, credential masking, Team-owner management rights, cache invalidation | AccountsPanel, provider input validation, verify/edit flows, optimistic updated_at revisions |
+| Realtime/event store | **Критический security + context refactor** | Project/Team-permission scoped topics/snapshots/fanout, recheck actor when credentials/membership revoke, permission-filtered subscriptions; reconnect/resubscribe by active project | WebSocket transport, reconnect/notification patterns, Valkey transport для кратких уведомлений |
+| Files/Terminal/Browser/Analysis | **Средний–высокий: переобвязка** | Явно передавать/проверять Project context, persistent Project Workspace, Browser internal vs remote ownership, Terminal Jobs permissions, independent Ghidra artifacts; безопасная очистка | UI редакторы/таблицы, browser operator, Files navigator, Terminal job controls, Ghidra list/workers |
+| Dashboard, Calls, OAuth, Settings | **Средний: scope/filter/policy refactor** | Project filters, redacted audit trail and retention, superuser-only global diagnostics, split **Project/Team reusable application variables** vs platform process settings; OAuth tied to caller not AgentSession | Счётчики, фильтры, charts/tables, settings optimistic revision, telemetry/i18n |
+| Shared UI/layout/design system | **Низкий: преимущественно сохранение** | Только новые navigation/context components и единые ошибки состояния | Vue3/TS, existing UI-kit, DataTable/virtual table, dialogs, translation framework, frontend telemetry |
+
+**Субъективная оценка объёма по исходникам:** backend access/routing and new identity/project APIs — **крупное архитектурное изменение**; frontend shared shell/API/state и Access/accounts — **существенный refactor**, большинство визуальных компонентов/операторских экранов **сохраняются и получают project scope**. Это оценка **затронутых обязанностей**, не статистика строк, не процент готовности, не результат UI/browser acceptance.
+
+### 14.3 Последовательность изменений без преждевременного UX-redesign
+
+1. Определить контракты User/Team/Project/Permission и типизированные OpenAPI DTO в фундаменте #390 до изменения UI; независимый Admin BFF не владеет чужими доменными таблицами.
+2. Перенести аутентификацию и текущую роль в понятие `CallerPrincipal`; все маршруты Administration авторизовать на backend, включая existing session cookies и WebSocket, per-project resource selection. **Никаких настоящих credential/execution privileges только от скрытия кнопки в UI.**
+3. Внести `activeProject` в shell и scoped query/cache/realtime context. При смене Project очистить project-owned stores/subscriptions и запретить stale response перезаписать данные другого Project; superuser может выбирать global operator scope явно, не превращать его в общий режим обычного User.
+4. Добавить Users/Teams/Projects sections и соответствующие формы в текущий Vue toolkit. **Team Settings/Connections/Variables** и **Project Settings/Connections/Variables** сделать отдельными режимами управления; показывать inherited vs local entries, исходный owner и эффективные значения. Существующие Git/Infrastructure accounts переделать под **Team OR Project owner**, не копировать один общий AccountStore без scope.
+5. Переделать AccessPage под UUID4/TTL/grants/approval и проектные события; оставить operator components, заменить старые `unrestricted` и OAuth/surface-owned DTO.
+6. Перепривязать Dashboard/Calls/OAuth/Settings, Files/Terminal, Browser и Reverse к новому authority, сохраняя прежние возможности и дифференцируя internal vs remote browser.
+7. Только после замкнутого локального среза определять необходимость frontend FSD-реорганизации и тонкого BFF route split. Не вводить новый роутер/глобальный store/GraphQL только ради переписывания. Backend интерфейсы могут быть разделены на route modules по домену, сохранив единый API deployment unit.
+
+### 14.4 Ограничения и уровень готовности
+
+- Обзор выполнен **по исходникам local checkout**, без браузерного/UI runtime inspection, без test execution и без изменения production. Нет доказательства фактического security incident или runtime regressions.
+- В приоритет MVP входят базовые Users/Teams/Projects, project-scoped Accounts/AgentSession/Realtime и минимальный работающий Files MCP. Более глубокая переработка Web, task/knowledge системы и бренда остаётся future backlog в **том же #390**.
+- После окончания рефакторинга независимая проверка архитектуры/безопасности **только в #391**; не смешивать её с реализационным чек-листом.
 

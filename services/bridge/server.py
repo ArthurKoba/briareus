@@ -40,7 +40,8 @@ from .access_middleware import AccessSessionMiddleware
 from .access_tools import register_access_session_tools
 from .authorization_access_client import AuthorizationAccessClient
 from .authorization_client import LocalAuthorizationTokenVerifier
-from .backend_router import BackendDescriptor, BackendRouter
+from .backend_catalog import existing_backend_descriptors
+from .backend_router import BackendRouter
 from .backend_sessions import ProxyClientPool
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 
@@ -134,56 +135,7 @@ _authorization_access = AuthorizationAccessClient(_authorization_access_settings
 _authorization_by_surface = _build_surface_authorization(_authorization_settings)
 
 _backend_router = BackendRouter(
-    (
-        BackendDescriptor(
-            "github",
-            _BACKENDS["github"],
-            MCP_SURFACE_PATHS["github"],
-            "GitHub repositories, pull requests, issues, Actions and reviews",
-        ),
-        BackendDescriptor(
-            "gitlab",
-            _BACKENDS["gitlab"],
-            MCP_SURFACE_PATHS["gitlab"],
-            "GitLab projects, repositories, merge requests, issues and CI",
-        ),
-        BackendDescriptor(
-            "files",
-            _BACKENDS["files"],
-            MCP_SURFACE_PATHS["files"],
-            "Persistent files, uploads, collections and object lifecycle",
-        ),
-        BackendDescriptor(
-            "web",
-            _BACKENDS["web"],
-            MCP_SURFACE_PATHS["web"],
-            "Web access through structured curl and persistent browser automation",
-        ),
-        BackendDescriptor(
-            "analysis",
-            _BACKENDS["analysis"],
-            MCP_SURFACE_PATHS["analysis"],
-            "General-purpose structured analysis surface",
-        ),
-        BackendDescriptor(
-            "ghidra",
-            _BACKENDS["ghidra"],
-            "",
-            "Private native analysis backend",
-        ),
-        BackendDescriptor(
-            "terminal",
-            _BACKENDS["terminal"],
-            MCP_SURFACE_PATHS["terminal"],
-            "Persistent Linux workspaces, commands and long-running jobs",
-        ),
-        BackendDescriptor(
-            "observability",
-            _BACKENDS["observability"],
-            MCP_SURFACE_PATHS["observability"],
-            "Unified read-only infrastructure state, logs, traces, metrics and deployments",
-        ),
-    ),
+    existing_backend_descriptors(_BACKENDS),
     timeout_provider=_backend_timeout_seconds,
 )
 
