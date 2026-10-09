@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue"
 import { Teleport } from "vue"
 import { X } from "lucide-vue-next"
+import { useI18n } from "vue-i18n"
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -10,9 +11,10 @@ const props = withDefaults(defineProps<{
   closeLabel?: string
 }>(), {
   width: "760px",
-  closeLabel: "Close",
 })
 const emit = defineEmits<{ close: [] }>()
+const {t}=useI18n()
+const closeText=()=>props.closeLabel??String(t("common.close"))
 const panel = ref<HTMLElement | null>(null)
 const titleId = useId()
 let focusBeforeDialog: HTMLElement | null = null
@@ -28,7 +30,7 @@ watch(() => props.open, async (open) => {
   if (!props.open) return
   const first = panel.value?.querySelector<HTMLElement>("[autofocus], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)")
   ;(first ?? panel.value)?.focus()
-}, { flush: "post" })
+}, { flush: "post", immediate: true })
 onBeforeUnmount(restoreFocus)
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -47,7 +49,7 @@ function handleKeydown(event: KeyboardEvent): void {
 <template>
   <Teleport to="body">
     <div v-if="open" class="fixed inset-0 z-[900] grid place-items-center p-4">
-      <button type="button" class="absolute inset-0 bg-black/60 backdrop-blur-[1px]" :aria-label="closeLabel" tabindex="-1" @click="emit('close')" />
+      <button type="button" class="absolute inset-0 bg-black/60 backdrop-blur-[1px]" :aria-label="closeText()" tabindex="-1" @click="emit('close')" />
       <section
         ref="panel"
         class="relative z-10 max-h-[90vh] w-full overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-2xl"
@@ -60,7 +62,7 @@ function handleKeydown(event: KeyboardEvent): void {
       >
         <header class="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 :id="titleId" class="text-base font-semibold tracking-tight">{{ title }}</h2>
-          <button type="button" class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground" :aria-label="closeLabel" @click="emit('close')">
+          <button type="button" class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground" :aria-label="closeText()" @click="emit('close')">
             <X class="size-4" />
           </button>
         </header>

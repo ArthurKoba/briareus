@@ -1,10 +1,10 @@
 import type { AccessProjection, PlatformPort } from "@/features/platform/model/contracts"
-import { acceptedA6Source } from "@/features/platform/api/draft/source-acceptance"
+import { acceptedA8Source } from "@/features/platform/api/draft/source-acceptance"
 
 /**
  * The cutover is intentionally NOT a runtime feature flag. It requires an
  * independently approved, actually mounted trusted server composition and
- * a verified current principal. The accepted A6 API remains unmounted SOURCE.
+ * a verified current principal. The accepted A8 API remains unmounted SOURCE.
  *
  * This is the future integration contract for the orchestrator/reviewer, not
  * a credential or permission check and not an authority users can supply.
@@ -31,11 +31,11 @@ export interface ReviewedPlatformRuntimeComposition {
 
 export const platformCutoverReadiness: Readonly<{
   state:"blocked"
-  acceptedSource:typeof acceptedA6Source.source
+  acceptedSource:typeof acceptedA8Source.source
   missing:readonly PlatformCutoverPrerequisite[]
 }> = Object.freeze({
   state:"blocked",
-  acceptedSource:acceptedA6Source.source,
+  acceptedSource:acceptedA8Source.source,
   missing:Object.freeze([
     "approved-public-api-contract",
     "server-verified-active-principal",

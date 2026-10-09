@@ -56,6 +56,8 @@ const mobileNavOpen=ref(false)
 const mobileNavPanel=ref<HTMLElement|null>(null)
 const publicFlow=ref<"invitation"|"reset"|null>(null)
 const publicToken=ref("")
+/** Separate one-use links of the SAME mode must never reuse a prior form. */
+const publicLinkRevision=ref(0)
 const publicLinkError=ref(false)
 let authGeneration=0
 let authAbort:AbortController|null=null
@@ -83,6 +85,9 @@ function readOneUseLink():void {
   url.searchParams.delete("invite")
   url.searchParams.delete("reset")
   history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`)
+  // Do not use the token itself as a Vue :key, DOM attribute or telemetry.
+  // A new token invalidates any previous sensitive form, even of same type.
+  ++publicLinkRevision.value
   if(invite!==null&&reset!==null){
     publicFlow.value=null
     publicToken.value=""
@@ -165,10 +170,26 @@ async function login():Promise<void>{
 }
 async function logout():Promise<void>{
   if(submitting.value)return
+  // Fence any in-flight restore before server revocation. The selected
+  // Project can no longer issue a command while logout is pending.
+  ++authGeneration
+  authAbort?.abort()
+  authAbort=null
+  const adapter=platformPort.value
   submitting.value=true
-  try { await platformPort.value?.auth.logout(new AbortController().signal) }
-  catch { /* Always purge browser memory; unknown remote revocation is not success. */ }
-  finally { expireAuth() }
+  projectContext.clear()
+  password.value=""
+  let remoteUncertain=false
+  try {
+    if(adapter)await adapter.auth.logout(new AbortController().signal)
+  }catch{
+    remoteUncertain=true
+  }finally{
+    // Even an unconfirmed remote logout MUST purge local bearer material.
+    adapter?.auth.invalidate?.()
+    expireAuth()
+    if(remoteUncertain)error.value=String(t("platform.logoutUncertain"))
+  }
 }
 function observeCredential():void {
   unsubscribeCredential?.()
@@ -215,7 +236,10 @@ onMounted(()=>{
 onBeforeUnmount(()=>{
   ++authGeneration
   authAbort?.abort()
+  // Unsub FIRST, then revoke all browser-memory bearer material when this
+  // authenticated shell is disposed (including route-owner replacement/HMR).
   unsubscribeCredential?.()
+  platformPort.value?.auth.invalidate?.()
   window.removeEventListener("hashchange",onHistory)
   window.removeEventListener("popstate",onHistory)
   window.removeEventListener("keydown",handleMobileNavKey)
@@ -228,7 +252,7 @@ onBeforeUnmount(()=>{
   <ToastHost />
   <div v-if="loading" role="status" class="grid min-h-screen place-items-center text-sm text-muted-foreground">{{t('app.loading')}}</div>
   <div v-else-if="publicFlow" class="grid min-h-screen place-items-center bg-muted/30 p-6">
-    <PublicAccountPage :key="publicFlow" :mode="publicFlow" :initial-token="publicToken" @token-copied="publicToken=''" @back="closePublicFlow" />
+    <PublicAccountPage :key="`${publicFlow}:${publicLinkRevision}`" :mode="publicFlow" :initial-token="publicToken" @token-copied="publicToken=''" @back="closePublicFlow" />
   </div>
   <div v-else-if="missingTransport" class="grid min-h-screen place-items-center p-6">
     <section class="w-full max-w-lg rounded-xl border border-border bg-card p-6 text-center shadow-sm" role="status">
