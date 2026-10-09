@@ -252,6 +252,18 @@ Idle TTL и hard TTL **различны**. Активность продлева
 **Результат исходникового ревью перед clean-start реализацией:** в старом access/control есть Valkey invalidation и abuse fallback gaps; учесть при новом design, не писать тесты сейчас.
 **Незакрытая инженерная деталь:** распределённый DB commit и Valkey delete не атомарны. Нельзя обещать «мгновенный revoke при любом сетевом сбое» одной лишь TTL-инвалидацией. В MVP нужны предел задержки отзыва и fail-closed elevated операций; тесты сейчас не пишем и не запускаем. Конкретную стратегию фиксируем после проверки уже существующего cache/abuse/revoke кода, не внедряем второй кеш-фреймворк.
 
+### 5.3 Технический фундамент: SQLAlchemy, Alembic и временные миграции схемы (решение 2026-10-09)
+
+**Целевой стек:** PostgreSQL — долговременная БД; `SQLAlchemy 2.x` в стиле typed declarative `Mapped/mapped_column` + `asyncpg`, `AsyncEngine`, `async_sessionmaker`, `AsyncSession` — стандартный Python persistence adapter. Бизнес-entities/use cases не зависят от ORM; доменные схемы и initial DDL принадлежат владельцам соответствующих bounded contexts. Текущая ветка `main` уже использует `sqlalchemy[asyncio]>=2.0,<2.1`, `asyncpg`, `create_async_engine` и `create_all`, но **Alembic ещё не заявлен в `pyproject.toml`**. `create_all` не заменяет изменение существующей схемы.
+
+**Допускается при greenfield-разработке:** настроить `Alembic` для **новой** PostgreSQL DB с async-compatible `env.py`/metadata, использовать автогенерацию ревизий только как черновик и применять/проверять локальные SQL schema transitions на изолированной, пересоздаваемой **dev** DB. Это **не** перенос legacy данных и не общие функциональные тесты. Generated revisions и экспериментальные migration scripts **не добавлять в Git до фиксации первой стабильной стадии**; временный каталог ревизий исключить через `.gitignore`. В Git могут находиться конфигурация Alembic, `env.py`, воспроизводимое описание исходной схемы в коде и deployment-инструкции без незавершённой истории миграций.
+
+**Важное ограничение:** пока миграционные ревизии не версионируются, **обновление существующей разделяемой БД не является гарантированно воспроизводимым из Git**. Каждый разработчик может пересоздать disposable DB из текущей конечной ORM-модели; нельзя выдавать локальный `upgrade` за репродуцируемый production migration. Не запускать `alembic upgrade head` автоматически на каждом FastAPI startup и не использовать `create_all` как универсальный production schema upgrade.
+
+**Момент baseline:** когда владелец подтверждает первую стабильную стадию, ввести **один проверенный исходный schema baseline** и с этого момента коммитить последующие Alembic revision files, обеспечивая историю изменений. До этого не создавать мнимую production-поддержку старых ревизий и не сохранять legacy-схемы ради совместимости.
+
+**Идемпотентность схемы:** повторный dev bootstrap не должен порождать дублей, migration operations должны быть осмыслены с точки зрения transaction boundaries и повторного применения. Это исключение позволяет только **ручную проверку применения миграций**, без unit/integration/e2e/smoke tests и CI test jobs.
+
 ## 6. Сеть, публичные MCP-адреса и межмодульные контракты
 
 ### 6.1 Поддомены
@@ -285,6 +297,16 @@ Idle TTL и hard TTL **различны**. Активность продлева
 - При вызове между независимыми runtime проверяем service identity **и** авторизованный actor/project context. Одних доверия сети и универсального service token недостаточно.
 - Внутрипроцессные модули взаимодействуют через application ports (Python Protocol/аналог), а не через искусственный HTTP-loopback. Межъязыковые/межконтейнерные вызовы используют явно версионированные DTO/IDL.
 - Сбой одного provider runtime не должен ронять Gateway или авторизацию других MCP.
+
+### 6.4 Основной API-контракт и возможность Go-модулей (решение 2026-10-09)
+
+**Принято для первой реализации:** Python HTTP/API runtimes строим на `FastAPI` + типизированные `Pydantic` request/response DTO, асинхронные handlers. Внутрипроцессные bounded contexts вызывают application ports/Protocols напрямую, без искусственного HTTP. Между независимыми runtime — **версионированный типизированный REST/JSON поверх HTTP(S)**, OpenAPI как публикуемая машиночитаемая схема. Для Admin UI поддерживать generated TypeScript client (не ручное дублирование DTO). Для Python/будущих Go можно генерировать клиентов по той же OpenAPI или писать узкие typed adapters. Публичный протокол агентов остаётся **MCP через FastMCP**; не заменять его REST или GraphQL.
+
+**Realtime:** имеющиеся WebSocket routes в Admin API сохраняются как транспорт событий; проектная авторизация проверяется на входе, при подписке и доставке. Valkey Pub/Sub подходит для ephemeral fan-out/cache invalidation, но **не** является долговременной очередью критичных задач. Изменение прав/выдача токенов/статусы задач фиксируются в PostgreSQL; для надёжной асинхронной доставки через процессы проектировать transactional outbox + idempotent consumer с доступными bounded retries. Не связывать домен напрямую с конкретным broker API.
+
+**GraphQL — не в фундаменте MVP.** GraphQL/Strawberry совместимы с FastAPI и могут позже служить **необязательным Admin BFF query adapter** для сложных агрегированных экранов, если появится проблема избыточных HTTP-запросов. Не вводить GraphQL как обязательный сервис-сервис протокол: он добавляет ещё одну схему и сложность resolver authorization, pagination, N+1/batching, caching, query cost/depth и трассировки, тогда как операции запуска процессов/файлов/прав удобно описывать явно в REST/MCP. При добавлении GraphQL все resolvers используют существующие application ports и обязательно `async def`; домены не зависят от GraphQL.
+
+**Go-ready:** для будущих нагруженных доменных executors соблюдать language-neutral contracts (OpenAPI/JSON Schema, версионированные события, явные ошибки и скопы). Python `SQLAlchemy` ORM-модели не экспортировать как межъязыковые DTO или API. Если измерения докажут необходимость высокочастотных бинарных RPC/streaming, рассмотреть `protobuf/gRPC` **точечно**, а не заменять ими всю платформу заранее.
 
 ### 6.3 Журналирование и секреты
 
@@ -359,6 +381,15 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 Для clean start используются новые DB/Valkey/volumes и новые конфигурации. Никаких миграций legacy volumes/keys/sessions. Текущие production ресурсы не удалять в ходе архитектурного ревью; их будущая очистка — отдельное ограниченное по конкретным объектам разрушительное действие.
 
+### 7.4 Асинхронность, транзакции и идемпотентность (решение 2026-10-09)
+
+- **Async-by-default:** `async def` для HTTP handlers, use cases с I/O, DB, WebSocket и сетевых adapters. Не писать искусственный `async` для чистой CPU-логики; blocking SDK, disk-heavy и CPU-bound операции выносить в bounded executor/отдельный worker, а не блокировать ASGI event loop.
+- `AsyncSession` — **одна на независимую операцию/транзакцию**, не глобальный shared object и не один session для конкурентного `asyncio.gather`. Явный `UnitOfWork` определяет commit/rollback/transaction ownership. SQLAlchemy implementation находится за repository ports, не внутри domain layer.
+- **Идемпотентность всех retryable mutations:** project-scoped `Idempotency-Key` (или детерминированный business request ID) + fingerprint операции, уникальные ограничения/atomic UPSERT, сохранение результата и status, повтор возвращает тот же outcome; несовпадение payload под тем же ключом — conflict. Не считать только Redis-lock гарантией.
+- **Конкуренция:** для grant approvals, invitation consumption, ownership transfer, task claiming и updates использовать DB uniqueness, optimistic version/fencing или row locking по характеру операции. Worker lease и hard TTL нельзя обходить повторной доставкой события; критичные cross-process workflows используют durable outbox/inbox или эквивалентную persisted state machine.
+- **API failure contract:** структурированные коды ошибок, correlation/request IDs, deadlines/timeouts, bounded retry с backoff только для безопасных/идемпотентных операций; не повторять произвольный Terminal command из-за network timeout.
+- Принятая временная пауза общих тестов сохраняется; **только локальная проверка SQL schema revisions** разрешена отдельно в разделе 5.3. Source review и статический анализ не означают runtime acceptance.
+
 ## 8. Поэтапное внедрение и границы MVP
 
 Это **очерёдность приёма интеграционных решений**, не автоматическое поручение нескольким агентам и не список уже созданных задач. Детальная декомпозиция/issue/ветки — **после ревью документа**.
@@ -396,7 +427,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 9. Сброс Files workspace не удаляет импортированные Reverse/Ghidra проекты.
 10. ChatGPT и LM Studio desktop используют локальный OAuth с логином/паролем, а клиент без OAuth — проверенный локальный вход после transport proof; каждый проходит authentication → выбор Project → `session_uuid` → инструмент MCP. Действующие OAuth-refresh не требуют постоянного переподключения; один Session UUID работает между модулями при наличии доступа.
 
-**ТЕСТЫ ПРИОСТАНОВЛЕНЫ:** не писать и не запускать никакие тесты (unit, integration, e2e, smoke, CI), не создавать mocks/fixtures и testing policies. Вся текущая деятельность — архитектура, чтение исходников и документация. Будущее решение о проверках принимает владелец отдельно.
+**ОБЩИЕ ТЕСТЫ ПРИОСТАНОВЛЕНЫ:** unit/integration/e2e/smoke/CI tests, mocks/fixtures и testing policies не добавлять и не запускать; разрешена только локальная проверка применения dev SQLAlchemy/Alembic schema revisions по §5.3. Версионирование ревизий начинается после первой стабильной стадии. Новые продуктовые acceptance tests требуют отдельного согласия.
 
 ### Не в MVP / расширения
 
@@ -418,13 +449,13 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **Пересмотрено 2026-10-09:** адресная legacy migration полностью отменена. Старые аккаунты, Files, Ghidra, Browser, Terminal, UUID и OAuth не переносим; всё создаётся заново.
 
-## 9. Чистая установка; миграций и тестов нет
+## 9. Чистая установка; без legacy, миграции схемы локально, общие тесты на паузе
 
 **GREENFIELD:** новая MCP Bridge собирается с чистой DB/schema, пустыми файловыми и Ghidra volumes, новыми учётными записями, ключами, provider accounts, Browser/Terminal состоянием. Никаких импорта/экспорта legacy, адаптеров `session_id`, прежних OAuth connections и URL aliases. Можно переиспользовать уже написанный код, если он соответствует конечным контрактам.
 
 **Этапы:** спроектировать разделение доменов и начальный DDL, создать Identity/Teams/Projects, Authorization/AgentSession UUID v4 и нужные MCP-домены, затем независимый Coolify deployment без необходимости переносить старые ресурсы.
 
-**Тестовая пауза:** никаких test files, fixtures/mocks, testing policies, unit/integration/e2e/smoke/CI test jobs. Только чтение/ревью исходников, спецификация и обычная нетестовая разработка после согласования. К проверкам вернуться лишь по новому решению владельца.
+**Тестовая пауза (уточнение владельца 2026-10-09):** test files, fixtures/mocks, testing policies, unit/integration/e2e/smoke/CI test jobs по-прежнему запрещены. **Единственное узкое исключение** — проверка и применение локальных Alembic migration revisions к изолированной dev PostgreSQL DB, **без помещения черновых ревизий в Git** до первой стабильной стадии. Чтение кода, статический анализ и сборка разрешены; функциональные тестовые прогоны — только после отдельного решения.
 
 **Разрушительная граница:** решение «всё под ноль» не означает, что нужно сейчас удалить какую-либо production DB/volume или контейнер. Перед фактическим reset/clean deployment определить точный список затрагиваемых ресурсов и исключить сторонние сервисы. Это ограничение на опасную операцию, **не миграционный план**.
 
@@ -436,7 +467,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 
 **10.2 Критический: согласованное доменное разделение и открытое runtime placement.** **Принято:** пять самостоятельных бизнес-модулей Identity (User), Teams (Team/TeamMembership/owner), Projects (Project/owner reference), Agents (AgentIdentity/child agents), Authorization (OAuth/AgentSession/grants). **Запрещено:** объединять Teams и Projects в один бизнес-модуль или выделять отдельный контейнер на сущность. **Осталось доказать:** composition root(ы), интерфейсы проверки TeamMembership/ProjectOwner/Agent grants, схема изоляции без циклического RPC; точно где работают первые четыре модуля без ненужного deploy overhead. Admin API не является owner другой доменной модели, Authorization не пересоздаётся при деплое админки.
 
-**10.3 Чистая DB:** определить новую логическую PostgreSQL DB, domain schemas и initial DDL. Не объединять и не переносить старые Authorization/Admin `oauth_sessions`; никаких миграционных скриптов или rollback старых таблиц.
+**10.3 Чистая DB и временные Alembic revisions:** новая логическая PostgreSQL DB и domain schemas, без переноса старых Authorization/Admin `oauth_sessions`. SQLAlchemy async и Alembic для локального развития новых схем; временные ревизии не в Git до первого stable schema baseline. Не путать локальные dev revisions с переносом legacy; общие тесты остаются на паузе.
 
 **10.4 Security/cache consistency.** Спроектировать механизм отзыва grant при race PostgreSQL/Valkey; тестирование отложено до нового решения владельца; указать максимальную задержку, fail-closed и ответственность worker. Нельзя принять новый elevated flow без защиты от устаревшего разрешения.
 
@@ -533,6 +564,7 @@ Portable Compose описывает runtime, Coolify adapter — требова�
 | Database/alias collision | `authorization/database.py` и `admin-api/src/infrastructure/database.py` имеют разные `oauth_sessions` схемы, provider aliases сейчас global unique | Новая чистая DB с domain schemas; project-scoped provider aliases, без копирования старых таблиц |
 | Workspace/Reverse IDs | `services/modules/terminal/manager.py` использует `workspace_id` для каталога; `services/modules/analysis/workspace_transfer.py` использует `project_id` для Ghidra | Новый PlatformProjectId не равен Terminal/Ghidra local ID; новые storage roots |
 | Packaging | `Dockerfile`, `uv.lock`, `services/authorization/docker-compose*.yaml` имеют фактические shared inputs | Watch Paths по реальным импортам/build inputs; domain-owned packaging и независимый deployment |
+| Async ORM/schema lifecycle | `pyproject.toml` содержит `sqlalchemy[asyncio]>=2.0,<2.1` и `asyncpg>=0.31`; `authorization/database.py` и `admin-api/src/infrastructure/database.py` уже используют `AsyncEngine/AsyncSession`, а initial tables создаются через `Base.metadata.create_all`, Alembic в dependencies нет | FastAPI/async SQLAlchemy adapters, начальный DDL и локально генерируемые Alembic dev revisions; черновые migration scripts не версионировать до первого стабильного baseline |
 
 **Внешние технологические кандидаты, не часть принятого ТЗ:** [pgvector](https://github.com/pgvector/pgvector) для PostgreSQL similarity search, [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) для checkpointed agent workflows, [Temporal](https://docs.temporal.io/) для durable task/workflow execution; выбор после архитектурного сравнения в #395/#397. MCP-server не получает чужую историю чата автоматически — для этого должен существовать разрешённый источник данных/клиентская интеграция.
 
