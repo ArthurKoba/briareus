@@ -1,31 +1,50 @@
-# Briareus DEV environment variable matrix
+# Briareus deployment configuration contract — ENV-1
 
-Actual secret values live only in the Coolify `briareus` / `development` shared environment. Required Compose keys use `${NAME:?}`. `bootstrap_coolify.py` checks that the shared keys exist, then binds Application variables to `{{environment.NAME}}` with Runtime=true and Buildtime=false. It never generates or prints secret values.
+Environment variables are operator configuration only when the value has an independent deployment lifecycle. Product name and environment name are already expressed by Coolify project/environment scope, so they are not repeated in key prefixes.
 
-| Module | Key | Contract | Desired value/source |
+## Current deploy inputs
+
+Only the Data Application currently consumes operator-provided configuration.
+
+| Key | Consumer | Type | Contract | Coolify ownership |
+| --- | --- | --- | --- | --- |
+| `POSTGRES_PASSWORD` | PostgreSQL | secret | required, no default | protected Project Shared Variable, referenced as `{{project.POSTGRES_PASSWORD}}` |
+| `VALKEY_PASSWORD` | Valkey | secret | required, no default | protected Project Shared Variable, referenced as `{{project.VALKEY_PASSWORD}}` |
+| `POSTGRES_USER` | PostgreSQL | nonsecret | safe default `briareus` | Compose default |
+| `POSTGRES_DB` | PostgreSQL | nonsecret | safe disposable-dev default `briareus_dev` | Compose default |
+| `TZ` | all staged containers | nonsecret | safe default `UTC` | Compose default |
+
+`POSTGRES_HOST=briareus-dev-postgres` and `POSTGRES_PORT=5432` are internal topology/defaults. They are not Project Shared variables and are not required on the Data container. Backend A8 derives the async PostgreSQL DSN from canonical Postgres components when a database-consuming runtime is actually composed.
+
+## Future activation inputs
+
+These names are accepted by the completed A8 Backend source, but the current D package does **not** provision them preemptively because the corresponding Admin/Auth protected compositions are not active yet.
+
+| Key | Future consumer | Type | Activation rule |
 | --- | --- | --- | --- |
-| admin-api | PLATFORM_ADMIN_JWT_SIGNING_KEY | required | {{environment.PLATFORM_ADMIN_JWT_SIGNING_KEY}} |
-| admin-api | PLATFORM_DATABASE_URL | required | {{environment.PLATFORM_DATABASE_URL}} |
-| admin-api | PLATFORM_IDEMPOTENCY_ENCRYPTION_KEY | required | {{environment.PLATFORM_IDEMPOTENCY_ENCRYPTION_KEY}} |
-| admin-api | PLATFORM_INVITATION_ENCRYPTION_KEY | required | {{environment.PLATFORM_INVITATION_ENCRYPTION_KEY}} |
-| admin-api | PLATFORM_REGISTRATION_BASE_URL | required | {{environment.PLATFORM_REGISTRATION_BASE_URL}} |
-| admin-api | PLATFORM_RESOURCE_ENCRYPTION_KEY | required | {{environment.PLATFORM_RESOURCE_ENCRYPTION_KEY}} |
-| admin-api | TZ | optional default | UTC |
-| admin-ui | ADMIN_API_BASE_URL | optional default | (empty) |
-| admin-ui | TZ | optional default | UTC |
-| authorization | PLATFORM_ADMIN_JWT_SIGNING_KEY | required | {{environment.PLATFORM_ADMIN_JWT_SIGNING_KEY}} |
-| authorization | PLATFORM_DATABASE_URL | required | {{environment.PLATFORM_DATABASE_URL}} |
-| authorization | TZ | optional default | UTC |
-| data | PLATFORM_DEV_DB_PASSWORD | required | {{environment.PLATFORM_DEV_DB_PASSWORD}} |
-| data | PLATFORM_DEV_DB_USER | required | {{environment.PLATFORM_DEV_DB_USER}} |
-| data | PLATFORM_DEV_VALKEY_PASSWORD | required | {{environment.PLATFORM_DEV_VALKEY_PASSWORD}} |
-| data | TZ | optional default | UTC |
-| files | TZ | optional default | UTC |
-| gateway | TZ | optional default | UTC |
-| infrastructure | TZ | optional default | UTC |
-| reverse | TZ | optional default | UTC |
-| svc | TZ | optional default | UTC |
-| terminal | TZ | optional default | UTC |
-| web | TZ | optional default | UTC |
+| `ADMIN_JWT_SIGNING_KEY` | Admin authentication | secret | Project Shared; required only when Admin auth composition is enabled |
+| `CREDENTIAL_ENCRYPTION_KEY` | encrypted integrations/secret variables and context-derived crypto subkeys | secret | Project Shared; required only when protected platform composition is enabled |
+| `DELEGATION_SIGNING_PRIVATE_KEY` | signed Authorization service identity | Ed25519 private key | Project Shared; required only by signed Authorization composition |
+| `ADMIN_UI_PUBLIC_URL` | Identity invite/reset link generation | external nonsecret URL | Application/operator value only when those links are generated; not Shared secret |
 
-Non-secret hard literals such as `POSTGRES_DB=briareus_dev`, workspace roots, disabled security flags and internal aliases remain in Compose and are not duplicated into shared variables. Public DNS/issuer values are intentionally not auto-generated in D2.
+No `PLATFORM_*`, `DEV_*` or `BRIAREUS_*` aliases are part of the new operator contract.
+
+## Removed pseudo-configuration
+
+D3-ENV removes these from Briareus deployment manifests/images rather than renaming them:
+
+- Admin preview/log-invite/service-identity enable flags;
+- Frontend preview, telemetry, event-mode and API-base runtime config;
+- Gateway `OAUTH_ENABLED=false` bypass flag;
+- global Files/Reverse/Web workspace/profile ENV;
+- global Terminal workspace/home ENV aliases.
+
+Current protected Gateway/Files/Terminal/Web/Reverse/Infrastructure/SVC services remain fail-closed through their existing guarded commands. Removing pseudo-ENV does not activate them.
+
+## Internal image constants
+
+Image/runtime constants such as `ASGI_APP`, `PYTHONPATH`, browser executable/cache paths, `HOME=/home/agent`, Chrome update/telemetry suppression flags and filesystem mount points are implementation topology, not operator configuration. They must not be promoted to Project Shared variables.
+
+## Secret handling
+
+All actual Briareus secret values are stored in protected Coolify **Project Shared Variables**. Git Compose contains only required placeholders. Application resource variables may contain `{{project.KEY}}` references, never copied plaintext secret values. D/agent tooling may inspect names/scopes/references only and does not retrieve resolved secret values.

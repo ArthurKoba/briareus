@@ -8,16 +8,17 @@ import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import select
+from pydantic import SecretStr
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from authorization.security import hash_password, random_token, token_hash, verify_password
-from common.platform_db import PlatformDatabase, PlatformDatabaseSettings
+from common.platform_db import PlatformDatabase
 from common.platform_errors import (
     AccessDenied,
     AuthenticationRateLimited,
@@ -31,19 +32,30 @@ from common.platform_ids import UserId
 from identity._domain import User, canonical_username
 from identity._persistence import InvitationRow, LoginAttemptRow, UserRow
 from identity._repository import IdentityRepository, to_user
+from identity._settings import IdentityLinkSettings
 
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class VerifiedFirstAdminOperator(Protocol):
+    def require_verified_operator(self) -> None:
+        """Pure assertion from a protected operator-only channel; no network I/O."""
+        ...
+
+
 class IdentityService:
-    def __init__(self, database: PlatformDatabase, settings: PlatformDatabaseSettings) -> None:
+    def __init__(self, database: PlatformDatabase, settings: IdentityLinkSettings) -> None:
         self.database = database
         self.repository = IdentityRepository()
-        self.registration_base_url = settings.registration_base_url
-        self.cipher = Fernet(settings.invitation_secret_key.get_secret_value().encode())
+        self.admin_ui_public_url = settings.admin_ui_public_url
         self._dummy_password_digest = hash_password(random_token())
+
+    def _link(self, kind: str, raw_token: str) -> str:
+        if not self.admin_ui_public_url:
+            raise InvalidInput("ADMIN_UI_PUBLIC_URL required when issuing an invitation/reset URL")
+        return f"{self.admin_ui_public_url}?{kind}={quote(raw_token)}"
 
     @asynccontextmanager
     async def _transaction(self, existing: AsyncSession | None) -> AsyncIterator[AsyncSession]:
@@ -53,33 +65,48 @@ class IdentityService:
             async with self.database.transaction() as session:
                 yield session
 
-    async def system_registration_link(self, *, session: AsyncSession | None = None) -> str:
-        """Return a recoverable active system invitation; call only in trusted startup.
+    async def issue_first_admin_setup(
+        self,
+        operator: VerifiedFirstAdminOperator,
+        *,
+        session: AsyncSession | None = None,
+    ) -> SecretStr:
+        """One-time restricted setup delivery; no general HTTP/logging path.
 
-        The caller is responsible for limiting the startup log sink to operators.
-        The token is encrypted at rest and the hash is used for redemption.
+        A trusted supervisor must independently authenticate the human
+        operator BEFORE invoking this function. Only a SHA-256 token digest
+        is persisted. If the operator loses the code, another operator-
+        authorized issue revokes the previous unredeemed code until the
+        first superuser successfully registers.
         """
+        operator.require_verified_operator()
         async with self._transaction(session) as tx:
-            await self.repository.lock_bootstrap(tx)
-            invitation = await self.repository.pending_system(tx)
-            if invitation is None:
-                raw = random_token()
-                invitation = InvitationRow(
+            bootstrap = await self.repository.lock_bootstrap(tx)
+            if bootstrap.first_superuser_claimed:
+                raise Conflict("initial superuser is already established")
+            if await self.repository.list_active_superusers(tx):
+                raise Conflict("an active superuser already exists")
+            now = utcnow()
+            await tx.execute(
+                update(InvitationRow)
+                .where(
+                    InvitationRow.kind == "system",
+                    InvitationRow.used_at.is_(None),
+                    InvitationRow.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
+            )
+            raw = random_token()
+            tx.add(
+                InvitationRow(
                     id=uuid4(),
                     token_digest=token_hash(raw),
                     kind="system",
-                    system_token_ciphertext=self.cipher.encrypt(raw.encode()).decode(),
-                    expires_at=None,
+                    expires_at=now + timedelta(hours=24),
                 )
-                tx.add(invitation)
-            else:
-                if not invitation.system_token_ciphertext:
-                    raise InvalidInvitation("system invitation cannot be recovered securely")
-                try:
-                    raw = self.cipher.decrypt(invitation.system_token_ciphertext.encode()).decode()
-                except InvalidToken as exc:
-                    raise InvalidInvitation("system invitation encryption key mismatch") from exc
-        return f"{self.registration_base_url}?invite={quote(raw)}"
+            )
+            await tx.flush()
+        return SecretStr(raw)
 
     async def issue_registration_invitation(
         self, actor: UserId, *, session: AsyncSession | None = None
@@ -98,7 +125,7 @@ class IdentityService:
                     expires_at=utcnow() + timedelta(days=7),
                 )
             )
-        return f"{self.registration_base_url}?invite={quote(raw)}"
+        return self._link("invite", raw)
 
     async def register(
         self, *, invitation: str, username: str, password: str, session: AsyncSession | None = None
@@ -137,6 +164,10 @@ class IdentityService:
                     raise InvalidInvitation("invitation issuer is no longer active")
             if await self.repository.username_taken(tx, normalized):
                 raise Conflict("username is unavailable")
+            if not bootstrap.first_superuser_claimed and row.kind != "system":
+                raise InvalidInvitation("first administrator requires the protected setup code")
+            if bootstrap.first_superuser_claimed and row.kind == "system":
+                raise InvalidInvitation("initial administrator setup is permanently closed")
             role = "superuser" if not bootstrap.first_superuser_claimed else "user"
             new_user = UserRow(
                 id=uuid4(),
@@ -299,7 +330,7 @@ class IdentityService:
                     expires_at=utcnow() + timedelta(minutes=15),
                 )
             )
-        return f"{self.registration_base_url}?reset={quote(raw)}"
+        return self._link("reset", raw)
 
     async def reset_password(
         self, token: str, password: str, *, session: AsyncSession | None = None

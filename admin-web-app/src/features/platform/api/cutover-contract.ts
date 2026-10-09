@@ -4,7 +4,7 @@ import { acceptedA6Source } from "@/features/platform/api/draft/source-acceptanc
 /**
  * The cutover is intentionally NOT a runtime feature flag. It requires an
  * independently approved, actually mounted trusted server composition and
- * a verified current principal. The only accepted A4 API is unmounted SOURCE.
+ * a verified current principal. The accepted A6 API remains unmounted SOURCE.
  *
  * This is the future integration contract for the orchestrator/reviewer, not
  * a credential or permission check and not an authority users can supply.
@@ -51,7 +51,7 @@ export const platformCutoverReadiness: Readonly<{
 /**
  * Future cutover must implement an independently reviewed installer that
  * consumes ReviewedPlatformRuntimeComposition after all public gates close.
- * There is intentionally no callable activate/enable path in B8.
+ * There is intentionally no callable activate/enable path in B12.
  */
 export function cutoverBlocked():never {
   throw new Error("C1-B2-PUBLIC/C2 platform transport and verified runtime are not approved")

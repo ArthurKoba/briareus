@@ -156,5 +156,22 @@
     "network": "briareus-net",
     "auto_deploy_during_bootstrap": false,
     "deploy_during_bootstrap": false
+  },
+  "configuration_contract": {
+    "secret_scope": "project",
+    "secret_reference": "{{project.KEY}}",
+    "project_shared_secrets_current": [
+      "POSTGRES_PASSWORD",
+      "VALKEY_PASSWORD"
+    ],
+    "required_application_nonsecrets_current": [],
+    "safe_defaults": {
+      "POSTGRES_USER": "briareus",
+      "POSTGRES_DB": "briareus_dev",
+      "POSTGRES_PORT": "5432",
+      "TZ": "UTC"
+    },
+    "forbidden_shared_scope": "environment",
+    "read_secret_values": false
   }
 }

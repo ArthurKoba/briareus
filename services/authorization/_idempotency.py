@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common.platform_db import PlatformDatabase
 from common.platform_errors import IdempotencyConflict, InvalidInput, OperationInProgress
 
+from ._crypto_keys import fingerprint_key, replay_fernet_key
 from ._platform_persistence import IdempotencyRow
 
 Command = Callable[[AsyncSession], Awaitable["CommandOutcome"]]
@@ -72,8 +73,8 @@ def canonical_fingerprint(payload: object, *, secret: bytes) -> str:
 class IdempotentCommandExecutor:
     def __init__(self, database: PlatformDatabase, encryption_key: str) -> None:
         self.database = database
-        self._cipher = Fernet(encryption_key.encode())
-        self._fingerprint_secret = encryption_key.encode()
+        self._cipher = Fernet(replay_fernet_key(encryption_key).encode())
+        self._fingerprint_secret = fingerprint_key(encryption_key)
 
     @staticmethod
     def _verify_key(key: str) -> None:

@@ -1,17 +1,19 @@
-"""Fresh platform SQLAlchemy infrastructure; never touches historical DBs.
+"""Briareus greenfield PostgreSQL connection; no legacy DSN or crypto settings.
 
-A composition root explicitly passes PLATFORM_DATABASE_URL. Metadata DDL
-requires an operator-approved, disposable EMPTY database. No create_all in
-normal application startup: Alembic baseline is intentionally still pending.
+Only the deployment-provided POSTGRES_PASSWORD is a required secret. Host,
+database name, port and username follow the one selected Compose topology.
+No DB connection is opened by constructing the settings or SQLAlchemy metadata.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from pydantic import Field, SecretStr, field_validator
 from sqlalchemy import MetaData, text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -24,45 +26,59 @@ from sqlalchemy.orm import DeclarativeBase
 from common.platform_errors import Conflict, PersistenceTimeout
 from common.settings import ProcessSettings
 
+_LOCK_TIMEOUT_MS = 3000
+_STATEMENT_TIMEOUT_MS = 30000
+_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]{0,62}\Z", re.ASCII)
+_HOST = re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\Z", re.ASCII)
+
 
 class PlatformDatabaseSettings(ProcessSettings):
-    database_url: SecretStr = Field(validation_alias="PLATFORM_DATABASE_URL")
-    invitation_secret_key: SecretStr = Field(validation_alias="PLATFORM_INVITATION_ENCRYPTION_KEY")
-    idempotency_key: SecretStr = Field(validation_alias="PLATFORM_IDEMPOTENCY_ENCRYPTION_KEY")
-    registration_base_url: str = Field(validation_alias="PLATFORM_REGISTRATION_BASE_URL")
-    lock_timeout_ms: int = Field(
-        default=3000,
-        ge=500,
-        le=15000,
-        validation_alias="PLATFORM_DB_LOCK_TIMEOUT_MS",
-    )
-    statement_timeout_ms: int = Field(
-        default=30000,
-        ge=5000,
-        le=120000,
-        validation_alias="PLATFORM_DB_STATEMENT_TIMEOUT_MS",
-    )
+    """DB-only contract: credentials, topology and no unrelated app options."""
 
-    @field_validator("registration_base_url")
+    postgres_host: str = Field("briareus-dev-postgres", validation_alias="POSTGRES_HOST")
+    postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="POSTGRES_PORT")
+    postgres_db: str = Field("briareus_dev", validation_alias="POSTGRES_DB")
+    postgres_user: str = Field("briareus", validation_alias="POSTGRES_USER")
+    postgres_password: SecretStr = Field(validation_alias="POSTGRES_PASSWORD")
+
+    @field_validator("postgres_host")
     @classmethod
-    def _secure_invite_url(cls, value: str) -> str:
-        from urllib.parse import urlsplit
+    def _host(cls, value: str) -> str:
+        if not _HOST.fullmatch(value) or len(value) > 253:
+            raise ValueError("POSTGRES_HOST must be an internal DNS host")
+        return value
 
-        normalized = value.strip()
-        parsed = urlsplit(normalized)
+    @field_validator("postgres_db", "postgres_user")
+    @classmethod
+    def _identifier(cls, value: str) -> str:
+        if not _IDENTIFIER.fullmatch(value):
+            raise ValueError("PostgreSQL database/user must be canonical identifiers")
+        return value
+
+    @field_validator("postgres_password")
+    @classmethod
+    def _password(cls, value: SecretStr) -> SecretStr:
+        raw = value.get_secret_value()
         if (
-            parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-            or len(normalized) > 2048
+            not raw
+            or raw.isspace()
+            or raw.startswith(("{{", "${"))
+            or len(raw) > 8192
         ):
-            raise ValueError("registration URL must not contain credentials or a query")
-        if parsed.scheme == "https" and parsed.hostname:
-            return normalized
-        if parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
-            return normalized
-        raise ValueError("PLATFORM_REGISTRATION_BASE_URL must be HTTPS or local dev")
+            raise ValueError("POSTGRES_PASSWORD must resolve to a nonempty secret")
+        return value
+
+    @property
+    def url(self) -> URL:
+        """SQLAlchemy quotes credentials safely; no second DATABASE_URL input."""
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.postgres_user,
+            password=self.postgres_password.get_secret_value(),
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        )
 
 
 class PlatformBase(DeclarativeBase):
@@ -71,30 +87,23 @@ class PlatformBase(DeclarativeBase):
 
 class PlatformDatabase:
     def __init__(self, settings: PlatformDatabaseSettings) -> None:
-        url = settings.database_url.get_secret_value()
-        if not url.startswith("postgresql+asyncpg://"):
-            raise ValueError("PLATFORM_DATABASE_URL must use postgresql+asyncpg")
-        self._lock_timeout_ms = settings.lock_timeout_ms
-        self._statement_timeout_ms = settings.statement_timeout_ms
-        self.engine: AsyncEngine = create_async_engine(url, pool_pre_ping=True)
+        self.engine: AsyncEngine = create_async_engine(settings.url, pool_pre_ping=True)
         self.sessions: async_sessionmaker[AsyncSession] = async_sessionmaker(
             self.engine, expire_on_commit=False, autoflush=False
         )
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[AsyncSession]:
-        """A new AsyncSession and explicit commit/rollback on each invocation."""
+        """Bounded one-command transaction, errors preserve retry semantics."""
         try:
             async with self.sessions() as session, session.begin():
-                # A transaction waiting on the same idempotency/ownership row
-                # must not tie up an HTTP worker indefinitely.
                 await session.execute(
                     text("SELECT set_config('lock_timeout', :value, true)"),
-                    {"value": f"{self._lock_timeout_ms}ms"},
+                    {"value": f"{_LOCK_TIMEOUT_MS}ms"},
                 )
                 await session.execute(
                     text("SELECT set_config('statement_timeout', :value, true)"),
-                    {"value": f"{self._statement_timeout_ms}ms"},
+                    {"value": f"{_STATEMENT_TIMEOUT_MS}ms"},
                 )
                 yield session
         except DBAPIError as exc:

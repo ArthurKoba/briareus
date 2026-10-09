@@ -152,22 +152,12 @@ export interface SettingsState {
   analysis_error: string
 }
 
-const previewBootstrap: AdminBootstrap = {
-  product: "MCP Bridge", environment: "frontend-preview",
-  navigation: [
-    { id: "overview", label: "Overview", enabled: true }, { id: "accounts", label: "Accounts", enabled: true },
-    { id: "calls", label: "MCP Calls", enabled: true }, { id: "files", label: "Files", enabled: true },
-    { id: "terminal", label: "Terminal", enabled: true }, { id: "browser", label: "Browser", enabled: true },
-    { id: "analysis", label: "Analysis", enabled: true }, { id: "access", label: "Access", enabled: true }, { id: "oauth", label: "OAuth Sessions", enabled: true },
-    { id: "settings", label: "Settings", enabled: true },
-  ],
-}
 
 export const adminApi = {
-  session: (): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: true, username: "preview" }) : request("/session"),
-  login: (username: string, password: string): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: true, username: username || "preview" }) : request("/login", { method: "POST", body: jsonBody({ username, password }) }),
-  logout: (): Promise<SessionState> => runtimeConfig.preview ? Promise.resolve({ authenticated: false, username: null }) : request("/logout", { method: "POST", body: "{}" }),
-  bootstrap: (): Promise<AdminBootstrap> => runtimeConfig.preview ? Promise.resolve(previewBootstrap) : request("/bootstrap"),
+  session: (): Promise<SessionState> => request("/session"),
+  login: (username: string, password: string): Promise<SessionState> => request("/login", { method: "POST", body: jsonBody({ username, password }) }),
+  logout: (): Promise<SessionState> => request("/logout", { method: "POST", body: "{}" }),
+  bootstrap: (): Promise<AdminBootstrap> => request("/bootstrap"),
   dashboard: (options: RequestOptions = {}): Promise<DashboardState> => request("/dashboard", {}, options),
   ...legacyAccountApi,
   calls: (query: number | InvocationQuery = 100, options: RequestOptions = {}): Promise<InvocationPage> => {

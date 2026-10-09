@@ -48,7 +48,7 @@ function choose(event: Event): void {
     </label>
     <span v-else class="inline-flex items-center gap-1.5 text-muted-foreground" :title="t('context.contractPending')">
       <LockKeyhole class="size-3.5 shrink-0" aria-hidden="true" />
-      <span class="hidden lg:inline">{{ t('context.legacy') }}</span>
+      <span class="hidden lg:inline">{{ t('context.contractPending') }}</span>
       <span class="hidden 2xl:inline">· {{ t('context.contractPending') }}</span>
     </span>
   </div>

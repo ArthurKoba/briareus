@@ -10,8 +10,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-ENV PYTHONPATH=/app/services:/app/services/admin-api/src \
-    PLATFORM_ADMIN_PREVIEW_ENABLED=false
+ENV PYTHONPATH=/app/services:/app/services/admin-api/src
 COPY services/common ./services/common
 COPY services/authorization ./services/authorization
 COPY services/identity ./services/identity

@@ -7,17 +7,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from pydantic import Field
 from sqlalchemy import MetaData
 
 from common.platform_db import PlatformDatabase, PlatformDatabaseSettings
-from common.settings import ProcessSettings
 from identity._service import IdentityService
+from identity._settings import IdentityLinkSettings
 from projects._file_quota import FileQuotaLedger
 from projects._native_import_ledger import NativeImportLedger
 from projects._resource_service import ResourceService, ResourceSettings
 from projects._runtime_ledger import RuntimeLedger
 
+from ._crypto_keys import ledger_hmac_key, login_bucket_key
 from ._external_operations import ExternalOperationLedger
 from ._files_vertical import SignedFilesAuthority
 from ._idempotency import IdempotentCommandExecutor
@@ -70,10 +70,6 @@ def platform_metadata() -> MetaData:
     return PlatformBase.metadata
 
 
-class ServiceIdentityToggle(ProcessSettings):
-    enabled: bool = Field(False, validation_alias="PLATFORM_SERVICE_IDENTITY_ENABLED")
-
-
 @dataclass(frozen=True)
 class PlatformServices:
     database: PlatformDatabase
@@ -98,25 +94,40 @@ class PlatformServices:
     scoped_outbox: OutboxDispatcher
 
 
-def compose_platform(settings: PlatformDatabaseSettings) -> PlatformServices:
+def compose_platform(
+    settings: PlatformDatabaseSettings,
+    *,
+    signed_authorization: ServiceIdentitySettings | None = None,
+) -> PlatformServices:
     platform_metadata()
     database = PlatformDatabase(settings)
     application = PlatformApplication(database)
-    idempotency_key = settings.idempotency_key.get_secret_value()
+    # One protected at-rest root, HKDF-separated for every unrelated ledger.
+    # No generic idempotency/key ENV and no reuse of Admin JWT signing key.
     resource_settings = ResourceSettings()
+    storage_key = resource_settings.encryption_key.get_secret_value()
     resources = ResourceService(
         application,
-        encryption_key=resource_settings.encryption_key.get_secret_value(),
+        encryption_key=storage_key,
     )
     sessions = ProjectSessionService(application)
-    identity = IdentityService(database, settings)
-    admin_auth = PlatformAdminBearerAuth(identity, AdminBearerSettings())
-    toggles = ServiceIdentityToggle()
+    identity = IdentityService(database, IdentityLinkSettings())
+    admin_auth = PlatformAdminBearerAuth(
+        identity,
+        AdminBearerSettings(),
+        login_pepper=login_bucket_key(storage_key),
+    )
+    # Composition selects a fully authenticated authorization service, not
+    # an ENV flag that disables mandatory service identity checking.
     service_identity = (
         ServiceIdentityAuthority(
-            application, sessions, resources, admin_auth, ServiceIdentitySettings()
+            application,
+            sessions,
+            resources,
+            admin_auth,
+            signed_authorization,
         )
-        if toggles.enabled
+        if signed_authorization is not None
         else None
     )
     # No verified mTLS/Unix peer attestor or OS/Files/Ghidra/provider adapter
@@ -130,22 +141,22 @@ def compose_platform(settings: PlatformDatabaseSettings) -> PlatformServices:
         application,
         sessions,
         resources,
-        signing_key=idempotency_key.encode(),
+        signing_key=ledger_hmac_key(storage_key, "provider"),
         validator=service_identity,
     )
     runtimes = RuntimeLedger(
         application,
-        signing_key=idempotency_key.encode(),
+        signing_key=ledger_hmac_key(storage_key, "runtime"),
         validator=service_identity,
     )
     file_quotas = FileQuotaLedger(
         application,
-        signing_key=idempotency_key.encode(),
+        signing_key=ledger_hmac_key(storage_key, "files"),
         validator=service_identity,
     )
     native_imports = NativeImportLedger(
         application,
-        signing_key=idempotency_key.encode(),
+        signing_key=ledger_hmac_key(storage_key, "native"),
         validator=service_identity,
     )
     scoped_events = ScopedEventFeed(application, validator=service_identity)
@@ -155,7 +166,7 @@ def compose_platform(settings: PlatformDatabaseSettings) -> PlatformServices:
         identity=identity,
         application=application,
         sessions=sessions,
-        commands=IdempotentCommandExecutor(database, idempotency_key),
+        commands=IdempotentCommandExecutor(database, storage_key),
         resources=resources,
         credential_use=credentials,
         admin_auth=admin_auth,
@@ -174,6 +185,15 @@ def compose_platform(settings: PlatformDatabaseSettings) -> PlatformServices:
         scoped_events=scoped_events,
         scoped_outbox=scoped_outbox,
     )
+
+
+def compose_signed_authorization(settings: PlatformDatabaseSettings) -> PlatformServices:
+    """Opt-in via secure service *entrypoint*, never an operator toggle.
+
+    DELEGATION_SIGNING_PRIVATE_KEY is required and validated only for the
+    authorization process that actually signs cross-service operations.
+    """
+    return compose_platform(settings, signed_authorization=ServiceIdentitySettings())
 
 
 def bind_explicit_dev_mtls(

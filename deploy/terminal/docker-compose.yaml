@@ -10,8 +10,6 @@ services:
     command: ["/bin/sh", "-ec", "echo DEV_RUNTIME_TRANSPORT_PENDING >&2; exit 78"]
     stop_grace_period: 30s
     environment:
-      TERMINAL_WORKSPACE_ROOT: "/workspace"
-      TERMINAL_HOME: "/home/agent"
       TZ: "${TZ:-UTC}"
     expose:
       - "8000"

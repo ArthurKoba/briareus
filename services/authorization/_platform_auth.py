@@ -32,13 +32,13 @@ TTL = timedelta(minutes=15)
 
 
 class AdminBearerSettings(ProcessSettings):
-    signing_key: SecretStr = Field(validation_alias="PLATFORM_ADMIN_JWT_SIGNING_KEY")
+    signing_key: SecretStr = Field(validation_alias="ADMIN_JWT_SIGNING_KEY")
 
     @field_validator("signing_key")
     @classmethod
     def _key_length(cls, value: SecretStr) -> SecretStr:
         if len(value.get_secret_value().encode()) < 32:
-            raise ValueError("PLATFORM_ADMIN_JWT_SIGNING_KEY needs >=32 random bytes")
+            raise ValueError("ADMIN_JWT_SIGNING_KEY needs >=32 random bytes")
         return value
 
 
@@ -65,9 +65,18 @@ class IssuedAdminToken:
 
 
 class PlatformAdminBearerAuth:
-    def __init__(self, identity: IdentityService, settings: AdminBearerSettings) -> None:
+    def __init__(
+        self,
+        identity: IdentityService,
+        settings: AdminBearerSettings,
+        *,
+        login_pepper: bytes,
+    ) -> None:
+        if len(login_pepper) < 32:
+            raise ValueError("independent login throttling key required")
         self.identity = identity
         self._signing_key = settings.signing_key.get_secret_value().encode()
+        self._login_pepper = login_pepper
 
     def _issue(self, user: User) -> IssuedAdminToken:
         now = datetime.now(UTC)
@@ -106,7 +115,7 @@ class PlatformAdminBearerAuth:
             username,
             password,
             source=source,
-            pepper=self._signing_key,
+            pepper=self._login_pepper,
         )
         if user is None:
             return None

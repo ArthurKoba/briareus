@@ -6,11 +6,11 @@ development environment, briareus-net standalone Destination, and the 11 named
 Git-backed Applications. It NEVER starts/deploys an Application, changes DNS,
 OAuth issuer, legacy resources, or invents secret values.
 
-Required ${NAME:?} Compose values must already exist as shared variables in the
-Briareus development environment. The script binds parsed Application variables
-to {{environment.NAME}} with runtime=true/buildtime=false after Coolify has
-materialized them. If parsing is still pending, it exits incomplete rather than
-deploying.
+Required secret values live in Coolify Project Shared Variables. Git Compose
+contains only ${NAME:?} placeholders. After Coolify materializes Application
+variables, this tool binds only approved secret keys to {{project.NAME}} references
+with runtime=true/buildtime=false. It never reads Project Shared values. Required
+non-secret resource inputs remain operator-owned Application variables.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 SERVER_NAME = "tambov"
@@ -130,13 +130,38 @@ def main() -> int:
     base=normalize_origin(args.coolify_url)
     root=Path(__file__).resolve().parent
     registry=read_registry(root)
+    config=registry.get("configuration_contract")
+    if not isinstance(config, dict):
+        raise BootstrapError("APPLICATIONS.json missing configuration_contract")
+    project_shared_secret_keys=frozenset(config.get("project_shared_secrets_current", []))
+    required_application_nonsecrets=frozenset(config.get("required_application_nonsecrets_current", []))
+    if config.get("secret_scope") != "project" or config.get("secret_reference") != "{{project.KEY}}":
+        raise BootstrapError("unexpected Shared Variable scope/reference contract")
+    if config.get("read_secret_values") is not False:
+        raise BootstrapError("secret read policy must remain disabled")
     if args.branch.startswith("TO_BE_") or not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", args.branch):
         raise BootstrapError("invalid/unreviewed Git branch/ref")
 
     required_by_app={app["name"]: required_variables(root, app) for app in registry["applications"]}
     print(f"PLAN: {len(registry['applications'])} Applications, server={SERVER_NAME}, environment={ENVIRONMENT_NAME}, network={NETWORK_NAME}, branch={args.branch}")
     for app in registry["applications"]:
-        print(f"  {app['name']}: base={app['base_directory']} required_shared={','.join(required_by_app[app['name']]) or '-'}")
+        print(f"  {app['name']}: base={app['base_directory']} required_inputs={','.join(required_by_app[app['name']]) or '-'}")
+    all_required=set().union(*required_by_app.values())
+    unknown_required=sorted(
+        all_required
+        - project_shared_secret_keys
+        - required_application_nonsecrets
+    )
+    if unknown_required:
+        raise BootstrapError(
+            "unclassified required variables in Compose: " + ", ".join(unknown_required)
+        )
+    project_secret_refs=sorted(all_required & project_shared_secret_keys)
+    resource_required=sorted(all_required & required_application_nonsecrets)
+    if project_secret_refs:
+        print("PROJECT SHARED SECRET KEYS REQUIRED (names only): " + ", ".join(project_secret_refs))
+    if resource_required:
+        print("APPLICATION REQUIRED NON-SECRETS: " + ", ".join(resource_required))
     if not args.apply and not os.environ.get("COOLIFY_API_TOKEN"):
         print("DRY RUN SOURCE-ONLY: no COOLIFY_API_TOKEN; no remote read/write performed")
         return 0
@@ -176,14 +201,9 @@ def main() -> int:
     if not env_uuid:
         raise BootstrapError("development environment UUID unavailable")
 
-    shared=api(base,token,"GET",f"projects/{project_uuid}/environments/{quote(ENVIRONMENT_NAME)}/envs")
-    shared_keys={x.get("key") for x in shared if isinstance(x,dict)}
-    all_required=set().union(*required_by_app.values())
-    missing_shared=sorted(all_required-shared_keys)
-    if missing_shared:
-        print("BLOCKED: missing environment-scoped shared variables: "+", ".join(missing_shared))
-        print("Populate their secret values in Coolify before Application creation; bootstrap never invents them.")
-        return 3
+    # Intentionally do not GET Project Shared Variables: the D/agent surface must
+    # not read secret values. Existence/scope is verified separately through a
+    # metadata-only operator surface before deployment.
 
 
     destinations=api(base,token,"GET",f"servers/{SERVER_UUID}/destinations")
@@ -257,9 +277,11 @@ def main() -> int:
             parser_pending.append(name)
             continue
         for key in required_by_app[name]:
-            desired_value="{{environment."+key+"}}"
+            if key not in project_shared_secret_keys:
+                continue
+            desired_value="{{project."+key+"}}"
             if args.apply:
-                api(base,token,"PATCH",f"applications/{app_uuid}/envs",{"key":key,"value":desired_value,"is_preview":False,"is_literal":False,"is_multiline":False,"is_shown_once":False,"is_runtime":True,"is_buildtime":False,"comment":"Briareus development shared variable reference"})
+                api(base,token,"PATCH",f"applications/{app_uuid}/envs",{"key":key,"value":desired_value,"is_preview":False,"is_literal":False,"is_multiline":False,"is_shown_once":False,"is_runtime":True,"is_buildtime":False,"comment":"Briareus Project Shared secret reference"})
         verified=api(base,token,"GET",f"applications/{app_uuid}")
         if verified.get("watch_paths")!=desired_watch or verified.get("base_directory")!=spec["base_directory"] or verified.get("git_branch")!=args.branch:
             raise BootstrapError(f"{name}: Coolify did not persist exact source/watch configuration")

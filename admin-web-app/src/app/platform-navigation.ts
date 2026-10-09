@@ -36,8 +36,7 @@ const operationalPreviewPages = new Set<PlatformPageId>([
   "dashboard","calls","oauth","files","terminal","browser-managed",
   "browser-external","analysis",
 ])
-export function visiblePlatformPages(preview=false): PlatformNavigationItem[] {
-  if (preview) return [...platformNavigation]
+export function visiblePlatformPages(): PlatformNavigationItem[] {
   const scope=projectContext.state.scope
   return platformNavigation.filter(item => {
     if (item.scope==="project" && scope!=="project") return false
@@ -51,6 +50,6 @@ export function visiblePlatformPages(preview=false): PlatformNavigationItem[] {
     return item.permissions.some(permission=>projectContext.can(permission))
   })
 }
-export function validPlatformPage(id:string, preview=false):id is PlatformPageId {
-  return visiblePlatformPages(preview).some(item=>item.id===id)
+export function validPlatformPage(id:string):id is PlatformPageId {
+  return visiblePlatformPages().some(item=>item.id===id)
 }

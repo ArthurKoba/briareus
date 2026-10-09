@@ -8,9 +8,6 @@ services:
     restart: "no"
     stop_grace_period: 30s
     environment:
-      PLATFORM_DATABASE_URL: "${PLATFORM_DATABASE_URL:?}"
-      PLATFORM_ADMIN_JWT_SIGNING_KEY: "${PLATFORM_ADMIN_JWT_SIGNING_KEY:?}"
-      PLATFORM_SERVICE_IDENTITY_ENABLED: "false"
       TZ: "${TZ:-UTC}"
     expose:
       - "8000"
