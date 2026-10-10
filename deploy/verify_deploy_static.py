@@ -84,12 +84,14 @@ def main() -> int:
     live_sources.extend(ROOT.glob("*/Dockerfile"))
     live_text="\n".join(q.read_text(errors="ignore") for q in live_sources)
     forbidden_tokens=(
-        "PLATFORM_", "PLATFORM_DEV_", "{{environment.",
+        "PLATFORM_", "PLATFORM_DEV_",
         "ADMIN_UI_PREVIEW", "ADMIN_UI_TELEMETRY", "ADMIN_UI_EVENTS_MODE",
         "ADMIN_API_BASE_URL", "OAUTH_ENABLED", "FILE_WORKSPACE_ROOT",
         "TERMINAL_WORKSPACE_ROOT", "TERMINAL_HOME", "BROWSER_PROFILE_PATH",
     )
     assert not any(token in live_text for token in forbidden_tokens), [t for t in forbidden_tokens if t in live_text]
+    env_ref_sources=[q for q in live_sources if "{{environment." in q.read_text(errors="ignore")]
+    assert set(env_ref_sources)=={ROOT/"admin-api/docker-compose.coolify.yaml"}, env_ref_sources
     for module in MODULES:
         base=ROOT/module/"docker-compose.yaml"
         cool=ROOT/module/"docker-compose.coolify.yaml"
@@ -114,6 +116,20 @@ def main() -> int:
             expected_env=dict(service["environment"])
             if module == "admin-ui":
                 expected_env["SERVICE_URL_BRIAREUS_DEV_ADMIN_UI_8080"]="/"
+            if module == "admin-api":
+                expected_env={
+                    "TZ":"{{team.TZ}}",
+                    "OTLP_ENDPOINT":"{{team.OTLP_ENDPOINT}}",
+                    "OTLP_BEARER_TOKEN":"{{team.OTLP_BEARER_TOKEN}}",
+                    "SERVICE_NAMESPACE":"{{environment.SERVICE_NAMESPACE}}",
+                    "DEPLOYMENT_ENVIRONMENT":"{{environment.DEPLOYMENT_ENVIRONMENT}}",
+                    "OTEL_SERVICE_NAME":"admin-api",
+                    "POSTGRES_HOST":"briareus-dev-postgres",
+                    "POSTGRES_PORT":"5432",
+                    "POSTGRES_DB":"briareus_dev",
+                    "POSTGRES_USER":"{{environment.POSTGRES_USER}}",
+                    "POSTGRES_PASSWORD":"{{environment.POSTGRES_PASSWORD}}",
+                }
             assert b["services"][service_name]["environment"]==expected_env
             if module != "data":
                 build=service["build"]
@@ -167,7 +183,7 @@ def main() -> int:
     assert 'projects/{project_uuid}/envs' not in bootstrap
     assert 'projects/{project_uuid}/environments/{quote' not in bootstrap
     assert '{{environment.' not in bootstrap
-    print("STATIC_PASS: module-first deploy + ENV-1 contract, 11 Apps, 22 Compose, COPY→Watch, Project Shared secret policy, canonical Data-only operator inputs, no pseudo ENV, A8/B12/R10 packaging alignment, hardened schema source")
+    print("STATIC_PASS: module-first deploy + ENV-1 contract, 11 Apps, 22 Compose, COPY→Watch, scoped Admin API Team/Environment refs, canonical Data inputs, no pseudo ENV, A8/B12/R10 packaging alignment, hardened schema source")
     return 0
 
 if __name__=="__main__":
