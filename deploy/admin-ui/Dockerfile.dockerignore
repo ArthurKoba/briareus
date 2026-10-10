@@ -1,0 +1,13 @@
+**
+!admin-web-app/
+!admin-web-app/package.json
+!admin-web-app/bun.lock
+!admin-web-app/components.json
+!admin-web-app/index.html
+!admin-web-app/tsconfig.json
+!admin-web-app/vite.config.ts
+!admin-web-app/src/
+!admin-web-app/src/**
+!admin-web-app/public/
+!admin-web-app/public/**
+!admin-web-app/nginx.conf.template
