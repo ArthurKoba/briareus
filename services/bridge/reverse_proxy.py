@@ -5,7 +5,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from opentelemetry import trace
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
@@ -160,8 +160,12 @@ class ReverseProxy:
                         content=await request.body(),
                         headers=request_headers,
                     )
-            except httpx.RequestError as exc:
-                span.record_exception(exc)
+            except httpx.RequestError:
+                # `httpx.RequestError.__str__` can embed the target URL and
+                # sensitive query, proxy credentials or HTTP transport data.
+                # Do NOT export this exception as an OTel event/description.
+                span.set_attribute("error.type", "backend_request_unavailable")
+                span.set_status(Status(StatusCode.ERROR, "backend_unavailable"))
                 return PlainTextResponse(
                     f"{self.backend_name} backend unavailable",
                     status_code=502,

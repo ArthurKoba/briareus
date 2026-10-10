@@ -46,6 +46,10 @@ export function normalizeUiError(error: unknown, phase: "read" | "mutation" = "r
     return { kind: "unavailable", code, message: "contractPending" }
   }
   if (status === 401) return { kind: "unauthorized", code, message: "authenticationExpired" }
+  // A future Authorization-owned schema migration may temporarily keep
+  // verified Admin callers unavailable. 503 is NOT evidence migrations ran;
+  // never trigger a client-side migration, fake readiness or replay a write.
+  if (status === 503 && phase === "read")return {kind:"unavailable",code:"service_unavailable",message:"serviceUnavailableOrUpgrading"}
   if (status === 429) return { kind: "unavailable", code, message: "rateLimited" }
   if (status === 403) return { kind: "forbidden", code, message: "permissionDenied" }
   if (code === "invalid_invitation" && (status === 400 || status === 422)) {

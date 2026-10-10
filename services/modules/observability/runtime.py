@@ -6,9 +6,10 @@ from typing import Literal
 from common.admin_api_client import AdminApiClient
 from common.models import JsonObject, JsonValue
 from common.runtime_annotations import READ_EXTERNAL
-from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
+from common.runtime_common import admin_api_client, private_http_app
 from common.settings import AdminApiClientSettings, PrivateRuntimeSettings
 from modules.coolify.client import CoolifyClient
+from modules.project_runtime.runtime_telemetry import build_runtime_mcp
 from modules.signoz.client import SigNozClient
 
 ProviderName = Literal["signoz", "coolify"]
@@ -57,7 +58,7 @@ class ObservabilityRuntimeContext:
 _private = PrivateRuntimeSettings()
 _admin_api = admin_api_client(AdminApiClientSettings())
 _context = ObservabilityRuntimeContext(_admin_api)
-mcp = build_private_mcp("observability", _admin_api, observability_scope="observability")
+mcp, _runtime_telemetry = build_runtime_mcp("infrastructure", name="observability")
 
 
 @mcp.tool(title="Observability sources", annotations=READ_EXTERNAL)
@@ -187,17 +188,13 @@ def observability_get_application(account_id: str, uuid: str) -> JsonObject:
 
 
 @mcp.tool(title="Infrastructure application storages", annotations=READ_EXTERNAL)
-def observability_application_storages(
-    account_id: str, application_uuid: str
-) -> JsonObject:
+def observability_application_storages(account_id: str, application_uuid: str) -> JsonObject:
     """List safe Coolify storage topology without file contents or host filesystem paths."""
     return _context.coolify(account_id).application_storages(application_uuid)
 
 
 @mcp.tool(title="Infrastructure application variables", annotations=READ_EXTERNAL)
-def observability_application_variables(
-    account_id: str, application_uuid: str
-) -> JsonObject:
+def observability_application_variables(account_id: str, application_uuid: str) -> JsonObject:
     """List safe Coolify application variable metadata; values are never returned."""
     return _context.coolify(account_id).application_variables(application_uuid)
 
@@ -223,4 +220,4 @@ def observability_get_deployment(account_id: str, uuid: str) -> JsonObject:
     return _context.coolify(account_id).deployment(uuid)
 
 
-app = private_http_app(mcp, _private)
+app = _runtime_telemetry.attach(private_http_app(mcp, _private))

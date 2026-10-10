@@ -62,6 +62,7 @@ PUBLIC_DETAIL_KEYS = frozenset(
         "source_file_object_id",
         "session_version",
         "approved",
+        "enabled",
         "artifact_confirmed",
         "reconciliation_required",
         "cleanup_required",
@@ -75,6 +76,7 @@ SECURITY_CHANGES = frozenset(
         "identity.role_changed",
         "identity.password_changed",
         "identity.password_reset",
+        "identity.browser_telemetry_consent_changed",
         "team.member_removed",
         "team.member_added",
         "team.owner_transferred",
@@ -216,6 +218,7 @@ def _scopes(event_name: str, raw: dict[str, object]) -> tuple[ScopeKey, ...]:
         "identity.role_changed",
         "identity.password_changed",
         "identity.password_reset",
+        "identity.browser_telemetry_consent_changed",
     }:
         ident = _parse_uuid(raw.get("object_id"))
         if ident:

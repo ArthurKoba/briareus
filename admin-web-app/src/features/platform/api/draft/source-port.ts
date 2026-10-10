@@ -863,15 +863,24 @@ export function createUninstalledDraftConsumer(baseUrl: string): DraftConsumer {
         const current=ctx.scope
         const verifyTeam=async():Promise<string>=>{
           const permit=await source.teamAccess(statusScope,ctx.signal)
-          if(!permit.can_manage_resources)return missingContract("team_source_manage_revoked")
+          const isMembership=["team.member.add","team.member.remove","team.transfer_owner"].includes(input.operation)
+          if(isMembership?!permit.can_manage_members:!permit.can_manage_resources)
+            return missingContract("team_source_manage_revoked")
           if(current.kind==="team"){
             if(statusScope!==current.teamId)return missingContract("team_status_scope_mismatch")
             requireSourceDecision(ctx,permit.decision_version)
           }else if(current.kind==="project"){
             const project=await source.projectAccess(current.projectId,ctx.signal)
             requireSourceDecision(ctx,project.decision_version)
-            if(project.owner_scope!=="team"||project.owner_id!==statusScope||!project.can_manage_team_resources)
+            if(project.owner_scope!=="team"||project.owner_id!==statusScope||
+               (!isMembership&&!project.can_manage_team_resources))
               return missingContract("team_status_not_current_project_owner")
+          }else if(current.kind==="operator"){
+            await requireOperatorCommand(source,ctx)
+          }else if(current.kind==="account"){
+            const projection=await source.context(ctx.signal)
+            if(!projection.user.enabled||!projection.teams.some(item=>item.team_id===statusScope))
+              return missingContract("team_status_not_current_actor_team")
           }else return missingContract("team_status_wrong_selected_scope")
           return permit.decision_version
         }

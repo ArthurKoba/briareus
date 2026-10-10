@@ -28,6 +28,10 @@ class UserRow(PlatformBase):
     role: Mapped[str] = mapped_column(String(24), default="user")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     credential_version: Mapped[int] = mapped_column(Integer, default=1)
+    # Strictly opt-in; missing consent never authorizes browser event upload.
+    browser_telemetry_opt_in: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

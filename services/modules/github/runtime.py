@@ -5,13 +5,14 @@ from common.runtime_annotations import (
     READ_EXTERNAL,
     WRITE_EXTERNAL,
 )
-from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
+from common.runtime_common import admin_api_client, private_http_app
 from common.runtime_policy_contracts import GitHubRuntimePolicy
 from common.settings import (
     AdminApiClientSettings,
     GitHubPolicySettings,
     PrivateRuntimeSettings,
 )
+from modules.project_runtime.runtime_telemetry import build_runtime_mcp
 
 from .account_tools import register_github_account_tools
 from .github_actions_tools import register_github_actions_tools
@@ -28,7 +29,7 @@ _admin_api = admin_api_client(AdminApiClientSettings())
 _policy = GitHubPolicySettings()
 _context = GitHubRuntimeContext(_admin_api, _policy)
 
-mcp = build_private_mcp("github", _admin_api)
+mcp, _runtime_telemetry = build_runtime_mcp("svc", name="github")
 
 
 def _github_runtime_policy() -> GitHubRuntimePolicy:
@@ -87,4 +88,4 @@ register_github_reviewer_tools(
     WRITE_EXTERNAL,
 )
 
-app = private_http_app(mcp, _private_settings)
+app = _runtime_telemetry.attach(private_http_app(mcp, _private_settings))

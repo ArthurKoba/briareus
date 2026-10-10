@@ -9,17 +9,21 @@ from __future__ import annotations
 import ipaddress
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from time import perf_counter
+from uuid import uuid4
 
 from api_errors import api_error, install_admin_api_error_handlers
 from fastapi import FastAPI, Request
 from presentation.platform_api import build_unmounted_platform_router
-from sqlalchemy import text
 from starlette.responses import Response
 
-from authorization.platform_composition import (
-    PlatformServices,
-    platform_metadata,
+from authorization.platform_composition import PlatformServices
+from authorization.schema_migrations import (
+    SchemaUpgradeRejected,
+    require_current_authorization_revision,
+    verify_authorization_schema_for_consumer,
 )
+from common.platform_telemetry import BriareusHttpTelemetry
 
 # In this wave public operation remains blocked independently of configuration.
 # To expose non-loopback interfaces requires a reviewed future C1-B2/C2 patch.
@@ -65,31 +69,26 @@ def _private_request(request: Request) -> bool:
 
 def create_platform_admin_app(services: PlatformServices | None = None) -> FastAPI:
     """Injected, verified composition or health-only closed ASGI default."""
+    telemetry: BriareusHttpTelemetry | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        if services is not None:
-            try:
-                # Verify only the expected clean schema exists. Never create
-                # or upgrade tables on startup.
-                async with services.database.engine.connect() as connection:
-                    database_name = await connection.scalar(text("SELECT current_database()"))
-                    if not isinstance(database_name, str) or not database_name.endswith("_dev"):
-                        raise RuntimeError("Admin requires a verified disposable *_dev DB")
-                    for table in platform_metadata().sorted_tables:
-                        relation = await connection.scalar(
-                            text("SELECT to_regclass(:name)"),
-                            {"name": table.fullname},
-                        )
-                        if relation is None:
-                            raise RuntimeError(
-                                "Admin schema incomplete; explicit dev initialization required"
-                            )
-                yield
-            finally:
-                await services.database.close()
-        else:
+        nonlocal telemetry
+        if services is None:
             yield
+            return
+        try:
+            # Admin is a READ-ONLY schema consumer, not a second migrator.
+            # Authoritative version and all required constraints must
+            # already be committed by Authorization on the selected DB.
+            await verify_authorization_schema_for_consumer(services.database)
+            telemetry = BriareusHttpTelemetry("admin-api")
+            telemetry.started()
+            yield
+        finally:
+            if telemetry is not None:
+                telemetry.shutdown()
+            await services.database.close()
 
     app = FastAPI(
         title="Briareus Project Administration",
@@ -124,24 +123,56 @@ def create_platform_admin_app(services: PlatformServices | None = None) -> FastA
     async def protected_perimeter(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Even when someone changes the ASGI target/host, a remote client never
-        # receives a project endpoint. C2 must deliberately revise this gate.
-        if not _private_request(request):
-            return _private_failure(403, "verified local transport required")
-        if services is None and request.url.path != "/health/live":
-            return _private_failure(503, "Admin composition not provisioned")
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin")
-            if origin is not None:
-                # C1-B2/C2 has not approved a cross-origin transport.
-                # Same-origin requests have no cross-origin Origin requirements.
+        correlation = str(uuid4())
+        started_at = perf_counter()
+        status_code = 500
 
-                return _private_failure(403, "origin rejected")
-        response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        return response
+        async def securely_invoke() -> Response:
+            # No reverse-proxy header is automatically trusted as caller
+            # identity. A real C1-B2/C2 ingress must deliberately change
+            # these gates after independently verified TLS/Origin.
+            if not _private_request(request):
+                return _private_failure(403, "verified local transport required")
+            if services is None and request.url.path != "/health/live":
+                return _private_failure(503, "Admin composition not provisioned")
+            if services is not None and request.url.path != "/health/live":
+                try:
+                    # No long-lived admin process may keep serving stale
+                    # bearer/role/Project logic after Authorization migrates
+                    # the shared DB to a different accepted schema version.
+                    await require_current_authorization_revision(services.database)
+                except SchemaUpgradeRejected:
+                    return _private_failure(503, "Authorization schema is not ready")
+            if request.method not in {"GET", "HEAD", "OPTIONS"}:
+                origin = request.headers.get("origin")
+                if origin is not None:
+                    return _private_failure(403, "origin rejected")
+            return await call_next(request)
+
+        try:
+            if telemetry is not None:
+                with telemetry.trace_request(
+                    method=request.method,
+                    correlation_id=correlation,
+                ) as span:
+                    response = await securely_invoke()
+                    if span is not None:
+                        span.set_attribute("http.response.status_code", response.status_code)
+            else:
+                response = await securely_invoke()
+            status_code = response.status_code
+            response.headers["X-Request-ID"] = correlation
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            return response
+        finally:
+            if telemetry is not None:
+                telemetry.observe_http(
+                    method=request.method,
+                    status_code=status_code,
+                    duration_ms=(perf_counter() - started_at) * 1000,
+                )
 
     @app.get("/health/live", include_in_schema=False)
     async def liveness() -> dict[str, bool]:

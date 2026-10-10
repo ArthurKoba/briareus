@@ -1,7 +1,7 @@
 [project]
-name = "mcp-bridge"
+name = "briareus"
 version = "0.1.0"
-description = "Modular MCP bridge for local tools, isolated workers, and long-running agent tasks."
+description = "Briareus project-scoped Authorization, Admin and isolated runtime services."
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
@@ -25,9 +25,6 @@ dependencies = [
   "asyncpg>=0.31,<0.32",
   "alembic>=1.17,<2",
 ]
-
-[project.scripts]
-mcp-serve = "common.asgi:main"
 
 [dependency-groups]
 web = ["playwright>=1.55,<2"]
@@ -84,6 +81,10 @@ packages = [
 "services/admin-api/src/presentation" = "presentation"
 "services/admin-api/src/platform_runtime.py" = "platform_runtime.py"
 "services/admin-api/src/api_errors.py" = "api_errors.py"
+# Authorization is the sole migrator. Ship frozen Alembic source in its
+# wheel so D4 needs no duplicate schema-init image, operator SQL or sidecar.
+"scripts/alembic.ini" = "authorization/alembic.ini"
+"scripts/alembic_greenfield" = "authorization/alembic_greenfield"
 
 [tool.ruff]
 src = ["services"]

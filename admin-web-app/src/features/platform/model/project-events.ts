@@ -1,5 +1,6 @@
 import { reactive, readonly, watch } from "vue"
 import { projectContext } from "@/features/platform/model/project-context"
+import { browserTelemetry } from "@/features/platform/model/browser-telemetry"
 import { platformPort } from "@/features/platform/api/port"
 import { normalizeUiError } from "@/features/platform/model/errors"
 import { pageActivity } from "@/shared/lib/page-activity"
@@ -114,6 +115,7 @@ async function connect(resetRetry = true): Promise<void> {
     }
     stopSocket = dispose
     state.status = "connected"
+    browserTelemetry.lifecycle("ok")
     state.retryAttempt = 0
   } catch (error) {
     if (version !== connectionVersion || controller.signal.aborted) return
@@ -121,6 +123,7 @@ async function connect(resetRetry = true): Promise<void> {
     if (issue.kind === "unauthorized") { projectContext.clear(); return }
     if (issue.kind === "forbidden") { projectContext.selectNone(); return }
     state.status = "error"
+    browserTelemetry.error("app","realtime")
     scheduleReconnect()
   } finally {
     if (connectingController === controller) connectingController = null

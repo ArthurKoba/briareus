@@ -1,4 +1,4 @@
-"""Unmounted authenticated Project dispatch; legacy Gateway routes unaffected.
+"""Unmounted Briareus Project dispatch, signed A6 actions only.
 
 C1-B/C2 must provide a verified principal/session/grants transport and typed
 backend identity. This is a private composition root, NOT a public MCP tool.
@@ -24,7 +24,7 @@ from modules.project_runtime import (
 
 # C2-UNMOUNTED source registry; operation cannot be selected by untrusted
 # MCP arguments or by an accidentally permissive classifier implementation.
-# Exactly one bounded mutation is staged: Files upload under A5 durable quota.
+# Exactly one bounded mutation is staged: Files upload under A6 signed quota.
 _PRIVATE_TOOL_ACTIONS: dict[tuple[str, str], ProjectAction] = {
     ("files", "list"): "files.read",
     ("files", "info"): "files.read",
@@ -113,6 +113,18 @@ def _deny_raw_credentials(
         raise ProjectGatewayDispatchUnavailable("PROJECT_ARGUMENTS_INVALID")
 
 
+class ProjectAuthorizationReadinessPort(Protocol):
+    """Backend A10-only source verifier; no guessed REST or schema DDL.
+
+    Implemented only after A10 accepts authenticated Authorization readiness
+    with verified expected Alembic head/version and fresh service identity.
+    Missing/down/upgrading/wrong-head state MUST reject before forwarding any
+    protected Project operation (including read/status and UNKNOWN retry).
+    """
+
+    async def require_current_schema_ready(self, invocation: ProjectInvocation) -> None: ...
+
+
 class ProjectToolClassifier(Protocol):
     async def classify(self, backend: str, tool: str) -> ProjectAction | None: ...
 
@@ -146,6 +158,7 @@ class ProjectGatewayDispatch:
         *,
         classifier: ProjectToolClassifier | None = None,
         forwarder: AuthenticatedProjectForwarder | None = None,
+        readiness: ProjectAuthorizationReadinessPort | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
         if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 300:
@@ -154,6 +167,7 @@ class ProjectGatewayDispatch:
         self.timeout_seconds = timeout_seconds
         self._classifier = classifier
         self._forwarder = forwarder
+        self._readiness = readiness
 
     async def dispatch(
         self,
@@ -166,6 +180,8 @@ class ProjectGatewayDispatch:
     ) -> JsonObject:
         if self._classifier is None or self._forwarder is None:
             raise ProjectGatewayDispatchUnavailable("PROJECT_DISPATCH_NOT_CONFIGURED")
+        if self._readiness is None:
+            raise ProjectGatewayDispatchUnavailable("PROJECT_AUTHORIZATION_SCHEMA_NOT_READY")
         expected_action = _PRIVATE_TOOL_ACTIONS.get((backend, tool))
         if expected_action is None:
             # Native Ghidra and arbitrary internal backends are NOT public.
@@ -174,7 +190,21 @@ class ProjectGatewayDispatch:
         if not isinstance(forwarded, dict):
             raise ProjectGatewayDispatchUnavailable("PROJECT_ARGUMENTS_INVALID")
         _deny_raw_credentials(forwarded)
+        forwarded_to_effect = False
         try:
+            # This does not create/upgrade any schema. Verified A10
+            # Authorization is the ONLY migrator; read-only health from Data
+            # PostgreSQL is not sufficient. A stale/wrong head fails closed.
+            try:
+                async with asyncio.timeout(min(self.timeout_seconds, 10.0)):
+                    await self._readiness.require_current_schema_ready(invocation)
+            except Exception as exc:
+                # DB healthy != migrated Authorization ready. Never include
+                # Backend/schema SQL errors, secrets or a guessed revision in
+                # tool metadata. No mutating operation has started yet.
+                raise ProjectGatewayDispatchUnavailable(
+                    "PROJECT_AUTHORIZATION_SCHEMA_UNAVAILABLE"
+                ) from exc
             async with asyncio.timeout(self.timeout_seconds):
                 action = await self._classifier.classify(backend, tool)
                 if action is None or action != expected_action:
@@ -190,7 +220,7 @@ class ProjectGatewayDispatch:
                     backend=backend, tool=tool, arguments=forwarded
                 )
                 _deny_raw_credentials(prepared)
-                # A5 SQL idempotency key and signed operation UUID must equal
+                # A6 SQL idempotency key and signed operation UUID must equal
                 # the canonical upload UUID in the validated payload.
                 if action == "files.write" and prepared.get("operation_uuid") != str(
                     operation_uuid
@@ -218,8 +248,13 @@ class ProjectGatewayDispatch:
                 request = AuthorizedToolForward(
                     backend, tool, prepared, permit, operation_uuid, scoped
                 )
+                forwarded_to_effect = True
                 return await self._forwarder.forward(request)
         except TimeoutError as exc:
+            if not forwarded_to_effect:
+                raise ProjectGatewayDispatchUnavailable(
+                    "PROJECT_AUTHORIZATION_SCHEMA_UNAVAILABLE"
+                ) from exc
             # Only an already-dispatched write is an UNKNOWN SIDE EFFECT.
             # Read-only status queries should not masquerade as new writes.
             if backend == "files" and tool == "upload_base64":

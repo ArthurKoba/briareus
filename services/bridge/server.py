@@ -9,6 +9,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.proxy import FastMCPProxy
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
@@ -21,7 +22,6 @@ from common.mcp_surfaces import (
     surface_base_url,
 )
 from common.models import JsonObject
-from common.observability import announce_runtime_started, build_observability
 from common.runtime_annotations import (
     DESTRUCTIVE_EXTERNAL,
     READ_EXTERNAL,
@@ -34,6 +34,7 @@ from common.settings import (
     BridgeSettings,
     GatewayAuthorizationSettings,
 )
+from modules.project_runtime.runtime_telemetry import RuntimeTelemetry, SafeRuntimeToolTelemetry
 
 from . import __version__
 from .access_middleware import AccessSessionMiddleware
@@ -46,9 +47,9 @@ from .backend_sessions import ProxyClientPool
 from .models import BridgeBuildInfo, BridgeCapabilities, BridgePing
 
 _STARTED_AT = datetime.now(UTC).isoformat()
-_observability = build_observability("gateway")
-announce_runtime_started(_observability, "gateway")
+_runtime_telemetry = RuntimeTelemetry.construct("gateway")
 _PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
 
 async def _backend_timeout_seconds() -> float:
     try:
@@ -107,11 +108,9 @@ def _public_facade(
     backend_url: str,
     authorization_by_surface: dict[str, RemoteAuthProvider],
 ) -> FastMCP:
-    middleware = (
-        [AccessSessionMiddleware(surface=name, client=_authorization_access)]
-        if _authorization_access_settings.enabled
-        else []
-    )
+    middleware: list[Middleware] = [SafeRuntimeToolTelemetry("gateway", _runtime_telemetry.sink)]
+    if _authorization_access_settings.enabled:
+        middleware.append(AccessSessionMiddleware(surface=name, client=_authorization_access))
     surface = FastMCP(
         name,
         version=__version__,
@@ -142,11 +141,14 @@ _backend_router = BackendRouter(
 mcp = FastMCP(
     "mcp-bridge",
     version=__version__,
-    middleware=(
-        [AccessSessionMiddleware(surface="root", client=_authorization_access)]
-        if _authorization_access_settings.enabled
-        else []
-    ),
+    middleware=[
+        SafeRuntimeToolTelemetry("gateway", _runtime_telemetry.sink),
+        *(
+            [AccessSessionMiddleware(surface="root", client=_authorization_access)]
+            if _authorization_access_settings.enabled
+            else []
+        ),
+    ],
     instructions=(
         "Universal MCP map and bridge. Dedicated backends are not automatically "
         "published on this root surface. Use bridge_backends to inspect availability, "
@@ -332,7 +334,7 @@ async def _gateway_lifespan(app: Starlette) -> AsyncIterator[None]:
             await _authorization_access.close()
 
 
-app = Starlette(lifespan=_gateway_lifespan)
+app = _runtime_telemetry.attach(Starlette(lifespan=_gateway_lifespan))
 
 for _route in _resource_discovery_routes():
     app.router.routes.append(_route)

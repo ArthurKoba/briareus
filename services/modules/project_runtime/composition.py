@@ -28,6 +28,7 @@ from .a6_runtime import (
     A6RuntimeSignedSource,
     A6SignedRuntimePort,
 )
+from .a9_signed_lease import A9PinnedRuntimeKeyPort
 from .authorization import ProjectAccessPort, ProjectRuntimeAuthority
 from .backend_access import CurrentCallerVerifier
 from .integrations import ProjectIntegrationSelector
@@ -35,7 +36,7 @@ from .variables import ProjectVariableSelector
 from .workspace_roots import ProjectRootRegistry
 
 if TYPE_CHECKING:
-    from bridge.project_dispatch import ProjectGatewayDispatch
+    from bridge.project_dispatch import ProjectAuthorizationReadinessPort, ProjectGatewayDispatch
     from modules.analysis.a6_native import (
         A6NativeInventoryPort,
         A6ReversePeerPort,
@@ -71,6 +72,7 @@ class PrivateProjectRuntime:
     files_observer: TrustedFilesStoragePort | None = None
     runtime_peer: A6RuntimePeerPort | None = None
     runtime_backend: A6SignedRuntimePort | None = None
+    runtime_pinned_key: A9PinnedRuntimeKeyPort | None = None
     provider_peer: A6ProviderPeerPort | None = None
     provider_backend: A6SignedProviderPort | None = None
     native_peer: A6ReversePeerPort | None = None
@@ -96,6 +98,7 @@ class PrivateProjectRuntime:
         files_observer: TrustedFilesStoragePort | None = None,
         runtime_peer: A6RuntimePeerPort | None = None,
         runtime_backend: A6SignedRuntimePort | None = None,
+        runtime_pinned_key: A9PinnedRuntimeKeyPort | None = None,
         provider_peer: A6ProviderPeerPort | None = None,
         provider_backend: A6SignedProviderPort | None = None,
         native_peer: A6ReversePeerPort | None = None,
@@ -124,6 +127,7 @@ class PrivateProjectRuntime:
             files_observer=files_observer,
             runtime_peer=runtime_peer,
             runtime_backend=runtime_backend,
+            runtime_pinned_key=runtime_pinned_key,
             provider_peer=provider_peer,
             provider_backend=provider_backend,
             native_peer=native_peer,
@@ -179,7 +183,12 @@ class PrivateProjectRuntime:
 
         return ProjectWebRuntime(authority=self.authority, files=files)
 
-    def gateway(self, *, files: ProjectFilesService | None = None) -> ProjectGatewayDispatch:
+    def gateway(
+        self,
+        *,
+        files: ProjectFilesService | None = None,
+        readiness: ProjectAuthorizationReadinessPort | None = None,
+    ) -> ProjectGatewayDispatch:
         """Private A6 allowlisted dispatcher. This NEVER mounts FastMCP."""
         # Gateway images do not import the Files implementation eagerly.
         from bridge.project_dispatch import ProjectGatewayDispatch
@@ -191,6 +200,7 @@ class PrivateProjectRuntime:
         return ProjectGatewayDispatch(
             self.authority,
             classifier=PrivateProjectToolClassifier(),
+            readiness=readiness,
             forwarder=PrivateProjectModuleForwarder(
                 self.authority,
                 files=files,
@@ -211,6 +221,7 @@ class PrivateProjectRuntime:
             self.authority,
             peer=self.runtime_peer,
             backend=self.runtime_backend,
+            pinned_key=self.runtime_pinned_key,
         )
 
     def a6_native(self) -> A6SignedNativeClient:

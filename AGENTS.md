@@ -21,7 +21,7 @@ This repository checkout belongs to the persistent Koba Terminal workspace
 - Keep REST/OpenAPI as default inter-runtime API, FastMCP for agents, and leave gRPC/GraphQL optional.
 - Do not create Git commits, push, open PRs, or merge during individual task slices.
   Maintain a recoverable working tree; one intentional publication/review cycle after slice integration.
-- No generated Alembic revision in Git before first approved schema baseline.
+- Owner decision (2026-10-09): Backend owns source-tracked approved Alembic baseline/revisions and automatic startup migration in Authorization; this supersedes the earlier prohibition of migration files in Git. No manual one-shot schema init, create_all, schema sidecar or legacy-data migration. See architecture §5.3 and coordination MIGRATION-AUTO.
 - Do not add/run unit/integration/e2e/CI suites or write test-policy files.
   Local app configuration, builds, runtime investigation, and isolated schema migration application are allowed.
 - Do not modify production containers/databases or wipe existing infrastructure from this checkout.

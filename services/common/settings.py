@@ -335,7 +335,7 @@ class ObservabilitySettings(ProcessSettings):
     def service_version(self) -> str:
         """Immutable source distribution version, not release mutable ENV."""
         try:
-            return distribution_version("mcp-bridge")
+            return distribution_version("briareus")
         except PackageNotFoundError:
             return "unknown"
 

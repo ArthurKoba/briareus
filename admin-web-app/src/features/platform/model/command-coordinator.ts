@@ -30,6 +30,9 @@ export function resourceForAction(action: UiCapability): CommandResource | null 
 /** Exact A5 Project idempotency operation vocabulary, not a UI label. */
 const PROJECT_COMMANDS=new Set(["agent.create","session.open","project.transfer_owner","project.admin_reassign"])
 const RESOURCE_CREATES=new Set(["integration.create","variable.create"])
+/** A9 accepts normalized status operations and checks the original GLOBAL
+ * dedupe key internally as `team.member.*:{teamUUID}`. */
+const TEAM_MEMBER_ACTIONS=new Set(["team.member.add","team.member.remove","team.transfer_owner"])
 const RESOURCE_EDITS=new Set(["integration.update","integration.rotate","integration.revoke",
  "variable.update","variable.rotate","variable.revoke"])
 const scopedCommand=/^(?:agent\.(?:rename|state)|session\.(?:elevation|resolve|revoke)):(?:[0-9a-f]{8}-){1}[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -48,7 +51,11 @@ function checkedSourceBinding(scope:ScopeSelection,requested:string|SourceComman
     (scope.kind==="operator"&&["project.admin_reassign","project.transfer_owner"].includes(operation))
   )?selected:false
   if(target.kind==="project_resource")return scope.kind==="project"&&scope.projectId===target.id&&RESOURCE_CREATES.has(operation)?selected:false
-  if(target.kind==="team")return (scope.kind==="team"||scope.kind==="project")&&RESOURCE_CREATES.has(operation)?selected:false
+  if(target.kind==="team")return (
+    (scope.kind==="team"?scope.teamId===target.id:
+      ["project","account","operator"].includes(scope.kind))&&
+    (RESOURCE_CREATES.has(operation)||TEAM_MEMBER_ACTIONS.has(operation))
+  )?selected:false
   if(target.kind==="resource"){
     if(!RESOURCE_EDITS.has(operation)||!(scope.kind==="team"||scope.kind==="project"))return false
     const owner=target.owner

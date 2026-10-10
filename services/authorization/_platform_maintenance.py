@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity._persistence import AdminTokenRevocationRow, LoginAttemptRow
 from projects._resource_persistence import CredentialLeaseRow
 
+from ._browser_telemetry_persistence import BrowserTelemetryBudgetRow
 from ._service_identity_persistence import ConsumedAssertionRow
 
 
@@ -68,6 +69,37 @@ async def prune_ephemeral_security_records(
             delete(ConsumedAssertionRow).where(ConsumedAssertionRow.id.in_(old_assertion_ids))
         )
 
+    # Event payloads are NEVER persisted. Only minute-granularity
+    # admission counters remain, and a bounded maintenance sweep limits
+    # their long-term cardinality without touching consent or audit rows.
+    old_browser_buckets = list(
+        (
+            await tx.execute(
+                select(
+                    BrowserTelemetryBudgetRow.user_id,
+                    BrowserTelemetryBudgetRow.scope_kind,
+                    BrowserTelemetryBudgetRow.scope_id,
+                    BrowserTelemetryBudgetRow.minute_start,
+                )
+                .where(BrowserTelemetryBudgetRow.minute_start < now - timedelta(days=1))
+                .order_by(BrowserTelemetryBudgetRow.minute_start)
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
+            )
+        ).tuples()
+    )
+    if old_browser_buckets:
+        await tx.execute(
+            delete(BrowserTelemetryBudgetRow).where(
+                tuple_(
+                    BrowserTelemetryBudgetRow.user_id,
+                    BrowserTelemetryBudgetRow.scope_kind,
+                    BrowserTelemetryBudgetRow.scope_id,
+                    BrowserTelemetryBudgetRow.minute_start,
+                ).in_(old_browser_buckets)
+            )
+        )
+
     old_attempt_ids = list(
         await tx.scalars(
             select(LoginAttemptRow.bucket_key)
@@ -92,4 +124,5 @@ async def prune_ephemeral_security_records(
         "admin_token_revocations": len(old_revoke_ids),
         "login_attempts": len(old_attempt_ids),
         "consumed_service_assertions": len(old_assertion_ids),
+        "browser_telemetry_budgets": len(old_browser_buckets),
     }

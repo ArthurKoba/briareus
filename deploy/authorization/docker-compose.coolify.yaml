@@ -4,17 +4,25 @@ x-watch-path-coolify:
   - "deploy/authorization/docker-compose.coolify.yaml"
   - "pyproject.toml"
   - "uv.lock"
-  - "services/common/**"
+  - "README.md"
+  - "LICENSE"
   - "services/authorization/**"
+  - "services/common/**"
   - "services/identity/**"
   - "services/teams/**"
   - "services/projects/**"
   - "services/agents/**"
+  - "services/bridge/**"
+  - "services/modules/**"
+  - "services/admin-api/src/presentation/**"
+  - "services/admin-api/src/platform_runtime.py"
+  - "services/admin-api/src/api_errors.py"
+  - "scripts/alembic.ini"
+  - "scripts/alembic_greenfield/**"
 
-# Coolify override for a single independent Git-backed Application.
-# Coolify variable discovery happens before resolving extends; mirror env keys.
-# Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
-# No public SERVICE_FQDN_* until security acceptance.
+# Coolify parser materializes required DB variables and optional telemetry
+# defaults. Shared reference VALUES are configured only through scoped
+# Coolify Team/Environment bindings; no token or secret is stored in Git.
 services:
   briareus-authorization:
     extends:
@@ -22,6 +30,16 @@ services:
       service: briareus-authorization
     environment:
       TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      SERVICE_NAMESPACE: "${SERVICE_NAMESPACE:-briareus}"
+      DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT:-development}"
+      OTEL_SERVICE_NAME: "authorization"
+      POSTGRES_HOST: "briareus-postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "briareus_dev"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
 networks:
   briareus:
     external: true
