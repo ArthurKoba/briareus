@@ -111,7 +111,10 @@ def main() -> int:
             assert service["networks"]["briareus"]["aliases"]==[service_name]
             ext=b["services"][service_name]["extends"]
             assert ext=={"file":"docker-compose.yaml","service":service_name}
-            assert b["services"][service_name]["environment"]==service["environment"]
+            expected_env=dict(service["environment"])
+            if module == "admin-ui":
+                expected_env["SERVICE_URL_BRIAREUS_DEV_ADMIN_UI_8080"]="/"
+            assert b["services"][service_name]["environment"]==expected_env
             if module != "data":
                 build=service["build"]
                 assert build=={"context":"../..","dockerfile":f"deploy/{module}/Dockerfile"}, (module,build)
@@ -159,6 +162,7 @@ def main() -> int:
     ast.parse((ROOT/"sync_watch_paths_coolify.py").read_text(),filename="sync_watch_paths_coolify.py")
     assert 'applications/{app_uuid}/start' not in bootstrap and '/restart' not in bootstrap and 'queue_application_deployment' not in bootstrap
     assert '"instant_deploy":False' in bootstrap and '"is_auto_deploy_enabled":False' in bootstrap
+    assert '"autogenerate_domain":autogenerate_domain(root, spec)' in bootstrap
     assert '"{{project."+key+"}}"' in bootstrap
     assert 'projects/{project_uuid}/envs' not in bootstrap
     assert 'projects/{project_uuid}/environments/{quote' not in bootstrap

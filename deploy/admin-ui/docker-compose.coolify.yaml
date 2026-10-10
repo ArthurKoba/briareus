@@ -24,6 +24,7 @@ services:
       service: briareus-dev-admin-ui
     environment:
       TZ: "${TZ:-UTC}"
+      SERVICE_URL_BRIAREUS_DEV_ADMIN_UI_8080: "/"
 networks:
   briareus:
     external: true
