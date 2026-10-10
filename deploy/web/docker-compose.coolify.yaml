@@ -15,15 +15,15 @@ x-watch-path-coolify:
 # Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
 # No public SERVICE_FQDN_* until security acceptance.
 services:
-  briareus-dev-web:
+  briareus-web:
     extends:
       file: docker-compose.yaml
-      service: briareus-dev-web
+      service: briareus-web
     environment:
       TZ: "${TZ:-UTC}"
 volumes:
   data:
-    name: briareus-dev-web-v1
+    name: briareus-web-v1
 networks:
   briareus:
     external: true

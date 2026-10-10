@@ -1,7 +1,7 @@
 # One Briareus SVC module, with GitHub and GitLab adapters in one image.
 # C1-B2/C2: signed service caller and unified runtime not yet implemented.
 services:
-  briareus-dev-svc:
+  briareus-svc:
     build:
       context: ../..
       dockerfile: deploy/svc/Dockerfile
@@ -14,7 +14,7 @@ services:
       - "8000"
     networks:
       briareus:
-        aliases: ["briareus-dev-svc"]
+        aliases: ["briareus-svc"]
     mem_limit: 512m
     cpus: 0.75
     pids_limit: 96

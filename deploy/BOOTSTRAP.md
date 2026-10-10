@@ -1,14 +1,27 @@
-# Briareus first-time Coolify bootstrap contract — ENV-1
+# Briareus Coolify bootstrap
 
-The source bootstrap is dry-run first and does not deploy/start applications.
+`deploy/APPLICATIONS.json` contains 11 Application display names, explicit
+module identities, Compose source paths and scoped Shared-variable references.
+No module identity is derived from a user-facing Application display name.
 
-Current secret contract:
+A newly created Git-backed Compose Application is parsed by Coolify. `${KEY:?}`
+materializes a required editable variable; `${KEY:-default}` materializes an
+editable optional variable. Literal Compose values remain fixed source-owned
+runtime settings and do not need a separate Application variable entry.
 
-- `POSTGRES_PASSWORD` — Coolify Project Shared secret.
-- `VALKEY_PASSWORD` — Coolify Project Shared secret.
+Run the source bootstrap in dry-run mode first. A separately authorized
+`--apply` reconciles existing resource identity, git/Compose/watch paths and
+binds parsed Application ENV keys to Team/Environment Shared references.
+It never reads, copies, prints or invents secret values, never changes legacy
+resources, and never deploys, restarts, creates schemas, or modifies database
+contents. Configuration is not runtime acceptance.
 
-Compose parser materializes those required Application variables; bootstrap may bind them to `{{project.POSTGRES_PASSWORD}}` and `{{project.VALKEY_PASSWORD}}` with Runtime=true and Buildtime=false. It never reads or prints Project Shared values.
+For new Admin API releases, resolve `POSTGRES_USER` and `POSTGRES_PASSWORD`
+required bindings **before** first deploy; otherwise Coolify must fail closed.
+For an existing healthy Application, reconcile shared bindings and review
+current runtime first, then allow a new source deployment.
 
-Future Admin/Auth secrets are not created or attached until the corresponding protected runtime composition is actually activated. Safe defaults and internal topology remain in source/code rather than Shared variables.
-
-Bootstrap may reconcile only project/environment identity, `briareus-net`, the 11 exact Git-backed Application definitions, source branch/Base/Compose path and Watch Paths. Auto-deploy/instant deploy/domain generation remain disabled during bootstrap. No schema initialization, DNS/OAuth mutation, legacy resource mutation or Application start/restart occurs here.
+A Compose service rename changes Coolify's component identity and generated
+FQDN variable names. In particular, preserve/inspect live Data volume mounts
+before applying a naming update to the running PostgreSQL/Valkey Application.
+Do not assume a physical volume ID from the tracked Compose alone.

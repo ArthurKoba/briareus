@@ -16,15 +16,15 @@ x-watch-path-coolify:
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.
 # Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
-# No public SERVICE_FQDN_* until security acceptance.
+# Public static UI FQDN is provisioned; authenticated API is separate.
 services:
-  briareus-dev-admin-ui:
+  briareus-admin-ui:
     extends:
       file: docker-compose.yaml
-      service: briareus-dev-admin-ui
+      service: briareus-admin-ui
     environment:
       TZ: "${TZ:-UTC}"
-      SERVICE_URL_BRIAREUS_DEV_ADMIN_UI_8080: "/"
+      SERVICE_URL_BRIAREUS_ADMIN_UI_8080: "/"
 networks:
   briareus:
     external: true

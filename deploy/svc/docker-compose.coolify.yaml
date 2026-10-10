@@ -11,10 +11,10 @@ x-watch-path-coolify:
   - "services/modules/gitlab/**"
 
 services:
-  briareus-dev-svc:
+  briareus-svc:
     extends:
       file: docker-compose.yaml
-      service: briareus-dev-svc
+      service: briareus-svc
     environment:
       TZ: "${TZ:-UTC}"
 networks:
