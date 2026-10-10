@@ -129,6 +129,7 @@ def main() -> int:
                     "POSTGRES_DB":"briareus_dev",
                     "POSTGRES_USER":"{{environment.POSTGRES_USER}}",
                     "POSTGRES_PASSWORD":"{{environment.POSTGRES_PASSWORD}}",
+                    "SERVICE_URL_BRIAREUS_DEV_ADMIN_API_8000":"/",
                 }
             assert b["services"][service_name]["environment"]==expected_env
             if module != "data":

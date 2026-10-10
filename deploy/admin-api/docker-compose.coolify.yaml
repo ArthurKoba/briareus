@@ -33,6 +33,7 @@ services:
       POSTGRES_DB: "briareus_dev"
       POSTGRES_USER: "{{environment.POSTGRES_USER}}"
       POSTGRES_PASSWORD: "{{environment.POSTGRES_PASSWORD}}"
+      SERVICE_URL_BRIAREUS_DEV_ADMIN_API_8000: "/"
 networks:
   briareus:
     external: true
