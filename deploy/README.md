@@ -1,12 +1,12 @@
 # Briareus deployment source — module-first layout
 
-Status: **D3-ENV cleanup staging; aligned to A8/B12/R10 handoffs, not yet integrated or applied to Coolify.** Intended tracked root after review: `repo/deploy/`. Target Coolify account/server: `koba` / `tambov`. Legacy `mcp-bridge` and `ghidra-mcp` are outside this package and must remain untouched.
+Status: Git-backed deployment source. Changes to live container identities require independent rollout review and runtime validation. Target Coolify account/server: `koba` / `tambov`. Legacy `mcp-bridge` and `ghidra-mcp` are outside this package and must remain untouched.
 
 ## Layout
 
 Each independently deployable functional unit owns one directory directly under `deploy/`:
 
-- `deploy/data/` — grouped PostgreSQL + Valkey vendor dependency release and its manual schema initializer.
+- `deploy/data/` — grouped PostgreSQL + Valkey vendor dependency release.
 - `deploy/authorization/`
 - `deploy/gateway/`
 - `deploy/admin-api/`
@@ -18,7 +18,7 @@ Each independently deployable functional unit owns one directory directly under 
 - `deploy/infrastructure/` — Coolify/SigNoz provider runtime.
 - `deploy/reverse/` — Analysis/Reverse domain; Ghidra executor remains a future inner runtime decision, not a separate Coolify Application by default.
 
-Every module owns its `Dockerfile`, portable `docker-compose.yaml`, and `docker-compose.coolify.yaml`. Data's Dockerfile is a **manual one-shot schema initializer**, not a third long-running service. Global desired-state/bootstrap/review files live only at `deploy/`: `APPLICATIONS.json`, `bootstrap_coolify.py`, `sync_watch_paths_coolify.py`, `WATCH_PATHS.md`, `ENVIRONMENT.md`, `MIGRATION_MAP.md`, `FANIN.json`, `COOLIFY_CAPABILITIES.md`, `PUBLICATION.md`, `BOOTSTRAP.md`, `ACCEPTANCE.md`, `verify_deploy_static.py`, and `SHA256SUMS`.
+Every module owns its `Dockerfile`, portable `docker-compose.yaml`, and `docker-compose.coolify.yaml`. Data has only two long-running vendor services. Schema migrations belong to normal Authorization startup after accepted A10 source. Global desired-state/bootstrap/review files live only at `deploy/`: `APPLICATIONS.json`, `bootstrap_coolify.py`, `sync_watch_paths_coolify.py`, `WATCH_PATHS.md`, `ENVIRONMENT.md`, `MIGRATION_MAP.md`, `FANIN.json`, `COOLIFY_CAPABILITIES.md`, `PUBLICATION.md`, `BOOTSTRAP.md`, `ACCEPTANCE.md`, `verify_deploy_static.py`, and `SHA256SUMS`.
 
 ## Coolify contract
 
@@ -32,7 +32,7 @@ For every Application:
 - Build context for first-party images: repository root via `../..`.
 - Dockerfile: `deploy/<module>/Dockerfile`; no root shared multi-stage Dockerfile and no cross-module Dockerfile.
 - Auto-deploy stays disabled during bootstrap/review.
-- No generated public domain, DNS or OAuth issuer change during bootstrap.
+- Generated domains for Admin UI/API are source-owned Coolify directives; bootstrap itself performs no DNS or OAuth issuer mutation.
 - Watch Paths are declared in top-level `x-watch-path-coolify` and must be persisted to the Coolify Application setting by supported API. The extension alone is not a native Coolify watcher.
 
 All applications join one pre-existing external network:
@@ -52,9 +52,9 @@ There are **11 Coolify Applications / 12 long-running container definitions**: t
 
 Authorization, Gateway, Files, Terminal, Web, SVC, Infrastructure and Reverse remain fail-closed in the current source until protected transport/C1-B2/C2 requirements are independently accepted. A green container image is not permission to enable those surfaces.
 
-## Data and schema initializer
+## Data and migrations
 
-`deploy/data/docker-compose.yaml` owns only PostgreSQL 18 and Valkey 9 vendor containers, distinct named volumes and no host ports. Database is `briareus_dev`. `deploy/data/Dockerfile` + `deploy/data/greenfield_schema.py` define a manually invoked one-shot initializer requiring the explicit disposable `_dev` guard. The script is **not** part of normal Data Application startup, so its source is intentionally not a Data auto-deploy Watch Path.
+`deploy/data/docker-compose.yaml` owns only PostgreSQL 18 and Valkey 9 vendor containers, distinct named volumes and no host ports. Database is `briareus_dev`. No manual Data schema initializer is allowed. Accepted Authorization startup owns Alembic upgrade under a PostgreSQL advisory lock. Existing physical Data volumes are not renamed by service-naming cleanup.
 
 ## Bootstrap
 
@@ -64,9 +64,9 @@ Authorization, Gateway, Files, Terminal, Web, SVC, Infrastructure and Reverse re
 2. independent `briareus-net` Destination on Tambov;
 3. the 11 exact Git-backed Applications from `APPLICATIONS.json`;
 4. Base directory, Compose path, branch, disabled auto-deploy and exact Watch Paths;
-5. required Application variables to already-existing `{{project.KEY}}` shared variable references, runtime-only/buildtime-disabled.
+5. parsed Application variables to already-existing Team/Environment Shared references, runtime-only/buildtime-disabled.
 
-It never deploys/starts Applications, never generates or prints secret values, never touches legacy applications, never changes DNS/OAuth, and never blindly retries a failed create. Missing current Project Shared secret bindings, required Application inputs, or pending Compose parser materialization stop reconciliation.
+It never deploys/starts Applications, never generates or prints secret values, never touches legacy applications, never changes DNS/OAuth, and never blindly retries a failed create. Missing current Team/Environment Shared bindings, required Application inputs, or pending Compose parser materialization stop reconciliation.
 
 ## Evidence boundary
 

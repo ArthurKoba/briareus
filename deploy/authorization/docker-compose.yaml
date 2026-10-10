@@ -1,7 +1,7 @@
 # Portable Compose. One service / one Coolify Application; staged, not deployed.
 # No dependency on legacy MCP resources, volumes, databases or networks.
 services:
-  briareus-dev-authorization:
+  briareus-authorization:
     build:
       context: ../..
       dockerfile: deploy/authorization/Dockerfile
@@ -13,7 +13,7 @@ services:
       - "8000"
     networks:
       briareus:
-        aliases: ["briareus-dev-authorization"]
+        aliases: ["briareus-authorization"]
     # Safety gate: the historic authorization.runtime auto-creates legacy schema.
     # This image intentionally has no greenfield Authorization startup.
     mem_limit: 512m

@@ -68,19 +68,38 @@ def main() -> int:
     registry=json.loads((ROOT/"APPLICATIONS.json").read_text())
     apps=registry["applications"]
     assert len(apps)==11 and len({x["name"] for x in apps})==11
+    assert len({x["module"] for x in apps})==11
+    expected_app_names={
+        "data":"External Services", "authorization":"Authorization", "admin-api":"Admin API",
+        "admin-ui":"Admin UI", "gateway":"Gateway", "files":"Files", "terminal":"Terminal",
+        "web":"Web", "svc":"SVC", "infrastructure":"Infrastructure", "reverse":"Reverse",
+    }
+    assert {x["module"]:x["name"] for x in apps}==expected_app_names
     assert registry["repository"]=="ArthurKoba/briareus"
+    active_naming_sources=[ROOT/"APPLICATIONS.json",ROOT/"bootstrap_coolify.py",ROOT/"sync_watch_paths_coolify.py"]
+    active_naming_sources.extend(ROOT.glob("*/docker-compose*.yaml"))
+    allowed_physical_storage={
+        "name: briareus-dev-postgres-v1",
+        "name: briareus-dev-valkey-v1",
+    }
+    stale=[]
+    for q in active_naming_sources:
+        for lineno,line in enumerate(q.read_text(errors="ignore").splitlines(),1):
+            if "briareus-dev-" in line and line.strip() not in allowed_physical_storage:
+                stale.append((str(q),lineno,line.strip()))
+    assert not stale, ("environment leaked into runtime/service name",stale)
     config=registry.get("configuration_contract")
     assert isinstance(config,dict)
-    assert config.get("secret_scope")=="project"
-    assert config.get("secret_reference")=="{{project.KEY}}"
-    assert config.get("forbidden_shared_scope")=="environment"
     assert config.get("read_secret_values") is False
-    current_secrets=set(config.get("project_shared_secrets_current",[]))
-    assert current_secrets=={"POSTGRES_PASSWORD","VALKEY_PASSWORD"}
-    assert set(config.get("required_application_nonsecrets_current",[]))==set()
-    assert "project_shared_secrets_future" not in config
-    assert "required_application_nonsecrets_future" not in config
-    assert "apply_blocked_pending_backend" not in config
+    assert set(config.get("team_shared",[]))=={"TZ","OTLP_ENDPOINT","OTLP_BEARER_TOKEN"}
+    assert set(config.get("environment_shared",[]))=={"SERVICE_NAMESPACE","DEPLOYMENT_ENVIRONMENT","POSTGRES_USER","POSTGRES_PASSWORD","VALKEY_PASSWORD"}
+    assert set(config.get("secret_keys",[]))=={"OTLP_BEARER_TOKEN","POSTGRES_PASSWORD","VALKEY_PASSWORD"}
+    assert "project_shared_secrets_current" not in config
+    for app in apps:
+        bindings=app.get("shared_variables",{})
+        for key,ref in bindings.items():
+            assert ref in {f"{{{{team.{key}}}}}",f"{{{{environment.{key}}}}}"}
+            assert key in set(config["team_shared"]+config["environment_shared"])
     live_sources.extend(ROOT.glob("*/Dockerfile"))
     live_text="\n".join(q.read_text(errors="ignore") for q in live_sources)
     forbidden_tokens=(
@@ -90,8 +109,6 @@ def main() -> int:
         "TERMINAL_WORKSPACE_ROOT", "TERMINAL_HOME", "BROWSER_PROFILE_PATH",
     )
     assert not any(token in live_text for token in forbidden_tokens), [t for t in forbidden_tokens if t in live_text]
-    env_ref_sources=[q for q in live_sources if "{{environment." in q.read_text(errors="ignore")]
-    assert set(env_ref_sources)=={ROOT/"admin-api/docker-compose.coolify.yaml"}, env_ref_sources
     for module in MODULES:
         base=ROOT/module/"docker-compose.yaml"
         cool=ROOT/module/"docker-compose.coolify.yaml"
@@ -115,21 +132,21 @@ def main() -> int:
             assert ext=={"file":"docker-compose.yaml","service":service_name}
             expected_env=dict(service["environment"])
             if module == "admin-ui":
-                expected_env["SERVICE_URL_BRIAREUS_DEV_ADMIN_UI_8080"]="/"
+                expected_env["SERVICE_URL_BRIAREUS_ADMIN_UI_8080"]="/"
             if module == "admin-api":
                 expected_env={
-                    "TZ":"{{team.TZ}}",
-                    "OTLP_ENDPOINT":"{{team.OTLP_ENDPOINT}}",
-                    "OTLP_BEARER_TOKEN":"{{team.OTLP_BEARER_TOKEN}}",
-                    "SERVICE_NAMESPACE":"{{environment.SERVICE_NAMESPACE}}",
-                    "DEPLOYMENT_ENVIRONMENT":"{{environment.DEPLOYMENT_ENVIRONMENT}}",
+                    "TZ":"${TZ:-UTC}",
+                    "OTLP_ENDPOINT":"${OTLP_ENDPOINT:-}",
+                    "OTLP_BEARER_TOKEN":"${OTLP_BEARER_TOKEN:-}",
+                    "SERVICE_NAMESPACE":"${SERVICE_NAMESPACE:-briareus}",
+                    "DEPLOYMENT_ENVIRONMENT":"${DEPLOYMENT_ENVIRONMENT:-development}",
                     "OTEL_SERVICE_NAME":"admin-api",
-                    "POSTGRES_HOST":"briareus-dev-postgres",
+                    "POSTGRES_HOST":"briareus-postgres",
                     "POSTGRES_PORT":"5432",
                     "POSTGRES_DB":"briareus_dev",
-                    "POSTGRES_USER":"{{environment.POSTGRES_USER}}",
-                    "POSTGRES_PASSWORD":"{{environment.POSTGRES_PASSWORD}}",
-                    "SERVICE_URL_BRIAREUS_DEV_ADMIN_API_8000":"/",
+                    "POSTGRES_USER":"${POSTGRES_USER:?}",
+                    "POSTGRES_PASSWORD":"${POSTGRES_PASSWORD:?}",
+                    "SERVICE_URL_BRIAREUS_ADMIN_API_8000":"/",
                 }
             assert b["services"][service_name]["environment"]==expected_env
             if module != "data":
@@ -142,7 +159,7 @@ def main() -> int:
                 actual=(ROOT.parent / source.removeprefix("deploy/")) if source.startswith("deploy/") else (REPO / source)
                 assert actual.exists(), f"{module}: Docker COPY source missing: {source}"
                 assert covered(source,watches), f"{module}: COPY input not watched: {source}"
-        app=next(x for x in apps if x["name"]==f"briareus-dev-{module}")
+        app=next(x for x in apps if x["module"]==module)
         assert app["base_directory"]==f"/deploy/{module}"
         assert app["docker_compose_location"]=="/docker-compose.coolify.yaml"
         assert app["watch_paths_source"]==f"deploy/{module}/docker-compose.coolify.yaml#x-watch-path-coolify"
@@ -150,8 +167,8 @@ def main() -> int:
     # ENV-1: only Data currently consumes operator inputs; all other staged Apps are
     # fail-closed/health-only/static and must not receive future secrets preemptively.
     data=yaml.safe_load((ROOT/"data/docker-compose.yaml").read_text())
-    data_pg=data["services"]["briareus-dev-postgres"]["environment"]
-    data_vk=data["services"]["briareus-dev-valkey"]["environment"]
+    data_pg=data["services"]["briareus-postgres"]["environment"]
+    data_vk=data["services"]["briareus-valkey"]["environment"]
     assert data_pg=={
         "POSTGRES_DB":"${POSTGRES_DB:-briareus_dev}",
         "POSTGRES_USER":"${POSTGRES_USER:-briareus}",
@@ -166,12 +183,12 @@ def main() -> int:
     required=set()
     for q in ROOT.glob("*/docker-compose.coolify.yaml"):
         required.update(REQUIRED_ENV.findall(q.read_text()))
-    assert required=={"POSTGRES_PASSWORD","VALKEY_PASSWORD"}
-    assert current_secrets==required
-    assert set(data["services"])=={"briareus-dev-postgres","briareus-dev-valkey"}
-    valkey=data["services"]["briareus-dev-valkey"]["command"][0]
+    assert required=={"POSTGRES_PASSWORD","POSTGRES_USER","VALKEY_PASSWORD"}
+    assert required <= set().union(*(set(a.get("shared_variables",{})) for a in apps))
+    assert set(data["services"])=={"briareus-postgres","briareus-valkey"}
+    valkey=data["services"]["briareus-valkey"]["command"][0]
     assert subprocess.run(["sh","-n"],input=valkey,text=True,capture_output=True).returncode==0
-    schema=next(x for x in apps if x["name"]=="briareus-dev-data")["schema_initializer"]
+    schema=next(x for x in apps if x["module"]=="data")["schema_initializer"]
     assert schema["dockerfile"]=="deploy/data/Dockerfile" and schema["script"]=="deploy/data/greenfield_schema.py"
     assert (ROOT/"data/greenfield_schema.py").read_text()==(REPO/"scripts/greenfield_schema.py").read_text()
     bootstrap=(ROOT/"bootstrap_coolify.py").read_text()
@@ -180,11 +197,13 @@ def main() -> int:
     assert 'applications/{app_uuid}/start' not in bootstrap and '/restart' not in bootstrap and 'queue_application_deployment' not in bootstrap
     assert '"instant_deploy":False' in bootstrap and '"is_auto_deploy_enabled":False' in bootstrap
     assert '"autogenerate_domain":autogenerate_domain(root, spec)' in bootstrap
-    assert '"{{project."+key+"}}"' in bootstrap
+    assert 'bindings_by_app' in bootstrap and 'SHARED_REF.fullmatch(ref)' in bootstrap
     assert 'projects/{project_uuid}/envs' not in bootstrap
     assert 'projects/{project_uuid}/environments/{quote' not in bootstrap
-    assert '{{environment.' not in bootstrap
-    print("STATIC_PASS: module-first deploy + ENV-1 contract, 11 Apps, 22 Compose, COPY→Watch, scoped Admin API Team/Environment refs, canonical Data inputs, no pseudo ENV, A8/B12/R10 packaging alignment, hardened schema source")
+    assert '"is_buildtime":False' in bootstrap
+    assert '"is_runtime":True' in bootstrap
+    assert '"--apply"' in bootstrap
+    print("STATIC_PASS: environment-neutral service naming, 11 Apps, 22 Compose, COPY→Watch, runtime-only Shared references, required Admin API database inputs, no premature C2 activation, protected physical volume IDs")
     return 0
 
 if __name__=="__main__":

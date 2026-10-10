@@ -1,6 +1,6 @@
 # Standalone Admin UI; DO NOT publish until new Admin auth/API boundary is accepted.
 services:
-  briareus-dev-admin-ui:
+  briareus-admin-ui:
     build:
       context: ../..
       dockerfile: deploy/admin-ui/Dockerfile
@@ -12,7 +12,7 @@ services:
       - "8080"
     networks:
       briareus:
-        aliases: ["briareus-dev-admin-ui"]
+        aliases: ["briareus-admin-ui"]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
       interval: 10s

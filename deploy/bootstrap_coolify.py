@@ -6,11 +6,10 @@ development environment, briareus-net standalone Destination, and the 11 named
 Git-backed Applications. It NEVER starts/deploys an Application, changes DNS,
 OAuth issuer, legacy resources, or invents secret values.
 
-Required secret values live in Coolify Project Shared Variables. Git Compose
-contains only ${NAME:?} placeholders. After Coolify materializes Application
-variables, this tool binds only approved secret keys to {{project.NAME}} references
-with runtime=true/buildtime=false. It never reads Project Shared values. Required
-non-secret resource inputs remain operator-owned Application variables.
+The source registry declares Team/Environment Shared bindings by variable name.
+Coolify first materializes editable `${KEY}`/`${KEY:?}` Compose variables;
+then `--apply` binds them to Shared references without ever reading values.
+This is config-only: no application starts, database changes, or implicit deploy.
 """
 from __future__ import annotations
 
@@ -34,6 +33,8 @@ REPOSITORY = "ArthurKoba/briareus"
 REPOSITORY_URL = "https://github.com/ArthurKoba/briareus.git"
 RESOURCE_ID = re.compile(r"[a-z0-9]{24}\Z")
 REQUIRED = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\:\?\}")
+INTERPOLATED = re.compile(r"\$\{([A-Z][A-Z0-9_]*)(?::-[^}]*)?(?::\?)?\}")
+SHARED_REF = re.compile(r"\{\{(team|environment)\.([A-Z][A-Z0-9_]*)\}\}\Z")
 GENERATED_DOMAIN = re.compile(r"\bSERVICE_(?:URL|FQDN)_[A-Z0-9_]+\b")
 
 
@@ -89,23 +90,25 @@ def read_registry(root: Path) -> dict:
     apps = registry.get("applications")
     if not isinstance(apps, list) or len(apps) != 11 or len({x.get("name") for x in apps}) != 11:
         raise BootstrapError("APPLICATIONS.json must contain exactly 11 unique Applications")
+    if len({x.get("module") for x in apps}) != 11:
+        raise BootstrapError("APPLICATIONS.json must have explicit unique module identities")
     return registry
 
 
 def required_variables(root: Path, app: dict) -> list[str]:
-    module = app["name"].removeprefix("briareus-dev-")
+    module = app["module"]
     source = (root / module / "docker-compose.coolify.yaml").read_text()
     return sorted(set(REQUIRED.findall(source)))
 
 
 def autogenerate_domain(root: Path, app: dict) -> bool:
-    module = app["name"].removeprefix("briareus-dev-")
+    module = app["module"]
     source = (root / module / "docker-compose.coolify.yaml").read_text()
     return bool(GENERATED_DOMAIN.search(source))
 
 
 def watch_paths(root: Path, app: dict) -> str:
-    module = app["name"].removeprefix("briareus-dev-")
+    module = app["module"]
     source = (root / module / "docker-compose.coolify.yaml").read_text()
     marker = "x-watch-path-coolify:\n"
     if not source.startswith(marker):
@@ -140,12 +143,26 @@ def main() -> int:
     config=registry.get("configuration_contract")
     if not isinstance(config, dict):
         raise BootstrapError("APPLICATIONS.json missing configuration_contract")
-    project_shared_secret_keys=frozenset(config.get("project_shared_secrets_current", []))
-    required_application_nonsecrets=frozenset(config.get("required_application_nonsecrets_current", []))
-    if config.get("secret_scope") != "project" or config.get("secret_reference") != "{{project.KEY}}":
-        raise BootstrapError("unexpected Shared Variable scope/reference contract")
+    allowed_scopes={"team":frozenset(config.get("team_shared", [])),
+                    "environment":frozenset(config.get("environment_shared", []))}
+    secret_keys=frozenset(config.get("secret_keys", []))
     if config.get("read_secret_values") is not False:
         raise BootstrapError("secret read policy must remain disabled")
+    bindings_by_app={}
+    for app in registry["applications"]:
+        module=app["module"]
+        source=(root/module/"docker-compose.coolify.yaml").read_text()
+        declared=set(INTERPOLATED.findall(source))
+        bindings=app.get("shared_variables",{})
+        if not isinstance(bindings,dict):
+            raise BootstrapError(f"{module}: shared_variables must be a mapping")
+        for key,ref in bindings.items():
+            match=SHARED_REF.fullmatch(ref) if isinstance(ref,str) else None
+            if not match or key != match.group(2) or key not in allowed_scopes[match.group(1)]:
+                raise BootstrapError(f"{module}: unapproved Shared variable binding for {key}")
+            if key not in declared:
+                raise BootstrapError(f"{module}: {key} is not a Compose interpolation input")
+        bindings_by_app[app["name"]]=bindings
     if args.branch.startswith("TO_BE_") or not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", args.branch):
         raise BootstrapError("invalid/unreviewed Git branch/ref")
 
@@ -154,21 +171,15 @@ def main() -> int:
     for app in registry["applications"]:
         print(f"  {app['name']}: base={app['base_directory']} required_inputs={','.join(required_by_app[app['name']]) or '-'}")
     all_required=set().union(*required_by_app.values())
-    unknown_required=sorted(
-        all_required
-        - project_shared_secret_keys
-        - required_application_nonsecrets
-    )
+    classified=set().union(*(set(x) for x in bindings_by_app.values()))
+    unknown_required=sorted(all_required-classified)
     if unknown_required:
         raise BootstrapError(
             "unclassified required variables in Compose: " + ", ".join(unknown_required)
         )
-    project_secret_refs=sorted(all_required & project_shared_secret_keys)
-    resource_required=sorted(all_required & required_application_nonsecrets)
-    if project_secret_refs:
-        print("PROJECT SHARED SECRET KEYS REQUIRED (names only): " + ", ".join(project_secret_refs))
-    if resource_required:
-        print("APPLICATION REQUIRED NON-SECRETS: " + ", ".join(resource_required))
+    for name,bindings in bindings_by_app.items():
+        if bindings:
+            print(f"  SHARED BINDINGS {name} (names/scopes only): " + ", ".join(f"{key}={ref}" for key,ref in sorted(bindings.items())))
     if not args.apply and not os.environ.get("COOLIFY_API_TOKEN"):
         print("DRY RUN SOURCE-ONLY: no COOLIFY_API_TOKEN; no remote read/write performed")
         return 0
@@ -278,17 +289,18 @@ def main() -> int:
             api(base,token,"PATCH",f"applications/{app_uuid}",patch)
         envs=api(base,token,"GET",f"applications/{app_uuid}/envs")
         by_key={x.get("key"):x for x in envs if isinstance(x,dict) and not x.get("is_preview")}
-        missing_parsed=[key for key in required_by_app[name] if key not in by_key]
+        missing_parsed=[key for key in set(required_by_app[name])|set(bindings_by_app[name]) if key not in by_key]
         if missing_parsed:
             print(f"PARSER_PENDING: {name} has not materialized required env keys: {', '.join(missing_parsed)}")
             parser_pending.append(name)
             continue
-        for key in required_by_app[name]:
-            if key not in project_shared_secret_keys:
-                continue
-            desired_value="{{project."+key+"}}"
+        for key,desired_value in sorted(bindings_by_app[name].items()):
             if args.apply:
-                api(base,token,"PATCH",f"applications/{app_uuid}/envs",{"key":key,"value":desired_value,"is_preview":False,"is_literal":False,"is_multiline":False,"is_shown_once":False,"is_runtime":True,"is_buildtime":False,"comment":"Briareus Project Shared secret reference"})
+                api(base,token,"PATCH",f"applications/{app_uuid}/envs",{
+                    "key":key,"value":desired_value,"is_preview":False,"is_literal":False,
+                    "is_multiline":False,"is_shown_once":False,"is_runtime":True,
+                    "is_buildtime":False,
+                    "comment":"Briareus Shared variable reference (no secret value exposed)"})
         verified=api(base,token,"GET",f"applications/{app_uuid}")
         if verified.get("watch_paths")!=desired_watch or verified.get("base_directory")!=spec["base_directory"] or verified.get("git_branch")!=args.branch:
             raise BootstrapError(f"{name}: Coolify did not persist exact source/watch configuration")

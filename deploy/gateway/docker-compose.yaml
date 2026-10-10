@@ -1,7 +1,7 @@
 # Portable Compose. One service / one Coolify Application; staged, not deployed.
 # No dependency on legacy MCP resources, volumes, databases or networks.
 services:
-  briareus-dev-gateway:
+  briareus-gateway:
     build:
       context: ../..
       dockerfile: deploy/gateway/Dockerfile
@@ -15,7 +15,7 @@ services:
       - "8000"
     networks:
       briareus:
-        aliases: ["briareus-dev-gateway"]
+        aliases: ["briareus-gateway"]
     mem_limit: 512m
     cpus: 0.75
     pids_limit: 128

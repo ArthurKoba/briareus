@@ -1,50 +1,54 @@
-# Briareus deployment configuration contract — ENV-1
+# Briareus Coolify configuration contract
 
-Environment variables are operator configuration only when the value has an independent deployment lifecycle. Product name and environment name are already expressed by Coolify project/environment scope, so they are not repeated in key prefixes.
+Coolify project/environment (`briareus` / `development`) own the deployment
+scope. Service names, container DNS and generated `SERVICE_URL_*` identifiers
+are stable across environments, without a `dev` naming component.
 
-## Current deploy inputs
+## Shared variable ownership
 
-Only the Data Application currently consumes operator-provided configuration.
+| Scope | Keys | Consumers |
+| --- | --- | --- |
+| Team Shared | `TZ`, `OTLP_ENDPOINT`, protected `OTLP_BEARER_TOKEN` | Server applications when configured; Admin UI receives only TZ |
+| Environment Shared | `SERVICE_NAMESPACE`, `DEPLOYMENT_ENVIRONMENT` | Admin API and future accepted first-party server runtimes |
+| Environment Shared | `POSTGRES_USER`, protected `POSTGRES_PASSWORD`, protected `VALKEY_PASSWORD` | Data and accepted DB/Valkey consumers |
 
-| Key | Consumer | Type | Contract | Coolify ownership |
-| --- | --- | --- | --- | --- |
-| `POSTGRES_PASSWORD` | PostgreSQL | secret | required, no default | protected Project Shared Variable, referenced as `{{project.POSTGRES_PASSWORD}}` |
-| `VALKEY_PASSWORD` | Valkey | secret | required, no default | protected Project Shared Variable, referenced as `{{project.VALKEY_PASSWORD}}` |
-| `POSTGRES_USER` | PostgreSQL | nonsecret | safe default `briareus` | Compose default |
-| `POSTGRES_DB` | PostgreSQL | nonsecret | safe disposable-dev default `briareus_dev` | Compose default |
-| `TZ` | all staged containers | nonsecret | safe default `UTC` | Compose default |
+`deploy/APPLICATIONS.json` holds **references only**, never resolved values.
+`bootstrap_coolify.py` dry-runs by default; `--apply` binds already-parsed
+Application variables to declared Team/Environment references without reading
+secret values. No application is deployed or started by bootstrap.
 
-`POSTGRES_HOST=briareus-dev-postgres` and `POSTGRES_PORT=5432` are internal topology/defaults. They are not Project Shared variables and are not required on the Data container. Backend A8 derives the async PostgreSQL DSN from canonical Postgres components when a database-consuming runtime is actually composed.
+## Admin API
 
-## Future activation inputs
+Required, operator-supplied via Environment Shared:
+`POSTGRES_USER=${POSTGRES_USER:?}` and
+`POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?}`.
 
-These names are accepted by the completed A8 Backend source, but the current D package does **not** provision them preemptively because the corresponding Admin/Auth protected compositions are not active yet.
+Optional/editable defaults: `TZ=UTC`, `OTLP_ENDPOINT` and
+`OTLP_BEARER_TOKEN` (empty disables corresponding export),
+`SERVICE_NAMESPACE=briareus`, `DEPLOYMENT_ENVIRONMENT=development`.
+Shared binding supplies accepted non-default values when configured.
 
-| Key | Future consumer | Type | Activation rule |
-| --- | --- | --- | --- |
-| `ADMIN_JWT_SIGNING_KEY` | Admin authentication | secret | Project Shared; required only when Admin auth composition is enabled |
-| `CREDENTIAL_ENCRYPTION_KEY` | encrypted integrations/secret variables and context-derived crypto subkeys | secret | Project Shared; required only when protected platform composition is enabled |
-| `DELEGATION_SIGNING_PRIVATE_KEY` | signed Authorization service identity | Ed25519 private key | Project Shared; required only by signed Authorization composition |
-| `ADMIN_UI_PUBLIC_URL` | Identity invite/reset link generation | external nonsecret URL | Application/operator value only when those links are generated; not Shared secret |
+Source-owned constants: `OTEL_SERVICE_NAME=admin-api`,
+`POSTGRES_HOST=briareus-postgres`, `POSTGRES_PORT=5432`,
+`POSTGRES_DB=briareus_dev`, and internal port `8000`. The database's
+`_dev` suffix is an existing data identifier, **not** a container name.
 
-No `PLATFORM_*`, `DEV_*` or `BRIAREUS_*` aliases are part of the new operator contract.
+The public generated domain is a Coolify route to port 8000; it does **not**
+authorize C1-B2/C2 endpoints. The current Admin API remains fail-closed.
 
-## Removed pseudo-configuration
+## Data persistence during naming changes
 
-D3-ENV removes these from Briareus deployment manifests/images rather than renaming them:
+The existing physical PostgreSQL/Valkey volume IDs retain their old names
+(`briareus-dev-postgres-v1`, `briareus-dev-valkey-v1`) in Git to avoid an
+implicit volume migration. A live Coolify storage record may have a
+Coolify-generated physical name rather than the Git declaration. Never
+merge/deploy a Data service rename until effective live Compose, actual volume
+mounts and a safe rollback path are verified. Do not recreate/initialize
+PostgreSQL or Valkey volumes as part of a naming cleanup.
 
-- Admin preview/log-invite/service-identity enable flags;
-- Frontend preview, telemetry, event-mode and API-base runtime config;
-- Gateway `OAUTH_ENABLED=false` bypass flag;
-- global Files/Reverse/Web workspace/profile ENV;
-- global Terminal workspace/home ENV aliases.
+## Excluded legacy/pseudo configuration
 
-Current protected Gateway/Files/Terminal/Web/Reverse/Infrastructure/SVC services remain fail-closed through their existing guarded commands. Removing pseudo-ENV does not activate them.
-
-## Internal image constants
-
-Image/runtime constants such as `ASGI_APP`, `PYTHONPATH`, browser executable/cache paths, `HOME=/home/agent`, Chrome update/telemetry suppression flags and filesystem mount points are implementation topology, not operator configuration. They must not be promoted to Project Shared variables.
-
-## Secret handling
-
-All actual Briareus secret values are stored in protected Coolify **Project Shared Variables**. Git Compose contains only required placeholders. Application resource variables may contain `{{project.KEY}}` references, never copied plaintext secret values. D/agent tooling may inspect names/scopes/references only and does not retrieve resolved secret values.
+No old `PLATFORM_*`, per-signal OTLP endpoint, browser OTLP bearer,
+`ADMIN_API_BASE_URL`, preview toggle, or auth-bypass variable is authorized.
+Future security/signing keys require independent accepted C1-B2/C2 source and
+runtime activation. Team collector credentials are server-side only.

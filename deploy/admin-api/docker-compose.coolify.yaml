@@ -15,25 +15,25 @@ x-watch-path-coolify:
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.
 # Shared values resolve from approved Coolify Team/Environment scopes; no secret value is stored in Git.
-# No public SERVICE_FQDN_* until security acceptance.
+# Public FQDN is provisioned, but protected API routes remain denied pending C1-B2/C2.
 services:
-  briareus-dev-admin-api:
+  briareus-admin-api:
     extends:
       file: docker-compose.yaml
-      service: briareus-dev-admin-api
+      service: briareus-admin-api
     environment:
-      TZ: "{{team.TZ}}"
-      OTLP_ENDPOINT: "{{team.OTLP_ENDPOINT}}"
-      OTLP_BEARER_TOKEN: "{{team.OTLP_BEARER_TOKEN}}"
-      SERVICE_NAMESPACE: "{{environment.SERVICE_NAMESPACE}}"
-      DEPLOYMENT_ENVIRONMENT: "{{environment.DEPLOYMENT_ENVIRONMENT}}"
+      TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      SERVICE_NAMESPACE: "${SERVICE_NAMESPACE:-briareus}"
+      DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT:-development}"
       OTEL_SERVICE_NAME: "admin-api"
-      POSTGRES_HOST: "briareus-dev-postgres"
+      POSTGRES_HOST: "briareus-postgres"
       POSTGRES_PORT: "5432"
       POSTGRES_DB: "briareus_dev"
-      POSTGRES_USER: "{{environment.POSTGRES_USER}}"
-      POSTGRES_PASSWORD: "{{environment.POSTGRES_PASSWORD}}"
-      SERVICE_URL_BRIAREUS_DEV_ADMIN_API_8000: "/"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      SERVICE_URL_BRIAREUS_ADMIN_API_8000: "/"
 networks:
   briareus:
     external: true

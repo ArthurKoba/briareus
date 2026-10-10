@@ -21,4 +21,4 @@ COPY services/admin-api/src ./services/admin-api/src
 RUN useradd -u 1000 -m -d /home/platform platform
 USER 1000:1000
 EXPOSE 8000
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "platform_runtime:app", "--host", "127.0.0.1", "--port", "8000", "--no-proxy-headers"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "platform_runtime:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

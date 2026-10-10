@@ -35,7 +35,7 @@ _HOST = re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\Z", re.ASCII)
 class PlatformDatabaseSettings(ProcessSettings):
     """DB-only contract: credentials, topology and no unrelated app options."""
 
-    postgres_host: str = Field("briareus-dev-postgres", validation_alias="POSTGRES_HOST")
+    postgres_host: str = Field("briareus-postgres", validation_alias="POSTGRES_HOST")
     postgres_port: int = Field(5432, ge=1, le=65535, validation_alias="POSTGRES_PORT")
     postgres_db: str = Field("briareus_dev", validation_alias="POSTGRES_DB")
     postgres_user: str = Field("briareus", validation_alias="POSTGRES_USER")

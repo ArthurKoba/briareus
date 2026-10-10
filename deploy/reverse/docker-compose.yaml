@@ -1,6 +1,6 @@
 # Portable independent runtime; private only, C1-B2/C2 pending.
 services:
-  briareus-dev-reverse:
+  briareus-reverse:
     build:
       context: ../..
       dockerfile: deploy/reverse/Dockerfile
@@ -14,7 +14,7 @@ services:
       - "8000"
     networks:
       briareus:
-        aliases: ["briareus-dev-reverse"]
+        aliases: ["briareus-reverse"]
     mem_limit: 1024m
     cpus: 0.75
     pids_limit: 128
