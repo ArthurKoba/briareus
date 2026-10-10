@@ -14,7 +14,7 @@ x-watch-path-coolify:
 
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.
-# Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
+# Shared values resolve from approved Coolify Team/Environment scopes; no secret value is stored in Git.
 # No public SERVICE_FQDN_* until security acceptance.
 services:
   briareus-dev-admin-api:
@@ -22,7 +22,17 @@ services:
       file: docker-compose.yaml
       service: briareus-dev-admin-api
     environment:
-      TZ: "${TZ:-UTC}"
+      TZ: "{{team.TZ}}"
+      OTLP_ENDPOINT: "{{team.OTLP_ENDPOINT}}"
+      OTLP_BEARER_TOKEN: "{{team.OTLP_BEARER_TOKEN}}"
+      SERVICE_NAMESPACE: "{{environment.SERVICE_NAMESPACE}}"
+      DEPLOYMENT_ENVIRONMENT: "{{environment.DEPLOYMENT_ENVIRONMENT}}"
+      OTEL_SERVICE_NAME: "admin-api"
+      POSTGRES_HOST: "briareus-dev-postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "briareus_dev"
+      POSTGRES_USER: "{{environment.POSTGRES_USER}}"
+      POSTGRES_PASSWORD: "{{environment.POSTGRES_PASSWORD}}"
 networks:
   briareus:
     external: true
