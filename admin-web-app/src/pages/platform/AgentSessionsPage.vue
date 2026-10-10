@@ -9,6 +9,7 @@ import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
 import ConfirmAction from "@/features/platform/ui/ConfirmAction.vue"
 import Button from "@/shared/ui/Button.vue"
 import InstantTime from "@/shared/ui/InstantTime.vue"
+import { deviceInputToUtc, deviceLocalInput } from "@/shared/lib/event-time"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 
 const { t }=useI18n()
@@ -194,11 +195,15 @@ async function requestElevation(){
 async function resolve(){
   const item=pending.value
   if(!item || (item.kind==="approval" && (item.request.status!=="pending" || item.request.projectId!==currentProject.value || !requests.value.some(row=>row.id===item.request.id&&row.snapshotKey===item.request.snapshotKey&&row.status==="pending"))) || (item.kind==="revoke" && !rows.value.some(row=>row.sessionUuid===item.session.sessionUuid&&row.revision===item.session.revision&&row.status==="active")) || (item.kind==="approval" && item.approve && (!approvedUntilValid.value || !approvalTtlUnchanged.value || !reviewedGrantsKnown.value || (beyondRequest.value && !confirmExpansion.value) || !approvalGrants.value.every(id=>grantOptions.value.some(grant=>grant.id===id)))))return
+  // Reject ambiguous/invalid device-local dates before handing off a write.
+  // The command callback must always return a Promise, never undefined.
+  const hasDeadlineOverride=item.kind==="approval" && item.approve && approvalUntil.value!==""
+  const approvedDeadline=hasDeadlineOverride?deviceInputToUtc(approvalUntil.value):null
+  if(hasDeadlineOverride && approvedDeadline===null)return
   const done=await command.submit(item.kind==="revoke" ? "sessions.revoke" : "sessions.resolve",(port,ctx)=>{
     if(item.kind==="revoke")return port.sessions.revoke(ctx,item.session)
     // Server is authoritative for requested grants, expanded grants, TTL and audit.
-    const until=item.approve && approvalUntil.value ? deviceInputToUtc(approvalUntil.value) : item.request.requestedUntil
-    if(item.approve&&approvalUntil.value&&!until)return
+    const until=hasDeadlineOverride ? approvedDeadline : item.request.requestedUntil
     return port.sessions.resolve(ctx,item.request,item.approve,item.approve?[...approvalGrants.value]:[],until,{explicitExpansion:item.approve && beyondRequest.value && confirmExpansion.value})
   },item.kind==="revoke"?`session.revoke:${item.session.sessionUuid}`:`session.resolve:${item.request.id}`)
   if(done){pending.value=null;reviewing.value=null;await sessions.reload()}
