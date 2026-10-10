@@ -90,7 +90,7 @@ class FrontendTelemetryProxy:
             )
         )
         handler = LoggingHandler(level=logging.DEBUG, logger_provider=provider)
-        logger = logging.Logger("mcp_bridge.frontend_telemetry", level=logging.DEBUG)
+        logger = logging.Logger("briareus.frontend_telemetry", level=logging.INFO)
         logger.propagate = False
         logger.addHandler(handler)
         self._provider = provider

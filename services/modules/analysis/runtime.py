@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from common.runtime_common import admin_api_client, build_private_mcp, private_http_app
+from common.runtime_common import admin_api_client, private_http_app
 from common.settings import (
     AdminApiClientSettings,
     AnalysisSettings,
@@ -8,6 +8,7 @@ from common.settings import (
     PrivateRuntimeSettings,
 )
 from modules.files.workspace_store import WorkspaceFileStore
+from modules.project_runtime.runtime_telemetry import build_runtime_mcp
 
 from .provider import AnalysisToolProvider
 from .workspace_transfer import AnalysisWorkspaceTransfers, register_workspace_transfer_tools
@@ -18,7 +19,7 @@ _analysis_settings = AnalysisSettings()
 _file_settings = FileSettings()
 _workspace = WorkspaceFileStore(_file_settings.workspace_root)
 
-mcp = build_private_mcp("analysis", _admin_api)
+mcp, _runtime_telemetry = build_runtime_mcp("reverse", name="analysis")
 mcp.add_provider(AnalysisToolProvider(_analysis_settings))
 register_workspace_transfer_tools(
     mcp,
@@ -29,4 +30,4 @@ register_workspace_transfer_tools(
     ),
 )
 
-app = private_http_app(mcp, _private_settings)
+app = _runtime_telemetry.attach(private_http_app(mcp, _private_settings))

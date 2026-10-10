@@ -128,6 +128,67 @@ wheels = [
 ]
 
 [[package]]
+name = "briareus"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "fastmcp" },
+    { name = "httpx" },
+    { name = "itsdangerous" },
+    { name = "mcp", extra = ["cli"] },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uvicorn" },
+    { name = "valkey" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "ruff" },
+]
+web = [
+    { name = "playwright" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.17,<2" },
+    { name = "asyncpg", specifier = ">=0.31,<0.32" },
+    { name = "cryptography", specifier = ">=46,<47" },
+    { name = "fastapi", specifier = ">=0.128,<1" },
+    { name = "fastmcp", specifier = "==4.0.10" },
+    { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "itsdangerous", specifier = ">=2.2,<3" },
+    { name = "mcp", extras = ["cli"], specifier = ">=2,<3" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.45,<2" },
+    { name = "opentelemetry-sdk", specifier = ">=1.45,<2" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "pydantic-settings", specifier = ">=2.11,<3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
+    { name = "python-multipart", specifier = ">=0.0.20,<1" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<2.1" },
+    { name = "uvicorn", specifier = ">=0.35,<1" },
+    { name = "valkey", specifier = ">=6.1,<7" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.18,<2" },
+    { name = "ruff", specifier = ">=0.12,<1" },
+]
+web = [{ name = "playwright", specifier = ">=1.55,<2" }]
+
+[[package]]
 name = "cachetools"
 version = "7.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -990,67 +1051,6 @@ cli = [
     { name = "python-dotenv" },
     { name = "typer" },
 ]
-
-[[package]]
-name = "mcp-bridge"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "cryptography" },
-    { name = "fastapi" },
-    { name = "fastmcp" },
-    { name = "httpx" },
-    { name = "itsdangerous" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "python-multipart" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "uvicorn" },
-    { name = "valkey" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "ruff" },
-]
-web = [
-    { name = "playwright" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.17,<2" },
-    { name = "asyncpg", specifier = ">=0.31,<0.32" },
-    { name = "cryptography", specifier = ">=46,<47" },
-    { name = "fastapi", specifier = ">=0.128,<1" },
-    { name = "fastmcp", specifier = "==4.0.10" },
-    { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "itsdangerous", specifier = ">=2.2,<3" },
-    { name = "mcp", extras = ["cli"], specifier = ">=2,<3" },
-    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.45,<2" },
-    { name = "opentelemetry-sdk", specifier = ">=1.45,<2" },
-    { name = "pydantic", specifier = ">=2.12,<3" },
-    { name = "pydantic-settings", specifier = ">=2.11,<3" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
-    { name = "python-multipart", specifier = ">=0.0.20,<1" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<2.1" },
-    { name = "uvicorn", specifier = ">=0.35,<1" },
-    { name = "valkey", specifier = ">=6.1,<7" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.18,<2" },
-    { name = "ruff", specifier = ">=0.12,<1" },
-]
-web = [{ name = "playwright", specifier = ">=1.55,<2" }]
 
 [[package]]
 name = "mcp-types"

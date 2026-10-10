@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, reactive, shallowReactive, watch, watchEffect } from "vue"
 import { projectContext } from "@/features/platform/model/project-context"
+import { browserTelemetry, type DiagnosticOutcome } from "@/features/platform/model/browser-telemetry"
 import { platformPort } from "@/features/platform/api/port"
 import { normalizeUiError, type UiError } from "@/features/platform/model/errors"
 import { scopedEvents } from "@/features/platform/model/project-events"
@@ -106,6 +107,13 @@ function requiresReconciliation(error: UiError): boolean {
   // No automatic replay with a fresh idempotency key after an uncertain write.
   // 409 may represent a stale version, collision, or still-running command.
   return error.kind === "uncertain" || error.kind === "conflict" || error.kind === "unknown"
+}
+/** Only trusted fixed error KIND enters telemetry. Never raw server code/URL. */
+function diagnosticOutcome(error:UiError):DiagnosticOutcome {
+  if(error.kind==="uncertain"||error.kind==="unknown"||error.kind==="conflict")return "uncertain"
+  if(error.kind==="forbidden"||error.kind==="unauthorized")return "blocked"
+  if(error.kind==="invalid")return "rejected"
+  return "unavailable"
 }
 function handlePermissionError(error: UiError, scope: ScopeSelection): boolean {
   if (error.kind === "unauthorized") { projectContext.clear(); return true }
@@ -215,6 +223,7 @@ export function useDomain<T>(
     const port = platformPort.value
     if (!port) { state.status = "blocked"; return false }
     const generation = readRun
+    const telemetryStart=performance.now()
     const abort = new AbortController()
     controller = abort
     const context = snapshot(abort.signal)
@@ -232,6 +241,7 @@ export function useDomain<T>(
       state.hasMore=result.hasMore===true
       state.pageSize=result.pageSize??null
       state.status = result.items.length ? "ready" : "empty"
+      browserTelemetry.read(resource,"ok",performance.now()-telemetryStart)
       return true
     } catch (cause) {
       if (disposed || generation !== readRun || abort.signal.aborted || !sameScope(context.scope, context.revision)) return false
@@ -239,6 +249,7 @@ export function useDomain<T>(
       if (handlePermissionError(normalized, context.scope)) return false
       state.error = normalized
       state.status = "error"
+      browserTelemetry.read(resource,diagnosticOutcome(normalized),performance.now()-telemetryStart)
       return false
     } finally {
       if (controller === abort) controller = null
@@ -252,6 +263,7 @@ export function useDomain<T>(
     if(!port)return false
     const cursor=state.nextAfterId
     const version=readRun
+    const telemetryStart=performance.now()
     const abort=new AbortController()
     pagination=abort
     const context=snapshot(abort.signal)
@@ -273,11 +285,15 @@ export function useDomain<T>(
       state.hasMore=result.hasMore===true
       state.pageSize=result.pageSize??state.pageSize
       state.status=state.items.length?"ready":"empty"
+      browserTelemetry.read(resource,"ok",performance.now()-telemetryStart)
       return true
     }catch(error){
       if(!disposed&&!abort.signal.aborted&&version===readRun&&sameScope(context.scope,context.revision)){
         const issue=normalizeUiError(error)
-        if(!handlePermissionError(issue,context.scope))state.loadMoreError=issue
+        if(!handlePermissionError(issue,context.scope)){
+          state.loadMoreError=issue
+          browserTelemetry.read(resource,diagnosticOutcome(issue),performance.now()-telemetryStart)
+        }
       }
       return false
     }finally{
@@ -289,6 +305,7 @@ export function useDomain<T>(
     if (!usable() || !projectContext.can(action) || state.busy || state.reconciliationRequired || !port || disposed ||
         commandCoordinator.lookup(projectContext.state.user?.key ?? "", projectContext.selection())) return false
     const generation = ++writeRun
+    const telemetryStart=performance.now()
     const abort = new AbortController()
     mutation = abort
     const base = snapshot(abort.signal)
@@ -310,6 +327,7 @@ export function useDomain<T>(
       }
       commandCoordinator.confirm(pending)
       if (activeWrite === pending) activeWrite = null
+      browserTelemetry.write(resource,"ok",performance.now()-telemetryStart)
       // A successful write is acknowledged independently of any subsequent read.
       // Failed refresh remains visible in state.status/error, never a fake write failure.
       await reload()
@@ -324,6 +342,7 @@ export function useDomain<T>(
       if (!disposed && !abort.signal.aborted && generation === writeRun && sameScope(base.scope, base.revision)) {
         const normalized = normalizeUiError(cause, "mutation")
         if (!handlePermissionError(normalized, base.scope)) {
+          browserTelemetry.write(resource,diagnosticOutcome(normalized),performance.now()-telemetryStart)
           state.actionError = normalized
           state.reconciliationRequired = requiresReconciliation(normalized)
         }
@@ -436,6 +455,8 @@ export function useCommand(scopes: ScopeSelection["kind"][] = ["account", "team"
     if (disposed || state.busy || state.reconciliationRequired || !port || !scope || !scopes.includes(scope.kind) || !projectContext.can(ability)) return false
     const actor = projectContext.state.user?.key ?? ""
     const generation = ++nonce
+    const telemetryStart=performance.now()
+    const diagnosticResource=resourceForAction(ability)??"other"
     const abort = new AbortController()
     const revision = projectContext.state.revision
     const pending = commandCoordinator.begin(actor, scope, ability, verifiedDecisionVersion(scope), sourceOperation)
@@ -457,6 +478,7 @@ export function useCommand(scopes: ScopeSelection["kind"][] = ["account", "team"
       }
       commandCoordinator.confirm(pending)
       commandInFlight = null
+      browserTelemetry.write(diagnosticResource,"ok",performance.now()-telemetryStart)
       return true
     } catch (cause) {
       const normalized = normalizeUiError(cause, "mutation")
@@ -469,6 +491,7 @@ export function useCommand(scopes: ScopeSelection["kind"][] = ["account", "team"
       if (!disposed && !abort.signal.aborted && nonce === generation && sameScope(scope, revision) && platformPort.value === port) {
         const normalized = normalizeUiError(cause, "mutation")
         if (!handlePermissionError(normalized, scope)) {
+          browserTelemetry.write(diagnosticResource,diagnosticOutcome(normalized),performance.now()-telemetryStart)
           state.error = normalized
           state.reconciliationRequired = requiresReconciliation(normalized)
         }

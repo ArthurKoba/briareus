@@ -8,6 +8,7 @@ import { platformPort } from "@/features/platform/api/port"
 import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
 import ConfirmAction from "@/features/platform/ui/ConfirmAction.vue"
 import Button from "@/shared/ui/Button.vue"
+import InstantTime from "@/shared/ui/InstantTime.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 
 const { t }=useI18n()
@@ -95,7 +96,8 @@ const approvalTtlUnchanged=computed(()=>{
   if(!ttlEditSupported.value)return approvalUntil.value===""
   const original=reviewing.value?.requestedUntil
   if(!original)return !approvalUntil.value
-  return !approvalUntil.value||Date.parse(approvalUntil.value)===Date.parse(original)
+  const converted=deviceInputToUtc(approvalUntil.value)
+  return !approvalUntil.value||(converted!==null&&Date.parse(converted)===Date.parse(original))
 })
 const rows=computed(()=>[...(data.value?.sessions??[]),...extraSessions.value]
   .filter(session=>session.projectId===currentProject.value && canonicalUuid4(session.sessionUuid))
@@ -129,22 +131,19 @@ const requestedUntil=ref("")
 const approvalGrants=ref<string[]>([])
 const approvalUntil=ref("")
 const confirmExpansion=ref(false)
-const approvedUntilValid=computed(()=>!approvalUntil.value || Date.parse(approvalUntil.value)>browserNow.value)
+const approvedUntilValid=computed(()=>!approvalUntil.value ||
+  (deviceInputToUtc(approvalUntil.value)!==null&&Date.parse(deviceInputToUtc(approvalUntil.value)!)>browserNow.value))
 const unknownRequestedGrants=computed(()=>reviewing.value?.requestedGrants.filter(id=>!grantOptions.value.some(option=>option.id===id))??[])
 const reviewedGrantsKnown=computed(()=>unknownRequestedGrants.value.length===0)
 const beyondRequest=computed(()=>{
   const request=reviewing.value
   if(!request)return false
   if(approvalGrants.value.some(grant=>!request.requestedGrants.includes(grant)))return true
-  if(approvalUntil.value && (!request.requestedUntil || Date.parse(approvalUntil.value)>Date.parse(request.requestedUntil)))return true
+  const until=deviceInputToUtc(approvalUntil.value)
+  if(approvalUntil.value && (!request.requestedUntil || (until!==null&&Date.parse(until)>Date.parse(request.requestedUntil))))return true
   return false
 })
-function toLocalDate(iso: string | null):string {
-  if(!iso)return ""
-  const date=new Date(iso)
-  if(Number.isNaN(date.getTime()))return ""
-  return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16)
-}
+const toLocalDate=deviceLocalInput
 function askResolve(request:AgentSessionRequestView,approve:boolean){
   if(!can("sessions.resolve") || request.allowedActions?.["sessions.resolve"]!==true ||
      request.status!=="pending" || request.projectId!==currentProject.value ||
@@ -163,7 +162,12 @@ const reviewing=ref<AgentSessionRequestView | null>(null)
 const pending=ref<{ kind:"revoke"; session:AgentSessionView } | { kind:"approval"; request:AgentSessionRequestView; approve:boolean } | null>(null)
 const can=projectContext.can
 const grantSelectionValid=computed(()=>selectedGrants.value.length>0 && selectedGrants.value.every(id=>grantOptions.value.some(item=>item.id===id)))
-const untilValid=computed(()=>!requestedUntil.value || (requestedTtlMax.value>0 && Date.parse(requestedUntil.value)>browserNow.value && Date.parse(requestedUntil.value)<=browserNow.value+requestedTtlMax.value*1000))
+const untilValid=computed(()=>{
+  if(!requestedUntil.value)return true
+  const utc=deviceInputToUtc(requestedUntil.value)
+  return utc!==null&&requestedTtlMax.value>0&&Date.parse(utc)>browserNow.value&&
+    Date.parse(utc)<=browserNow.value+requestedTtlMax.value*1000
+})
 watch(()=>projectContext.state.revision,()=>{pending.value=null;reviewing.value=null;newLabel.value="";selectedUuid.value="";selectedGrants.value=[];requestedUntil.value="";approvalGrants.value=[];approvalUntil.value="";confirmExpansion.value=false})
 // Any server refresh/WS invalidate replaces the list: a pending confirmation
 // created from an older revision must not be silently applied to the new list.
@@ -182,7 +186,8 @@ async function openSession(){
 }
 async function requestElevation(){
   if(!canonicalUuid4(selectedUuid.value) || !rows.value.some(item=>item.sessionUuid===selectedUuid.value && item.status==="active" && item.elevationPolicy==="requestable") || !grantSelectionValid.value || !untilValid.value)return
-  const until=requestedUntil.value ? new Date(requestedUntil.value).toISOString():null
+  const until=requestedUntil.value ? deviceInputToUtc(requestedUntil.value):null
+  if(requestedUntil.value&&!until)return
   const requested=await command.submit("sessions.request",(port,ctx)=>port.sessions.request(ctx,{sessionUuid:selectedUuid.value,grants:[...selectedGrants.value],requestedUntil:until}),`session.elevation:${selectedUuid.value}`)
   if(requested){selectedGrants.value=[];requestedUntil.value="";await sessions.reload()}
 }
@@ -192,7 +197,8 @@ async function resolve(){
   const done=await command.submit(item.kind==="revoke" ? "sessions.revoke" : "sessions.resolve",(port,ctx)=>{
     if(item.kind==="revoke")return port.sessions.revoke(ctx,item.session)
     // Server is authoritative for requested grants, expanded grants, TTL and audit.
-    const until=item.approve && approvalUntil.value ? new Date(approvalUntil.value).toISOString() : item.request.requestedUntil
+    const until=item.approve && approvalUntil.value ? deviceInputToUtc(approvalUntil.value) : item.request.requestedUntil
+    if(item.approve&&approvalUntil.value&&!until)return
     return port.sessions.resolve(ctx,item.request,item.approve,item.approve?[...approvalGrants.value]:[],until,{explicitExpansion:item.approve && beyondRequest.value && confirmExpansion.value})
   },item.kind==="revoke"?`session.revoke:${item.session.sessionUuid}`:`session.resolve:${item.request.id}`)
   if(done){pending.value=null;reviewing.value=null;await sessions.reload()}
@@ -204,7 +210,7 @@ async function resolve(){
     <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.openSession')}}</h2><p class="text-xs text-muted-foreground">{{t('platform.sessionBoundaries')}}</p><p v-if="!openSupported" role="status" class="text-xs text-muted-foreground">{{t('platform.sessionOpenPending')}}</p><p v-else-if="!labelSupported" role="status" class="text-xs text-muted-foreground">{{t('platform.unnamedSessionSource')}}</p><form class="flex flex-wrap items-end gap-3" @submit.prevent="openSession"><label v-if="labelSupported" class="min-w-48 flex-1 text-xs">{{t('platform.sessionLabel')}}<input v-model="newLabel" class="field mt-1" maxlength="120" :disabled="!can('sessions.open') || (command.state.busy || command.state.reconciliationRequired)" required /></label><label class="text-xs">{{t('platform.sessionKind')}}<select v-model="sessionKind" class="field mt-1" :disabled="!can('sessions.open') || (command.state.busy || command.state.reconciliationRequired)"><option value="normal">{{t('platform.normalSession')}}</option><option value="elevated" :disabled="!elevatedOpenSupported">{{t('platform.elevatedSession')}}</option></select></label><label class="text-xs">{{t('platform.elevationPolicy')}}<select v-model="policy" class="field mt-1" :disabled="!can('sessions.open') || (command.state.busy || command.state.reconciliationRequired)"><option value="requestable">{{t('platform.requestable')}}</option><option value="fixed">{{t('platform.fixed')}}</option></select></label><Button type="submit" size="sm" :disabled="!can('sessions.open') || !openSupported || (sessionKind==='elevated' && !elevatedOpenSupported) || (command.state.busy || command.state.reconciliationRequired) || (labelSupported && !newLabel.trim())">{{t('platform.open')}}</Button></form></section>
     <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.projectSessions')}}</h2><PlatformFeedback :status="sessions.state.status" :error="sessions.state.error" @retry="sessions.reload" /><p v-if="sessions.state.status==='ready' && !rows.length" class="text-sm text-muted-foreground">{{t('platform.empty')}}</p>
       <p v-if="moreSessions" role="status" class="text-xs text-muted-foreground">{{t('platform.a6PartialPage')}}</p>
-      <div v-if="rows.length" class="overflow-x-auto"><table class="w-full min-w-[650px] text-left text-sm"><thead class="text-xs text-muted-foreground"><tr><th class="py-2">{{t('platform.sessionLabel')}}</th><th>UUIDv4</th><th>{{t('platform.grants')}}</th><th>{{t('platform.expiration')}}</th><th>{{t('common.actions')}}</th></tr></thead><tbody><tr v-for="session in rows" :key="session.sessionUuid" class="border-t border-border"><td class="py-3"><span class="font-medium">{{session.label}}</span><span class="block text-xs text-muted-foreground">{{session.elevation}} · {{session.status}}</span></td><td class="font-mono text-xs" :title="t('platform.uuidPrivate')">{{session.sessionUuid.slice(0,8)}}…</td><td class="text-xs">{{session.grants.join(', ') || '—'}}</td><td class="text-xs">{{session.expiresAt}}</td><td><Button variant="destructive" size="sm" :disabled="!can('sessions.revoke') || session.allowedActions?.['sessions.revoke']!==true || session.status!=='active' || (command.state.busy || command.state.reconciliationRequired)" @click="pending={kind:'revoke',session}">{{t('platform.revoke')}}</Button></td></tr></tbody></table></div>
+      <div v-if="rows.length" class="overflow-x-auto"><table class="w-full min-w-[650px] text-left text-sm"><thead class="text-xs text-muted-foreground"><tr><th class="py-2">{{t('platform.sessionLabel')}}</th><th>UUIDv4</th><th>{{t('platform.grants')}}</th><th>{{t('platform.expiration')}}</th><th>{{t('common.actions')}}</th></tr></thead><tbody><tr v-for="session in rows" :key="session.sessionUuid" class="border-t border-border"><td class="py-3"><span class="font-medium">{{session.label}}</span><span class="block text-xs text-muted-foreground">{{session.elevation}} · {{session.status}}</span></td><td class="font-mono text-xs" :title="t('platform.uuidPrivate')">{{session.sessionUuid.slice(0,8)}}…</td><td class="text-xs">{{session.grants.join(', ') || '—'}}</td><td class="text-xs"><InstantTime :value="session.expiresAt" /></td><td><Button variant="destructive" size="sm" :disabled="!can('sessions.revoke') || session.allowedActions?.['sessions.revoke']!==true || session.status!=='active' || (command.state.busy || command.state.reconciliationRequired)" @click="pending={kind:'revoke',session}">{{t('platform.revoke')}}</Button></td></tr></tbody></table></div>
       <div v-if="moreSessions||paging==='sessions'" class="flex items-center gap-2">
         <Button variant="outline" size="sm" :disabled="paging!==null || !moreSessions" @click="loadMore('sessions')">{{t('platform.loadMoreA6')}}</Button>
         <span v-if="paging==='sessions'" role="status" class="text-xs text-muted-foreground">{{t('app.loading')}}</span>
@@ -212,7 +218,7 @@ async function resolve(){
       <p v-if="pagingError==='sessions'" role="alert" class="text-xs text-destructive">{{t('platform.a6PageReadFailed')}}</p>
     </section>
     <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.requestGrants')}}</h2><p class="text-xs text-muted-foreground">{{t('platform.grantHint')}}</p>
-      <form class="grid gap-3 sm:grid-cols-2" @submit.prevent="requestElevation"><label class="text-xs">{{t('platform.session')}}<select v-model="selectedUuid" class="field mt-1" :disabled="!can('sessions.request') || (command.state.busy || command.state.reconciliationRequired)"><option value="">{{t('platform.selectSession')}}</option><option v-for="session in rows.filter(item=>item.status==='active' && item.elevationPolicy==='requestable')" :key="session.sessionUuid" :value="session.sessionUuid">{{session.label}} · {{session.sessionUuid.slice(0,8)}}</option></select></label><label class="text-xs">{{t('platform.requestedUntil')}}<input v-model="requestedUntil" class="field mt-1" type="datetime-local" :disabled="!can('sessions.request') || (command.state.busy || command.state.reconciliationRequired)" /></label>
+      <form class="grid gap-3 sm:grid-cols-2" @submit.prevent="requestElevation"><label class="text-xs">{{t('platform.session')}}<select v-model="selectedUuid" class="field mt-1" :disabled="!can('sessions.request') || (command.state.busy || command.state.reconciliationRequired)"><option value="">{{t('platform.selectSession')}}</option><option v-for="session in rows.filter(item=>item.status==='active' && item.elevationPolicy==='requestable')" :key="session.sessionUuid" :value="session.sessionUuid">{{session.label}} · {{session.sessionUuid.slice(0,8)}}</option></select></label><label class="text-xs">{{t('platform.requestedUntil')}}<span class="block text-[10px] text-muted-foreground">{{t('platform.deviceInputTimeHint')}}</span><input v-model="requestedUntil" class="field mt-1" type="datetime-local" :disabled="!can('sessions.request') || (command.state.busy || command.state.reconciliationRequired)" /></label>
         <fieldset class="sm:col-span-2" :disabled="!can('sessions.request') || (command.state.busy || command.state.reconciliationRequired)"><legend class="mb-2 text-xs">{{t('platform.grants')}}</legend><p v-if="!grantOptions.length" class="text-xs text-muted-foreground">{{t('platform.noGrantSchema')}}</p><div v-for="grant in grantOptions" :key="grant.id" class="mb-1"><label class="inline-flex items-start gap-2 text-xs"><input v-model="selectedGrants" type="checkbox" :value="grant.id" class="mt-0.5" /><span><strong>{{grant.label}}</strong><span v-if="grant.description" class="block text-muted-foreground">{{grant.description}}</span></span></label></div></fieldset>
         <div class="sm:col-span-2"><Button type="submit" size="sm" :disabled="!can('sessions.request') || (command.state.busy || command.state.reconciliationRequired) || !selectedUuid || !grantSelectionValid || !untilValid">{{t('platform.requestApproval')}}</Button><p v-if="!untilValid" role="alert" class="mt-2 text-xs text-destructive">{{t('platform.futureDate')}}</p></div>
       </form>
@@ -228,8 +234,8 @@ async function resolve(){
     <section v-if="reviewing" class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.reviewApproval')}}</h2><p class="text-xs text-muted-foreground">{{t('platform.approvalScopeWarning')}}</p>
       <p v-if="unknownRequestedGrants.length" role="alert" class="text-sm text-destructive">{{t('platform.unknownSessionGrants')}}</p>
       <fieldset><legend class="mb-2 text-xs">{{t('platform.grants')}}</legend><label v-for="grant in grantOptions" :key="grant.id" class="mb-2 flex items-start gap-2 text-xs"><input v-model="approvalGrants" type="checkbox" :value="grant.id" :disabled="(command.state.busy || command.state.reconciliationRequired)" /><span>{{grant.label}}</span></label></fieldset>
-      <label v-if="ttlEditSupported" class="block max-w-xs text-xs">{{t('platform.requestedUntil')}}<input v-model="approvalUntil" class="field mt-1" type="datetime-local" :disabled="(command.state.busy || command.state.reconciliationRequired)" /></label>
-      <div v-else class="max-w-xl text-xs"><span class="text-muted-foreground">{{t('platform.requestedUntil')}}</span><p class="mt-1 rounded-md border border-border p-2 font-mono">{{reviewing.requestedUntil??'—'}}</p><p class="mt-1 text-muted-foreground">{{t('platform.serverTtlUneditable')}}</p></div>
+      <label v-if="ttlEditSupported" class="block max-w-xs text-xs">{{t('platform.requestedUntil')}}<span class="block text-[10px] text-muted-foreground">{{t('platform.deviceInputTimeHint')}}</span><input v-model="approvalUntil" class="field mt-1" type="datetime-local" :disabled="(command.state.busy || command.state.reconciliationRequired)" /></label>
+      <div v-else class="max-w-xl text-xs"><span class="text-muted-foreground">{{t('platform.requestedUntil')}}</span><p class="mt-1 rounded-md border border-border p-2 font-mono"><InstantTime :value="reviewing.requestedUntil" /></p><p class="mt-1 text-muted-foreground">{{t('platform.serverTtlUneditable')}}</p></div>
       <p v-if="!approvedUntilValid" role="alert" class="text-xs text-destructive">{{t('platform.futureDate')}}</p>
       <label v-if="beyondRequest" class="flex items-start gap-2 text-xs text-destructive"><input v-model="confirmExpansion" type="checkbox" :disabled="(command.state.busy || command.state.reconciliationRequired)" /><span>{{t('platform.expansionAcknowledgement')}}</span></label>
       <div class="flex gap-2"><Button size="sm" :disabled="!can('sessions.resolve') || (command.state.busy || command.state.reconciliationRequired) || !approvedUntilValid || !reviewedGrantsKnown || !approvalTtlUnchanged || (beyondRequest && !confirmExpansion)" @click="confirmReviewedApproval">{{t('platform.confirmReviewedApproval')}}</Button><Button variant="outline" size="sm" @click="reviewing=null">{{t('common.cancel')}}</Button></div>

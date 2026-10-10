@@ -1,10 +1,10 @@
 import type { AccessProjection, PlatformPort } from "@/features/platform/model/contracts"
 import { DraftContractError } from "@/features/platform/api/draft/source-contract"
-import { acceptedA8Source } from "@/features/platform/api/draft/source-acceptance"
+import { acceptedA9Source } from "@/features/platform/api/draft/source-acceptance"
 import { createUninstalledDraftConsumer, type DraftConsumer } from "@/features/platform/api/draft/source-port"
 
 /**
- * A private, intentionally UNINSTALLED A8 source composition. Constructing
+ * A private, intentionally UNINSTALLED A9 source composition. Constructing
  * this object cannot install PlatformPort or make network calls. Its origin
  * must be explicitly supplied and passes the same-origin HTTPS/path guard.
  *
@@ -12,21 +12,21 @@ import { createUninstalledDraftConsumer, type DraftConsumer } from "@/features/p
  * the permanently blocked public installer in api/port.ts.
  */
 export interface DisabledFuturePlatformClient {
-  readonly acceptance: typeof acceptedA8Source
+  readonly acceptance: typeof acceptedA9Source
   readonly port: PlatformPort
-  /** A8 server-proven principal only; returns null when no memory token. */
+  /** A9 server-proven principal only; returns null when no memory token. */
   verifyCurrentPrincipal(signal: AbortSignal): Promise<AccessProjection | null>
   destroy(): void
 }
 
 export function createUninstalledFuturePlatformClient(explicitSameOriginUrl: string): DisabledFuturePlatformClient {
-  if(acceptedA8Source.publicTransportAuthorized || acceptedA8Source.platformPortInstallAuthorized) {
+  if(acceptedA9Source.publicTransportAuthorized || acceptedA9Source.platformPortInstallAuthorized) {
     throw new DraftContractError("source_only_cutover_required")
   }
   const client:DraftConsumer=createUninstalledDraftConsumer(explicitSameOriginUrl)
   let destroyed=false
   return Object.freeze({
-    acceptance:acceptedA8Source,
+    acceptance:acceptedA9Source,
     port:client.port,
     async verifyCurrentPrincipal(signal:AbortSignal):Promise<AccessProjection|null> {
       if(destroyed||signal.aborted)throw new DraftContractError("future_client_unavailable")

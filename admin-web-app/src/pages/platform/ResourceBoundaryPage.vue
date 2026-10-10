@@ -8,6 +8,7 @@ import { platformPort } from "@/features/platform/api/port"
 import { useDomain } from "@/features/platform/model/use-domain"
 import PlatformFeedback from "@/features/platform/ui/PlatformFeedback.vue"
 import Button from "@/shared/ui/Button.vue"
+import InstantTime from "@/shared/ui/InstantTime.vue"
 import PageHeader from "@/shared/ui/PageHeader.vue"
 
 const props=defineProps<{ resource:OperationalArea }>()
@@ -77,7 +78,7 @@ watch(()=>operatorRows.state.items,()=>{
       <p v-if="!adapterReady" class="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground" role="status">{{t('platform.resourceBlocked')}}</p>
       <PlatformFeedback v-else :status="status" :error="operatorRows.state.error" @retry="operatorRows.reload" />
       <p v-if="adapterReady && operatorRows.state.possiblyTruncated" role="status" class="rounded-md border border-border p-3 text-xs text-muted-foreground">{{t('platform.a5LedgerCap', {limit:operatorRows.state.serverLimit??50})}}</p>
-      <p v-if="adapterReady && operatorRows.state.observedAt" class="text-xs text-muted-foreground">{{t('platform.a5ObservedAt')}}: {{operatorRows.state.observedAt}}</p>
+      <p v-if="adapterReady && operatorRows.state.observedAt" class="text-xs text-muted-foreground">{{t('platform.a5ObservedAt')}}: <InstantTime :value="operatorRows.state.observedAt" /></p>
       <div v-if="status==='ready' && operatorRows.state.items.length" class="flex flex-wrap items-end gap-3">
         <label class="min-w-52 flex-1 text-xs">{{t('platform.filterResource')}}
           <input v-model="search" class="field mt-1" type="search" maxlength="160" :placeholder="t('platform.filterResourcePlaceholder')" />
@@ -91,7 +92,7 @@ watch(()=>operatorRows.state.items,()=>{
       <div v-if="status==='ready' && visibleRows.length" class="overflow-x-auto">
         <table class="w-full min-w-[450px] text-left text-sm">
           <thead class="text-xs text-muted-foreground"><tr><th class="py-2">{{t('platform.resourceId')}}</th><th>{{t('platform.resourceName')}}</th><th>{{t('common.status')}}</th><th>{{t('platform.a5ObservedAt')}}</th></tr></thead>
-          <tbody><tr v-for="item in visibleRows" :key="item.id" class="border-t border-border"><td class="max-w-36 py-3 font-mono text-xs"><button class="max-w-36 truncate text-left underline-offset-2 hover:underline focus-visible:underline" type="button" :aria-pressed="selectedRecordId===item.id" :title="item.id" @click="selectedRecordId=selectedRecordId===item.id?'':item.id">{{item.id}}</button></td><td class="break-words">{{item.label}}</td><td>{{item.status}}</td><td>{{item.observedAt??item.updatedAt??'—'}}</td></tr></tbody>
+          <tbody><tr v-for="item in visibleRows" :key="item.id" class="border-t border-border"><td class="max-w-36 py-3 font-mono text-xs"><button class="max-w-36 truncate text-left underline-offset-2 hover:underline focus-visible:underline" type="button" :aria-pressed="selectedRecordId===item.id" :title="item.id" @click="selectedRecordId=selectedRecordId===item.id?'':item.id">{{item.id}}</button></td><td class="break-words">{{item.label}}</td><td>{{item.status}}</td><td><InstantTime :value="item.observedAt??item.updatedAt" /></td></tr></tbody>
         </table>
       </div>
       <section v-if="selectedRecord" class="space-y-2 rounded-lg border border-border bg-muted/20 p-4" :aria-label="t('platform.resourceReadOnlyDetails')">
@@ -101,10 +102,10 @@ watch(()=>operatorRows.state.items,()=>{
           <div class="min-w-0"><dt class="text-muted-foreground">{{t('platform.resourceName')}}</dt><dd class="break-words">{{selectedRecord.label}}</dd></div>
           <div class="min-w-0"><dt class="text-muted-foreground">{{t('platform.projectBoundary')}}</dt><dd class="break-all font-mono">{{selectedRecord.projectId}}</dd></div>
           <div class="min-w-0"><dt class="text-muted-foreground">{{t('common.status')}}</dt><dd class="break-words">{{selectedRecord.status}}</dd></div>
-          <div class="min-w-0"><dt class="text-muted-foreground">{{t('platform.updatedAt')}}</dt><dd>{{selectedRecord.observedAt??selectedRecord.updatedAt??t('platform.notPublished')}}</dd></div>
+          <div class="min-w-0"><dt class="text-muted-foreground">{{t('platform.updatedAt')}}</dt><dd><InstantTime :value="selectedRecord.observedAt??selectedRecord.updatedAt" :unknown-label="t('platform.notPublished')" /></dd></div>
           <div v-if="selectedRecord.ledgerKind" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.a5LedgerKind')}}</dt><dd>{{selectedRecord.ledgerKind}}</dd></div>
           <div v-if="selectedRecord.version" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.a5RecordVersion')}}</dt><dd class="tabular-nums">{{selectedRecord.version}}</dd></div>
-          <div v-if="selectedRecord.hardExpiresAt" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.expiration')}}</dt><dd>{{selectedRecord.hardExpiresAt}}</dd></div>
+          <div v-if="selectedRecord.hardExpiresAt" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.expiration')}}</dt><dd><InstantTime :value="selectedRecord.hardExpiresAt" /></dd></div>
           <div v-if="selectedRecord.cleanupState" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.a5CleanupState')}}</dt><dd>{{selectedRecord.cleanupState}}</dd></div>
           <div v-if="selectedRecord.reportedStatus" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.a5ReportedState')}}</dt><dd>{{selectedRecord.reportedStatus}}</dd></div>
           <div v-if="selectedRecord.fileCount!==undefined" class="min-w-0"><dt class="text-muted-foreground">{{t('platform.a5FileQuota')}}</dt><dd class="tabular-nums">{{selectedRecord.fileCount}} / {{selectedRecord.usedBytes}} / {{selectedRecord.reservedBytes}} / {{selectedRecord.byteLimit}}</dd></div>

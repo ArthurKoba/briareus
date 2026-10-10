@@ -384,8 +384,11 @@ class OpenTelemetrySink(ObservabilitySink):
             name,
             kind=SpanKind.INTERNAL,
             attributes=dict(attributes or {}),
-            record_exception=True,
-            set_status_on_exception=True,
+            # Automatic exception messages and stack traces may contain
+            # password-reset links, raw path args, bearer credentials or
+            # provider keys. Only sanitized status/code is recorded manually.
+            record_exception=False,
+            set_status_on_exception=False,
         )
 
     def record_runtime_started(self, scope: str) -> None:

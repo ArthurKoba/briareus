@@ -17,24 +17,6 @@
       ],
       "watch_paths_source": "deploy/data/docker-compose.coolify.yaml#x-watch-path-coolify",
       "activation": "candidate_private_data",
-      "dockerfile": "deploy/data/Dockerfile",
-      "schema_initializer": {
-        "dockerfile": "deploy/data/Dockerfile",
-        "script": "deploy/data/greenfield_schema.py",
-        "mode": "manual_one_shot_only",
-        "inputs": [
-          "deploy/data/Dockerfile",
-          "deploy/data/greenfield_schema.py",
-          "pyproject.toml",
-          "uv.lock",
-          "services/common/**",
-          "services/authorization/**",
-          "services/identity/**",
-          "services/teams/**",
-          "services/projects/**",
-          "services/agents/**"
-        ]
-      },
       "module": "data",
       "shared_variables": {
         "TZ": "{{team.TZ}}",
@@ -51,9 +33,18 @@
         "briareus-authorization"
       ],
       "watch_paths_source": "deploy/authorization/docker-compose.coolify.yaml#x-watch-path-coolify",
-      "activation": "blocked_pending_C1_B2_C2",
+      "activation": "source_ready_runtime_pending_A10_acceptance_and_C2",
       "dockerfile": "deploy/authorization/Dockerfile",
-      "module": "authorization"
+      "module": "authorization",
+      "shared_variables": {
+        "TZ": "{{team.TZ}}",
+        "OTLP_ENDPOINT": "{{team.OTLP_ENDPOINT}}",
+        "OTLP_BEARER_TOKEN": "{{team.OTLP_BEARER_TOKEN}}",
+        "SERVICE_NAMESPACE": "{{environment.SERVICE_NAMESPACE}}",
+        "DEPLOYMENT_ENVIRONMENT": "{{environment.DEPLOYMENT_ENVIRONMENT}}",
+        "POSTGRES_USER": "{{environment.POSTGRES_USER}}",
+        "POSTGRES_PASSWORD": "{{environment.POSTGRES_PASSWORD}}"
+      }
     },
     {
       "name": "Admin API",

@@ -115,7 +115,8 @@ async function createTeam() {
 async function addMember() {
   const team = active.value
   if (!team || team.allowedActions?.["teams.members"] !== true || !can("teams.members") || !canonicalUuid(newMemberId.value.trim())) return
-  const success = await command.submit("teams.members", (port, ctx) => port.teams.addMember(ctx, team, newMemberId.value.trim()))
+  const success = await command.submit("teams.members", (port, ctx) => port.teams.addMember(ctx, team, newMemberId.value.trim()),
+    {operation:"team.member.add",target:{kind:"team",id:team.id}})
   if (success) { newMemberId.value = ""; await refreshAuthenticatedProjection(); await teams.reload() }
 }
 async function confirmAction() {
@@ -128,7 +129,8 @@ async function confirmAction() {
   if (current.allowedActions?.[action.kind === "transfer" ? "teams.ownership" : "teams.members"] !== true) return
   const success = await command.submit(action.kind === "transfer" ? "teams.ownership" : "teams.members", (port, ctx) => action.kind === "transfer"
     ? port.teams.transferOwner(ctx, current, action.userId)
-    : port.teams.removeMember(ctx, current, action.userId))
+    : port.teams.removeMember(ctx, current, action.userId),
+    {operation:action.kind==="transfer"?"team.transfer_owner":"team.member.remove",target:{kind:"team",id:current.id}})
   if (success) { pending.value = null; newOwnerId.value = ""; await refreshAuthenticatedProjection(); await teams.reload() }
 }
 function askTransfer() {

@@ -1,24 +1,39 @@
-# Portable Compose. One service / one Coolify Application; staged, not deployed.
-# No dependency on legacy MCP resources, volumes, databases or networks.
+# Portable private Authorization. Automatic migration belongs to its
+# normal ASGI startup, never to a sidecar, profile or one-shot operator job.
 services:
   briareus-authorization:
     build:
       context: ../..
       dockerfile: deploy/authorization/Dockerfile
-    restart: "no"
+    restart: unless-stopped
     stop_grace_period: 30s
     environment:
       TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      SERVICE_NAMESPACE: "${SERVICE_NAMESPACE:-briareus}"
+      DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT:-development}"
+      OTEL_SERVICE_NAME: "authorization"
+      POSTGRES_HOST: "briareus-postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "briareus_dev"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
     expose:
       - "8000"
     networks:
       briareus:
         aliases: ["briareus-authorization"]
-    # Safety gate: the historic authorization.runtime auto-creates legacy schema.
-    # This image intentionally has no greenfield Authorization startup.
-    mem_limit: 512m
-    cpus: 0.5
-    pids_limit: 96
+    # Liveness is NOT security/readiness: /health/ready stays 503 until C2.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8000/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 180s
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
     security_opt:
       - no-new-privileges:true
 networks:

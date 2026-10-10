@@ -4,6 +4,8 @@ import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sun, X } from "lucide-vue-ne
 import { useI18n } from "vue-i18n"
 import { platformPort } from "@/features/platform/api/port"
 import { projectContext } from "@/features/platform/model/project-context"
+import { browserTelemetry } from "@/features/platform/model/browser-telemetry"
+import { normalizeUiError } from "@/features/platform/model/errors"
 import { validPlatformPage, type PlatformPageId } from "@/app/platform-navigation"
 import PlatformNav from "@/app/PlatformNav.vue"
 import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
@@ -48,6 +50,8 @@ const verified=computed(()=>projectContext.state.user?.active===true&&
 const missingTransport=computed(()=>platformPort.value===null)
 const loading=ref(true)
 const unavailable=ref(false)
+/** Never infer DB schema version/head from unauthenticated health/ENV. */
+const serviceUpgradingPossible=ref(false)
 const submitting=ref(false)
 const error=ref("")
 const username=ref("")
@@ -65,6 +69,7 @@ let unsubscribeCredential:(()=>void)|undefined
 
 /** Expire the entire verified User/Team/Project identity, never a cached username. */
 function expireAuth():void {
+  browserTelemetry.clear()
   ++authGeneration
   authAbort?.abort()
   authAbort=null
@@ -75,6 +80,7 @@ function expireAuth():void {
   loading.value=false
   submitting.value=false
   unavailable.value=false
+  serviceUpgradingPossible.value=false
 }
 /** Single-use credentials do not survive a URL/history navigation. */
 function readOneUseLink():void {
@@ -112,7 +118,11 @@ function readHash():void {
   }else routePage.value=child||"home"
   mobileNavOpen.value=false
 }
-function onHistory():void {readOneUseLink();readHash()}
+function onHistory():void {
+  readOneUseLink()
+  readHash()
+  browserTelemetry.navigation(activePage.value)
+}
 function ensureRoute():void {
   if(!validPlatformPage(routePage.value)){
     history.replaceState(null,"",`${location.pathname}${location.search}#platform/home`)
@@ -126,21 +136,36 @@ async function restore():Promise<void>{
   authAbort=controller
   loading.value=true
   unavailable.value=false
+  serviceUpgradingPossible.value=false
   error.value=""
   const port=platformPort.value
   try {
     if(!port){
       projectContext.clear()
+      browserTelemetry.lifecycle("blocked")
       return
     }
     const projection=await port.auth.restore(controller.signal)
     if(generation!==authGeneration||controller.signal.aborted||port!==platformPort.value)return
     if(projection)projectContext.installServerProjection(projection)
     else projectContext.clear()
+    browserTelemetry.lifecycle("ok")
     ensureRoute()
-  }catch{
+  }catch(cause){
     if(generation!==authGeneration||controller.signal.aborted)return
+    const issue=normalizeUiError(cause)
+    browserTelemetry.error("app","authentication")
+    if(issue.kind==="unauthorized"){
+      // An authenticated 401 is not schema upgrading or a valid User.
+      // Clear the browser memory credential and show normal sign-in only.
+      port?.auth.invalidate?.()
+      projectContext.clear()
+      error.value=String(t("platform.authSessionExpired"))
+      unavailable.value=false
+      return
+    }
     projectContext.offline()
+    serviceUpgradingPossible.value=issue.message==="serviceUnavailableOrUpgrading"
     unavailable.value=true
   }finally{
     if(generation===authGeneration){loading.value=false;authAbort=null}
@@ -159,10 +184,16 @@ async function login():Promise<void>{
     const projection=await port.auth.login({username:username.value,password:password.value},controller.signal)
     if(generation!==authGeneration||controller.signal.aborted||port!==platformPort.value)return
     projectContext.installServerProjection(projection)
+    browserTelemetry.lifecycle("ok")
     unavailable.value=false
     ensureRoute()
-  }catch{
-    if(generation===authGeneration&&!controller.signal.aborted)error.value=String(t("platform.signInFailed"))
+  }catch(cause){
+    if(generation===authGeneration&&!controller.signal.aborted){
+      const issue=normalizeUiError(cause)
+      browserTelemetry.error("app","authentication")
+      error.value=String(t(issue.message==="serviceUnavailableOrUpgrading"?
+        "platform.serviceUnavailableOrUpgrading":"platform.signInFailed"))
+    }
   }finally{
     password.value=""
     if(generation===authGeneration){submitting.value=false;authAbort=null}
@@ -186,6 +217,7 @@ async function logout():Promise<void>{
     remoteUncertain=true
   }finally{
     // Even an unconfirmed remote logout MUST purge local bearer material.
+    browserTelemetry.clear()
     adapter?.auth.invalidate?.()
     expireAuth()
     if(remoteUncertain)error.value=String(t("platform.logoutUncertain"))
@@ -265,7 +297,7 @@ onBeforeUnmount(()=>{
   <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
     <section class="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm" role="alert">
       <h1 class="text-lg font-semibold">{{t('platform.brand')}}</h1>
-      <p class="mt-2 text-sm text-muted-foreground">{{t('platform.unverifiedOffline')}}</p>
+      <p class="mt-2 text-sm text-muted-foreground">{{t(serviceUpgradingPossible?'platform.serviceUnavailableOrUpgrading':'platform.unverifiedOffline')}}</p>
       <Button class="mt-5" @click="restore">{{t('common.retry')}}</Button>
     </section>
   </div>

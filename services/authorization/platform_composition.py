@@ -39,6 +39,7 @@ from ._service_transport import PrivateServiceAuthorizationController
 def platform_metadata() -> MetaData:
     """Import domain-owned ORM models into shared metadata (offline-safe)."""
     from agents import _persistence as _agents
+    from authorization import _browser_telemetry_persistence as _browser_telemetry
     from authorization import _platform_persistence as _authorization
     from authorization import _scoped_events_persistence as _events
     from authorization import _service_identity_persistence as _service_ids
@@ -55,6 +56,7 @@ def platform_metadata() -> MetaData:
     _ = (
         _agents,
         _authorization,
+        _browser_telemetry,
         _sessions,
         _identity,
         _projects,

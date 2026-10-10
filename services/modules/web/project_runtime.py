@@ -159,6 +159,9 @@ class ProjectWebRuntime:
             or scope.request_uuid != operation_uuid
         ):
             raise ProjectWebRuntimeUnavailable("PROJECT_FILES_SIGNED_OPERATION_REQUIRED")
+        # Refuse external network I/O if there is no independent signed A6
+        # quota/peer/OS observer to receive the resulting Project File.
+        self.files.a6_quota.require_write_ready()
         # Check the current caller/grant BEFORE opening any external socket.
         await self.authority.require(invocation, "files.write")
         deadline = time.monotonic() + max_seconds
