@@ -1,5 +1,6 @@
 x-watch-path-coolify:
   - "deploy/admin-ui/Dockerfile"
+  - "deploy/admin-ui/Dockerfile.dockerignore"
   - "deploy/admin-ui/docker-compose.yaml"
   - "deploy/admin-ui/docker-compose.coolify.yaml"
   - "admin-web-app/package.json"
