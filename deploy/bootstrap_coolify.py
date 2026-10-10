@@ -34,6 +34,7 @@ REPOSITORY = "ArthurKoba/briareus"
 REPOSITORY_URL = "https://github.com/ArthurKoba/briareus.git"
 RESOURCE_ID = re.compile(r"[a-z0-9]{24}\Z")
 REQUIRED = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\:\?\}")
+GENERATED_DOMAIN = re.compile(r"\bSERVICE_(?:URL|FQDN)_[A-Z0-9_]+\b")
 
 
 class BootstrapError(RuntimeError):
@@ -95,6 +96,12 @@ def required_variables(root: Path, app: dict) -> list[str]:
     module = app["name"].removeprefix("briareus-dev-")
     source = (root / module / "docker-compose.coolify.yaml").read_text()
     return sorted(set(REQUIRED.findall(source)))
+
+
+def autogenerate_domain(root: Path, app: dict) -> bool:
+    module = app["name"].removeprefix("briareus-dev-")
+    source = (root / module / "docker-compose.coolify.yaml").read_text()
+    return bool(GENERATED_DOMAIN.search(source))
 
 
 def watch_paths(root: Path, app: dict) -> str:
@@ -252,7 +259,7 @@ def main() -> int:
                 "watch_paths":desired_watch,
                 "is_auto_deploy_enabled":False,
                 "is_preview_deployments_enabled":False,
-                "autogenerate_domain":False,
+                "autogenerate_domain":autogenerate_domain(root, spec),
                 "instant_deploy":False,
             }
             def refetch(name=name):
@@ -266,7 +273,7 @@ def main() -> int:
         if not app_uuid or not RESOURCE_ID.fullmatch(app_uuid):
             raise BootstrapError(f"{name}: invalid Coolify Application UUID")
         # Reconcile safe source/watch state; auto deploy remains off until later explicit acceptance.
-        patch={"git_branch":args.branch,"base_directory":spec["base_directory"],"docker_compose_location":spec["docker_compose_location"],"watch_paths":desired_watch,"is_auto_deploy_enabled":False,"is_preview_deployments_enabled":False,"autogenerate_domain":False}
+        patch={"git_branch":args.branch,"base_directory":spec["base_directory"],"docker_compose_location":spec["docker_compose_location"],"watch_paths":desired_watch,"is_auto_deploy_enabled":False,"is_preview_deployments_enabled":False,"autogenerate_domain":autogenerate_domain(root, spec)}
         if args.apply:
             api(base,token,"PATCH",f"applications/{app_uuid}",patch)
         envs=api(base,token,"GET",f"applications/{app_uuid}/envs")
