@@ -190,7 +190,7 @@ def _identity(conn: Connection, settings: OwnerDatabaseSettings) -> None:
     }
     unexpected = conn.execute(
         text(
-            """SELECT n.nspname, c.relname, c.relkind FROM pg_class c
+            """SELECT n.nspname, c.relname, c.relkind::text AS relkind FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
                 AND c.relkind IN ('r','p','v','m','f','S')"""
