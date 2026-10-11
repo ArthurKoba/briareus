@@ -222,7 +222,7 @@ def _verify(conn: Connection, settings: OwnerDatabaseSettings) -> int:
         raise OwnerSchemaRejected("owner revision mismatch")
     for table in metadata.sorted_tables:
         names = {c["name"] for c in insp.get_columns(table.name, schema=table.schema)}
-        if names != set(table.columns):
+        if names != {column.name for column in table.columns}:
             raise OwnerSchemaRejected("owner column inventory mismatch")
         by_name = {c["name"]: c for c in insp.get_columns(table.name, schema=table.schema)}
         pg = dialect()  # type: ignore[no-untyped-call]
@@ -263,17 +263,32 @@ def _verify(conn: Connection, settings: OwnerDatabaseSettings) -> int:
         }
         if not required_checks <= found_checks:
             raise OwnerSchemaRejected("owner CHECK constraints missing")
-        required_unique = {
-            c.name
-            for c in table.constraints
-            if c.__class__.__name__ == "UniqueConstraint" and c.name
+        # Match UNIQUE by its ordered database column names; PostgreSQL
+        # assigns a generated name to a SQLAlchemy UniqueConstraint that
+        # deliberately has no explicit name (e.g. identity invitations).
+        # Named constraints must still keep their exact reviewed names.
+        expected_uniques = [
+            (tuple(column.name for column in constraint.columns), constraint.name)
+            for constraint in table.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        ]
+        observed_uniques = insp.get_unique_constraints(table.name, schema=table.schema)
+        observed_by_columns = {
+            tuple(constraint.get("column_names") or ()): constraint.get("name")
+            for constraint in observed_uniques
         }
-        found_unique = {
-            c["name"] for c in insp.get_unique_constraints(table.name, schema=table.schema)
-        }
-        # An extra original UUID UNIQUE is not harmless: it silently blocks
-        # reserve/dispatch/reconcile with the same original operation UUID.
-        if required_unique != found_unique:
+        # Reject extra/missing or duplicate UNIQUEs, including the obsolete
+        # UNIQUE(operation_uuid) that would break multi-phase idempotency.
+        if (
+            len(observed_by_columns) != len(observed_uniques)
+            or len(expected_uniques) != len(observed_uniques)
+            or {columns for columns, _ in expected_uniques} != set(observed_by_columns)
+            or any(
+                explicit_name is not None
+                and observed_by_columns[columns] != explicit_name
+                for columns, explicit_name in expected_uniques
+            )
+        ):
             raise OwnerSchemaRejected("owner UNIQUE contract differs from reviewed head")
         indexes = {i["name"]: i for i in insp.get_indexes(table.name, schema=table.schema)}
         if not {ix.name for ix in table.indexes} <= indexes.keys():
