@@ -34,9 +34,14 @@ while [ "$i" -lt 90 ]; do
         if ! psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 \
             -U "$POSTGRES_USER" -d postgres \
             -f /usr/local/share/briareus/owner-bootstrap.psql >/dev/null; then
-            echo 'briareus owner bootstrap: failed; PostgreSQL health remains blocked' >&2
-            stop_server
-            exit 1
+            # Domain bootstrap is NOT PostgreSQL's own lifecycle. Missing
+            # protected scoped references must fail closed for owner services,
+            # but must never terminate the already-running physical database.
+            # The READY marker stays absent; no owner migrations run here.
+            unset PGPASSWORD
+            echo 'briareus owner bootstrap: blocked (scoped DB role/credential refs invalid or unavailable); PostgreSQL stays running; owner DB readiness UNVERIFIED' >&2
+            wait "$child"
+            exit $?
         fi
         unset PGPASSWORD
         touch "$ready_file"

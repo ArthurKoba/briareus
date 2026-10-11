@@ -214,8 +214,14 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 'context':'../..','dockerfile':'deploy/data/Dockerfile'
             }:
                 fatal('data: PostgreSQL must build only its existing extended image')
-            if 'test -f /run/briareus-owner-databases-ready' not in str(base['services']['briareus-postgres']['healthcheck']):
-                fatal('data: readiness must gate on four provisioned owner stores')
+            if base['services']['briareus-postgres']['healthcheck']['test'] != [
+                'CMD-SHELL','pg_isready -U "$$POSTGRES_USER" -d postgres'
+            ]:
+                fatal('data: physical PostgreSQL health must not depend on optional domain provisioning')
+            if 'stop_server\n            exit 1' in shell.read_text().split('if ! psql',1)[1].split('fi',1)[0]:
+                fatal('data: optional owner bootstrap failure must not stop PostgreSQL')
+            if 'wait "$child"' not in shell.read_text().split('if ! psql',1)[1].split('fi',1)[0]:
+                fatal('data: blocked owner bootstrap must preserve underlying DB process')
             if 'docker-entrypoint.sh "$@" &' not in shell.read_text() or 'ON_ERROR_STOP=1' not in shell.read_text():
                 fatal('data: SQL bootstrap not owned by existing PostgreSQL lifecycle')
             for db in ('briareus_identity','briareus_access','briareus_platform','briareus_resources'):
