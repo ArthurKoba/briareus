@@ -22,12 +22,12 @@ source_signature = "ba83ac5b77a755f02b4b034f43eed17742ab26ffa4d0dcd2e3004530b3e6
 
 def upgrade() -> None:
     # Transactional owner DB DDL only; never modify another logical DB.
-    op.drop_constraint("uq_platform_command_uuid", "commands", schema="projects", type_="unique")
+    op.drop_constraint("uq_platform_command_uuid", "commands", schema="control", type_="unique")
     op.create_unique_constraint(
         "uq_platform_command_uuid_phase",
         "commands",
         ["operation_uuid", "operation"],
-        schema="projects",
+        schema="control",
     )
 
 
