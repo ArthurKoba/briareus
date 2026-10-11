@@ -2,42 +2,40 @@
 
 **Единственная актуальная инструкция для оператора.** Исходники: `ArthurKoba/briareus`, модульные деплой-пакеты: `deploy/<module>/`. Целевая среда: Coolify, проект `briareus`, окружение `development`, сервер `tambov`, независимая общая Docker-сеть `briareus-net`. Сведения об установленной версии Coolify, реальных credential/volumes и разрешённых действиях проверять непосредственно перед любым изменением; наличие Compose в Git само по себе не даёт права применять его к серверу.
 
-**Главное ограничение (2026-10-10): живой деплой изменений архитектуры данных НЕ разрешён.** Существующие `External Services` (PostgreSQL + Valkey), `Admin UI` и `Admin API` остаются действующими. Не создавать, не запускать `Authorization`, не выполнять старый общий `0001_briareus_baseline` → `0002_browser_telemetry` Alembic, не переименовывать, не удалять и не пересоздавать существующие volumes, DB, роли и сеть. Авторизация C1-B2/C2, выполнение MCP/Files/OS и новая независимая схема хранения ждут отдельной технической и операторской приёмки. Эта инструкция описывает **планируемое source/staging-состояние**; оно может ещё не совпадать с опубликованным `main` или Coolify.
+**Решение владельца от 2026-10-11 для текущей DEV-активации:** один уже
+работающий PostgreSQL 18.6 и существующие POSTGRES_USER/POSTGRES_PASSWORD
+используются всеми четырьмя owner-сервисами. PostgreSQL-пользователь
+briareus_dev с правами SUPERUSER/CREATEDB подтверждён живым SQL SELECT через
+Coolify. Внутренняя временная среда использует этот общий доступ сознательно;
+это НЕ межсервисная изоляция SQL-прав. Сохранены четыре отдельные логические
+базы и Alembic-графы их владельцев, но не создаются отдельные SQL-роли.
+Существующие физические тома Postgres/Valkey, данные briareus_dev и сеть
+сохраняются; старый глобальный мигратор запрещён.
 
-## Первичная подготовка четырёх баз без дополнительных сервисов
+## Автоматическое создание баз и запуск миграций
 
-В существующем External Services PostgreSQL используется производный образ
-postgres:18.6-alpine через deploy/data/Dockerfile, сохраняющий официальный
-docker-entrypoint.sh и действующий PGDATA. До независимой проверки owner store
-стартовый скрипт deploy/data/postgres-entrypoint.sh через psql -X -q и
-ON_ERROR_STOP=1 запускает owner-bootstrap.psql внутри PostgreSQL.
-Создаются лишь отсутствующие четыре DB/роли; существующие проверяются
-без DROP/ALTER PASSWORD. briareus_dev и Valkey остаются неизменными.
-Миграции таблиц выполняются в ASGI lifespan каждого owner-сервиса.
+Обычный запуск существующего External Services вызывает официальный
+Postgres entrypoint (без повторного initdb при существующем PGDATA), затем
+deploy/data/owner-bootstrap.psql создаёт только отсутствующие базы:
+briareus_identity, briareus_access, briareus_platform, briareus_resources.
+Создание выполняется от действующего POSTGRES_USER без дополнительных
+паролей, ролей, ручного SQL, DROP/ALTER либо отдельного миграционного
+контейнера. Повторные запуски проверяют существование и владельца баз.
+При невозможности создания Postgres остаётся жив, но readiness owner-БД
+не подтверждается — проблема не маскируется.
 
-SQL-пароли поступают исключительно как защищённые Coolify Project Shared
-Variables. В Git Compose используются ОБЯЗАТЕЛЬНЫЕ редактируемые input
-переменные (доллар-фигурная интерполяция с двоеточием и вопросительным
-знаком): IDENTITY_POSTGRES_USER, IDENTITY_POSTGRES_PASSWORD,
-ACCESS_POSTGRES_USER, ACCESS_POSTGRES_PASSWORD, CONTROL_POSTGRES_USER,
-CONTROL_POSTGRES_PASSWORD, CATALOG_POSTGRES_USER, CATALOG_POSTGRES_PASSWORD.
-Значение каждого соответствующего Application Environment Variable в
-Coolify должно ссылаться на Project Shared в виде
-{{project.IDENTITY_POSTGRES_PASSWORD}} и аналогичных имён.
-Записывать Project Shared refs как жёсткие значения Compose нельзя:
-Coolify не создаёт из них управляемые Application variable inputs.
-Настоящие значения паролей не передаются в Git и не печатаются. При отсутствующей
-или неверной ссылке начальное создание четырёх owner DB/ролей остаётся
-заблокированным, а физический PostgreSQL **продолжает работать**. Его
-healthcheck проверяет только доступность процесса PostgreSQL, не готовность
-owner-БД. Marker /run/briareus-owner-databases-ready выставляется только
-после полной проверки ролей и БД. Подключение owner-сервисов и Alembic
-должно независимо отказать при отсутствии своих баз или прав.
-**Никогда не останавливать PostgreSQL из-за недоступности новых SQL ролей.**
-Перед live deploy обязательны восстановимый PostgreSQL backup, проверка
-реальной резолюции Coolify Compose переменных (без раскрытия секретов),
-а также соответствия image/build context. Статический PASS не является
-подтверждением реального исполнения миграций.
+После появления соответствующей базы каждый существующий owner ASGI
+при своём startup запускает только собственный Alembic upgrade head и
+verify_owner. Отсутствие схемы, БД или текущих ревизий блокирует
+готовность домена, не останавливая физический PostgreSQL.
+
+В Coolify у Data и четырёх owner Apps POSTGRES_USER/POSTGRES_PASSWORD
+ссылаются на существующие защищённые Environment Shared значения.
+Секреты в Git, логи или образ не записываются. Имена баз фиксированы
+в каждом owner Compose, не являются отдельными настройками оператора.
+Поля IDENTITY/ACCESS/CONTROL/CATALOG_POSTGRES_USER/PASSWORD больше
+не используются и могут быть удалены из живых Application Variables
+после проверки целевого deployment. Не сбрасывать PostgreSQL volume.
 
 ## 1. Модуль, владелец данных и release
 

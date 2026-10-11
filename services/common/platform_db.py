@@ -139,8 +139,6 @@ class OwnerDatabaseSettings(PlatformDatabaseSettings):
     def _owner_database(self) -> OwnerDatabaseSettings:
         if self.postgres_db != OWNER_DB_NAMES[self.owner]:
             raise ValueError("POSTGRES_DB does not match this durable owner's logical database")
-        if self.postgres_user in {"briareus", "postgres", "root"}:
-            raise ValueError("POSTGRES_USER cannot be the shared/platform/admin principal")
         return self
 
 

@@ -75,14 +75,15 @@ def run(source_root: Path, allow_pending: bool) -> None:
     cfg=registry['configuration_contract']
     manifest=json.loads((ROOT/'data/config/owner-databases.json').read_text())
     rows={x['module']:x for x in manifest['initial']}
-    if set(rows)!=set(OWNERS) or manifest['provisioning_status']!='source_only_owner_approval_required':
-        fatal('owner DB manifest incomplete or not gated')
-    if manifest.get('role_model') != 'single_owner_scoped_principal_runs_alembic_at_startup':
-        fatal('runtime principal cannot own migrations in accepted D4 rollout')
+    if set(rows)!=set(OWNERS) or manifest['provisioning_status']!='automatic_on_data_start_pending_live_observation':
+        fatal('four owner databases must be automatically created at Data startup')
+    if manifest.get('role_model') != 'shared_existing_postgres_principal_four_logical_databases':
+        fatal('DB role configuration must use one accepted existing PostgreSQL principal')
     if manifest['legacy_database_do_not_migrate']!='briareus_dev':
         fatal('live historical DB may not be repurposed')
-    if any(not v for v in manifest['immutable_guards'].values()):
-        fatal('one or more DB/source safety guards disabled')
+    if any(not value for key,value in manifest['immutable_guards'].items()
+           if key!='no_live_creation_approved'):
+        fatal('one or more existing DB/source safety invariants disabled')
     for module in MODULES:
         a=next(x for x in apps if x['module']==module)
         name=next(iter(a['compose_services']),None)
@@ -162,15 +163,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal(f'{module}: bad Coolify extends')
             for key,value in body.get('environment',{}).items():
                 actual=override['services'][service]['environment'].get(key)
-                if module=='data' and service=='briareus-postgres' and key in {
-                    f'{owner}_POSTGRES_{field}' for owner in ('IDENTITY','ACCESS','CONTROL','CATALOG')
-                    for field in ('USER','PASSWORD')
-                }:
-                    if value != chr(36)+'{'+key+':-}' or actual != chr(36)+'{'+key+':?}':
-                        fatal(f'data: scoped PostgreSQL bootstrap credential must be an editable required Coolify variable: {key}')
-                    if a.get('shared_variables',{}).get(key) != '{{project.'+key+'}}':
-                        fatal(f'data: scoped PostgreSQL credential must bind to Project Shared {key}')
-                elif actual!=value:
+                if actual!=value:
                     fatal(f'{module}: base/Coolify ENV mismatch {key}')
             used=set(REQUIRED.findall(str(override['services'][service]['environment'])))
             bindings=a.get('shared_variables',{})
@@ -179,14 +172,8 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal(f'{module}: required ENV lacks scoped reference: {used-allowed_required}')
             for key,ref in bindings.items():
                 match=SHARED.fullmatch(ref)
-                # Only owner App inputs use canonical aliases for
-                # separately qualified Environment Shared credentials.
-                owner_key=(
-                    OWNERS[module][2]+'_'+key
-                    if module in OWNERS and key in {'POSTGRES_USER','POSTGRES_PASSWORD'} else key
-                )
-                if (match is None or match.group(2)!=owner_key
-                        or owner_key not in cfg[match.group(1)+'_shared']):
+                if (match is None or match.group(2)!=key
+                        or key not in cfg[match.group(1)+'_shared']):
                     fatal(f'{module}: bad Shared binding {key}')
         if module=='data':
             if (ROOT/module/'greenfield_schema.py').exists():
@@ -204,18 +191,17 @@ def run(source_root: Path, allow_pending: bool) -> None:
             sql=(ROOT/module/'owner-bootstrap.psql')
             if not all(p.is_file() for p in (docker,shell,sql)):
                 fatal('data: missing existing-PostgreSQL-container owner bootstrap source')
-            # Coolify discovers Application env vars from dollar-braced Compose
-            # interpolation, NOT literal project shared-reference strings.
-            declared_data=override['services']['briareus-postgres']['environment']
-            data_registry=next(a for a in apps if a['module']=='data')
-            shared=data_registry['shared_variables']
-            for scope in ('IDENTITY','ACCESS','CONTROL','CATALOG'):
+            # This release uses only the existing PostgreSQL user/password.
+            # Eight former owner-scoped credentials are not real inputs.
+            data_env=override['services']['briareus-postgres']['environment']
+            for prefix in ('IDENTITY','ACCESS','CONTROL','CATALOG'):
                 for suffix in ('USER','PASSWORD'):
-                    key=f'{scope}_POSTGRES_{suffix}'
-                    if declared_data.get(key)!=chr(36)+'{'+key+':?}':
-                        fatal(f'data: {key} must be a required Coolify Application interpolation')
-                    if shared.get(key)!='{{project.'+key+'}}':
-                        fatal(f'data: {key} lacks scoped Project Shared binding')
+                    if f'{prefix}_POSTGRES_{suffix}' in data_env:
+                        fatal('data: obsolete per-domain credentials still required')
+            if 'CREATE ROLE ' in sql.read_text().upper():
+                fatal('data: separate SQL role creation reintroduced')
+            if sql.read_text().count('CREATE DATABASE')!=1 or '\\gexec' not in sql.read_text():
+                fatal('data: automatic PostgreSQL database provisioning missing')
             if 'FROM postgres:18.6-alpine' not in docker.read_text():
                 fatal('data: upstream PostgreSQL version changed')
             copy_ignore=(ROOT/module/'Dockerfile.dockerignore').read_text()
@@ -307,7 +293,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal(f'{module}: redundant duplicated private owner ASGI entrypoint')
             owner, db, env_key=OWNERS[module]
             record=rows[module]
-            if (record['owner'],record['database'],record['role_env'],record['secret_env'])!=(owner,db,env_key+'_POSTGRES_USER',env_key+'_POSTGRES_PASSWORD'):
+            if (record['owner'],record['database'],record['role_env'],record['secret_env'])!=(owner,db,'POSTGRES_USER','POSTGRES_PASSWORD'):
                 fatal(f'{module}: DB owner manifest mismatch')
             env=override['services'][f'briareus-{module}']['environment']
             if env.get('OTEL_SERVICE_NAME')!='${OTEL_SERVICE_NAME:?}':
@@ -319,20 +305,13 @@ def run(source_root: Path, allow_pending: bool) -> None:
             if any(k.startswith('MIGRATION_POSTGRES_') for k in env):
                 fatal(f'{module}: second DB migration credential contract returned')
             for app_key in ('POSTGRES_USER','POSTGRES_PASSWORD'):
-                ref='{{project.'+env_key+'_'+app_key+'}}'
+                ref='{{environment.'+app_key+'}}'
                 if a['shared_variables'].get(app_key)!=ref:
-                    fatal(f'{module}: owner-specific role reference absent: {app_key}')
+                    fatal(f'{module}: existing PostgreSQL credential binding missing: {app_key}')
             if any(k.startswith('MIGRATION_POSTGRES_') for k in a['shared_variables']):
                 fatal(f'{module}: legacy migration Shared variables returned')
-            if record.get('owner_role')!=f'briareus_{owner}_owner':
-                fatal(f'{module}: one owner-specific role must own only its database')
-            if record.get('owner_role_may_apply_own_schema_ddl') is not True:
-                fatal(f'{module}: owner cannot apply its own Alembic revisions')
-            for flag in ('owner_role_superuser_allowed','owner_role_createdb_allowed',
-                         'owner_role_createrole_allowed',
-                         'owner_role_cross_database_grants_allowed'):
-                if record.get(flag) is not False:
-                    fatal(f'{module}: unsafe owner role privilege: {flag}')
+            if any(k.startswith('owner_role') for k in record):
+                fatal(f'{module}: redundant separate PostgreSQL principal returned')
             if (source_root/'services/common/owner_migration_roles.py').exists():
                 fatal('obsolete separate migrator module returned')
             runtime_source=(source_root/'services/common/owner_runtime.py').read_text()
