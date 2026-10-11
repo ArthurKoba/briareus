@@ -311,31 +311,23 @@ def _verify(conn: Connection, settings: OwnerDatabaseSettings) -> int:
     return len(metadata.tables)
 
 
-def _apply(
+def _upgrade_owner(
     conn: Connection,
     cfg: Config,
     settings: OwnerDatabaseSettings,
-    phase_change: Callable[[Phase], None] | None = None,
-) -> OwnerSchemaStatus:
-    if phase_change is not None:
-        phase_change("owner_schema_verify")
+) -> bool:
+    # Inspired by vpn-core's MigrationManager: applying reviewed Alembic
+    # revisions is one operation; schema inspection is a separate read-only
+    # operation AFTER the migration's transaction has committed.
     _identity(conn, settings)
-    if phase_change is not None:
-        phase_change("alembic_upgrade")
-    current = _revision(conn)
-    if current != _head(settings.owner):
+    changed = _revision(conn) != _head(settings.owner)
+    if changed:
         cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "head")
-    # Within the same owner-only Alembic transaction, distinguish a DDL
-    # exception from a subsequent ORM/head/constraints/source-schema check.
-    if phase_change is not None:
-        phase_change("owner_schema_verify")
-    return OwnerSchemaStatus(
-        settings.owner,
-        _head(settings.owner),
-        current != _head(settings.owner),
-        _verify(conn, settings),
-    )
+        try:
+            command.upgrade(cfg, "head")
+        finally:
+            cfg.attributes.pop("connection", None)
+    return changed
 
 
 async def migrate_owner(
@@ -389,16 +381,20 @@ async def migrate_owner(
             async with conn.begin():
                 await conn.execute(text("SELECT set_config('statement_timeout', '90000ms', true)"))
                 await conn.execute(text("SELECT set_config('lock_timeout', '75000ms', true)"))
-                result = await conn.run_sync(_apply, cfg, settings, phase_change)
+                changed = await conn.run_sync(_upgrade_owner, cfg, settings)
+            # vpn-core separates upgrade from assert-current: strict schema
+            # comparison must not roll back a committed Alembic revision.
+            # Keep the same owner advisory lock across both phases.
             if phase_change is not None:
                 phase_change("owner_schema_verify")
             async with conn.begin():
-                if (
-                    await conn.scalar(text("SELECT version_num FROM public.alembic_version"))
-                    != result.revision
-                ):
-                    raise OwnerSchemaRejected("committed owner revision diverged")
-            return result
+                observed = await conn.run_sync(_read_owner, settings)
+            return OwnerSchemaStatus(
+                settings.owner,
+                observed.revision,
+                changed,
+                observed.tables,
+            )
     except TimeoutError:
         raise OwnerSchemaRejected("owner startup deadline exceeded") from None
     finally:
