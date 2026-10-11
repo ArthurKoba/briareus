@@ -27,7 +27,7 @@ SELECT (
 \if :valid_owner_refs
 \else
 \echo 'briareus owner bootstrap: missing/invalid scoped credential references'
-SELECT 1 / 0; -- explicit safe nonzero SQL failure (ON_ERROR_STOP)
+DO $$ BEGIN RAISE EXCEPTION 'briareus owner bootstrap blocked: missing/invalid scoped credentials' USING ERRCODE = 'P0001'; END $$;
 \endif
 
 SELECT format('CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', :'iu', :'ip')
@@ -88,7 +88,7 @@ SELECT (
 \if :owners_verified
 \else
 \echo 'briareus owner bootstrap: existing owner/database privileges differ; manual reconciliation needed'
-SELECT 1 / 0; -- explicit safe nonzero SQL failure (ON_ERROR_STOP)
+DO $$ BEGIN RAISE EXCEPTION 'briareus owner bootstrap blocked: owner database/role security invariant differs' USING ERRCODE = 'P0001'; END $$;
 \endif
 -- Owner-specific Alembic revision/DDL is intentionally handled by each
 -- existing owner application during its normal ASGI lifespan startup.

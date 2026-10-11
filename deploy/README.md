@@ -8,7 +8,7 @@
 
 В существующем External Services PostgreSQL используется производный образ
 postgres:18.6-alpine через deploy/data/Dockerfile, сохраняющий официальный
-docker-entrypoint.sh и действующий PGDATA. Перед положительным healthcheck
+docker-entrypoint.sh и действующий PGDATA. До независимой проверки owner store
 стартовый скрипт deploy/data/postgres-entrypoint.sh через psql -X -q и
 ON_ERROR_STOP=1 запускает owner-bootstrap.psql внутри PostgreSQL.
 Создаются лишь отсутствующие четыре DB/роли; существующие проверяются
@@ -18,7 +18,13 @@ ON_ERROR_STOP=1 запускает owner-bootstrap.psql внутри PostgreSQL.
 SQL-пароли поступают только как защищённые проектные ссылки вида
 {{project.IDENTITY_POSTGRES_PASSWORD}}; реальные значения не переносятся
 в Git и не печатаются, Shared Variables не изменяются. При отсутствующей
-или неверной ссылке процесс завершается и PostgreSQL healthcheck не проходит.
+или неверной ссылке начальное создание четырёх owner DB/ролей остаётся
+заблокированным, а физический PostgreSQL **продолжает работать**. Его
+healthcheck проверяет только доступность процесса PostgreSQL, не готовность
+owner-БД. Marker /run/briareus-owner-databases-ready выставляется только
+после полной проверки ролей и БД. Подключение owner-сервисов и Alembic
+должно независимо отказать при отсутствии своих баз или прав.
+**Никогда не останавливать PostgreSQL из-за недоступности новых SQL ролей.**
 Перед live deploy обязательны восстановимый PostgreSQL backup, проверка
 реальной резолюции Coolify Compose переменных (без раскрытия секретов),
 а также соответствия image/build context. Статический PASS не является
