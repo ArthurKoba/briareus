@@ -15,9 +15,18 @@ ON_ERROR_STOP=1 запускает owner-bootstrap.psql внутри PostgreSQL.
 без DROP/ALTER PASSWORD. briareus_dev и Valkey остаются неизменными.
 Миграции таблиц выполняются в ASGI lifespan каждого owner-сервиса.
 
-SQL-пароли поступают только как защищённые проектные ссылки вида
-{{project.IDENTITY_POSTGRES_PASSWORD}}; реальные значения не переносятся
-в Git и не печатаются, Shared Variables не изменяются. При отсутствующей
+SQL-пароли поступают исключительно как защищённые Coolify Project Shared
+Variables. В Git Compose используются ОБЯЗАТЕЛЬНЫЕ редактируемые input
+переменные (доллар-фигурная интерполяция с двоеточием и вопросительным
+знаком): IDENTITY_POSTGRES_USER, IDENTITY_POSTGRES_PASSWORD,
+ACCESS_POSTGRES_USER, ACCESS_POSTGRES_PASSWORD, CONTROL_POSTGRES_USER,
+CONTROL_POSTGRES_PASSWORD, CATALOG_POSTGRES_USER, CATALOG_POSTGRES_PASSWORD.
+Значение каждого соответствующего Application Environment Variable в
+Coolify должно ссылаться на Project Shared в виде
+{{project.IDENTITY_POSTGRES_PASSWORD}} и аналогичных имён.
+Записывать Project Shared refs как жёсткие значения Compose нельзя:
+Coolify не создаёт из них управляемые Application variable inputs.
+Настоящие значения паролей не передаются в Git и не печатаются. При отсутствующей
 или неверной ссылке начальное создание четырёх owner DB/ролей остаётся
 заблокированным, а физический PostgreSQL **продолжает работать**. Его
 healthcheck проверяет только доступность процесса PostgreSQL, не готовность
