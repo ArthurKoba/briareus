@@ -17,7 +17,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from authorization.security import hash_password, random_token, token_hash, verify_password
+from common.credential_primitives import hash_password, random_token, token_hash, verify_password
 from common.platform_db import PlatformDatabase
 from common.platform_errors import (
     AccessDenied,

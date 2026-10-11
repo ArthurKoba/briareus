@@ -7,16 +7,42 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml uv.lock ./
+COPY deploy/infrastructure/uv-project/pyproject.toml /app/pyproject.toml
+COPY deploy/infrastructure/uv-project/uv.lock /app/uv.lock
+COPY deploy/infrastructure/uv-project/.python-version /app/.python-version
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared uv sync --frozen --no-dev --no-install-project
 ENV ASGI_APP=modules.observability.runtime:app
 RUN useradd -u 1000 -m -d /home/bridge bridge
-# Direct uv image build: dependency layer cached above; local Briareus distribution is
-# installed non-editably from the reviewed git tree, not an external wheelhouse.
-COPY README.md LICENSE .python-version ./
-COPY services/ ./services/
-COPY scripts/ ./scripts/
-RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared uv sync --frozen --no-dev --no-editable --reinstall-package briareus
+# Source-only uv image: dependency layer cached above; selected service code
+# remains uninstalled and runs directly via uv run --no-sync.
+COPY services/common/__init__.py /app/src/common/__init__.py
+COPY services/common/account_contracts.py /app/src/common/account_contracts.py
+COPY services/common/admin_api_client.py /app/src/common/admin_api_client.py
+COPY services/common/asgi.py /app/src/common/asgi.py
+COPY services/common/audit_payloads.py /app/src/common/audit_payloads.py
+COPY services/common/cache.py /app/src/common/cache.py
+COPY services/common/http_transport.py /app/src/common/http_transport.py
+COPY services/common/models.py /app/src/common/models.py
+COPY services/common/oauth_session_contracts.py /app/src/common/oauth_session_contracts.py
+COPY services/common/observability.py /app/src/common/observability.py
+COPY services/common/runtime_annotations.py /app/src/common/runtime_annotations.py
+COPY services/common/runtime_common.py /app/src/common/runtime_common.py
+COPY services/common/runtime_policy_contracts.py /app/src/common/runtime_policy_contracts.py
+COPY services/common/settings.py /app/src/common/settings.py
+COPY services/common/tool_observability.py /app/src/common/tool_observability.py
+COPY services/modules/__init__.py /app/src/modules/__init__.py
+COPY services/modules/coolify/__init__.py /app/src/modules/coolify/__init__.py
+COPY services/modules/coolify/client.py /app/src/modules/coolify/client.py
+COPY services/modules/observability/__init__.py /app/src/modules/observability/__init__.py
+COPY services/modules/observability/runtime.py /app/src/modules/observability/runtime.py
+COPY services/modules/project_runtime/__init__.py /app/src/modules/project_runtime/__init__.py
+COPY services/modules/project_runtime/runtime_telemetry.py /app/src/modules/project_runtime/runtime_telemetry.py
+COPY services/modules/signoz/__init__.py /app/src/modules/signoz/__init__.py
+COPY services/modules/signoz/client.py /app/src/modules/signoz/client.py
+# No installation of the Briareus project: source-only uv run.
+COPY deploy/runtime_write_provenance.py /app/runtime_write_provenance.py
+RUN python /app/runtime_write_provenance.py infrastructure
+WORKDIR /app/src
 USER 1000:1000
 EXPOSE 8000
-CMD ["/app/.venv/bin/python", "-m", "common.asgi"]
+CMD ["uv", "run", "--frozen", "--no-sync", "--no-dev", "--project", "/app", "--directory", "/app/src", "python", "-m", "common.asgi"]

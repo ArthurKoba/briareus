@@ -24,7 +24,7 @@ import urllib.request
 from dataclasses import dataclass
 from types import TracebackType
 
-from .workspace_store import WorkspaceFileError
+from modules.workspace_compat.legacy_store import WorkspaceFileError
 
 
 @dataclass(frozen=True, slots=True)

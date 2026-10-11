@@ -14,7 +14,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 
 from authorization._access_proof_reader import TrustedAccessActorSource
-from authorization._service_identity import ALLOWED_AUDIENCES
+from authorization._service_audience import ALLOWED_AUDIENCES
 from authorization._service_identity_persistence import ServiceKeyRow
 from common.owner_contracts import (
     OwnerAuthorityUnavailable,

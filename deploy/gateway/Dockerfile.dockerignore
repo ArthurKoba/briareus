@@ -1,15 +1,34 @@
-# Canonical full Briareus noneditable uv install; no private scratch/build artifacts.
+# generated exact-source Docker context
 **
-!pyproject.toml
-!uv.lock
-!README.md
-!LICENSE
-!.python-version
+!deploy/
 !services/
-!services/**
-!scripts/
-!scripts/**
-# Do not send credentials or local build artifacts even if nested under source.
+!services/bridge/
+!services/common/
+!services/modules/
+!services/modules/project_runtime/
+!deploy/runtime_write_provenance.py
+!services/bridge/__init__.py
+!services/bridge/server.py
+!services/bridge/single_origin.py
+!services/common/__init__.py
+!services/common/account_contracts.py
+!services/common/admin_api_client.py
+!services/common/asgi.py
+!services/common/cache.py
+!services/common/http_transport.py
+!services/common/models.py
+!services/common/oauth_session_contracts.py
+!services/common/observability.py
+!services/common/runtime_policy_contracts.py
+!services/common/settings.py
+!services/modules/__init__.py
+!services/modules/project_runtime/__init__.py
+!services/modules/project_runtime/runtime_telemetry.py
+!deploy/gateway/
+!deploy/gateway/uv-project/
+!deploy/gateway/uv-project/pyproject.toml
+!deploy/gateway/uv-project/uv.lock
+!deploy/gateway/uv-project/.python-version
 **/.env
 **/.env.*
 **/*.pem
@@ -18,8 +37,5 @@
 **/secrets/**
 **/__pycache__/**
 **/*.pyc
-**/.mypy_cache/**
-**/.ruff_cache/**
-**/.venv/**
-**/dist/**
 **/build/**
+**/dist/**

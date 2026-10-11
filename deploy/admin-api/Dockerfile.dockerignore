@@ -1,15 +1,16 @@
-# Canonical full Briareus noneditable uv install; no private scratch/build artifacts.
+# generated exact-source Docker context
 **
-!pyproject.toml
-!uv.lock
-!README.md
-!LICENSE
-!.python-version
+!deploy/
 !services/
-!services/**
-!scripts/
-!scripts/**
-# Do not send credentials or local build artifacts even if nested under source.
+!services/admin-api/
+!services/admin-api/src/
+!deploy/runtime_write_provenance.py
+!services/admin-api/src/platform_runtime.py
+!deploy/admin-api/
+!deploy/admin-api/uv-project/
+!deploy/admin-api/uv-project/pyproject.toml
+!deploy/admin-api/uv-project/uv.lock
+!deploy/admin-api/uv-project/.python-version
 **/.env
 **/.env.*
 **/*.pem
@@ -18,8 +19,5 @@
 **/secrets/**
 **/__pycache__/**
 **/*.pyc
-**/.mypy_cache/**
-**/.ruff_cache/**
-**/.venv/**
-**/dist/**
 **/build/**
+**/dist/**

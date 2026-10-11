@@ -13,7 +13,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from common.mcp_client_pool import PersistentMcpClientPool
 from common.models import JsonObject, json_object
 from common.settings import AnalysisSettings
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .result import decode_call_result
 
@@ -54,9 +54,7 @@ class AnalysisWorkspaceTransfers:
         result = await self._backend_pool.call_tool(name, arguments)
         decoded = decode_call_result(result)
         if not isinstance(decoded, dict):
-            raise AnalysisTransferError(
-                f"analysis backend {name} returned no structured result"
-            )
+            raise AnalysisTransferError(f"analysis backend {name} returned no structured result")
         value = json_object(decoded, context=f"analysis backend {name} result")
         error = value.get("error")
         if isinstance(error, str) and error.strip():
@@ -352,15 +350,11 @@ class AnalysisWorkspaceTransfers:
     ) -> JsonObject:
         target = self.workspace.target_path(workspace_path)
         if target.exists() and not overwrite:
-            raise AnalysisTransferError(
-                f"workspace destination already exists: {workspace_path}"
-            )
+            raise AnalysisTransferError(f"workspace destination already exists: {workspace_path}")
         if target.exists() and target.is_dir():
             raise AnalysisTransferError("workspace destination is a directory")
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.parent / (
-            f".{target.name}.analysis-transfer-{uuid.uuid4().hex}.part"
-        )
+        temporary = target.parent / (f".{target.name}.analysis-transfer-{uuid.uuid4().hex}.part")
         temporary.unlink(missing_ok=True)
 
         offset = 0
@@ -379,9 +373,7 @@ class AnalysisWorkspaceTransfers:
                     )
                     raw = chunk.get("data_base64")
                     if not isinstance(raw, str):
-                        raise AnalysisTransferError(
-                            "analysis artifact read returned invalid data"
-                        )
+                        raise AnalysisTransferError("analysis artifact read returned invalid data")
                     try:
                         data = base64.b64decode(raw, validate=True)
                     except Exception as exc:
@@ -395,9 +387,7 @@ class AnalysisWorkspaceTransfers:
                             "analysis artifact read returned invalid offset"
                         )
                     if data and next_offset <= offset:
-                        raise AnalysisTransferError(
-                            "analysis artifact read did not advance offset"
-                        )
+                        raise AnalysisTransferError("analysis artifact read did not advance offset")
                     offset = next_offset
                     raw_size = chunk.get("size_bytes")
                     if isinstance(raw_size, int):
@@ -410,9 +400,7 @@ class AnalysisWorkspaceTransfers:
                         break
                 handle.flush()
             if size_bytes is not None and offset != size_bytes:
-                raise AnalysisTransferError(
-                    "analysis artifact transfer ended at unexpected size"
-                )
+                raise AnalysisTransferError("analysis artifact transfer ended at unexpected size")
             if target.exists():
                 target.unlink()
             temporary.replace(target)
@@ -455,9 +443,7 @@ class AnalysisWorkspaceTransfers:
         )
         artifact_path = exported.get("path") or exported.get("output_path")
         if not isinstance(artifact_path, str) or not artifact_path:
-            raise AnalysisTransferError(
-                "analysis export did not return an artifact path"
-            )
+            raise AnalysisTransferError("analysis export did not return an artifact path")
         return await self._copy_artifact_to_workspace(
             project_id,
             artifact_path,
@@ -483,9 +469,7 @@ class AnalysisWorkspaceTransfers:
         )
         artifact_path = archived.get("path") or archived.get("output_path")
         if not isinstance(artifact_path, str) or not artifact_path:
-            raise AnalysisTransferError(
-                "analysis project archive did not return an artifact path"
-            )
+            raise AnalysisTransferError("analysis project archive did not return an artifact path")
         return await self._copy_artifact_to_workspace(
             project_id,
             artifact_path,

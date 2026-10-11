@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 from common.owner_contracts import OwnerAuthorityUnavailable
+from common.owner_runtime_abi import OwnerRuntimeLeaseClaim
 
 _LEASE_TYPE = "briareus.owner-runtime-lease+jwt"
 _LEASE_PURPOSE = "briareus-runtime-owner-lease-v1"
@@ -75,14 +76,12 @@ class RuntimeOwnerLeaseSigner:
         self._issuer = issuer
         self._kid = _public_key_fingerprint(key.public_key())
 
-    def sign(self, claim: object) -> str:
+    def sign(self, claim: OwnerRuntimeLeaseClaim) -> str:
         """Sign a fenced in-process source-only owner lease after SQL commit.
 
         The payload is structurally validated instead of blindly serializing
         an arbitrary dataclass from a caller request body.
         """
-        from projects._runtime_source import OwnerRuntimeLeaseClaim
-
         if not isinstance(claim, OwnerRuntimeLeaseClaim):
             raise OwnerAuthorityUnavailable("trusted Runtime ledger lease required")
         now = datetime.now(UTC)

@@ -30,6 +30,14 @@ class OwnerPhaseBinding:
 _BINDINGS: tuple[OwnerPhaseBinding, ...] = (
     OwnerPhaseBinding(
         "files",
+        "read",
+        "FilesRead",
+        frozenset({"files.read.observe"}),
+        "FilesReadSource.verify_committed_file_read",
+        native_required=True,
+    ),
+    OwnerPhaseBinding(
+        "files",
         "reserve",
         "FilesReserve",
         frozenset({"files.write.reserve"}),

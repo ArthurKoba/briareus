@@ -222,6 +222,8 @@ class OwnerEffectCommand(BaseModel):
             or not _uuid4(self.operation_uuid)
             or self.operation_uuid != self.idempotency_uuid
             or not _uuid4(self.agent_session_uuid)
+            or not _uuid4(self.project_id)
+            or not _uuid4(self.actor_id)
             or not _uuid4(self.recipient_service_id)
             or not _uuid4(self.recipient_instance_uuid)
         ):
@@ -263,6 +265,8 @@ class OwnerEffectReceipt(BaseModel):
             or not _uuid4(self.operation_uuid)
             or self.idempotency_uuid != self.operation_uuid
             or not _uuid4(self.agent_session_uuid)
+            or not _uuid4(self.project_id)
+            or not _uuid4(self.actor_id)
             or not _uuid4(self.recipient_service_id)
             or not _uuid4(self.recipient_instance_uuid)
             or self.expires_at.tzinfo is None
@@ -405,6 +409,8 @@ class OwnerEffectClient:
         if (
             scope is None
             or scope.action != action
+            or scope.project_id != invocation.project_id
+            or scope.agent_session_uuid != invocation.session_uuid
             or owner not in _PHASES
             or phase not in _PHASES[owner]
             or not valid_project_revision(target_sha256)
@@ -416,6 +422,13 @@ class OwnerEffectClient:
         uuid = original_operation_uuid or scope.request_uuid
         if uuid != scope.request_uuid or not _uuid4(uuid):
             raise OwnerEffectUnavailable("OWNER_ORIGINAL_UUID_MISMATCH")
+        for embedded_field in ("operation_uuid", "original_operation_uuid"):
+            embedded_uuid = getattr(payload, embedded_field, None)
+            if embedded_uuid is not None and embedded_uuid != uuid:
+                raise OwnerEffectUnavailable("OWNER_EMBEDDED_ORIGINAL_UUID_MISMATCH")
+        payload_key = getattr(payload, "idempotency_key", None)
+        if payload_key is not None and payload_key != str(uuid):
+            raise OwnerEffectUnavailable("OWNER_EMBEDDED_IDEMPOTENCY_KEY_MISMATCH")
         permit = await self.authority.require(invocation, action)
         fence = OwnerFenceDTO.from_permit(permit)
         peer = await self._recipient(invocation)
@@ -680,6 +693,11 @@ class OwnerEffectClient:
             not isinstance(command, OwnerEffectCommand)
             or not isinstance(source_command, A11OwnerCommandDTO)
             or command.operation_uuid != source_command.operation_uuid
+            or source_command.idempotency_key != str(command.operation_uuid)
+            or invocation.operation_scope is None
+            or invocation.operation_scope.action != command.action
+            or invocation.operation_scope.project_id != invocation.project_id
+            or invocation.operation_scope.agent_session_uuid != invocation.session_uuid
             or command.project_id != invocation.project_id
             or command.agent_session_uuid != invocation.session_uuid
         ):

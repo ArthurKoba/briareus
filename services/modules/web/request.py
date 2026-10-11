@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from common.models import JsonObject, JsonValue
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .errors import CurlError
 from .presets import _PRESETS, DEFAULT_CURL_PRESET
@@ -121,9 +121,7 @@ def _has_sensitive_redirect_state(
     headers: dict[str, str],
     cookies: dict[str, str] | None,
 ) -> bool:
-    return bool(cookies) or any(
-        name.casefold() in _SENSITIVE_HEADERS for name in headers
-    )
+    return bool(cookies) or any(name.casefold() in _SENSITIVE_HEADERS for name in headers)
 
 
 def _body_source(

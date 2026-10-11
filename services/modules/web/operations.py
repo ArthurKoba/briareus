@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from common.models import JsonObject, JsonValue, json_value
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .errors import CurlError
 from .executor import _build_curl_command, _execute_curl, _metadata_from_stdout, _system_curl_binary
@@ -194,9 +194,7 @@ def curl_download_impl(
         if not store_http_errors and not (200 <= status < 400):
             diagnostic = _http_status_diagnostic(status)
             hint = diagnostic["error_hint"] if diagnostic else f"HTTP {status}"
-            raise CurlError(
-                f"HTTP response was not stored as a file: {hint}"
-            )
+            raise CurlError(f"HTTP response was not stored as a file: {hint}")
         size = output_path.stat().st_size
         if size > max_bytes:
             raise CurlError("download exceeded max_bytes")
@@ -275,9 +273,7 @@ def curl_stream_capture_impl(
             f"duration_seconds must be greater than 0 and at most {_MAX_DURATION_SECONDS}"
         )
     if max_bytes <= 0 or max_bytes > max_file_bytes:
-        raise CurlError(
-            f"max_bytes must be between 1 and {max_file_bytes}"
-        )
+        raise CurlError(f"max_bytes must be between 1 and {max_file_bytes}")
 
     clean_method = _validate_method(method)
     request_url = _with_query(_validate_url(url), query)
@@ -294,14 +290,10 @@ def curl_stream_capture_impl(
         max_file_bytes=max_file_bytes,
     )
 
-    fd_headers, raw_headers = tempfile.mkstemp(
-        prefix="curl-stream-headers-"
-    )
+    fd_headers, raw_headers = tempfile.mkstemp(prefix="curl-stream-headers-")
     os.close(fd_headers)
     header_path = Path(raw_headers)
-    fd_output, raw_output = tempfile.mkstemp(
-        prefix="curl-stream-output-"
-    )
+    fd_output, raw_output = tempfile.mkstemp(prefix="curl-stream-output-")
     os.close(fd_output)
     output_path = Path(raw_output)
 

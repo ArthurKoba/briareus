@@ -39,7 +39,7 @@ _OWNER_MODELS: dict[OwnerName, tuple[type[DeclarativeBase], tuple[str, ...]]] = 
             "teams._persistence",
             "projects._persistence",
             "agents._persistence",
-            "authorization._scoped_events_persistence",
+            "projects._scoped_events_persistence",
             "projects._control_ledger",
         ),
     ),
@@ -47,7 +47,6 @@ _OWNER_MODELS: dict[OwnerName, tuple[type[DeclarativeBase], tuple[str, ...]]] = 
         CatalogBase,
         (
             "projects._resource_persistence",
-            "authorization._platform_persistence",
             "projects._catalog_ledger",
         ),
     ),

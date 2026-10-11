@@ -8,9 +8,11 @@ orchestrator fan-in. Never promote staging-source PASS into Docker/DB_RUNTIME.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shlex
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -54,6 +56,52 @@ def watch_covered(source: str, watches: list[str]) -> bool:
     )
 
 
+def check_independently_recomputed_source_graph(
+    source_root: Path, units: dict[str, object]
+) -> None:
+    """Fail closed if changed Backend/Runtime imports outrun Docker COPY/Watch.
+
+    Only call accepted pure source-graph functions. Do NOT stage/build wheels
+    or install packages to reproduce release dependency coverage.
+    """
+    import sys
+
+    source_root=source_root.resolve()
+    if not (source_root/'scripts/owner_source_graph.py').is_file():
+        fatal('accepted Backend exact source-graph producer absent')
+    if not (source_root/'services/bridge/package_graph.py').is_file():
+        fatal('accepted Runtime exact source-graph producer absent')
+    sys.path.insert(0,str(source_root/'scripts'))
+    sys.path.insert(0,str(source_root/'services/bridge'))
+    from owner_source_graph import source_closure
+    from package_graph import release_manifest
+    backend=source_closure(source_root)
+    runtime=release_manifest(source_root)
+    owners={'identity':'identity','authorization':'access',
+            'platform':'platform','resources':'resources'}
+    for module, record in units.items():
+        if module in owners:
+            owner=owners[module]
+            expected={file['path'] for package in ('common',owner)
+                      for file in backend['units'][package]}
+        elif module in runtime['release_units']:
+            item=runtime['release_units'][module]
+            if item['dynamic_imports_to_review']:
+                fatal(f'{module}: runtime source graph has unresolved dynamic imports')
+            expected=set(item['source_paths'])
+        elif module=='admin-api':
+            # Published Admin API remains a fail-closed health-only shell.
+            # Any new BFF import needs a fresh reviewed source dependency graph.
+            expected={'services/admin-api/src/platform_runtime.py'}
+        else:
+            fatal(f'{module}: no reviewed source-graph owner')
+        actual=set(record['files'])
+        if actual!=expected:
+            fatal(f'{module}: real source graph no longer matches copied inputs: '
+                  f'missing={sorted(expected-actual)} surplus={sorted(actual-expected)}')
+    print('ACCEPTED_OWNER_RUNTIME_SOURCE_GRAPH_12_OF_12_EXACT')
+
+
 def run(source_root: Path, allow_pending: bool) -> None:
     registry=json.loads((ROOT/'APPLICATIONS.json').read_text())
     apps=registry['applications']
@@ -65,13 +113,19 @@ def run(source_root: Path, allow_pending: bool) -> None:
         fatal('wrong deploy module directories')
     if registry['provisioning_status']!='source_only_uv_direct_live_provisioning_blocked':
         fatal('live Apply guard not present')
-    if registry.get('management',{}).get('build_strategy')!='coolify_git_webhook_uv_cached_deps_noneditable_project':
+    if registry.get('management',{}).get('build_strategy')!='coolify_uv_frozen_per_service_source_run_no_first_party_wheels':
         fatal('uv direct build source of truth is missing')
     docs=sorted(p.name for p in ROOT.glob('*.md'))
     if docs != ['README.md']:
         fatal(f'duplicate active deployment manuals: {docs}')
     if (ROOT/'FANIN.json').exists():
         fatal('obsolete provider-parent FANIN must not be active')
+    source_inputs=json.loads((ROOT/'SELECTIVE_UV_SOURCE.json').read_text())
+    source_units=source_inputs['modules']
+    expected_python=MODULES-{'data','admin-ui'}
+    if set(source_units)!=expected_python:
+        fatal('source-only uv graph must cover exactly twelve Python Apps')
+    check_independently_recomputed_source_graph(source_root,source_units)
     cfg=registry['configuration_contract']
     manifest=json.loads((ROOT/'data/config/owner-databases.json').read_text())
     rows={x['module']:x for x in manifest['initial']}
@@ -244,35 +298,81 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 if forbidden in dockertext:
                     fatal(f'{module}: obsolete wheel distribution/runtime shortcut: {forbidden}')
             expected_deps='uv sync --frozen --no-dev --no-install-project'
-            if module=='web':
-                expected_deps='uv sync --frozen --no-dev --group web --no-install-project'
             if f'RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared {expected_deps}' not in dockertext:
-                fatal(f'{module}: missing cached dependency-only build layer')
-            expected_project='uv sync --frozen --no-dev --no-editable --reinstall-package briareus'
-            if module=='web':
-                expected_project='uv sync --frozen --no-dev --group web --no-editable --reinstall-package briareus'
-            if f'RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared {expected_project}' not in dockertext:
-                fatal(f'{module}: Briareus wheel not force-reinstalled from current Git source')
-            if dockertext.index(expected_deps)>dockertext.index('COPY services/') or dockertext.index(expected_project)<dockertext.index('COPY scripts/'):
-                fatal(f'{module}: dependency cache or actual project installation wrong order')
-            if 'CMD ' not in dockertext or 'uv sync ' in dockertext.split('CMD ')[-1]:
-                fatal(f'{module}: runtime should run service without uv sync')
+                fatal(f'{module}: native per-service dependency-only uv sync missing')
+            if 'uv build' in dockertext or 'uv pip install' in dockertext:
+                fatal(f'{module}: first-party wheel pipeline is forbidden')
+            if '"uv", "run", "--frozen", "--no-sync", "--no-dev"' not in dockertext:
+                fatal(f'{module}: own service must run directly via uv run --no-sync')
+            unit=source_units[module]
+            sources=unit['files']
+            if not sources or not isinstance(sources,dict):
+                fatal(f'{module}: missing exact source input graph')
+            dep=unit['dependency_project']
+            expected_docker_sources=set(sources)|{
+                dep['source'],dep['lock'],dep['python'],unit['provenance_script']
+            }
+            actual_docker_sources=set(docker_copies(docker))
+            if actual_docker_sources!=expected_docker_sources:
+                fatal(f'{module}: actual COPY differs from exact uv unit inputs')
             expected={f'deploy/{module}/Dockerfile',f'deploy/{module}/Dockerfile.dockerignore',
                       f'deploy/{module}/docker-compose.yaml',f'deploy/{module}/docker-compose.coolify.yaml',
-                      'pyproject.toml','uv.lock','README.md','LICENSE','.python-version','services/**','scripts/**'}
-            if set(watches)!=expected:
-                fatal(f'{module}: full source build has uncovered inputs/watches')
+                      *expected_docker_sources}
+            if set(watches)!=expected or set(watches)!=set(unit['watches']):
+                fatal(f'{module}: native Watch Paths differ from exact Docker/source inputs')
+            if any(x in watches for x in ('services/**','scripts/**','pyproject.toml','uv.lock')):
+                fatal(f'{module}: monolithic source or dependency watcher returned')
             ignore=(ROOT/module/'Dockerfile.dockerignore').read_text()
-            for needed in ('!pyproject.toml','!uv.lock','!README.md','!LICENSE','!.python-version',
-                           '!services/','!services/**','!scripts/','!scripts/**'):
-                if needed not in ignore:
-                    fatal(f'{module}: missing narrow Docker COPY input: {needed}')
-            for src in docker_copies(docker):
-                if src.startswith('deploy/'):
-                    fatal(f'{module}: obsolete deploy install artifact reached image')
-                path=source_root/src.rstrip('/')
-                if not path.exists() or not watch_covered(src,watches):
-                    fatal(f'{module}: actual Docker COPY input uncovered: {src}')
+            if f'!deploy/{module}/' not in ignore or f'!deploy/{module}/uv-project/' not in ignore:
+                fatal(f'{module}: uv-project or its parent hidden from Docker context')
+            for src in expected_docker_sources:
+                path=(ROOT/src.removeprefix('deploy/')) if src.startswith('deploy/') else source_root/src
+                if not path.is_file() or f'!{src}' not in ignore:
+                    fatal(f'{module}: source COPY input missing or Docker-ignored {src}')
+            for src,target in sources.items():
+                if f'COPY {src} /app/src/{target}' not in dockertext:
+                    fatal(f'{module}: selected source mounted at wrong Python import path {src}')
+            dep_project=tomllib.loads((ROOT/dep['source'].removeprefix('deploy/')).read_text())
+            if dep_project.get('tool',{}).get('uv',{}).get('package') is not False:
+                fatal(f'{module}: uv project must never install a first-party wheel')
+            if not dep_project['project']['dependencies']:
+                fatal(f'{module}: empty dependency resolution inputs')
+            lock=tomllib.loads((ROOT/dep['lock'].removeprefix('deploy/')).read_text())
+            if not any(x['name']==dep_project['project']['name'] for x in lock.get('package',[])):
+                fatal(f'{module}: own uv lock is not aligned to its project')
+            expected_pins={
+                f"{pkg['name']}=={pkg['version']}" for pkg in lock.get('package',[])
+                if pkg['name']!=dep_project['project']['name']
+            }
+            declared_pins=set(dep_project['tool']['uv'].get('constraint-dependencies',[]))
+            if declared_pins!=expected_pins:
+                fatal(f'{module}: unnecessary or missing transitive uv constraints')
+            accepted_packages={
+                pkg['name']:pkg['version']
+                for pkg in tomllib.loads((source_root/'uv.lock').read_text())['package']
+            }
+            if any(accepted_packages.get(pkg['name'])!=pkg['version']
+                   for pkg in lock.get('package',[])
+                   if pkg['name']!=dep_project['project']['name']):
+                fatal(f'{module}: dependency resolution diverged from accepted root lock')
+            digest=hashlib.sha256(json.dumps(
+                sorted((target,hashlib.sha256((source_root/src).read_bytes()).hexdigest())
+                       for src,target in sources.items()),
+                separators=(',',':')
+            ).encode()).hexdigest()
+            expected_version=f"0.1.0+{module.replace('-', '')}.s{digest[:12]}"
+            if unit['version']!=expected_version:
+                fatal(f'{module}: source digest differs from source-only release version')
+            if unit.get('provenance_script')!='deploy/runtime_write_provenance.py':
+                fatal(f'{module}: source-digest provenance generator absent')
+            if f'RUN python /app/runtime_write_provenance.py {module}' not in dockertext:
+                fatal(f'{module}: runtime release provenance not derived from image source bytes')
+            writer=(ROOT/'runtime_write_provenance.py').read_text()
+            if 'BRIAREUS_UV_SOURCE_VERSION' not in writer or 'write_source_metadata' not in writer:
+                fatal(f'{module}: build-time version witness source missing')
+            if unit['actual_first_party_install'] is not False:
+                fatal(f'{module}: first-party source install re-enabled')
+
         else:
             for src in docker_copies(docker):
                 path=ROOT/src.removeprefix('deploy/') if src.startswith('deploy/') else source_root/src
@@ -340,7 +440,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
     if any(ROOT.glob('*/wheel-pin.json')) or (ROOT/'install_wheel_release.py').exists():
         fatal('old external wheel release artifacts still active')
     print('UV_DIRECT_SOURCE_STATIC_PASS; 14 Apps, 28 YAML, 12 first-party uv images, four owner DBs')
-    print('Dependencies cached before source COPY; local package force-reinstalled non-editably at BUILD; no uv sync in service CMD.')
+    print('Frozen per-service uv-dependencies; exact source COPY; uv run --no-sync; zero first-party wheel artifacts.')
     print('Actual Coolify image BUILD, new SQL role/DB/OS/C2 acceptance not established by STATIC.')
 
 

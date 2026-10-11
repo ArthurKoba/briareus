@@ -287,7 +287,8 @@
     "network": "briareus-net",
     "auto_deploy_during_bootstrap": false,
     "deploy_during_bootstrap": false,
-    "build_strategy": "coolify_git_webhook_uv_cached_deps_noneditable_project"
+    "build_strategy": "coolify_uv_frozen_per_service_source_run_no_first_party_wheels",
+    "selective_source_manifest": "deploy/SELECTIVE_UV_SOURCE.json"
   },
   "configuration_contract": {
     "team_shared": [
