@@ -7,30 +7,54 @@ Host/Origin, original operation identity and long-lived streaming behavior.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-
 from starlette.applications import Starlette
 from starlette.middleware import Middleware as ASGIMiddleware
 
-from modules.project_runtime.runtime_telemetry import RuntimeTelemetry
-
+from .gateway_transport import (
+    PrivateGatewayTransport,
+    TrustedGatewaySourcePort,
+    TrustedWebSocketDialer,
+)
 from .single_origin import SingleOriginGuard, unavailable_routes
 
-_runtime_telemetry = RuntimeTelemetry.construct("gateway")
 
+def private_gateway_application(
+    *,
+    current_source: TrustedGatewaySourcePort | None = None,
+    websocket_dialer: TrustedWebSocketDialer | None = None,
+    public_static_enabled: bool = False,
+) -> Starlette:
+    """No protected routes without A18 C2. Public static needs D6 opt-in.
 
-@asynccontextmanager
-async def _gateway_lifespan(_app: Starlette) -> AsyncIterator[None]:
-    # No legacy backend pools or OAuth bootstrap are created by this closed
-    # ingress; no global owner DB, client, session manager or tool registration.
-    yield
-
-
-app = _runtime_telemetry.attach(
-    Starlette(
-        routes=unavailable_routes(),
-        middleware=[ASGIMiddleware(SingleOriginGuard)],
-        lifespan=_gateway_lifespan,
+    The default app never opens a client or public service listener. A D6
+    source-accepted static-only release can opt into just GET/HEAD on the
+    three owner-approved crawler-visible root files, independent of C2.
+    """
+    transport = PrivateGatewayTransport(
+        source=current_source,
+        websocket_dialer=websocket_dialer,
+        public_static_enabled=public_static_enabled,
     )
-)
+    private_app = Starlette(
+        routes=[*transport.routes(), *unavailable_routes()],
+        middleware=[
+            ASGIMiddleware(
+                SingleOriginGuard,
+                allow_verified_websocket=(
+                    current_source is not None and websocket_dialer is not None
+                ),
+            )
+        ],
+        lifespan=transport.lifespan,
+    )
+    if current_source is None:
+        # Without current A18 trust only the explicitly D6-released public
+        # static reads may work. No FastMCP/provider/collector startup, no
+        # protected route or signed JTI is implicitly enabled.
+        return private_app
+    from modules.project_runtime.runtime_telemetry import RuntimeTelemetry
+
+    return RuntimeTelemetry.construct("gateway").attach(private_app)
+
+
+app = private_gateway_application()

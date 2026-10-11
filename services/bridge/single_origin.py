@@ -15,8 +15,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-PUBLIC_ORIGIN = "https://briaray.koba-nexus.ru"
-PUBLIC_HOST = "briaray.koba-nexus.ru"
+PUBLIC_ORIGIN = "https://briareus.koba-nexus.ru"
+PUBLIC_HOST = "briareus.koba-nexus.ru"
 MCP_MODULES: tuple[Literal["files", "web", "terminal", "svc", "infrastructure", "reverse"], ...] = (
     "files",
     "web",
@@ -65,8 +65,9 @@ class SingleOriginGuard:
     termination and service-identity boundary must be separately verified.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, allow_verified_websocket: bool = False) -> None:
         self.app = app
+        self.allow_verified_websocket = allow_verified_websocket
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in {"http", "websocket"}:
@@ -96,7 +97,7 @@ class SingleOriginGuard:
             return
         # A WebSocket upgrade must not silently become a public alternative
         # to signed MCP SSE/streamable HTTP and gateway C2 user approval.
-        if scope["type"] == "websocket":
+        if scope["type"] == "websocket" and not self.allow_verified_websocket:
             await send({"type": "websocket.close", "code": 1008})
             return
         await self.app(scope, receive, send)
