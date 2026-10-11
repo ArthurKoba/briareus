@@ -166,8 +166,10 @@ def run(source_root: Path, allow_pending: bool) -> None:
                     f'{owner}_POSTGRES_{field}' for owner in ('IDENTITY','ACCESS','CONTROL','CATALOG')
                     for field in ('USER','PASSWORD')
                 }:
-                    if value != '$'+'{'+key+':-}' or actual != '{{project.'+key+'}}':
-                        fatal(f'data: PostgreSQL bootstrap credential must be a protected Project reference: {key}')
+                    if value != chr(36)+'{'+key+':-}' or actual != chr(36)+'{'+key+':?}':
+                        fatal(f'data: scoped PostgreSQL bootstrap credential must be an editable required Coolify variable: {key}')
+                    if a.get('shared_variables',{}).get(key) != '{{project.'+key+'}}':
+                        fatal(f'data: scoped PostgreSQL credential must bind to Project Shared {key}')
                 elif actual!=value:
                     fatal(f'{module}: base/Coolify ENV mismatch {key}')
             used=set(REQUIRED.findall(str(override['services'][service]['environment'])))
@@ -202,6 +204,18 @@ def run(source_root: Path, allow_pending: bool) -> None:
             sql=(ROOT/module/'owner-bootstrap.psql')
             if not all(p.is_file() for p in (docker,shell,sql)):
                 fatal('data: missing existing-PostgreSQL-container owner bootstrap source')
+            # Coolify discovers Application env vars from dollar-braced Compose
+            # interpolation, NOT literal project shared-reference strings.
+            declared_data=override['services']['briareus-postgres']['environment']
+            data_registry=next(a for a in apps if a['module']=='data')
+            shared=data_registry['shared_variables']
+            for scope in ('IDENTITY','ACCESS','CONTROL','CATALOG'):
+                for suffix in ('USER','PASSWORD'):
+                    key=f'{scope}_POSTGRES_{suffix}'
+                    if declared_data.get(key)!=chr(36)+'{'+key+':?}':
+                        fatal(f'data: {key} must be a required Coolify Application interpolation')
+                    if shared.get(key)!='{{project.'+key+'}}':
+                        fatal(f'data: {key} lacks scoped Project Shared binding')
             if 'FROM postgres:18.6-alpine' not in docker.read_text():
                 fatal('data: upstream PostgreSQL version changed')
             copy_ignore=(ROOT/module/'Dockerfile.dockerignore').read_text()

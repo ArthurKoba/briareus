@@ -299,8 +299,9 @@ def main() -> int:
         app_uuid=app.get("uuid")
         if not app_uuid or not RESOURCE_ID.fullmatch(app_uuid):
             raise BootstrapError(f"{name}: invalid Coolify Application UUID")
-        # Reconcile safe source/watch state; auto deploy remains off until later explicit acceptance.
-        patch={"git_branch":args.branch,"base_directory":spec["base_directory"],"docker_compose_location":spec["docker_compose_location"],"watch_paths":desired_watch,"is_auto_deploy_enabled":False,"is_preview_deployments_enabled":False,"autogenerate_domain":autogenerate_domain(root, spec)}
+        # Never disable the owner's existing on-push Auto Deploy while
+        # reconciling environmental references and source selection.
+        patch={"git_branch":args.branch,"base_directory":spec["base_directory"],"docker_compose_location":spec["docker_compose_location"],"watch_paths":desired_watch,"autogenerate_domain":autogenerate_domain(root, spec)}
         if args.apply:
             api(base,token,"PATCH",f"applications/{app_uuid}",patch)
         envs=api(base,token,"GET",f"applications/{app_uuid}/envs")
