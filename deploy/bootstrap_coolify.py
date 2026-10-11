@@ -161,16 +161,9 @@ def main() -> int:
         bindings=app.get("shared_variables",{})
         if not isinstance(bindings,dict):
             raise BootstrapError(f"{module}: shared_variables must be a mapping")
-        owner_scopes={'identity':'IDENTITY','authorization':'ACCESS',
-                      'platform':'CONTROL','resources':'CATALOG'}
-        owner_db_inputs={'POSTGRES_USER','POSTGRES_PASSWORD'}
         for key,ref in bindings.items():
             match=SHARED_REF.fullmatch(ref) if isinstance(ref,str) else None
-            shared_name=(
-                owner_scopes[module]+'_'+key
-                if module in owner_scopes and key in owner_db_inputs
-                else key
-            )
+            shared_name=key
             if (not match or shared_name!=match.group(2)
                     or shared_name not in allowed_scopes[match.group(1)]):
                 raise BootstrapError(f"{module}: unapproved Shared variable binding for {key}")

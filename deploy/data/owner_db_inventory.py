@@ -13,15 +13,15 @@ def main() -> int:
     args=parser.parse_args()
     path=Path(__file__).resolve().parent/'config/owner-databases.json'
     data=json.loads(path.read_text())
-    assert data['provisioning_status']=='source_only_owner_approval_required'
+    assert data['provisioning_status']=='automatic_on_data_start_pending_live_observation'
     assert len(data['initial'])==4
     if args.json:
         print(json.dumps(data,indent=2))
     else:
-        print('SOURCE-ONLY OWNER DATABASES — NOT PROVISIONED')
+        print('AUTO BOOTSTRAP OWNER DATABASES — LIVE STATUS UNVERIFIED')
         for row in data['initial']:
-            print(f"{row['owner']}: database={row['database']} one_role={row['owner_role']} owner_env={row['role_env']},{row['secret_env']} own_ddl={row['owner_role_may_apply_own_schema_ddl']}")
-        print('REQUIRES independent credentials/backup/role+DDL authority and explicit live-cutover approval')
+            print(f"{row['owner']}: database={row['database']} source_user={row['role_env']} secret_source={row['secret_env']}")
+        print('PostgreSQL creates the four DBs at start; each ASGI owner runs Alembic automatically')
     return 0
 
 
