@@ -111,16 +111,25 @@ def check_coverage(source_root: Path, allow_pending: bool) -> list[str]:
     # conservatively covers real build inputs but cannot resurrect this job.
     if (source_root/'scripts/alembic_greenfield/env.py').exists():
         raise ImpactError('retired global migrator unexpectedly exists in source tree')
-    # The current full Hatch project is installed into each Python image, so
-    # its source touches every Python consumer while Data/UI remain separate.
-    # This correctness tradeoff prevents independent Python-only rebuilds until
-    # package/import/build graphs are split and independently reviewed.
-    python_apps={a['module'] for a in registry['applications'] if a['module'] not in {'data','admin-ui'}}
-    for owner in ('identity','access','platform','resources'):
+    # Native uv-run images COPY exact per-unit inputs, not the former full
+    # Hatch source graph. Owner migration files belong only to their owner.
+    owner_apps={'identity':'identity','access':'authorization',
+                'platform':'platform','resources':'resources'}
+    for owner, app in owner_apps.items():
         source=f'scripts/alembic_owners/{owner}/env.py'
-        derived=generated_impact([source])
-        if set(derived[source])!=python_apps:
-            raise ImpactError(f'{owner}: shared Hatch source not watched by all Python consumers')
+        actual=generated_impact([source])[source]
+        if actual!=[app]:
+            raise ImpactError(f'{owner}: Alembic changed unrelated build consumers: {actual}')
+    samples={
+        'services/projects/_catalog_ledger.py':['resources'],
+        'services/modules/files/project_files.py':['files','web'],
+        'admin-web-app/src/main.ts':['admin-ui'],
+        'deploy/data/docker-compose.yaml':['data'],
+    }
+    for source,expected in samples.items():
+        actual=generated_impact([source])[source]
+        if set(actual)!=set(expected):
+            raise ImpactError(f'{source}: incorrect actual import dependency impact: {actual}')
     return missing
 
 

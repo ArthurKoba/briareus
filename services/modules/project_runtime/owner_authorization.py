@@ -107,8 +107,8 @@ class OwnerDecision(BaseModel):
                     self.operation_uuid,
                 )
             )
-            or not isinstance(self.project_id, UUID)
-            or not isinstance(self.actor_id, UUID)
+            or not _uuid4(self.project_id)
+            or not _uuid4(self.actor_id)
             or not isinstance(self.expires_at, datetime)
             or self.expires_at.tzinfo is None
             or not _uuid4(self.authority_epoch)
@@ -129,7 +129,7 @@ class OwnerDecision(BaseModel):
             if (
                 not valid_project_revision(self.project_revision)
                 or self.owner_scope not in {"team", "project"}
-                or self.owner_id is None
+                or not _uuid4(self.owner_id)
                 or (self.owner_scope == "project" and self.owner_id != self.project_id)
                 or self.session_hard_expires_at is not None
             ):
@@ -284,6 +284,7 @@ class SplitOwnerSourceAuthorization(ProjectAccessPort):
                 not _uuid4(jti)
                 or claims["purpose"] != "split-owner-effect-v1"
                 or type(claims["iat"]) is not int
+                or type(claims["nbf"]) is not int
                 or type(claims["exp"]) is not int
                 or not 0 < claims["exp"] - claims["iat"] <= 15
                 or decoded != signed.decision
@@ -325,6 +326,9 @@ class SplitOwnerSourceAuthorization(ProjectAccessPort):
             or invocation.caller_evidence is None
             or invocation.operation_scope is None
             or invocation.operation_scope.action != action
+            or invocation.operation_scope.project_id != invocation.project_id
+            or invocation.operation_scope.agent_session_uuid != invocation.session_uuid
+            or not _uuid4(invocation.operation_scope.request_uuid)
         ):
             raise ProjectAccessDenied("SPLIT_OWNER_SERVICE_PORTS_REQUIRED")
         try:

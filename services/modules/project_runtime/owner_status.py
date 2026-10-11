@@ -147,6 +147,7 @@ def verify_signed_owner_status_v2(
             or status.operation_uuid != command.operation_uuid
             or status.idempotency_uuid != command.idempotency_uuid
             or source_command.operation_uuid != command.operation_uuid
+            or source_command.idempotency_key != str(command.operation_uuid)
             or source_command.target_owner != owner_signer
             or source_command.caller_user_id != command.actor_id
             or source_command.project_id != command.project_id

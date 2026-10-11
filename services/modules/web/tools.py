@@ -4,7 +4,7 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from common.models import JsonObject, JsonValue
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 
 def register_curl_tools(

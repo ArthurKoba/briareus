@@ -27,8 +27,8 @@ from common.settings import (
     PrivateRuntimeSettings,
 )
 from common.websocket_proxy import relay_websocket
-from modules.files.workspace_store import WorkspaceFileStore
 from modules.project_runtime.runtime_telemetry import build_runtime_mcp
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .browser import BrowserManager
 from .browser_profile import DEFAULT_BROWSER_DESKTOP_PROFILE, resolve_chromium_gpu_args

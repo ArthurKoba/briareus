@@ -7,8 +7,8 @@ from common.settings import (
     FileSettings,
     PrivateRuntimeSettings,
 )
-from modules.files.workspace_store import WorkspaceFileStore
 from modules.project_runtime.runtime_telemetry import build_runtime_mcp
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .provider import AnalysisToolProvider
 from .workspace_transfer import AnalysisWorkspaceTransfers, register_workspace_transfer_tools

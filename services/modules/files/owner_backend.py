@@ -75,6 +75,10 @@ class FilesOwnerBackend:
             intent.project_id != invocation.project_id
             or intent.session_uuid != invocation.session_uuid
             or intent.operation_uuid != payload.operation_uuid
+            or (
+                isinstance(payload, FilesReserve)
+                and payload.idempotency_key != str(payload.operation_uuid)
+            )
             or intent.target_audience != "files"
             or intent.instance_uuid != peer.instance_uuid
             or intent.payload_sha256 != files_payload_fingerprint(payload)
@@ -226,9 +230,10 @@ class FilesOwnerBackend:
         )
         info = result.payload
         if not info.found:
-            if info.quota is not None or result.attestation.receipt.state != "committed":
-                raise OwnerEffectUnavailable("FILES_OWNER_INSPECT_ABSENCE_UNVERIFIED", unknown=True)
-            return None
+            # A signed SQL inspection cannot establish OS absence, even
+            # when the owner has no reservation row. Freeze the ORIGINAL
+            # request UUID: never allow a caller to treat None as a retry.
+            raise OwnerEffectUnavailable("FILES_OWNER_ABSENT_SQL_NOT_NATIVE_PROOF", unknown=True)
         if info.quota is None or info.quota.operation_uuid != command.operation_uuid:
             raise OwnerEffectUnavailable("FILES_OWNER_INSPECT_RECEIPT_INVALID", unknown=True)
         if result.attestation.receipt.state != "committed":

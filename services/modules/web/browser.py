@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, CDPSession, Locator, Page, Playwright
 
 from common.models import JsonObject, JsonValue
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .browser_extensions import BrowserExtensionRegistry
 
@@ -491,9 +491,7 @@ class BrowserManager:
         try:
             await page.goto("chrome://extensions/", wait_until="domcontentloaded")
             requested_ids = (
-                None
-                if extension_ids is None
-                else [value for value in extension_ids if value]
+                None if extension_ids is None else [value for value in extension_ids if value]
             )
             result = await page.evaluate(
                 """
@@ -573,9 +571,7 @@ class BrowserManager:
                 },
             )
         except Exception as exc:
-            raise BrowserError(
-                f"Chromium developer-mode synchronization failed: {exc}"
-            ) from exc
+            raise BrowserError(f"Chromium developer-mode synchronization failed: {exc}") from exc
         finally:
             with contextlib.suppress(Exception):
                 await page.close()
@@ -585,10 +581,11 @@ class BrowserManager:
         extensions = payload.get("extensions")
         extension_items = extensions if isinstance(extensions, list) else []
         eligible_raw = payload.get("eligibleExtensionIds")
-        eligible_ids = {
-            value
-            for value in eligible_raw if isinstance(value, str)
-        } if isinstance(eligible_raw, list) else set()
+        eligible_ids = (
+            {value for value in eligible_raw if isinstance(value, str)}
+            if isinstance(eligible_raw, list)
+            else set()
+        )
         if extension_ids is None:
             self._managed_user_scripts_extension_ids = eligible_ids
         else:
@@ -599,9 +596,7 @@ class BrowserManager:
                     self._managed_user_scripts_extension_ids.discard(extension_id)
 
         failures = [
-            item
-            for item in extension_items
-            if isinstance(item, dict) and not bool(item.get("ok"))
+            item for item in extension_items if isinstance(item, dict) and not bool(item.get("ok"))
         ]
         if failures:
             details = "; ".join(
@@ -901,9 +896,7 @@ class BrowserManager:
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "dev_extensions": self.dev_extensions(),
-            "managed_user_scripts_extension_count": len(
-                self._managed_user_scripts_extension_ids
-            ),
+            "managed_user_scripts_extension_count": len(self._managed_user_scripts_extension_ids),
             "user_scripts_follow_developer_access": True,
             "user_scripts_sync_error": self._user_scripts_sync_error,
             "observed": observed,

@@ -138,3 +138,47 @@ Coolify Git-backed Compose: Base directory `/deploy/<module>`, Docker Compose Lo
 **SOURCE/STATIC**: registry, YAML, Watch Paths, Docker COPY, отсутствие опасных флагов/общего migrator. **BUILD**: реальная сборка Docker image/UI; успешный stub `test`/`docker` job с `true` не является билдом. **DEV_RUNTIME**: живой конкретный контейнер, network/volume, owner DB head, безопасная миграция на согласованной БД. **PROTECTED_RUNTIME/C2**: реальный signed transport, актуальный principal/Team/Project/grants, OS/Files restrictions и browser-origin. **PRODUCTION** требует отдельных rollback/backup/нагрузки/monitoring gates. Нельзя повышать один уровень до другого без наблюдений.
 
 Проектный контракт архитектуры: `docs/architecture/storage-ownership-orchestrator-review.md`. Исторические и отменённые публикации остаются в истории Git и `coordination/`; не поддерживаются вторым активным руководством в `deploy/`. Состав и состояние источников меняются при последующих принятых задачах A11/R13; перед публикацией D4 обязан согласовать фактические импорты и owner Alembic paths с этими исходниками.
+
+## Прямая независимая сборка сервисов через uv run (D5 SOURCE/STATIC)
+
+**Принятое правило:** не создавать, не передавать и не устанавливать отдельные
+wheel-артефакты Briareus. Для каждого из 12 Python-сервисов — один существующий
+независимый Coolify Application / Dockerfile / Docker image, свой перечень
+исходников, свой ограниченный dependency pyproject.toml и frozen uv.lock в
+deploy/<module>/uv-project/, свои Watch Paths из того же exact source graph.
+
+1. В BUILDER-контейнере скопировать только три файла из per-service uv-project:
+   pyproject.toml, uv.lock и .python-version.
+2. Установить **сторонние** зависимости через uv sync --frozen --no-dev
+   --no-install-project с BuildKit cache /root/.cache/uv. Сервисный uv-project
+   содержит tool.uv.package=false; wheel самого Briareus не собирается и
+   не устанавливается. Для Web Playwright — прямая зависимость собственного
+   pyproject, не глобальная группа.
+3. Копировать только Python-файлы, перечисленные в
+   deploy/SELECTIVE_UV_SOURCE.json, в /app/src и один общий
+   deploy/runtime_write_provenance.py, без COPY всех services и scripts.
+4. В Docker BUILD выполнить python /app/runtime_write_provenance.py <module>,
+   получая service.version из реально скопированных исходников. Создаётся
+   только текстовый metadata свидетель в /app/.venv, не wheel и не mutable ENV.
+5. Запустить приложение через uv run --frozen --no-sync --no-dev
+   --project /app --directory /app/src python -m <входной модуль>.
+   Во время старта нет установки проекта и повторной синхронизации.
+
+deploy/verify_deploy_static.py и deploy/watch_impact.py --check проверяют
+14 приложений, SOURCE→Docker COPY→Dockerfile-specific ignore→Watch.
+Identity Alembic касается Identity, Catalog ledger — только Resources,
+Files source — Files и Web, так как Web реально импортирует часть Files.
+Общий provenance writer честно обслуживает все двенадцать контейнеров.
+
+Все 12 lock-файлов содержат индивидуальные прямые требования с точными
+версиями и constraints транзитивных библиотек из принятого корневого
+uv.lock. Constraints не устанавливают лишние пакеты.
+
+Нет uv build, uv pip install, install_wheel_release, передачи отдельно
+собранных wheel-артефактов, второго Docker host или внешнего builder.
+Только штатный существующий Coolify Docker Compose с uv.
+
+**Это SOURCE/STATIC candidate, НЕ опубликованный main.** Docker BUILD,
+живой Alembic, PostgreSQL, protected C2, OS/Files и реальная готовность
+должны подтверждаться независимо. Существующие fail-closed команды
+DEV_RUNTIME_TRANSPORT_PENDING / BRIAREUS_SVC_AUTH_PENDING не открываются.

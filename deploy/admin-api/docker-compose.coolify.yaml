@@ -1,15 +1,13 @@
 x-watch-path-coolify:
   - "deploy/admin-api/Dockerfile"
-  - "deploy/admin-api/docker-compose.yaml"
-  - "deploy/admin-api/docker-compose.coolify.yaml"
   - "deploy/admin-api/Dockerfile.dockerignore"
-  - "pyproject.toml"
-  - "uv.lock"
-  - "README.md"
-  - "LICENSE"
-  - ".python-version"
-  - "services/**"
-  - "scripts/**"
+  - "deploy/admin-api/docker-compose.coolify.yaml"
+  - "deploy/admin-api/docker-compose.yaml"
+  - "deploy/admin-api/uv-project/.python-version"
+  - "deploy/admin-api/uv-project/pyproject.toml"
+  - "deploy/admin-api/uv-project/uv.lock"
+  - "deploy/runtime_write_provenance.py"
+  - "services/admin-api/src/platform_runtime.py"
 
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.

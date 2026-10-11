@@ -23,6 +23,7 @@ from modules.project_runtime import (
 )
 
 from .a6_signed import A6FilesUnavailable, A6SignedFilesFlow, canonical_files_path
+from .a14_read_witness import A14FilesReadPreflight, FilesReadBusinessPreimage
 from .project_workspace import (
     ProjectFileEntry,
     ProjectFilePage,
@@ -61,10 +62,12 @@ class ProjectFilesService:
         *,
         max_file_bytes: int,
         a6_quota: A6SignedFilesFlow,
+        a14_read_witness: A14FilesReadPreflight | None = None,
     ) -> None:
         if not isinstance(a6_quota, A6SignedFilesFlow):
             raise A6FilesUnavailable("A6_FILES_SIGNED_QUOTA_REQUIRED")
         self.a6_quota = a6_quota
+        self.a14_read_witness = a14_read_witness
         self.authority = authority
         self.roots = roots
         self._store = ProjectWorkspaceFiles(roots, max_file_bytes=max_file_bytes)
@@ -108,6 +111,25 @@ class ProjectFilesService:
             phase=phase,
             max_bytes=max_bytes,
             operation_uuid=scope.request_uuid,
+        )
+
+    async def prepare_native_read_witness(
+        self,
+        invocation: ProjectInvocation,
+        *,
+        snapshot: ProjectFileSnapshot,
+        signed_native_evidence: object,
+    ) -> FilesReadBusinessPreimage:
+        """Private A14 source preflight; never mints or returns a read grant.
+
+        Physical C2 observer/Files owner must independently verify original
+        FileObject and native FD signature. Backend must re-verify both under
+        its Files SQL UoW; this prepares only an exact business payload.
+        """
+        if self.a14_read_witness is None:
+            raise A6FilesUnavailable("A14_FILES_NATIVE_WITNESS_UNCONFIGURED")
+        return await self.a14_read_witness.prepare(
+            invocation, snapshot=snapshot, evidence=signed_native_evidence
         )
 
     async def provision(self, invocation: ProjectInvocation) -> None:

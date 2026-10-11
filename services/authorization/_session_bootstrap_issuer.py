@@ -16,7 +16,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 
 from authorization._access_proof_reader import TrustedAccessActorSource
-from authorization._service_identity import ALLOWED_AUDIENCES
+from authorization._service_audience import ALLOWED_AUDIENCES
 from authorization._service_identity_persistence import ServiceKeyRow
 from authorization._session_persistence import ProjectAgentSessionRow
 from authorization._team_access_issuer import TrustedServiceAudiencePort

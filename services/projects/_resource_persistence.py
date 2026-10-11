@@ -13,6 +13,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -160,3 +161,64 @@ class VariableRow(ResourceOwnerColumns, CatalogBase):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ExternalOperationRow(CatalogBase):
+    """One irreversible provider effect per explicit operation identity.
+
+    A recorded 'dispatched' or 'unknown' outcome MUST NOT auto-execute again.
+    """
+
+    __tablename__ = "external_operations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('reserved', 'dispatched', 'succeeded', 'unknown')",
+            name="ck_external_operation_status",
+        ),
+        UniqueConstraint(
+            "actor_id",
+            "project_id",
+            "operation",
+            "idempotency_digest",
+            name="uq_external_operation_identity",
+        ),
+        UniqueConstraint(
+            "project_id",
+            "service_id",
+            "instance_uuid",
+            "operation_uuid",
+            name="uq_external_service_operation",
+        ),
+        Index("ix_external_unknown", "status", "created_at"),
+        Index(
+            "uq_external_uncertain_effect",
+            "project_id",
+            "resource_id",
+            "operation",
+            "request_fingerprint",
+            unique=True,
+            postgresql_where=text("status IN ('dispatched','unknown')"),
+        ),
+        {"schema": "resources"},
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    actor_id: Mapped[UUID] = mapped_column()
+    project_id: Mapped[UUID] = mapped_column()
+    session_uuid: Mapped[UUID] = mapped_column()
+    resource_id: Mapped[UUID] = mapped_column(
+        ForeignKey("resources.integrations.id", ondelete="RESTRICT")
+    )
+    resource_version: Mapped[int] = mapped_column(Integer)
+    service_id: Mapped[UUID] = mapped_column(nullable=False)
+    instance_uuid: Mapped[UUID] = mapped_column(nullable=False)
+    operation_uuid: Mapped[UUID] = mapped_column(nullable=False)
+    operation: Mapped[str] = mapped_column(String(128))
+    idempotency_digest: Mapped[str] = mapped_column(String(64))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    result_sha256: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="reserved")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

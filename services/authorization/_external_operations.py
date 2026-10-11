@@ -21,10 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common.platform_errors import AccessDenied, Conflict, InvalidInput
 from common.platform_ids import AgentSessionUuid, PlatformProjectId
 from projects._resource_domain import ResourceKind
+from projects._resource_persistence import ExternalOperationRow
 from projects._resource_service import ResourceService
 
 from ._platform_application import PlatformApplication
-from ._platform_persistence import ExternalOperationRow
 from ._project_access import CallerPrincipal
 from ._project_sessions import ProjectSessionService
 from ._service_identity import CurrentServiceDecisionValidator, ServiceAuthorizationDecision

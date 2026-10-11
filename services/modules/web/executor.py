@@ -10,7 +10,7 @@ from pathlib import Path
 
 from common.models import JsonObject, JsonValue, json_loads, json_object, json_value
 from common.settings import CurlSettings
-from modules.files.workspace_store import WorkspaceFileStore
+from modules.workspace_compat.legacy_store import WorkspaceFileStore
 
 from .errors import CurlError
 from .request import (
@@ -75,9 +75,7 @@ def _build_curl_command(
     if timeout_seconds <= 0 or timeout_seconds > 3600:
         raise CurlError("timeout_seconds must be greater than 0 and at most 3600")
     if connect_timeout_seconds <= 0 or connect_timeout_seconds > 300:
-        raise CurlError(
-            "connect_timeout_seconds must be greater than 0 and at most 300"
-        )
+        raise CurlError("connect_timeout_seconds must be greater than 0 and at most 300")
     if max_response_bytes <= 0:
         raise CurlError("max_response_bytes must be greater than 0")
 

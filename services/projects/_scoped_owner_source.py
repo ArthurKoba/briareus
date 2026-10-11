@@ -15,13 +15,13 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
-from authorization._scoped_events_persistence import (
+from common.platform_db import PlatformDatabase
+from common.platform_errors import AccessDenied, Conflict, InvalidInput
+from projects._scoped_events_persistence import (
     ScopeCursorRow,
     ScopeDeliveryReceiptRow,
     ScopeEventRow,
 )
-from common.platform_db import PlatformDatabase
-from common.platform_errors import AccessDenied, Conflict, InvalidInput
 
 ScopeKind = Literal["user", "team", "project"]
 _SourceOwner = Literal["identity", "access", "platform", "resources", "files", "runtime", "reverse"]
