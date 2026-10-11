@@ -159,27 +159,32 @@ def run(source_root: Path, allow_pending: bool) -> None:
             fatal(f'{module}: volume mapping changed between Compose files')
         if set(base['services'])!=set(a['compose_services']) or set(override['services'])!=set(a['compose_services']):
             fatal(f'{module}: registry/Compose services differ')
-        # Public domain routes must be declared only as canonical Coolify
-        # magic keys. Never interpolate SERVICE_URL_* in Compose values:
-        # Docker Compose resolves variables before Coolify can supply them.
-        if module in {'admin-api', 'admin-ui'}:
-            public_port = '8000' if module == 'admin-api' else '8080'
-            service_key = f'briareus-{module}'
-            public_key = 'PUBLIC_API_URL' if module == 'admin-api' else 'PUBLIC_UI_URL'
-            magic_key = 'SERVICE_URL_' + service_key.upper().replace('-', '_') + '_' + public_port
-            public_env = override['services'][service_key]['environment']
-            if public_env.get(magic_key) != '/' or public_key in public_env:
-                fatal(f'{module}: invalid Coolify magic domain or unnecessary PUBLIC_* URL')
-            if any('${SERVICE_URL_' in str(v) for v in public_env.values()):
-                fatal(f'{module}: SERVICE_URL_* must never be Compose-interpolated')
-            exposed = base['services'][service_key].get('expose', [])
-            if public_port not in [str(x) for x in exposed]:
-                fatal(f'{module}: public domain port mismatch')
-            if module == 'admin-api':
-                if public_env.get('OTEL_SERVICE_NAMESPACE') != '${OTEL_SERVICE_NAMESPACE:?}':
-                    fatal('admin-api: namespace must be required explicit ENV')
-                if public_env.get('OTEL_SERVICE_NAME') != '${OTEL_SERVICE_NAME:?}':
-                    fatal('admin-api: OTEL_SERVICE_NAME must be operator-required')
+        # Exactly one public Coolify domain is generated: Gateway port 8000.
+        # Saved legacy domains require separate live parser/router cutover.
+        generated = [
+            key for compose in (base, override)
+            for service_def in compose['services'].values()
+            for key in service_def.get('environment', {})
+            if key.startswith(('SERVICE_URL_', 'SERVICE_FQDN_'))
+        ]
+        if module == 'gateway':
+            magic_key = 'SERVICE_URL_BRIAREUS_GATEWAY_8000'
+            gateway_env = override['services']['briareus-gateway']['environment']
+            if generated != [magic_key] or gateway_env.get(magic_key) != '/':
+                fatal('gateway: sole public generated route must target Gateway 8000')
+            exposed = base['services']['briareus-gateway'].get('expose', [])
+            if '8000' not in [str(port) for port in exposed]:
+                fatal('gateway: public proxy port does not match exposed 8000')
+        elif generated:
+            fatal(f'{module}: public domain generation forbidden outside Gateway')
+        for compose in (base, override):
+            for service_def in compose['services'].values():
+                env = service_def.get('environment', {})
+                if any(k in env for k in ('PUBLIC_API_URL', 'PUBLIC_UI_URL')):
+                    fatal(f'{module}: obsolete per-service public URL input')
+                if any('${SERVICE_URL_' in str(v) or '${SERVICE_FQDN_' in str(v)
+                       for v in env.values()):
+                    fatal(f'{module}: parser-managed domain interpolated into Compose')
         # Telemetry configuration is never named SERVICE_*, which Coolify
         # reserves for generated values. Match real OpenTelemetry resource keys
         # through our Briareus-specific environment aliases.

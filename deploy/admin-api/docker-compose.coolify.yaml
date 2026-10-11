@@ -12,7 +12,7 @@ x-watch-path-coolify:
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.
 # Shared values resolve from approved Coolify Team/Environment scopes; no secret value is stored in Git.
-# Public FQDN exists; BFF must never access a shared domain DB. Protected routes stay C1-B2/C2 denied.
+# API remains internal; Gateway owns public domain. C1-B2/C2 still denied.
 services:
   briareus-admin-api:
     extends:
@@ -25,7 +25,6 @@ services:
       OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
       OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"
       OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:?}"
-      SERVICE_URL_BRIAREUS_ADMIN_API_8000: "/"
 networks:
   briareus:
     external: true
