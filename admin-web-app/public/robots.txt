@@ -1,2 +1,8 @@
+# Only public project information at / is intended for search indexing.
+# robots.txt is not an authorization boundary; authenticated routes must
+# enforce server-side grants even when crawled directly.
 User-agent: *
-Disallow: /
+Allow: /
+Disallow: /api/
+Disallow: /hands/
+Sitemap: https://briareus.koba-nexus.ru/sitemap.xml

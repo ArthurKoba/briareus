@@ -58,3 +58,6 @@ def private_gateway_application(
 
 
 app = private_gateway_application()
+
+# R23 static-only release entrypoint. Protected API/Panel/Hands remain C2 denied.
+static_app = private_gateway_application(public_static_enabled=True)

@@ -1,6 +1,9 @@
 server {
     listen 8080;
     server_name _;
+    # Behind the HTTPS Gateway, never synthesize an http:// internal-host
+    # Location for the /panel -> /panel/ redirect.
+    absolute_redirect off;
 
     root /usr/share/nginx/html;
     index index.html;
@@ -11,7 +14,36 @@ server {
         return 200 '{"status":"ok"}';
     }
 
-    location / {
+    # Gateway must preserve /panel/* unchanged: stripped /panel/ -> /
+    # collides with the PUBLIC landing page. Missing assets fail with 404.
+    location ^~ /panel/assets/ {
+        rewrite ^/panel/(.*)$ /$1 break;
+        try_files $uri =404;
+    }
+
+    location = /panel { return 308 /panel/; }
+
+    location ^~ /panel/ {
+        rewrite ^/panel/(.*)$ /$1 break;
         try_files $uri $uri/ /index.html;
     }
+
+    # Historic prefix-stripped /index.html and /assets/ remain static-only;
+    # the /panel/ document itself MUST reach this Nginx with its prefix.
+    # Public, crawler-readable root. Gateway MUST preserve /panel/* prefixes;
+    # prefix stripping /panel/ to / would confuse the two HTML documents.
+    location = / { try_files /_site/index.html =404; }
+    location ^~ /_site/ { return 404; }
+    # The prefix-stripped /index.html remains private Panel HTML (noindex).
+    location = /index.html {
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        try_files $uri =404;
+    }
+    location = /robots.txt { try_files $uri =404; }
+    location = /sitemap.xml { try_files $uri =404; }
+    location ^~ /assets/ { try_files $uri =404; }
+
+    # A misrouted /api, /hands, /.well-known, /authorize or token request
+    # MUST NOT receive SPA HTML with status 200. Gateway owns those routes.
+    location / { return 404; }
 }

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1423">
+  <meta name="robots" content="index, follow">
+  <title>Briareus — платформа для MCP, команд и AI-агентов</title>
+  <meta name="description" content="Briareus — развивающаяся проектно-ориентированная платформа для работы с AI-агентами, MCP-инструментами, командами, проектами и управляемыми сессиями. Узнайте об архитектуре и перейдите в Panel.">
+  <link rel="canonical" href="https://briareus.koba-nexus.ru/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:site_name" content="Briareus">
+  <meta property="og:title" content="Briareus — платформа для MCP, команд и AI-агентов">
+  <meta property="og:description" content="Единое пространство для проектов, команд, AI-агентов и инструментов MCP. Обзор архитектуры Briareus и вход в Panel.">
+  <meta property="og:url" content="https://briareus.koba-nexus.ru/">
+  <meta name="twitter:card" content="summary">
+  <script type="application/ld+json">{
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Briareus",
+    "url": "https://briareus.koba-nexus.ru/",
+    "inLanguage": "ru-RU",
+    "description": "Проектно-ориентированная платформа для AI-агентов и MCP-инструментов"
+  }</script>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; line-height: 1.55; background: #0b1423; color: #edf3ff; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-width: 320px; background: radial-gradient(ellipse 68% 25% at 85% 4%, #223e65 0%, transparent 100%), #0b1423; }
+    a { color: inherit; }
+    a:focus-visible { outline: 3px solid #9acfff; outline-offset: 4px; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
+    .skip-link { position: absolute; top: -100px; left: 18px; z-index: 10; padding: 12px 16px; background: #95ccff; color: #102039; border-radius: 8px; font-weight: 700; }
+    .skip-link:focus { top: 12px; }
+    .site-header { border-bottom: 1px solid #29384d; }
+    .header-inner { display: flex; min-height: 82px; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 760; font-size: 19px; letter-spacing: .02em; text-decoration: none; }
+    .mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; border: 1px solid #4e799b; background: #183552; color: #badfff; font-weight: 850; }
+    .nav { display: flex; align-items: center; gap: 26px; }
+    .nav a { text-decoration: none; color: #b4c5db; font-size: 14px; }
+    .nav a:hover { color: #fff; }
+    .nav .nav-panel { border: 1px solid #536781; border-radius: 9px; padding: 9px 14px; color: #edf3ff; }
+    .hero { padding: 92px 0 96px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 58px; align-items: center; }
+    .eyebrow { display: inline-block; padding: 6px 10px; border: 1px solid #365d7b; background: #132c45; color: #a9d5f4; font-size: 12px; letter-spacing: .06em; font-weight: 700; text-transform: uppercase; border-radius: 99px; }
+    h1 { font-size: clamp(37px, 5vw, 62px); line-height: 1.11; letter-spacing: -.045em; margin: 24px 0 25px; font-weight: 800; }
+    .hero p { max-width: 620px; color: #b7c7dc; font-size: 17px; line-height: 1.75; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 30px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 49px; padding: 12px 20px; border-radius: 11px; font-size: 15px; font-weight: 700; text-decoration: none; }
+    .primary { background: #95ccff; color: #102039; }
+    .primary:hover { background: #b8dfff; }
+    .secondary { border: 1px solid #4d607b; color: #e7effb; }
+    .secondary:hover { border-color: #8db0d1; }
+    .diagram { border: 1px solid #364965; border-radius: 22px; padding: 24px; background: linear-gradient(150deg, #1a2c46, #102139); box-shadow: 0 18px 60px #0004; }
+    .diagram-title { margin-bottom: 20px; color: #a9bfd9; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+    .node { padding: 14px 17px; border: 1px solid #45607d; border-radius: 12px; background: #152c48; }
+    .node strong, .node span { display: block; }
+    .node strong { font-size: 15px; }
+    .node span { color: #afc3da; font-size: 12px; margin-top: 2px; }
+    .arrow { text-align: center; padding: 8px 0; color: #7f9dbd; font-size: 18px; }
+    .split { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+    .split .node { padding: 13px 11px; }
+    section { padding: 35px 0 76px; }
+    section h2 { font-size: clamp(26px, 3.5vw, 35px); letter-spacing: -.025em; margin: 0 0 13px; }
+    .section-lead { margin: 0 0 30px; color: #aebfd4; max-width: 740px; }
+    .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .fact { padding: 21px 23px; border: 1px solid #30415a; background: #111f33; border-radius: 15px; }
+    .fact .value { display: block; color: #c7e5ff; font-size: clamp(27px, 3.5vw, 36px); font-weight: 790; line-height: 1.15; margin-bottom: 9px; }
+    .fact .meaning { display: block; font-size: 14px; color: #c9d6e6; }
+    .fact .detail { display: block; margin-top: 7px; font-size: 12px; color: #91a8c1; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .card { padding: 23px; border: 1px solid #30415a; background: #111f33; border-radius: 15px; }
+    .card .number { display: inline-block; color: #91c8f4; font-size: 13px; font-weight: 750; margin-bottom: 13px; }
+    .card h3 { font-size: 17px; margin: 0 0 10px; }
+    .card p { font-size: 14px; line-height: 1.65; color: #b1bfd2; margin: 0; }
+    .callout { padding: 28px 32px; border: 1px solid #3b5673; background: #132b45; border-radius: 17px; display: flex; gap: 28px; align-items: center; justify-content: space-between; }
+    .callout h2 { font-size: 23px; margin: 0 0 10px; }
+    .callout p { margin: 0; color: #bbcee1; font-size: 14px; max-width: 690px; }
+    footer { padding: 30px 0 40px; border-top: 1px solid #29384d; color: #95aac2; font-size: 13px; }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+    @media (max-width: 860px) { .hero { grid-template-columns: 1fr; gap: 30px; padding: 65px 0; } .diagram { max-width: 610px; } .cards { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 700px) { .facts { grid-template-columns: 1fr; } .fact { padding: 17px 21px; } }
+    @media (max-width: 580px) { .wrap { padding: 0 18px; } .header-inner { min-height: 72px; } .nav { gap: 12px; } .nav a:not(.nav-panel) { display: none; } .hero { padding: 52px 0 58px; } .hero p { font-size: 15px; } .cards { grid-template-columns: 1fr; } .callout { display: block; padding: 22px; } .callout .button { margin-top: 19px; width: 100%; } section { padding-bottom: 55px; } }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">К основному содержанию</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="/" aria-label="Briareus — главная"><span class="mark" aria-hidden="true">B</span> Briareus</a>
+      <nav class="nav" aria-label="Навигация"><a href="#platform">Платформа</a><a href="#architecture">Архитектура</a><a class="nav-panel" href="/panel/">Войти в Panel ↗</a></nav>
+    </div>
+  </header>
+  <main id="main-content">
+    <div class="wrap hero">
+      <div>
+        <span class="eyebrow">Платформа AI и MCP · в разработке</span>
+        <h1>Инфраструктура для AI-агентов, объединённая вокруг проектов.</h1>
+        <p>Briareus — проектно-ориентированная платформа для команд, пользователей и AI-агентов. Она объединяет управление доступом, контекстом проектов и MCP-инструментами в одном пространстве.</p>
+        <div class="buttons"><a class="button primary" href="/panel/">Перейти в панель управления <span aria-hidden="true">&nbsp;↗</span></a><a class="button secondary" href="#platform">О проекте</a></div>
+      </div>
+      <aside class="diagram" aria-label="Схема логической архитектуры Briareus">
+        <div class="diagram-title">Модель платформы · целевая архитектура</div>
+        <div class="node"><strong>Пользователь и Team</strong><span>Владение, участие и управляемый доступ</span></div>
+        <div class="arrow" aria-hidden="true">↓</div>
+        <div class="node"><strong>Project</strong><span>Граница ресурсов и операций</span></div>
+        <div class="arrow" aria-hidden="true">↓</div>
+        <div class="node"><strong>AgentSession</strong><span>Контекст и разрешения работы агента</span></div>
+        <div class="arrow" aria-hidden="true">↓</div>
+        <div class="split"><div class="node"><strong>MCP Tools</strong><span>Инструменты проекта</span></div><div class="node"><strong>Ресурсы</strong><span>Файлы и подключения</span></div></div>
+      </aside>
+    </div>
+    <section id="overview"><div class="wrap"><h2>Briareus в архитектурных фактах</h2><p class="section-lead">Это сведения о целевой структуре проекта, а не оперативная статистика: доступность сервисов, количество пользователей и вызовы MCP здесь не измеряются.</p>
+      <div class="facts">
+        <div class="fact"><span class="value">4</span><span class="meaning">Логические области данных</span><span class="detail">Identity · Access · Platform Control · Resource Catalog</span></div>
+        <div class="fact"><span class="value">1</span><span class="meaning">Публичная точка входа</span><span class="detail">Единый Gateway с разделением Panel, API и MCP по путям</span></div>
+        <div class="fact"><span class="value">Panel</span><span class="meaning">Отдельный интерфейс управления</span><span class="detail">Авторизация и полномочия подтверждаются на сервере</span></div>
+      </div>
+    </div></section>
+    <section id="platform"><div class="wrap"><h2>Что объединяет Briareus</h2><p class="section-lead">Цель платформы — сделать работу нескольких AI-агентов и инструментов управляемой в пределах конкретных проектов, без смешивания полномочий и данных.</p>
+      <div class="cards">
+        <article class="card"><span class="number">01 / Контекст</span><h3>Команды и проекты</h3><p>Личные и командные проекты задают границы доступа к данным, общим подключениям и настройкам.</p></article>
+        <article class="card"><span class="number">02 / Управление</span><h3>AI-агенты и сессии</h3><p>Сессии агентов и права на операции отделены от личной учётной записи пользователя.</p></article>
+        <article class="card"><span class="number">03 / Инструменты</span><h3>Модульные MCP-сервисы</h3><p>Files, Web, Terminal и другие инструменты проектируются как независимые сервисы за единым Gateway.</p></article>
+      </div>
+    </div></section>
+    <section id="architecture"><div class="wrap"><h2>Прозрачная архитектура</h2><p class="section-lead">Briareus развивается как набор самостоятельных областей ответственности: Identity, Access, Platform Control и Resource Catalog. Публичная страница описывает замысел, а не выдаёт внутренние рабочие показатели за подтверждённую статистику.</p>
+      <div class="callout"><div><h2>Панель управления — отдельно от публичного сайта</h2><p>В Panel предусмотрено управление проектами и доступами. Для защищённых функций потребуется подтверждённая авторизация; доступность сервисов не следует из доступности этой страницы.</p></div><a class="button primary" href="/panel/">Открыть Panel ↗</a></div>
+    </div></section>
+  </main>
+  <footer><div class="wrap"><span>© Briareus · платформа MCP и AI-агентов</span><span>Публичная информация о проекте · без пользовательских данных</span></div></footer>
+</body>
+</html>
