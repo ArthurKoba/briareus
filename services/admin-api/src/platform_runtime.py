@@ -7,7 +7,12 @@ source-owner API ports after reviewer acceptance of C1-B2/C2.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI
+
+if TYPE_CHECKING:
+    from presentation.private_c2_api import PrivateOwnerApiPorts
 
 
 def create_platform_admin_app(services: object | None = None) -> FastAPI:
@@ -29,3 +34,16 @@ def create_platform_admin_app(services: object | None = None) -> FastAPI:
 
 
 app = create_platform_admin_app()
+
+
+def create_trusted_private_platform_app(ports: PrivateOwnerApiPorts) -> FastAPI:
+    """Private C2-injected Admin API, never the default published app.
+
+    Physical release approval, current owner peers and per-request identity
+    must be independently supplied. No header/ENV can self-install C2.
+    """
+    if ports is None:
+        raise RuntimeError("trusted private Admin API requires injected C2 source")
+    from presentation.private_c2_api import create_unmounted_private_owner_api
+
+    return create_unmounted_private_owner_api(ports)
