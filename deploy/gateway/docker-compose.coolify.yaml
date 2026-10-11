@@ -28,7 +28,7 @@ x-watch-path-coolify:
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.
 # Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
-# No public SERVICE_FQDN_* until security acceptance.
+# Gateway is the only public domain owner; runtime C2 exit-78 stays closed.
 services:
   briareus-gateway:
     extends:
@@ -41,6 +41,7 @@ services:
       OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
       OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"
       OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:?}"
+      SERVICE_URL_BRIAREUS_GATEWAY_8000: "/"
 networks:
   briareus:
     external: true

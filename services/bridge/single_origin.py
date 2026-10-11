@@ -15,8 +15,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-PUBLIC_ORIGIN = "https://briaray.kobanexus.ru"
-PUBLIC_HOST = "briaray.kobanexus.ru"
+PUBLIC_ORIGIN = "https://briaray.koba-nexus.ru"
+PUBLIC_HOST = "briaray.koba-nexus.ru"
 MCP_MODULES: tuple[Literal["files", "web", "terminal", "svc", "infrastructure", "reverse"], ...] = (
     "files",
     "web",

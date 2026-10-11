@@ -297,7 +297,7 @@
       "runtime_validated": false,
       "runtime_version": "computed_from_actual_image_source_by_uv_build_without_wheel",
       "uv_mode": "uv run --frozen --no-sync --no-dev --project /app --directory /app/src",
-      "version": "0.1.0+gateway.s5655cffcb023",
+      "version": "0.1.0+gateway.sb4a4e3410418",
       "watches": [
         "deploy/gateway/Dockerfile",
         "deploy/gateway/Dockerfile.dockerignore",
