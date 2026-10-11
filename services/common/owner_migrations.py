@@ -16,7 +16,7 @@ from pathlib import Path
 from alembic import command, context
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, text
+from sqlalchemy import UniqueConstraint, inspect, text
 from sqlalchemy.dialects.postgresql import dialect
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
@@ -270,7 +270,7 @@ def _verify(conn: Connection, settings: OwnerDatabaseSettings) -> int:
         expected_uniques = [
             (tuple(column.name for column in constraint.columns), constraint.name)
             for constraint in table.constraints
-            if constraint.__class__.__name__ == "UniqueConstraint"
+            if isinstance(constraint, UniqueConstraint)
         ]
         observed_uniques = insp.get_unique_constraints(table.name, schema=table.schema)
         observed_by_columns = {
