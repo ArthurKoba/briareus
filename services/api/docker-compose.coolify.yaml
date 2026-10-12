@@ -1,5 +1,5 @@
 x-watch-path-coolify:
-  - "services/control-panel/api/**"
+  - "services/api/**"
 
 services:
   briareus-admin-api:

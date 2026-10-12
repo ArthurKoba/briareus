@@ -1,5 +1,8 @@
 # Owner selection: Rauthy + Cedar — 12 October 2026
 
+**LATEST TOPOLOGY OVERRIDE (12 October 2026):** [Flat Services / Hands / Shared](../architecture/flat-services-hands-shared-20261012.md). Its folder layout, independent data-plane boundary, Gateway Authorization admission and owner locations supersede this document where they differ; Rauthy + Cedar identity/policy ownership otherwise remains valid.
+
+
 **Status: owner-selected target, not yet implemented or deployed.** This decision supersedes custom Human Identity/JWT/session implementation and standalone non-Cedar authorization-engine plans in `owner-decisions-20261012.md`. Preserve the live implementation until an independently verified cutover. Existing operator security, network isolation, DB/volume retention, Git and scoped Coolify access rules remain mandatory.
 
 ## Responsibility boundaries
