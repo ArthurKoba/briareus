@@ -10,6 +10,8 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
@@ -71,6 +73,26 @@ _PROXY_ASSERTIONS = frozenset(
 )
 _TIMEOUT = httpx.Timeout(connect=3, read=60, write=30, pool=3)
 _METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+
+@dataclass(frozen=True, slots=True)
+class RouteSpec:
+    """Public route template and its fixed internal service destination."""
+
+    template: str
+    target: Literal["panel-ui", "panel-api"]
+
+
+# Runtime routing policy contains no principal, permissions or Identity paths.
+_ROUTE_TABLE: tuple[RouteSpec, ...] = (
+    RouteSpec("/", "panel-ui"),
+    RouteSpec("/robots.txt", "panel-ui"),
+    RouteSpec("/sitemap.xml", "panel-ui"),
+    RouteSpec("/panel", "panel-ui"),
+    RouteSpec("/panel/{path:path}", "panel-ui"),
+    RouteSpec("/api", "panel-api"),
+    RouteSpec("/api/{path:path}", "panel-api"),
+)
 
 
 def _media_type(value: str) -> str:
@@ -278,15 +300,13 @@ class ThinGateway:
 
 def build_app() -> Starlette:
     transport = ThinGateway()
+    handlers = {"panel-ui": transport.static, "panel-api": transport.api}
     return Starlette(
         routes=[
-            Route("/", transport.static, methods=_METHODS),
-            Route("/robots.txt", transport.static, methods=_METHODS),
-            Route("/sitemap.xml", transport.static, methods=_METHODS),
-            Route("/panel", transport.static, methods=_METHODS),
-            Route("/panel/{path:path}", transport.static, methods=_METHODS),
-            Route("/api", transport.api, methods=_METHODS),
-            Route("/api/{path:path}", transport.api, methods=_METHODS),
+            *[
+                Route(spec.template, handlers[spec.target], methods=_METHODS)
+                for spec in _ROUTE_TABLE
+            ],
             *unavailable_routes(),
         ],
         middleware=[Middleware(SingleOriginGuard), Middleware(RouteTelemetry)],
