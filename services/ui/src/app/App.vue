@@ -13,6 +13,7 @@ import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
 import ScopedRealtimeStatus from "@/features/platform/ui/ScopedRealtimeStatus.vue"
 import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
 import ControlPanelAccessPage from "@/pages/platform/ControlPanelAccessPage.vue"
+import ModuleWorkspacePage from "@/pages/modules/ModuleWorkspacePage.vue"
 import Button from "@/shared/ui/Button.vue"
 import ToastHost from "@/shared/notifications/ToastHost.vue"
 import { useUiPreferences } from "@/shared/lib/preferences"
@@ -20,6 +21,7 @@ import { useUiPreferences } from "@/shared/lib/preferences"
 /** Briareus is a greenfield application, not a legacy MCP operator console. */
 const pages:Record<PlatformPageId,ReturnType<typeof defineAsyncComponent>>={
   home:defineAsyncComponent(()=>import("@/pages/platform/PlatformHomePage.vue")),
+  mcp:defineAsyncComponent(()=>import("@/pages/modules/ModuleWorkspacePage.vue")),
   users:defineAsyncComponent(()=>import("@/pages/platform/UsersPage.vue")),
   teams:defineAsyncComponent(()=>import("@/pages/platform/TeamsPage.vue")),
   projects:defineAsyncComponent(()=>import("@/pages/platform/ProjectsPage.vue")),
@@ -50,6 +52,8 @@ const screen=computed(()=>pages[activePage.value])
 const verified=computed(()=>projectContext.state.user?.active===true&&
   ["choose-project","project","team","operator"].includes(projectContext.state.scope))
 const missingTransport=computed(()=>platformPort.value===null)
+// Explicit nonprivileged preview, isolated from authenticated PlatformPort.
+const modulePreview=ref(false)
 const loading=ref(true)
 const unavailable=ref(false)
 /** Never infer DB schema version/head from unauthenticated health/ENV. */
@@ -226,7 +230,7 @@ function handleMobileNavKey(event:KeyboardEvent):void {
 function handleSidebarClick(event:MouseEvent):void {
   if(mobileNavOpen.value&&event.target instanceof Element&&event.target.closest("nav button"))closeMobileNav()
 }
-watch(platformPort,()=>{observeCredential();expireAuth();void restore()})
+watch(platformPort,()=>{modulePreview.value=false;observeCredential();expireAuth();void restore()})
 watch(routePage,async()=>{
   // SPA hash-route navigation must move keyboard/screen-reader focus from
   // the old menu into the new page heading after the lazy view changes.
@@ -266,11 +270,14 @@ onBeforeUnmount(()=>{
 <template>
   <ToastHost />
   <div v-if="loading" role="status" class="grid min-h-screen place-items-center text-sm text-muted-foreground">{{t('app.loading')}}</div>
+  <div v-else-if="modulePreview && !verified" class="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-9">
+    <ModuleWorkspacePage preview @close="modulePreview=false" />
+  </div>
   <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
     <div class="w-full">
       <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
       <!-- Anonymous visitors see only provider readiness, never a password form. -->
-      <ControlPanelAccessPage />
+      <ControlPanelAccessPage @preview="modulePreview=true" />
     </div>
   </div>
   <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
@@ -285,7 +292,7 @@ onBeforeUnmount(()=>{
     <div class="w-full">
       <p v-if="projectContext.state.scope==='suspended'" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('platform.suspendedNotice')}}</p>
       <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
-      <ControlPanelAccessPage />
+      <ControlPanelAccessPage @preview="modulePreview=true" />
     </div>
   </div>
   <div v-else class="min-h-screen bg-background text-foreground md:grid" :class="sidebarCollapsed?'md:grid-cols-[68px_minmax(0,1fr)]':'md:grid-cols-[240px_minmax(0,1fr)]'">

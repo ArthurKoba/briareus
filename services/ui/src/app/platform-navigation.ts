@@ -2,7 +2,7 @@ import type { UiCapability } from "@/features/platform/model/contracts"
 import { projectContext } from "@/features/platform/model/project-context"
 
 /** Pure UI routing intent; the adapter maps effective server grants to these hints. */
-export type PlatformPageId = "home" | "users" | "teams" | "projects" | "agents" | "sessions" | "integrations" | "variables" | "dashboard" | "calls" | "oauth" | "files" | "terminal" | "browser-managed" | "browser-external" | "analysis" | "settings"
+export type PlatformPageId = "home" | "mcp" | "users" | "teams" | "projects" | "agents" | "sessions" | "integrations" | "variables" | "dashboard" | "calls" | "oauth" | "files" | "terminal" | "browser-managed" | "browser-external" | "analysis" | "settings"
 export interface PlatformNavigationItem {
   id: PlatformPageId
   title: string
@@ -12,6 +12,7 @@ export interface PlatformNavigationItem {
 }
 export const platformNavigation: readonly PlatformNavigationItem[] = [
   { id:"home",title:"home",section:"work",permissions:[],scope:"any" },
+  { id:"mcp",title:"mcp",section:"resources",permissions:[],scope:"any" },
   { id:"users",title:"users",section:"work",permissions:["profile.read","profile.password","invitations.issue","users.read"],scope:"any" },
   { id:"teams",title:"teams",section:"work",permissions:["teams.read","teams.create"],scope:"any" },
   { id:"projects",title:"projects",section:"work",permissions:["projects.read","projects.create"],scope:"any" },
