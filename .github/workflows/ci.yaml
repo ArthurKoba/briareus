@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_images:
+        description: "Build all flat-layout images in one consolidated release gate"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   test:
@@ -15,4 +21,27 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - run: "true"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.30"
+          enable-cache: true
+      - name: Validate entire flat service batch and Compose input
+        run: python3 scripts/verify_flat_batch.py --uv-locks --compose
+      - name: Build all images from the same Git revision
+        if: github.event_name == 'workflow_dispatch' && inputs.build_images == true
+        run: |
+          set +e
+          failed=0
+          while IFS='|' read -r slug folder; do
+            echo "::group::Docker build ${slug}"
+            docker build -f "${folder}/Dockerfile" -t "briareus-flat-${slug}:ci" .
+            code=$?
+            echo "::endgroup::"
+            if [ "$code" -ne 0 ]; then
+              echo "::error title=Flat batch image build failed::${slug} failed with status ${code}"
+              failed=1
+            fi
+          done < <(python3 -c 'import json; print("\n".join(x["slug"] + "|" + x["folder"] for x in json.load(open("docs/operations/flat-batch-cutover.json"))["candidates"]))')
+          exit "$failed"
+        shell: bash

@@ -26,6 +26,10 @@ services:
     mem_limit: 512m
     cpus: 0.75
     pids_limit: 96
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - "/tmp:rw,nosuid,noexec,size=16m"
     security_opt:
       - no-new-privileges:true
 networks:
