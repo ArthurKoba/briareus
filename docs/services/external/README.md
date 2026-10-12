@@ -20,52 +20,71 @@ Cedar stays embedded as the Rust-backed `cedarpy` library in Python Authorizatio
 - Coolify Base directory: `/services/external`; Compose location: `/docker-compose.coolify.yaml`;
   Watch Paths: `services/external/**`. Docs are outside watched paths.
 
-## Secret preparation — operator supplies values, never paste into chat
+## Minimal MVP variables and initial admin
 
-Coolify resolves Application variables to **protected references**, not literal
-example secrets. Existing previously configured values must be reused, not
-recreated, where they already exist.
+The existing PostgreSQL / Valkey shared bindings stay unchanged:
+`TZ={{team.TZ}}`, `POSTGRES_USER={{environment.POSTGRES_USER}}`,
+`POSTGRES_PASSWORD={{environment.POSTGRES_PASSWORD}}` and
+`VALKEY_PASSWORD={{environment.VALKEY_PASSWORD}}`.
 
-| Application variable | Source / format | Meaning |
+For a **single-instance MVP**, the operator creates exactly three NEW
+Environment Shared values. All three are genuine secrets and the agent may
+only configure their **references** inside this one Coolify Application:
+
+| Environment Shared name | Application ENV reference | Rauthy native ENV |
 | --- | --- | --- |
-| `TZ` | Existing Team Shared `{{team.TZ}}` | Timezone |
-| `POSTGRES_USER` | Existing Environment Shared `{{environment.POSTGRES_USER}}` | Existing database principal |
-| `POSTGRES_PASSWORD` | Existing Environment Shared `{{environment.POSTGRES_PASSWORD}}` | Existing database credential |
-| `VALKEY_PASSWORD` | Existing Environment Shared `{{environment.VALKEY_PASSWORD}}` | Existing Valkey credential |
-| `RAUTHY_HQL_SECRET_RAFT` | Operator-created protected value | Random high-entropy alphanumeric cluster secret, different from API secret |
-| `RAUTHY_HQL_SECRET_API` | Operator-created protected value | Second independent random high-entropy alphanumeric cluster secret |
-| `RAUTHY_ENC_KEYS` | Operator-created protected value | `<key-id>/<base64-of-exactly-32-random-bytes>` |
-| `RAUTHY_ENC_KEY_ACTIVE` | Nonsecret Application literal | `<key-id>`, exactly matching the ID prefix in ENC_KEYS |
-| `RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID` | Protected value | Complete encoded `$argon2id$...` password hash, NOT plaintext |
-| `RAUTHY_BOOTSTRAP_ADMIN_EMAIL` | Operator Application value | Initial operator email, not an arbitrary fake user |
-| `RAUTHY_TRUSTED_PROXIES` | Operator Application value after network inspection | Real Gateway proxy source CIDR; never trust-all |
+| `RAUTHY_HIQLITE_RAFT_SECRET` | `{{environment.RAUTHY_HIQLITE_RAFT_SECRET}}` | `HQL_SECRET_RAFT` |
+| `RAUTHY_HIQLITE_API_SECRET` | `{{environment.RAUTHY_HIQLITE_API_SECRET}}` | `HQL_SECRET_API` |
+| `RAUTHY_ENCRYPTION_KEY` | `{{environment.RAUTHY_ENCRYPTION_KEY}}` | `ENC_KEYS` |
 
-The actual Rauthy container receives upstream variables without the `RAUTHY_`
-prefix (via Compose mappings). `RAUTHY_*` are **Coolify configuration names**,
-not additional upstream ENV names. The database host/port, public origin,
-node ID, local listen port and database name are **stable Compose constants**,
-not unnecessary extra shared variables. Do not create duplicate DB URL settings.
+The Rauthy-native `ENC_KEY_ACTIVE` is **fixed to `v1` in Compose**:
+this is the ID of the one MVP encryption key, not another independent
+secret. The Shared `RAUTHY_ENCRYPTION_KEY` value must be
+`v1/<base64-of-32-random-bytes>`. Key rotation can be introduced later
+with an explicit migration; NEVER casually replace a key protecting
+existing encrypted data.
 
-Offline secret generation (run privately, copy the output directly into the
-approved protected Coolify value — no terminal logs in project artifacts):
+Run this locally on the operator's computer, not in an agent console;
+copy the three output lines privately to Environment Shared Variables:
 
-- `openssl rand -hex 32` gives 64 random hexadecimal characters; run
-  independently for RAUTHY_HQL_SECRET_RAFT and RAUTHY_HQL_SECRET_API.
-- `openssl rand -hex 4` generates the encryption key ID; `openssl rand -base64 32`
-  generates the encoded 32-byte key. Join as `id/base64` in RAUTHY_ENC_KEYS;
-  put only `id` in RAUTHY_ENC_KEY_ACTIVE.
-- For the admin password, generate a strong private password in an approved
-  password manager and create its **Argon2id PHC hash** with the official
-  Rauthy CLI or another authenticated Argon2id tool. The hash must begin
-  `$argon2id$`. Never use `BOOTSTRAP_ADMIN_PASSWORD_PLAIN` for this setup.
-- Keep the actual value of each encryption / HQL secret stable across restarts.
-  Back up Rauthy storage and keys together. Do not rotate by changing the
-  variables in place without the upstream key-rotation/migration procedure.
+```bash
+python3 - <<'PYTHON'
+import base64
+import secrets
+print("RAUTHY_HIQLITE_RAFT_SECRET=" + secrets.token_hex(24))
+print("RAUTHY_HIQLITE_API_SECRET=" + secrets.token_hex(24))
+print("RAUTHY_ENCRYPTION_KEY=v1/" + base64.b64encode(secrets.token_bytes(32)).decode("ascii"))
+PYTHON
+```
 
-Official instructions:
-https://sebadob.github.io/rauthy/getting_started/k8s.html#create-and-apply-secrets
-https://sebadob.github.io/rauthy/config/encryption.html
+Upstream requires different Hiqlite API/Raft secrets (at least 16
+characters), and one valid encryption key with an active ID. This is a
+normal upstream minimum, not custom extra security. Reuse the exact
+values across restarts and back up the encryption key together with
+Rauthy's persistent state.
+
+**No administrator bootstrap variables are necessary:** on first start
+against an empty database Rauthy creates `admin@localhost` and generates
+a password. The password is emitted **once** in its initial startup logs.
+Capture it through the approved operator channel. Do not publish it or
+replace it with an invented default. This happens only on first database
+initialization, not every restart.
+
+`RAUTHY_TRUSTED_PROXIES` is a **nonsecret, application-local network
+input**. Determine the actual Gateway proxy source CIDR from the permitted
+Briareus network before running a proxied login; do not put it in Shared
+secrets or use a trust-all CIDR. Existing `POSTGRES_*`, `VALKEY_PASSWORD`
+and `TZ` bindings remain unchanged.
+
+After reloading Coolify Compose, obsolete parser variables with the old
+`RAUTHY_HQL_SECRET_*`, `RAUTHY_ENC_*` and `RAUTHY_BOOTSTRAP_*` names
+may still exist. Remove only these confirmed obsolete Application ENV
+records, without accessing or revealing any Shared secret values.
+
+Official references:
 https://sebadob.github.io/rauthy/config/bootstrap.html
+https://sebadob.github.io/rauthy/config/encryption.html
+https://sebadob.github.io/rauthy/config/ha.html
 
 ## PostgreSQL and migration contract
 

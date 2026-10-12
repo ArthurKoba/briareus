@@ -27,13 +27,11 @@ services:
       TZ: "${TZ:-UTC}"
       PG_USER: "${POSTGRES_USER:?}"
       PG_PASSWORD: "${POSTGRES_PASSWORD:?}"
-      HQL_SECRET_RAFT: "${RAUTHY_HQL_SECRET_RAFT:?}"
-      HQL_SECRET_API: "${RAUTHY_HQL_SECRET_API:?}"
-      ENC_KEYS: "${RAUTHY_ENC_KEYS:?}"
-      ENC_KEY_ACTIVE: "${RAUTHY_ENC_KEY_ACTIVE:?}"
+      HQL_SECRET_RAFT: "${RAUTHY_HIQLITE_RAFT_SECRET:?}"
+      HQL_SECRET_API: "${RAUTHY_HIQLITE_API_SECRET:?}"
+      ENC_KEYS: "${RAUTHY_ENCRYPTION_KEY:?}"
+      ENC_KEY_ACTIVE: "v1"
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
-      BOOTSTRAP_ADMIN_EMAIL: "${RAUTHY_BOOTSTRAP_ADMIN_EMAIL:?}"
-      BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID: "${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID:?}"
 # Physical volume names intentionally preserve the existing live storage IDs;
 # runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
 volumes:

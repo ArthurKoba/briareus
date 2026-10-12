@@ -186,11 +186,9 @@ def main() -> int:
     classified=set().union(*(set(x) for x in bindings_by_app.values()))
     # Service identity is selected by each operator-managed Python Application.
     # It is intentionally not a Team/Project/Environment Shared value.
-    permitted_local={'OTEL_SERVICE_NAME', 'RAUTHY_HQL_SECRET_RAFT',
-                     'RAUTHY_HQL_SECRET_API', 'RAUTHY_ENC_KEYS',
-                     'RAUTHY_ENC_KEY_ACTIVE', 'RAUTHY_TRUSTED_PROXIES',
-                     'RAUTHY_BOOTSTRAP_ADMIN_EMAIL',
-                     'RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID'}
+    # External Rauthy secrets are classified as Environment Shared bindings.
+    # The trusted reverse proxy CIDR remains a nonsecret app-local input.
+    permitted_local={'OTEL_SERVICE_NAME', 'RAUTHY_TRUSTED_PROXIES'}
     unknown_required=sorted(all_required-classified-permitted_local)
     if unknown_required:
         raise BootstrapError(

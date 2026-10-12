@@ -95,10 +95,10 @@ services:
       HQL_DATA_DIR: /app/data
       HQL_NODE_ID: "1"
       HQL_NODES: "1 localhost:8100 localhost:8200"
-      HQL_SECRET_RAFT: "${RAUTHY_HQL_SECRET_RAFT:?}"
-      HQL_SECRET_API: "${RAUTHY_HQL_SECRET_API:?}"
-      ENC_KEYS: "${RAUTHY_ENC_KEYS:?}"
-      ENC_KEY_ACTIVE: "${RAUTHY_ENC_KEY_ACTIVE:?}"
+      HQL_SECRET_RAFT: "${RAUTHY_HIQLITE_RAFT_SECRET:?}"
+      HQL_SECRET_API: "${RAUTHY_HIQLITE_API_SECRET:?}"
+      ENC_KEYS: "${RAUTHY_ENCRYPTION_KEY:?}"
+      ENC_KEY_ACTIVE: "v1"
       LISTEN_ADDRESS: 0.0.0.0
       LISTEN_PORT_HTTP: "8080"
       LISTEN_SCHEME: http
@@ -108,8 +108,6 @@ services:
       RP_ID: briareus.koba-nexus.ru
       RP_ORIGIN: https://briareus.koba-nexus.ru:443
       RP_NAME: Briareus
-      BOOTSTRAP_ADMIN_EMAIL: "${RAUTHY_BOOTSTRAP_ADMIN_EMAIL:?}"
-      BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID: "${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID:?}"
       LOCAL_TEST: "false"
       SWAGGER_UI_PUBLIC: "false"
     configs:

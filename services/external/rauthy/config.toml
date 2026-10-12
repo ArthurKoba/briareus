@@ -24,7 +24,3 @@ http_workers = 2
 rp_id = "briareus.koba-nexus.ru"
 rp_origin = "https://briareus.koba-nexus.ru:443"
 rp_name = "Briareus"
-
-[bootstrap]
-# BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID come from
-# protected ENV. Never store an initial password or example hash in Git.

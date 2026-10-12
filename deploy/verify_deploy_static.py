@@ -230,10 +230,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
             bindings=a.get('shared_variables',{})
             allowed_required=set(bindings) | ({'OTEL_SERVICE_NAME'} if module not in {'external','admin-ui'} else set())
             if module=='external':
-                allowed_required |= {'RAUTHY_HQL_SECRET_RAFT','RAUTHY_HQL_SECRET_API',
-                                     'RAUTHY_ENC_KEYS','RAUTHY_ENC_KEY_ACTIVE',
-                                     'RAUTHY_TRUSTED_PROXIES','RAUTHY_BOOTSTRAP_ADMIN_EMAIL',
-                                     'RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID'}
+                allowed_required.add('RAUTHY_TRUSTED_PROXIES')
             if not used<=allowed_required:
                 fatal(f'{module}: required ENV lacks scoped reference: {used-allowed_required}')
             for key,ref in bindings.items():
