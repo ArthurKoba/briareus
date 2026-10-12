@@ -7,9 +7,13 @@ source-owner API ports after reviewer acceptance of C1-B2/C2.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+import httpx
 from fastapi import FastAPI
+from presentation.first_user_http import create_first_user_api_router
 
 if TYPE_CHECKING:
     from presentation.private_c2_api import PrivateFirstUserApiPorts, PrivateOwnerApiPorts
@@ -18,7 +22,24 @@ if TYPE_CHECKING:
 def create_platform_admin_app(services: object | None = None) -> FastAPI:
     if services is not None:
         raise RuntimeError("global PlatformServices BFF rejected: owner service ports required")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async with httpx.AsyncClient(
+            base_url="http://briareus-identity:8000",
+            trust_env=False,
+            follow_redirects=False,
+            timeout=httpx.Timeout(5, connect=2),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        ) as client:
+            app.state.identity_client = client
+            try:
+                yield
+            finally:
+                app.state.identity_client = None
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Briareus Administration",
         version="0.1.0",
         docs_url=None,
@@ -28,8 +49,9 @@ def create_platform_admin_app(services: object | None = None) -> FastAPI:
 
     @app.get("/health/live", include_in_schema=False)
     async def live() -> dict[str, str]:
-        return {"state": "live", "api": "unmounted", "authorization": "not_attested"}
+        return {"state": "live", "api": "first-user-http", "authorization": "identity-owned"}
 
+    app.include_router(create_first_user_api_router())
     return app
 
 

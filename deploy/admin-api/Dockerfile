@@ -14,8 +14,10 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared uv sync --frozen --
 RUN useradd -u 1000 -m -d /home/platform platform
 # Source-only uv image: dependency layer cached above; selected service code
 # remains uninstalled and runs directly via uv run --no-sync.
+COPY services/admin-api/src/identity_http_contracts.py /app/src/identity_http_contracts.py
 COPY services/admin-api/src/platform_runtime.py /app/src/platform_runtime.py
 COPY services/admin-api/src/presentation/__init__.py /app/src/presentation/__init__.py
+COPY services/admin-api/src/presentation/first_user_http.py /app/src/presentation/first_user_http.py
 COPY services/admin-api/src/presentation/owner_bff_evidence.py /app/src/presentation/owner_bff_evidence.py
 COPY services/admin-api/src/presentation/owner_bff_private_handlers.py /app/src/presentation/owner_bff_private_handlers.py
 COPY services/admin-api/src/presentation/private_c2_api.py /app/src/presentation/private_c2_api.py

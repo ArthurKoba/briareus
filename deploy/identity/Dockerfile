@@ -58,6 +58,8 @@ COPY services/identity/_repository.py /app/src/identity/_repository.py
 COPY services/identity/_service.py /app/src/identity/_service.py
 COPY services/identity/_settings.py /app/src/identity/_settings.py
 COPY services/identity/_user_delete_source.py /app/src/identity/_user_delete_source.py
+COPY services/identity/direct_first_user.py /app/src/identity/direct_first_user.py
+COPY services/identity/first_user_http_api.py /app/src/identity/first_user_http_api.py
 COPY services/identity/platform_runtime.py /app/src/identity/platform_runtime.py
 COPY services/identity/private_login_source.py /app/src/identity/private_login_source.py
 # No installation of the Briareus project: source-only uv run.

@@ -51,6 +51,8 @@ x-watch-path-coolify:
   - "services/identity/_service.py"
   - "services/identity/_settings.py"
   - "services/identity/_user_delete_source.py"
+  - "services/identity/direct_first_user.py"
+  - "services/identity/first_user_http_api.py"
   - "services/identity/platform_runtime.py"
   - "services/identity/private_login_source.py"
 

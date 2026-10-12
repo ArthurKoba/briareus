@@ -9,8 +9,10 @@
       },
       "docker_validated": false,
       "files": {
+        "services/admin-api/src/identity_http_contracts.py": "identity_http_contracts.py",
         "services/admin-api/src/platform_runtime.py": "platform_runtime.py",
         "services/admin-api/src/presentation/__init__.py": "presentation/__init__.py",
+        "services/admin-api/src/presentation/first_user_http.py": "presentation/first_user_http.py",
         "services/admin-api/src/presentation/owner_bff_evidence.py": "presentation/owner_bff_evidence.py",
         "services/admin-api/src/presentation/owner_bff_private_handlers.py": "presentation/owner_bff_private_handlers.py",
         "services/admin-api/src/presentation/private_c2_api.py": "presentation/private_c2_api.py",
@@ -29,7 +31,7 @@
       "runtime_validated": false,
       "runtime_version": "computed_from_actual_image_source_by_uv_build_without_wheel",
       "uv_mode": "uv run --frozen --no-sync --no-dev --project /app --directory /app/src",
-      "version": "0.1.0+adminapi.s2e2e1f74611b",
+      "version": "0.1.0+adminapi.s222975b37a5f",
       "watches": [
         "deploy/admin-api/Dockerfile",
         "deploy/admin-api/Dockerfile.dockerignore",
@@ -39,8 +41,10 @@
         "deploy/admin-api/uv-project/pyproject.toml",
         "deploy/admin-api/uv-project/uv.lock",
         "deploy/runtime_write_provenance.py",
+        "services/admin-api/src/identity_http_contracts.py",
         "services/admin-api/src/platform_runtime.py",
         "services/admin-api/src/presentation/__init__.py",
+        "services/admin-api/src/presentation/first_user_http.py",
         "services/admin-api/src/presentation/owner_bff_evidence.py",
         "services/admin-api/src/presentation/owner_bff_private_handlers.py",
         "services/admin-api/src/presentation/private_c2_api.py",
@@ -405,6 +409,8 @@
         "services/identity/_service.py": "identity/_service.py",
         "services/identity/_settings.py": "identity/_settings.py",
         "services/identity/_user_delete_source.py": "identity/_user_delete_source.py",
+        "services/identity/direct_first_user.py": "identity/direct_first_user.py",
+        "services/identity/first_user_http_api.py": "identity/first_user_http_api.py",
         "services/identity/platform_runtime.py": "identity/platform_runtime.py",
         "services/identity/private_login_source.py": "identity/private_login_source.py"
       },
@@ -413,7 +419,7 @@
       "runtime_validated": false,
       "runtime_version": "computed_from_actual_image_source_by_uv_build_without_wheel",
       "uv_mode": "uv run --frozen --no-sync --no-dev --project /app --directory /app/src",
-      "version": "0.1.0+identity.secbdc29d088b",
+      "version": "0.1.0+identity.s064f10e72e3e",
       "watches": [
         "deploy/identity/Dockerfile",
         "deploy/identity/Dockerfile.dockerignore",
@@ -467,6 +473,8 @@
         "services/identity/_service.py",
         "services/identity/_settings.py",
         "services/identity/_user_delete_source.py",
+        "services/identity/direct_first_user.py",
+        "services/identity/first_user_http_api.py",
         "services/identity/platform_runtime.py",
         "services/identity/private_login_source.py"
       ]
