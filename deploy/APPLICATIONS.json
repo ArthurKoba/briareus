@@ -4,7 +4,7 @@
   "coolify_project": "briareus",
   "environment": "development",
   "network_destination": "briareus-net",
-  "repository": "ArthurKoba/briareus",
+  "repository": "KobaProduction/briareus",
   "branch": "TO_BE_SET_TO_REVIEWED_PUBLISHED_DEV_REF",
   "applications": [
     {

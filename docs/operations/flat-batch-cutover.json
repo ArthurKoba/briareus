@@ -4,7 +4,7 @@
   "scope": {
     "project": "3xshlpoghb9wcyhjgktlqzzp",
     "environment": "naibrku1omovvmw5o0bcnp5c",
-    "repository": "ArthurKoba/briareus"
+    "repository": "KobaProduction/briareus"
   },
   "release_policy": "One Git revision and one aggregated CI gate for all target modules. Do not apply partial Coolify mutations or deploy until all target manifests, source and real rollout prerequisites are accepted. Never change offscope applications, secrets or volumes.",
   "candidates": [
