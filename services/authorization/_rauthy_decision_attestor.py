@@ -16,11 +16,17 @@ from fastapi import Request
 
 from authorization._decision_api import (
     DecisionAuthenticationRequired,
+    DecisionAuthorityUnavailable,
     DecisionCommand,
     DecisionScopeDenied,
     VerifiedDecisionCaller,
 )
-from authorization._rauthy_jwks import RauthyJwksVerifier, RauthyTokenRejected
+from authorization._rauthy_issuer_keys import TrustedRauthyIssuerKeys
+from authorization._rauthy_jwks import (
+    RauthyJwksVerifier,
+    RauthyKeysUnavailable,
+    RauthyTokenRejected,
+)
 from authorization._service_identity import ACTION_AUDIENCES
 
 
@@ -63,7 +69,7 @@ class RauthyDecisionAttestor:
     def __init__(
         self,
         *,
-        bearer_verifier: RauthyJwksVerifier,
+        bearer_verifier: RauthyJwksVerifier | TrustedRauthyIssuerKeys,
         peer_resolver: TrustedDecisionPeerResolver,
         membership_resolver: CurrentProjectMembershipResolver,
     ) -> None:
@@ -81,7 +87,14 @@ class RauthyDecisionAttestor:
         if not raw.startswith("Bearer ") or raw.count(" ") != 1:
             raise DecisionAuthenticationRequired("signed provider bearer required")
         try:
-            signed = self._bearer.verify_access_token(raw[7:])
+            verifier = (
+                await self._bearer.get_verifier()
+                if isinstance(self._bearer, TrustedRauthyIssuerKeys)
+                else self._bearer
+            )
+            signed = verifier.verify_access_token(raw[7:])
+        except RauthyKeysUnavailable:
+            raise DecisionAuthorityUnavailable("trusted issuer signing keys unavailable") from None
         except RauthyTokenRejected:
             raise DecisionAuthenticationRequired("provider bearer not verified") from None
 
