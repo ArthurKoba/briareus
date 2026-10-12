@@ -12,7 +12,6 @@ import PlatformNav from "@/app/PlatformNav.vue"
 import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
 import ScopedRealtimeStatus from "@/features/platform/ui/ScopedRealtimeStatus.vue"
 import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
-import PublicAccountPage from "@/pages/platform/PublicAccountPage.vue"
 import FirstUserPage from "@/pages/platform/FirstUserPage.vue"
 import Button from "@/shared/ui/Button.vue"
 import ToastHost from "@/shared/notifications/ToastHost.vue"
@@ -57,8 +56,6 @@ const unavailable=ref(false)
 const serviceUpgradingPossible=ref(false)
 const submitting=ref(false)
 const error=ref("")
-const username=ref("")
-const password=ref("")
 const mobileNavOpen=ref(false)
 const isMobile=ref(false)
 let mobileQuery:MediaQueryList|null=null
@@ -67,10 +64,7 @@ function syncMobile(event:MediaQueryListEvent|MediaQueryList):void {
   if(!event.matches)mobileNavOpen.value=false
 }
 const mobileNavPanel=ref<HTMLElement|null>(null)
-const publicFlow=ref<"invitation"|"reset"|null>(null)
-const publicToken=ref("")
 /** Separate one-use links of the SAME mode must never reuse a prior form. */
-const publicLinkRevision=ref(0)
 const publicLinkError=ref(false)
 let authGeneration=0
 let authAbort:AbortController|null=null
@@ -83,9 +77,6 @@ function expireAuth():void {
   authAbort?.abort()
   authAbort=null
   projectContext.clear()
-  password.value=""
-  username.value=""
-  publicToken.value=""
   loading.value=false
   submitting.value=false
   unavailable.value=false
@@ -93,30 +84,16 @@ function expireAuth():void {
 }
 /** Single-use credentials do not survive a URL/history navigation. */
 function readOneUseLink():void {
+  // The previous native-password invitation/reset flow is RETIRED from the
+  // browser. Never render its form, log its token or forward it to the IdP.
+  // Rauthy onboarding will use the independently accepted BFF/IdP contract.
   const url=new URL(location.href)
-  const invite=url.searchParams.get("invite")
-  const reset=url.searchParams.get("reset")
-  if(invite===null&&reset===null)return
+  const hasLegacyCode=url.searchParams.has("invite")||url.searchParams.has("reset")
+  if(!hasLegacyCode)return
   url.searchParams.delete("invite")
   url.searchParams.delete("reset")
   history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`)
-  // Do not use the token itself as a Vue :key, DOM attribute or telemetry.
-  // A new token invalidates any previous sensitive form, even of same type.
-  ++publicLinkRevision.value
-  if(invite!==null&&reset!==null){
-    publicFlow.value=null
-    publicToken.value=""
-    publicLinkError.value=true
-    return
-  }
-  publicLinkError.value=false
-  publicFlow.value=invite!==null?"invitation":"reset"
-  publicToken.value=invite??reset??""
-}
-function closePublicFlow():void {
-  publicFlow.value=null
-  publicToken.value=""
-  publicLinkError.value=false
+  publicLinkError.value=true
 }
 function readHash():void {
   const [root,child]=location.hash.slice(1).split("/")
@@ -194,45 +171,6 @@ async function restore():Promise<void>{
     if(generation===authGeneration){loading.value=false;authAbort=null}
   }
 }
-async function login():Promise<void>{
-  const port=platformPort.value
-  if(!port||submitting.value)return
-  const generation=++authGeneration
-  authAbort?.abort()
-  const controller=new AbortController()
-  authAbort=controller
-  submitting.value=true
-  error.value=""
-  try {
-    const projection=await port.auth.login({username:username.value,password:password.value},controller.signal)
-    if(generation!==authGeneration||controller.signal.aborted||port!==platformPort.value)return
-    projectContext.installServerProjection(projection)
-    if(!projection.user.active){
-      port.auth.invalidate?.()
-      error.value=String(t("platform.suspendedNotice"))
-      return
-    }
-    await refreshBffOwnerBoundary()
-    if(generation!==authGeneration||controller.signal.aborted||port!==platformPort.value)return
-    browserTelemetry.lifecycle("ok")
-    unavailable.value=false
-    ensureRoute()
-  }catch(cause){
-    if(generation===authGeneration&&!controller.signal.aborted){
-      const issue=normalizeUiError(cause)
-      browserTelemetry.error("app","authentication")
-      const safeMessage=issue.message==="rateLimited"?"platform.errors.rateLimited":
-        issue.message==="serviceUnavailableOrUpgrading"?"platform.serviceUnavailableOrUpgrading":
-        "platform.signInFailed"
-      // The accepted Identity 429 is SQL-backed throttling, not a 503.
-      // Do not invent a Retry-After delay or automatically retry credentials.
-      error.value=String(t(safeMessage))
-    }
-  }finally{
-    password.value=""
-    if(generation===authGeneration){submitting.value=false;authAbort=null}
-  }
-}
 async function logout():Promise<void>{
   if(submitting.value)return
   // Fence any in-flight restore before server revocation. The selected
@@ -243,7 +181,6 @@ async function logout():Promise<void>{
   const adapter=platformPort.value
   submitting.value=true
   projectContext.clear()
-  password.value=""
   let remoteUncertain=false
   try {
     if(adapter)await adapter.auth.logout(new AbortController().signal)
@@ -323,20 +260,18 @@ onBeforeUnmount(()=>{
   window.removeEventListener("hashchange",onHistory)
   window.removeEventListener("popstate",onHistory)
   window.removeEventListener("keydown",handleMobileNavKey)
-  password.value=""
-  publicToken.value=""
   projectContext.clear()
 })
 </script>
 <template>
   <ToastHost />
   <div v-if="loading" role="status" class="grid min-h-screen place-items-center text-sm text-muted-foreground">{{t('app.loading')}}</div>
-  <div v-else-if="publicFlow" class="grid min-h-screen place-items-center bg-muted/30 p-6">
-    <PublicAccountPage :key="`${publicFlow}:${publicLinkRevision}`" :mode="publicFlow" :initial-token="publicToken" @token-copied="publicToken=''" @back="closePublicFlow" />
-  </div>
   <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
-    <!-- First User only. No owner-wide PlatformPort or privileged grant is installed. -->
-    <FirstUserPage />
+    <div class="w-full">
+      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('oidc.legacyLinkUnavailable')}}</p>
+      <!-- Anonymous visitors see only provider readiness, never a password form. -->
+      <FirstUserPage />
+    </div>
   </div>
   <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
     <section class="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm" role="alert">
@@ -346,24 +281,12 @@ onBeforeUnmount(()=>{
       <p class="mt-4"><a href="/" class="text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80">{{t('app.publicWebsite')}}</a></p>
     </section>
   </div>
-  <div v-else-if="!verified" class="grid min-h-screen place-items-center bg-muted/30 p-6">
-    <section class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-sm">
-      <h1 class="text-xl font-semibold">{{t('platform.brand')}}</h1>
-      <p class="mt-1 text-sm text-muted-foreground">{{t('app.console')}}</p>
-      <p v-if="projectContext.state.scope==='suspended'" class="mt-4 text-sm text-destructive" role="alert">{{t('platform.suspendedNotice')}}</p>
-      <p v-if="publicLinkError" class="mt-4 text-sm text-destructive" role="alert">{{t('platform.ambiguousPublicLink')}}</p>
-      <form class="mt-6 space-y-4" @submit.prevent="login">
-        <label class="block space-y-1.5 text-sm"><span>{{t('app.username')}}</span><input v-model="username" autocomplete="username" class="field" required /></label>
-        <label class="block space-y-1.5 text-sm"><span>{{t('app.password')}}</span><input v-model="password" type="password" autocomplete="current-password" class="field" required /></label>
-        <p v-if="error" class="text-sm text-destructive" role="alert">{{error}}</p>
-        <Button class="w-full" type="submit" :disabled="submitting">{{t('app.signIn')}}</Button>
-      </form>
-      <div class="mt-4 flex flex-wrap justify-center gap-2">
-        <Button variant="ghost" size="sm" @click="publicFlow='invitation'">{{t('platform.haveInvitation')}}</Button>
-        <Button variant="ghost" size="sm" @click="publicFlow='reset'">{{t('platform.haveResetLink')}}</Button>
-      </div>
-      <p class="mt-4 text-center"><a href="/" class="text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80">{{t('app.publicWebsite')}}</a></p>
-    </section>
+  <div v-else-if="!verified" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
+    <div class="w-full">
+      <p v-if="projectContext.state.scope==='suspended'" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('platform.suspendedNotice')}}</p>
+      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('oidc.legacyLinkUnavailable')}}</p>
+      <FirstUserPage />
+    </div>
   </div>
   <div v-else class="min-h-screen bg-background text-foreground md:grid" :class="sidebarCollapsed?'md:grid-cols-[68px_minmax(0,1fr)]':'md:grid-cols-[240px_minmax(0,1fr)]'">
     <button v-if="mobileNavOpen" class="fixed inset-0 z-30 bg-black/40 md:hidden" :aria-label="t('platform.closeMenu')" tabindex="-1" @click="closeMobileNav" />
