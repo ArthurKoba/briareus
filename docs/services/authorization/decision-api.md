@@ -21,7 +21,7 @@
 
 The Backend/Deployment/Runtime handoff must supply an independently reviewed implementation of `TrustedDecisionAttestor`: real Rauthy access-token issuer/JWKS/signature/expiry/audience validation, service-peer authentication for the Gateway or particular Hand, canonical stable subject → internal User link, **fresh** Platform Project/member/active status, and a bounded expiry. A trusted factory must also inject `AuthorizationDecisionReader(PlatformDatabase(OwnerDatabaseSettings(owner="access")))` as the owner-local SQL authority. Never fabricate an issuer, client key or caller just to make this API return Allow. The deployed default remains unconfigured until those inputs exist; an API or UI outage must not become an Authorization dependency.
 
-No automated suites are added in the MVP. Native import, compiled Cedar, fail-closed local ASGI requests and release image source-closure checks prove only source behavior. Real Dev acceptance requires a new, explicitly authorized Coolify Application UUID because the former Authorization UUID was deleted, then live peer/OAuth/Project attestation plus an actual allow → deny → revoke sequence at a protected Hand. See issue #490. Retain existing PostgreSQL data and the legacy compose as rollback until runtime acceptance.
+No automated suites are added in the MVP. Native import, compiled Cedar, fail-closed local ASGI requests and release image source-closure checks prove only source behavior. Real Dev acceptance uses the existing owner-approved Authorization Application UUID `95podguiawtnf2tvlemvk3ef` in Briareus Development; it still requires the reviewed code actually deployed, live peer/OAuth/Project attestation and an allow → deny → revoke sequence at a protected Hand. See issue #490. Retain existing PostgreSQL data and the legacy compose as rollback until runtime acceptance.
 
 ## Service-local decision lifecycle binding (source only)
 
@@ -44,3 +44,18 @@ bounds proof expiry by the shortest upstream/peer/Project lifetime. The
 Access owner SQL + Cedar policy must still verify the current durable grant.
 Without actual trusted provider enrollment, peer and Platform ports, the
 runtime default remains 503 fail-closed; no real Permit is claimed.
+
+## Trusted issuer key-source refresh (source only)
+
+`_rauthy_issuer_keys.py` loads the actual discovered JWKS using the
+operator-reviewed HTTPS issuer, system CA validation, strict same-origin
+`jwks_uri`, disabled redirects, bounded JSON responses and a short refresh TTL.
+Refresh never follows token-supplied key locations. An expired key cache is
+invalidated before refresh; an upstream outage therefore denies new decisions
+rather than extending expired trust. The decision attestor accepts this
+refreshed source as well as the original injected static verifier. A provider
+key-fetch outage maps to 503 authority unavailable, not an authentication
+denial or grace Permit. Native validation exercised actual public Rauthy
+issuer/JWKS retrieval (four keys), key rotation, hostile JWKS origin and
+refresh outage. This is SOURCE validation, not proof of deployment-network
+reachability, a provisioned OAuth client or any live authenticated permit.
