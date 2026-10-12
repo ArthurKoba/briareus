@@ -1,0 +1,18 @@
+x-watch-path-coolify:
+  - "services/control-panel/ui/**"
+
+# Coolify override for a single independent Git-backed Application.
+# Coolify variable discovery happens before resolving extends; mirror env keys.
+# Secret values, when consumed, come only from protected Coolify Project Shared Variables. No secret in Git.
+# Panel UI remains private on briareus-net; only Gateway owns public domains.
+services:
+  briareus-control-panel-ui:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-control-panel-ui
+    environment:
+      TZ: "${TZ:-UTC}"
+networks:
+  briareus:
+    external: true
+    name: briareus-net

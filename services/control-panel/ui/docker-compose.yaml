@@ -1,0 +1,29 @@
+# Control Panel UI static shell; authorization stays with the separate owner API.
+services:
+  briareus-control-panel-ui:
+    build:
+      context: ../../..
+      dockerfile: services/control-panel/ui/Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      TZ: "${TZ:-UTC}"
+    expose:
+      - "8080"
+    networks:
+      briareus:
+        aliases: ["briareus-control-panel-ui", "briareus-admin-ui"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+networks:
+  briareus:
+    external: true
+    name: briareus-net
