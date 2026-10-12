@@ -7,6 +7,7 @@ Without it, the route is mounted but unavailable and cannot grant access.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, Protocol
@@ -133,15 +134,22 @@ class AuthorizationDecisionService:
 
 def authorization_decision_router(
     service: AuthorizationDecisionService | None,
+    *,
+    resolve_service: Callable[[Request], AuthorizationDecisionService | None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/internal/v1/authorization", tags=["authorization-private"])
 
     @router.post("/decide", include_in_schema=False)
     async def decide(command: DecisionCommand, request: Request) -> DecisionPermit:
-        if service is None:
+        active = (
+            service
+            if service is not None
+            else resolve_service(request) if resolve_service is not None else None
+        )
+        if active is None:
             raise HTTPException(503, detail="authorization identity attestation unavailable")
         try:
-            allowed = await service.permits(request, command)
+            allowed = await active.permits(request, command)
         except DecisionAuthenticationRequired:
             raise HTTPException(401, detail="authorization caller not authenticated") from None
         except DecisionScopeDenied:
