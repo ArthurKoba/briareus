@@ -13,6 +13,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from authorization._access_cedar import permits_current_project_grant
 from authorization._idempotency import CommandOutcome, IdempotentCommandExecutor
 from authorization._platform_persistence import OutboxRow, SecurityAuditRow
 from authorization._session_persistence import ProjectAgentSessionRow, SessionApprovalRow
@@ -423,4 +424,12 @@ class AccessSourceService:
             operations = row.grants.get("operations", [])
             if not isinstance(operations, list) or request.operation not in operations:
                 raise AccessDenied("AgentSession operation grant missing")
+            if not permits_current_project_grant(
+                row=row,
+                actor_uuid=request.caller_user_id,
+                project_uuid=request.project_id,
+                operation=request.operation,
+                expected_version=request.expected_access_revision,
+            ):
+                raise AccessDenied("Cedar denies current AgentSession operation")
             return True
