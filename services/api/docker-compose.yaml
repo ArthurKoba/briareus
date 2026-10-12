@@ -1,8 +1,8 @@
 services:
   briareus-admin-api:
     build:
-      context: ../../../
-      dockerfile: services/control-panel/api/Dockerfile
+      context: ../..
+      dockerfile: services/api/Dockerfile
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
