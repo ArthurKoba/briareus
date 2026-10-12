@@ -13,12 +13,22 @@ Identity credentials, Authorization grants or MCP Hand runtimes.
 - `/api/*` — same-origin browser requests to the separate **Control Panel API**,
   NOT to Identity directly. Gateway routes API and Hands separately.
 
-The browser-only first-user client sends the original matching UUIDv4
-`Operation-UUID` and `Idempotency-Key` on each POST, keeps a signed bearer
-in memory only, re-verifies `/api/platform/me` and never replays uncertain
-first-user registration. The broader privileged `PlatformPort` stays closed
-until owner-authenticated server permissions are actually available. The
-interface never derives auth or project access from the landing page.
+The browser only calls **same-origin Control Panel API** endpoints under
+`/api/*`. It never talks directly to the identity provider, Authorization,
+Platform or individual MCP Hands, and does not embed provider secrets, issuer
+configuration or admin credentials. The public, unauthenticated access screen
+checks only `GET /api/platform/me` to distinguish signed-out, denied, unknown
+and unavailable responses. A 200/401/403 alone is **not a verified signed-in
+User**. Login/registration actions remain explicitly disabled until Backend
+publishes a real, provider-agnostic session-start/callback/current User contract.
+The separate authenticated `PlatformPort` remains closed until a verified
+permission-bearing Control Panel API adapter is installed; the UI cannot
+infer Team, Project or AgentSession access from local state.
+
+Unauthenticated access supports English/Russian and light/dark preferences;
+those display preferences never grant permissions, select an IdP, or reveal
+credentials. A timed, bounded read-only connectivity probe cannot trigger
+any account mutation.
 
 ## Standalone native build
 

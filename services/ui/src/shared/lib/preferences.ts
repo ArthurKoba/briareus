@@ -46,13 +46,17 @@ function readPreferences(): void {
 }
 
 function persist(): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    theme: theme.value,
-    sidebarCollapsed: sidebarCollapsed.value,
-    density: density.value,
-    locale: locale.value,
-    displayTimeZone: displayTimeZone.value,
-  }))
+  // Storage can be disabled or quota-limited; a display preference must not
+  // break sign-in or crash the mounted Control Panel.
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      theme: theme.value,
+      sidebarCollapsed: sidebarCollapsed.value,
+      density: density.value,
+      locale: locale.value,
+      displayTimeZone: displayTimeZone.value,
+    }))
+  } catch { /* Keep the active tab preference in memory. */ }
 }
 
 function applyTheme(): void {
@@ -70,6 +74,10 @@ watch([theme, sidebarCollapsed, density, locale, displayTimeZone], persist)
 // always starts with diagnostics OFF; never read a previously stored opt-in.
 try {localStorage.removeItem("briareus:diagnostics-consent:v1")}catch{/* no storage access */}
 watch(theme, applyTheme, { immediate: true })
+// System theme can change while the tab stays open.
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (theme.value === "system") applyTheme()
+})
 watch(density, applyDensity, { immediate: true })
 
 window.addEventListener("storage", (event) => {

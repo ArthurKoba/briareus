@@ -71,7 +71,6 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--backgro
 
 .field { width:100%; min-height:2.25rem; border:1px solid var(--input); border-radius:.375rem; background:var(--background); padding:.45rem .7rem; color:var(--foreground); outline:none; }
 .field:focus { box-shadow:0 0 0 2px color-mix(in oklab,var(--ring) 45%,transparent); }
-.secret-field { padding-right: 5rem; }
 .first-user-stage {
   background-image: radial-gradient(ellipse 55% 42% at 8% 12%, color-mix(in oklab, var(--ring) 11%, transparent), transparent),
     radial-gradient(ellipse 50% 45% at 92% 91%, color-mix(in oklab, var(--primary) 7%, transparent), transparent);
