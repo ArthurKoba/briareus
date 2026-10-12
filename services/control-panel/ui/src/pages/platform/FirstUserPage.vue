@@ -129,7 +129,7 @@ onBeforeUnmount(()=>{
         <span class="grid size-11 shrink-0 place-items-center rounded-xl border border-teal-300/30 bg-teal-300/10 text-lg font-black text-teal-200" aria-hidden="true">B</span>
         <div>
           <p class="text-[11px] font-bold uppercase tracking-[.18em] text-teal-200/80">Briareus</p>
-          <p class="text-base font-semibold leading-6">Panel</p>
+          <p class="text-base font-semibold leading-6">Control Panel</p>
         </div>
       </div>
       <div class="relative z-10 mt-12 lg:my-12">
