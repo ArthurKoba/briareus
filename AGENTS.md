@@ -1,22 +1,20 @@
-# Briareus — AGENTS.md (рабочая карта)
+# Briareus — current AGENTS map (Rauthy + Cedar, 2026-10-12)
 
-Перед любой substantial задачей: прочитать это, current task/progress и выборочный skill из ArthurKoba/ai-agent-workflow. Source authority — актуальный опубликованный GitHub main; локальная central repo может быть старой или содержать незавершённый dirty-код.
+**AUTHORITATIVE NEW TARGET:** docs/architecture/identity-rauthy-cedar-20261012.md (selected by owner, PR #472).
+**FOUR OWNERS / HANDOFF:** docs/operations/rauthy-cedar-four-agent-migration-20261012.md.
+**Coordination:** docs/operations/AGENT_COORDINATION.md and local workspace coordination/CONTRACTS.md, OWNERSHIP.md, requests/<lane>.md.
+**Current agent tasks:** agents/{backend,runtime,frontend,deployment}.task.md; agent reports/evidence in *.progress.md FIRST State.
+**Original baseline:** docs/architecture/owner-decisions-20261012.md still governs independent service folders, PostgreSQL/Valkey volumes, sandbox network isolation and TRY-first. Its home-grown Identity/bootstrap/JWT paragraphs are **transitional legacy only**, superseded by the selected Rauthy document.
 
-**ЕДИНСТВЕННОЕ действующее владельческое ТЗ:** docs/architecture/owner-decisions-20261012.md.
-**Исполнимый план трёх агентов:** docs/operations/agent-migration-plan-20261012.md.
-**Процедура файлового обмена:** docs/operations/AGENT_COORDINATION.md.
-**Локальные workspace paths:** agents/backend.task.md, agents/runtime.task.md, agents/frontend.task.md, их *.progress.md, coordination/CONTRACTS.md, coordination/OWNERSHIP.md, coordination/requests/<lane>.md. Не выполнять исторические задания/примеры из архива.
+## Owners
+Backend: Cedar embedded in independent Briareus Authorization; durable AgentSession/grants/approve/deny/revoke, Control Panel API OIDC/Rauthy Admin BFF. Rauthy itself replaces Human Identity/OAuth issuer, not Project Control and not AgentSession grants.
+Runtime: thin declarative Gateway/OIDC route proxy + independently authenticated MCP Hands and sandbox network isolation.
+Frontend: independent Control Panel UI with real OIDC + PKCE login, truthfully presenting Authorization approval status.
+Deployment: fourth agent REACTIVATED for upstream Rauthy pinned image/Compose/secure Dev provisioning and verified issuer/storage/Admin API contract. It does not duplicate Backend/Cedar/Gateway/UI implementation.
 
-## Владелец и работа
-Backend — самостоятельные Identity/Authorization/Platform/Resources и Control Panel API; Runtime — тонкий Gateway, инфраструктурный runtime и Hands/MCP; Frontend — отдельный Control Panel UI. Общие контракты только через согласованные тематические shared папки. Код, Compose, uv/Bun lock и Watch каждого сервиса — внутри его собственной папки; docs отдельно в docs/services аналогичной структуры.
+## Autonomous release
+TRY: independently owned small real source change -> native build -> protected GitHub PR/reviewer merge -> exact approved Briareus Development app logs/real OAuth/HTTP/MCP outcome -> fix. No new unit/integration/e2e/smoke suites. Orchestrator accepts retrospectively; no prepublication review committee. Agent chats use short emoji TEXT, never tables; Orchestrator-to-owner start/stop TABLE has four lanes only.
 
-TRY-first: агент сам меняет только принадлежащий ему сервис, native compile/build, PR + реально обязательные GitHub checks, Reviewer merge, реальный Briareus Development app deploy/логи/HTTP, оперативное исправление. **Не писать/запускать unit/integration/e2e/smoke suites и необязательные CI тесты.** Обязательные Git protection/checks не обходить. Оркестратор проводит независимую проверку ПОСЛЕ публикации, не делает рутинный билд за агента.
-
-Worker чат: короткий текстовый статус, 3–5 строк с emoji, НИКОГДА не таблица. Таблица только от Оркестратора владельцу для трёх агентов (запускать/не запускать). Новые задачи и замечания идут ЧЕРЕЗ файлы, без переписывания в чате. FIRST State сохраняет смысл; не сбрасывать реально работающего агента при правках документации.
-
-## Жёсткие ограничения
-Coolify читать/изменять ТОЛЬКО проект Briareus MCP UUID 3xshlpoghb9wcyhjgktlqzzp, environment development UUID naibrku1omovvmw5o0bcnp5c, и точные одобренные приложения docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Запрещён ДАЖЕ ПРОСМОТР других проектов, environments, Shared Environments, глобальных страниц, Shared secret values/host-wide данных. Не раскрывать credentials, не удалять или мигрировать существующие PG/Valkey volumes, не делать фиктивный User/JWT/право доступа, не давать sandbox Hands свободный egress во внутреннюю сеть.
-
-Gateway исключительно transport/маршруты/метрики, независимо от Identity бизнес-логики; Control Panel API — управляющий BFF-клиент независимых owner API. System invitation в операторских startup logs только при count(superuser)<1; дальше invitations через superuser. Постоянный Identity signing key, Team Shared TZ/OTLP, Environment Shared DB/Valkey/Identity secrets, нет старого ADMIN_JWT_SIGNING_KEY. Только uv per-service, никакого общего wheel/пофайлового AST manifest как нормы.
-
-Исторические PACKAGING-V1, ENV-1, C2 в Gateway, старые README и READY_FOR_REVIEW не являются приказами. Архив, если нужен для расследования: local/artifacts/owner-policy-reconciliation-20261012/originals/. **Нет других обязательных длинных стартовых карт.**
+## Security / data
+Coolify MUST stay inside Briareus MCP project UUID 3xshlpoghb9wcyhjgktlqzzp, development environment UUID naibrku1omovvmw5o0bcnp5c, exact 14 existing allowed app UUIDs in docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Forbidden EVEN TO VIEW other projects, non-Dev, Shared Environments, global resources or plaintext secrets. New Rauthy Application UUID is not automatically allowed; establish explicit exact target scope first. Existing Identity cannot be repurposed before real cutover and storage/rollback acceptance. Preserve DB/Valkey/volumes, no fictitious IdP issuer, principal/authorization grant or secret values.
+Only Rauthy owns OAuth/JWT User tokens, Authorization owns Cedar policy/grants, Hands enforce resource access, Gateway transports traffic. No unsupported mass cutover or broad private-network access for sandbox executors.
