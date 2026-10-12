@@ -12,6 +12,7 @@ from starlette.middleware import Middleware as ASGIMiddleware
 
 from .gateway_transport import (
     PrivateGatewayTransport,
+    TrustedGatewayPreauthPort,
     TrustedGatewaySourcePort,
     TrustedWebSocketDialer,
 )
@@ -21,6 +22,7 @@ from .single_origin import SingleOriginGuard, unavailable_routes
 def private_gateway_application(
     *,
     current_source: TrustedGatewaySourcePort | None = None,
+    preauth_source: TrustedGatewayPreauthPort | None = None,
     websocket_dialer: TrustedWebSocketDialer | None = None,
     public_static_enabled: bool = False,
 ) -> Starlette:
@@ -32,6 +34,7 @@ def private_gateway_application(
     """
     transport = PrivateGatewayTransport(
         source=current_source,
+        preauth=preauth_source,
         websocket_dialer=websocket_dialer,
         public_static_enabled=public_static_enabled,
     )
