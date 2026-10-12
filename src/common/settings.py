@@ -664,6 +664,9 @@ class TerminalSettings(ProcessSettings):
 
 
 class BrowserSettings(ProcessSettings):
+    # New tabs are rejected at budget; existing user/browser tabs are never purged.
+    max_agent_tabs: int = Field(6, ge=1, le=24, validation_alias="BROWSER_MAX_AGENT_TABS")
+    max_tabs: int = Field(8, ge=2, le=32, validation_alias="BROWSER_MAX_TABS")
     profile_dir: Path = Field(
         Path("/browser/profile"),
         validation_alias="BROWSER_PROFILE_PATH",
