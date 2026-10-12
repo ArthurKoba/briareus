@@ -9,6 +9,7 @@
 !deploy/runtime_write_provenance.py
 !services/bridge/__init__.py
 !services/bridge/server.py
+!services/bridge/thin_gateway.py
 !services/bridge/single_origin.py
 !services/common/__init__.py
 !services/common/account_contracts.py

@@ -6,7 +6,7 @@ services:
       context: ../..
       dockerfile: deploy/gateway/Dockerfile
     restart: "no"
-    # Static-only ASGI_APP from the reviewed Gateway image; C2 routes remain denied.
+    # Thin static + /api reverse proxy; Admin API owns authentication.
     stop_grace_period: 30s
     environment:
       TZ: "${TZ:-UTC}"
