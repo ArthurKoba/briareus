@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import { setLocale } from "@/shared/i18n"
 import { useUiPreferences, type ThemePreference } from "@/shared/lib/preferences"
 import { useI18n } from "vue-i18n"
 import { checkControlPanelAccess, type ControlPanelAccessState } from "@/features/platform/api/control-panel-access"
+import { clearTemporaryBearer, FirstUserError, registerFirstUser, signInFirstUser, signOutFirstUser, type VerifiedFirstUser } from "@/features/platform/api/temporary-first-user"
 
 const { t } = useI18n()
 const emit=defineEmits<{preview:[]}>()
@@ -24,8 +25,115 @@ async function verifyApi() {
     controller = null
   }
 }
+const mode = ref<"login" | "register">("login")
+const username = ref("")
+const password = ref("")
+const invitation = ref("")
+const passwordVisible = ref(false)
+const busy = ref(false)
+let authController: AbortController | null = null
+const confirmed = ref<VerifiedFirstUser | null>(null)
+const notice = ref("")
+const authError = ref("")
+const labels = computed(() => locale.value === "ru" ? {
+  login: "Войти по логину и паролю",
+  register: "Регистрация по приглашению",
+  username: "Логин",
+  password: "Пароль",
+  invitation: "Ключ приглашения",
+  submitLogin: "Войти",
+  submitRegister: "Создать учётную запись",
+  signing: "Проверяем учётную запись…",
+  showPassword: "Показать пароль",
+  hidePassword: "Скрыть пароль",
+  confirmed: "Личность подтверждена сервером",
+  scopePending: "Вход выполнен через временный Identity API. Права на Projects, Teams и управление MCP пока не подтверждены Control Panel API.",
+  logout: "Выйти",
+  registered: "Учётная запись создана. Теперь войдите по логину и паролю.",
+  logoutUncertain: "Токен удалён из браузера, но подтверждения отзыва на сервере нет.",
+  unavailable: "Identity пока недоступен (503). Форма готова, но сервер не может выполнить вход. Требуется восстановить Identity или переключить BFF на Rauthy.",
+  invalid: "Проверьте логин, пароль и данные формы.",
+  denied: "Неверные данные входа или отсутствует разрешённый доступ.",
+  invite: "Ключ приглашения недействителен или уже использован.",
+  limited: "Слишком много попыток. Повторите позже.",
+  network: "Не удалось получить ответ от сервера.",
+  badResponse: "Сервер вернул неподтверждённый формат авторизации.",
+  transitional: "Временный вход через действующий Backend до подключения Rauthy.",
+} : {
+  login: "Sign in with username and password",
+  register: "Register with invitation",
+  username: "Username",
+  password: "Password",
+  invitation: "Invitation key",
+  submitLogin: "Sign in",
+  submitRegister: "Create account",
+  signing: "Verifying account…",
+  showPassword: "Show password",
+  hidePassword: "Hide password",
+  confirmed: "Identity verified by the server",
+  scopePending: "Signed in through the temporary Identity API. Project, Team, and MCP management permissions are not yet verified by Control Panel API.",
+  logout: "Sign out",
+  registered: "Account created. Sign in with your username and password.",
+  logoutUncertain: "Bearer cleared in browser; server revocation was not confirmed.",
+  unavailable: "Identity is currently unavailable (503). The form is ready, but the server cannot complete sign-in. Restore Identity or cut BFF over to Rauthy.",
+  invalid: "Check the username, password, and form fields.",
+  denied: "Invalid credentials or access denied.",
+  invite: "Invitation key is invalid or already used.",
+  limited: "Too many attempts. Try again later.",
+  network: "No response from server.",
+  badResponse: "The server returned an unverified authentication format.",
+  transitional: "Temporary login via existing Backend until Rauthy is connected.",
+})
+function selectMode(value:"login"|"register"):void {
+  mode.value=value
+  authError.value=""
+  notice.value=""
+  password.value=""
+  invitation.value=""
+}
+async function submitFirstUser():Promise<void> {
+  if(busy.value || confirmed.value)return
+  authError.value=""
+  notice.value=""
+  busy.value=true
+  authController?.abort()
+  const authRequest=new AbortController()
+  authController=authRequest
+  const secret=password.value
+  try {
+    if(mode.value==="register"){
+      await registerFirstUser(invitation.value.trim(),username.value.trim(),secret,authRequest.signal)
+      selectMode("login")
+      notice.value=labels.value.registered
+    }else{
+      confirmed.value=await signInFirstUser(username.value.trim(),secret,authRequest.signal)
+    }
+  }catch(e){
+    if(authRequest.signal.aborted)return
+    const code=e instanceof FirstUserError?e.code:"BAD_RESPONSE"
+    authError.value=code==="OWNER_SOURCE_UNAVAILABLE"?labels.value.unavailable:
+      code==="INVITATION_REJECTED"?(mode.value==="register"?labels.value.invite:labels.value.denied):
+      code==="AUTHENTICATION_RATE_LIMITED"?labels.value.limited:
+      code==="AUTHENTICATION_REQUIRED"?labels.value.denied:
+      code==="REQUEST_REJECTED"?labels.value.invalid:
+      code==="NETWORK_ERROR"?labels.value.network:labels.value.badResponse
+  }finally{
+    password.value=""
+    busy.value=false
+    if(authController===authRequest)authController=null
+  }
+}
+async function logoutFirstUser():Promise<void> {
+  if(busy.value)return
+  busy.value=true
+  const revoked=await signOutFirstUser()
+  confirmed.value=null
+  busy.value=false
+  if(!revoked)authError.value=labels.value.logoutUncertain
+  void verifyApi()
+}
 onMounted(() => { void verifyApi() })
-onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null })
+onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null; authController?.abort(); authController=null; clearTemporaryBearer() })
 </script>
 <template>
   <section class="mx-auto grid w-full max-w-[1100px] overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_32px_100px_-40px_rgba(8,35,55,.4)] lg:min-h-[600px] lg:grid-cols-[.9fr_1.1fr]" aria-labelledby="control-panel-login-title">
@@ -68,17 +176,45 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null })
           <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-lg font-bold text-primary" aria-hidden="true">B</span>
           <p class="text-sm font-semibold text-foreground">{{ t('panelAccess.connectionTitle') }}</p>
         </div>
-        <p v-if="state==='checking'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.checking') }}</p>
+        <p v-if="confirmed" class="text-sm leading-6 text-foreground">{{labels.confirmed}}</p>
+        <p v-else-if="state==='checking'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.checking') }}</p>
         <p v-else-if="state==='signed_out'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.signedOut') }}</p>
         <p v-else-if="state==='denied'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.denied') }}</p>
         <p v-else-if="state==='unverified'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unverified') }}</p>
         <p v-else class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unavailable') }}</p>
       </div>
-      <!-- Backend must first publish verified session creation, callback,
-           current User and logout routes. Never derive auth URLs in UI. -->
-      <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <button type="button" disabled class="min-h-12 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground opacity-60" :aria-label="t('panelAccess.signInPending')">{{ t('panelAccess.signInPending') }}</button>
-        <button type="button" disabled class="min-h-12 rounded-xl border border-border px-4 py-3 text-sm font-medium text-muted-foreground opacity-60">{{ t('panelAccess.registrationPending') }}</button>
+      <!-- Owner-requested TEMPORARY existing BFF login; no invented Project/Team grants. -->
+      <div class="mt-5 space-y-4">
+        <p class="text-xs leading-5 text-muted-foreground">{{labels.transitional}}</p>
+        <div v-if="confirmed" class="space-y-3 rounded-xl border border-border bg-muted/30 p-4" role="status">
+          <p class="text-sm font-semibold text-foreground">{{labels.confirmed}}</p>
+          <p class="break-all font-mono text-xs text-muted-foreground">{{confirmed.user_id}}</p>
+          <p class="text-sm text-muted-foreground">{{labels.scopePending}}</p>
+          <button type="button" class="min-h-11 w-full rounded-lg border border-border px-4 text-sm font-semibold hover:bg-accent disabled:opacity-50" :disabled="busy" @click="logoutFirstUser">{{labels.logout}}</button>
+        </div>
+        <template v-else>
+          <div class="grid grid-cols-2 gap-2" role="group" :aria-label="t('panelAccess.firstStep')">
+            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-semibold" :class="mode==='login'?'bg-primary text-primary-foreground':'text-foreground hover:bg-accent'" :aria-pressed="mode==='login'" :disabled="busy" @click="selectMode('login')">{{labels.login}}</button>
+            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-semibold" :class="mode==='register'?'bg-primary text-primary-foreground':'text-foreground hover:bg-accent'" :aria-pressed="mode==='register'" :disabled="busy" @click="selectMode('register')">{{labels.register}}</button>
+          </div>
+          <form class="space-y-3" @submit.prevent="submitFirstUser">
+            <label v-if="mode==='register'" class="block text-sm font-semibold text-foreground">{{labels.invitation}}
+              <input v-model="invitation" type="password" class="field mt-1.5" autocomplete="off" minlength="32" maxlength="256" required :disabled="busy" />
+            </label>
+            <label class="block text-sm font-semibold text-foreground">{{labels.username}}
+              <input v-model="username" type="text" class="field mt-1.5" autocomplete="username" minlength="3" maxlength="128" required :disabled="busy" />
+            </label>
+            <label class="block text-sm font-semibold text-foreground">{{labels.password}}
+              <span class="mt-1.5 flex min-w-0 gap-2">
+                <input v-model="password" :type="passwordVisible?'text':'password'" class="field min-w-0 flex-1" :autocomplete="mode==='login'?'current-password':'new-password'" minlength="12" maxlength="4096" required :disabled="busy" />
+                <button type="button" class="min-h-11 shrink-0 rounded-lg border border-border px-3 text-xs hover:bg-accent" :aria-label="passwordVisible?labels.hidePassword:labels.showPassword" :aria-pressed="passwordVisible" @click="passwordVisible=!passwordVisible">{{passwordVisible?labels.hidePassword:labels.showPassword}}</button>
+              </span>
+            </label>
+            <p v-if="authError" role="alert" class="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{{authError}}</p>
+            <p v-if="notice" role="status" class="rounded-lg border border-border bg-muted/30 p-3 text-sm text-foreground">{{notice}}</p>
+            <button type="submit" class="min-h-12 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50" :disabled="busy">{{busy?labels.signing:mode==='login'?labels.submitLogin:labels.submitRegister}}</button>
+          </form>
+        </template>
       </div>
       <button type="button" class="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm font-medium transition hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50" :disabled="state==='checking'" @click="verifyApi">{{ t('panelAccess.retry') }}</button>
       <button type="button" class="mt-4 w-full rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" @click="emit('preview')">{{t('panelAccess.exploreModules')}}</button>
