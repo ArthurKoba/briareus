@@ -1,34 +1,26 @@
-# Existing production network, no extra operator-supplied network variable.
-# Coolify discovers managed environment variables from THIS file before
-# Docker Compose expands extends. Mirror the base service's environment keys
-# to make every required setting visible to the Coolify parser.
+x-watch-path-coolify:
+  - "services/authorization/**"
+  - "services/common/**"  # transitional imported code until moved to shared/
+
+# Coolify parses literals and Required ENV before resolving Shared references.
 services:
-  authorization:
+  briareus-authorization:
     extends:
       file: docker-compose.yaml
-      service: authorization
+      service: briareus-authorization
     environment:
-      SERVICE_URL_AUTHORIZATION_8000: /
-      # Coolify generates SERVICE_URL_AUTHORIZATION from SERVICE_URL_AUTHORIZATION_8000.
-      # Keep an explicit override for a custom issuer or non-Coolify runtime.
-      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:-${SERVICE_URL_AUTHORIZATION}}
-      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-authorization}
-      POSTGRES_USER: ${POSTGRES_USER:?}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      AUTHORIZATION_BOOTSTRAP_USERNAME: ${AUTHORIZATION_BOOTSTRAP_USERNAME:?}
-      AUTHORIZATION_BOOTSTRAP_PASSWORD: ${AUTHORIZATION_BOOTSTRAP_PASSWORD:?}
-      AUTHORIZATION_JWT_PRIVATE_KEY_PEM: ${AUTHORIZATION_JWT_PRIVATE_KEY_PEM:?}
-      AUTHORIZATION_JWT_KEY_ID: ${AUTHORIZATION_JWT_KEY_ID:-authorization-1}
-      AUTHORIZATION_GATEWAY_SERVICE_TOKEN: ${AUTHORIZATION_GATEWAY_SERVICE_TOKEN:?}
-      AUTHORIZATION_ADMIN_SERVICE_TOKEN: ${AUTHORIZATION_ADMIN_SERVICE_TOKEN:?}
-      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
-    networks:
-      - mcp
-
+      TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:?}"
+      POSTGRES_HOST: "briareus-postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "briareus_access"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
 networks:
-  mcp:
+  briareus:
     external: true
-    name: mcp
+    name: briareus-net
