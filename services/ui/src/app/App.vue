@@ -276,7 +276,7 @@ onBeforeUnmount(()=>{
   <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
     <div class="w-full">
       <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
-      <!-- Anonymous visitors see only provider readiness, never a password form. -->
+      <!-- Transitional Identity login stays inside the scoped Control Panel BFF; no project grants are inferred. -->
       <ControlPanelAccessPage @preview="modulePreview=true" />
     </div>
   </div>
