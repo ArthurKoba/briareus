@@ -1,6 +1,6 @@
-# Briareus — CHAT-REPORT-V2: tables, file handoffs, Orchestrator acceptance
+# Briareus — CHAT-REPORT-V2: worker text, Orchestrator control table and file handoffs
 
-**Owner decision 2026-10-12.** Canonical agent workflow for workspace mcp-bridge-platform. Supersedes historical CHAT-REPORT-V1, plain-text/no-table V2, pasted НА ПРИЁМКУ and all conflicting older agent instructions. Applies to Backend, Frontend, Runtime workers and Orchestrator.
+**Owner decision 2026-10-12.** Canonical agent workflow for workspace mcp-bridge-platform. Supersedes historical CHAT-REPORT-V1 and the mistaken V2 worker-table requirement, pasted НА ПРИЁМКУ and all conflicting older agent instructions. Applies to Backend, Frontend, Runtime workers and Orchestrator.
 
 ## 1. Two DIFFERENT formats: worker chat text vs. Orchestrator control table
 
