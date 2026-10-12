@@ -31,7 +31,7 @@ function openProjects(){ window.location.hash="platform/projects" }
     <PageHeader :title="t('platform.navigation.home')" :description="t('platform.homeHint')" />
     <div v-if="!wired" role="status" class="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">{{t('platform.pendingContract')}}</div>
     <div v-if="projectContext.coreOwnerReady()" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <section class="settings-card"><h2 class="mb-1 text-sm font-semibold">{{t('platform.user')}}</h2><p class="break-words text-sm">{{projectContext.state.user.label}}</p><p class="mt-1 text-xs text-muted-foreground">{{projectContext.state.user.isSuperuser?'superuser':'User'}}</p></section>
+      <section class="settings-card"><h2 class="mb-1 text-sm font-semibold">{{t('platform.user')}}</h2><p class="break-words text-sm">{{projectContext.state.user?.label ?? ""}}</p><p class="mt-1 text-xs text-muted-foreground">{{projectContext.state.user?.isSuperuser?'superuser':'User'}}</p></section>
       <section class="settings-card"><h2 class="mb-1 text-sm font-semibold">{{t('platform.availableProjects')}}</h2><p class="text-2xl font-semibold tabular-nums">{{personal.length + teams.length}}</p><p class="text-xs text-muted-foreground">{{t('context.personal')}}: {{personal.length}} · {{t('context.teams')}}: {{teams.length}}</p></section>
       <section class="settings-card"><h2 class="mb-1 text-sm font-semibold">{{t('platform.currentScope')}}</h2><p class="break-words text-sm">{{scopeLabel}}</p><p class="mt-1 text-xs text-muted-foreground">{{t('platform.realtimeStatus')}}: {{t(`platform.scopedRealtime.${scopedEvents.state.status}`)}}</p></section>
     </div>

@@ -73,7 +73,7 @@ async function loadMore(kind:"sessions"|"approvals"):Promise<void> {
       const entries=result.items as AgentSessionView[]
       if(entries.some(item=>item.projectId!==scope.projectId))throw new Error("Foreign Project Session")
       const base=data.value?.sessions??[]
-      const next=appendVerifiedKeyset([...base,...extraSessions.value],result,cursor,item=>item.sessionUuid)
+      const next=appendVerifiedKeyset([...base,...extraSessions.value],{...result,items:entries},cursor,item=>item.sessionUuid)
       extraSessions.value=next.rows.slice(base.length)
       sessionCursor.value=next.next
       sessionHasMore.value=next.hasMore
@@ -81,7 +81,7 @@ async function loadMore(kind:"sessions"|"approvals"):Promise<void> {
       const entries=result.items as AgentSessionRequestView[]
       if(entries.some(item=>item.projectId!==scope.projectId))throw new Error("Foreign Project approval")
       const base=data.value?.requests??[]
-      const next=appendVerifiedKeyset([...base,...extraApprovals.value],result,cursor,item=>item.id)
+      const next=appendVerifiedKeyset([...base,...extraApprovals.value],{...result,items:entries},cursor,item=>item.id)
       extraApprovals.value=next.rows.slice(base.length)
       approvalCursor.value=next.next
       approvalHasMore.value=next.hasMore
@@ -256,7 +256,7 @@ async function resolve(){
 </script>
 <template>
   <div class="space-y-6">
-    <p v-if="!platformPort.value?.bff?.inspectOriginalCommand" role="status" class="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.sourceCommandUnavailable')}}</p>
+    <p v-if="!platformPort?.bff?.inspectOriginalCommand" role="status" class="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.sourceCommandUnavailable')}}</p>
     <PageHeader :title="t('platform.agentSessions')" :description="t('platform.sessionsHint')"><Button variant="outline" size="sm" :disabled="!can('sessions.read')" @click="sessions.reload">{{t('common.refresh')}}</Button></PageHeader>
     <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.openSession')}}</h2><p class="text-xs text-muted-foreground">{{t('platform.sessionBoundaries')}}</p><p v-if="!openSupported" role="status" class="text-xs text-muted-foreground">{{t('platform.sessionOpenPending')}}</p><p v-else-if="!labelSupported" role="status" class="text-xs text-muted-foreground">{{t('platform.unnamedSessionSource')}}</p><form class="flex flex-wrap items-end gap-3" @submit.prevent="openSession"><label v-if="labelSupported" class="min-w-48 flex-1 text-xs">{{t('platform.sessionLabel')}}<input v-model="newLabel" class="field mt-1" maxlength="120" :disabled="!openReady || (command.state.busy || command.state.reconciliationRequired)" required /></label><label class="text-xs">{{t('platform.sessionKind')}}<select v-model="sessionKind" class="field mt-1" :disabled="!openReady || (command.state.busy || command.state.reconciliationRequired)"><option value="normal">{{t('platform.normalSession')}}</option><option value="elevated" :disabled="!elevatedOpenSupported">{{t('platform.elevatedSession')}}</option></select></label><label class="text-xs">{{t('platform.elevationPolicy')}}<select v-model="policy" class="field mt-1" :disabled="!openReady || (command.state.busy || command.state.reconciliationRequired)"><option value="requestable">{{t('platform.requestable')}}</option><option value="fixed">{{t('platform.fixed')}}</option></select></label><Button type="submit" size="sm" :disabled="!openReady || !openSupported || (sessionKind==='elevated' && !elevatedOpenSupported) || (command.state.busy || command.state.reconciliationRequired) || (labelSupported && !newLabel.trim())">{{t('platform.open')}}</Button></form></section>
     <section class="settings-card space-y-3"><h2 class="font-semibold">{{t('platform.projectSessions')}}</h2><PlatformFeedback :status="sessions.state.status" :error="sessions.state.error" @retry="sessions.reload" /><ScopedSearch v-if="sessions.state.status==='ready'" v-model="sessionSearch" :label="t('platform.searchSessions')" :total="rows.length" :visible="visibleSessions.length" :partial="moreSessions" /><p v-if="sessions.state.status==='ready' && !rows.length" class="text-sm text-muted-foreground">{{t('platform.empty')}}</p>

@@ -14,7 +14,8 @@ if(!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(manifest.version)){
 /** No implicit proxy to an old Admin API or guessed backend port. */
 export default defineConfig({
   define:{__BRIAREUS_UI_PACKAGE_VERSION__:JSON.stringify(manifest.version)},
-  base:"/",
+  // One public Gateway serves the Panel at /panel/; no /api/ assets.
+  base:"/panel/",
   plugins:[vue(),tailwindcss()],
   resolve:{alias:{"@":fileURLToPath(new URL("./src",import.meta.url))}},
   server:{host:"127.0.0.1"},

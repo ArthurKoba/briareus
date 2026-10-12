@@ -11,12 +11,13 @@ COPY deploy/gateway/uv-project/pyproject.toml /app/pyproject.toml
 COPY deploy/gateway/uv-project/uv.lock /app/uv.lock
 COPY deploy/gateway/uv-project/.python-version /app/.python-version
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared uv sync --frozen --no-dev --no-install-project
-ENV ASGI_APP=bridge.server:app
+ENV ASGI_APP=bridge.server:static_app
 RUN useradd -u 1000 -m -d /home/bridge bridge
 # Source-only uv image: dependency layer cached above; selected service code
 # remains uninstalled and runs directly via uv run --no-sync.
 COPY services/bridge/__init__.py /app/src/bridge/__init__.py
 COPY services/bridge/server.py /app/src/bridge/server.py
+COPY services/bridge/gateway_transport.py /app/src/bridge/gateway_transport.py
 COPY services/bridge/single_origin.py /app/src/bridge/single_origin.py
 COPY services/common/__init__.py /app/src/common/__init__.py
 COPY services/common/account_contracts.py /app/src/common/account_contracts.py

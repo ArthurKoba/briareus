@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { projectContext } from "@/features/platform/model/project-context"
+import { platformPort } from "@/features/platform/api/port"
 import { refreshAuthenticatedProjection } from "@/features/platform/model/refresh-identity"
 import { useCommand, useDomain, sourceMutationReady } from "@/features/platform/model/use-domain"
 import { currentCatalogRowAllows } from "@/features/platform/model/resource-provenance"
@@ -147,7 +148,7 @@ async function remove():Promise<void> {
   <div class="space-y-6">
     <PageHeader :title="t('platform.navigation.variables')" :description="t('platform.variablesHint')"><Button size="sm" variant="outline" :disabled="!can('variables.read')" @click="variables.reload">{{t('common.refresh')}}</Button><Button size="sm" :disabled="!canCreate" @click="begin('create')">{{t('common.add')}}</Button></PageHeader>
     <p class="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.variablesSafetyHint')}} {{t('platform.scopeCollisionRule')}}</p>
-    <p v-if="!platformPort.value?.bff?.inspectOriginalCommand" role="status" class="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.sourceCommandUnavailable')}}</p>
+    <p v-if="!platformPort?.bff?.inspectOriginalCommand" role="status" class="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.sourceCommandUnavailable')}}</p>
     <section class="settings-card space-y-3">
       <label v-if="projectContext.state.scope==='project'" class="block max-w-xs text-xs">{{t('platform.resourceReadScope')}}
         <select v-model="scopeFilter" class="field mt-1"><option value="all">{{t('platform.scopeAll')}}</option><option v-if="teamId" value="team">{{t('platform.scopeTeam')}}</option><option value="project">{{t('platform.scopeProject')}}</option></select>

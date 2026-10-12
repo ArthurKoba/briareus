@@ -192,7 +192,7 @@ async function remove():Promise<void> {
       <Button variant="outline" size="sm" :disabled="!can('accounts.read')" @click="accounts.reload">{{t('common.refresh')}}</Button>
       <Button size="sm" :disabled="!canCreate" @click="begin('create')">{{t('common.add')}}</Button>
     </PageHeader>
-    <p v-if="!platformPort.value?.bff?.inspectOriginalCommand" role="status" class="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.sourceCommandUnavailable')}}</p>
+    <p v-if="!platformPort?.bff?.inspectOriginalCommand" role="status" class="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.sourceCommandUnavailable')}}</p>
     <p class="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">{{t('platform.scopeCollisionRule')}}</p>
     <section class="settings-card space-y-2">
       <h2 class="text-sm font-semibold">{{t('platform.a5ProviderCatalog')}}</h2>

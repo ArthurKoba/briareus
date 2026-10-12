@@ -6,8 +6,7 @@ services:
       context: ../..
       dockerfile: deploy/gateway/Dockerfile
     restart: "no"
-    # No legacy provider/server startup until C1-B2/C2 is accepted.
-    command: ["/bin/sh", "-ec", "echo DEV_RUNTIME_TRANSPORT_PENDING >&2; exit 78"]
+    # Static-only ASGI_APP from the reviewed Gateway image; C2 routes remain denied.
     stop_grace_period: 30s
     environment:
       TZ: "${TZ:-UTC}"
