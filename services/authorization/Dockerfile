@@ -20,6 +20,7 @@ COPY services/authorization/migrations/versions/0001_access_baseline.py /app/src
 # Older `services/common` is a transitional cross-service dependency pending
 # migration to narrow shared/contracts; NEVER expose its ORM over HTTP.
 COPY services/authorization/*.py /app/src/authorization/
+COPY services/authorization/access/ /app/src/authorization/access/
 COPY services/common/ /app/src/common/
 # No installation of the Briareus project: source-only uv run.
 COPY services/authorization/runtime_write_provenance.py /app/runtime_write_provenance.py
