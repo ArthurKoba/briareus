@@ -90,9 +90,10 @@ def check_independently_recomputed_source_graph(
                 fatal(f'{module}: runtime source graph has unresolved dynamic imports')
             expected=set(item['source_paths'])
         elif module=='admin-api':
-            # Published Admin API remains a fail-closed health-only shell.
-            # Any new BFF import needs a fresh reviewed source dependency graph.
-            expected={'services/admin-api/src/platform_runtime.py'}
+            # Private C2 remains injection-gated; nevertheless its precise
+            # transitive Python imports MUST be packaged into this image.
+            from admin_api_source_graph import private_admin_files
+            expected=set(private_admin_files(source_root))
         else:
             fatal(f'{module}: no reviewed source-graph owner')
         actual=set(record['files'])

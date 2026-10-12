@@ -8,6 +8,19 @@ x-watch-path-coolify:
   - "deploy/admin-api/uv-project/uv.lock"
   - "deploy/runtime_write_provenance.py"
   - "services/admin-api/src/platform_runtime.py"
+  - "services/admin-api/src/presentation/__init__.py"
+  - "services/admin-api/src/presentation/owner_bff_evidence.py"
+  - "services/admin-api/src/presentation/owner_bff_private_handlers.py"
+  - "services/admin-api/src/presentation/private_c2_api.py"
+  - "services/admin-api/src/presentation/private_c2_views.py"
+  - "services/common/__init__.py"
+  - "services/common/owner_bff_models.py"
+  - "services/common/owner_bff_signed.py"
+  - "services/common/owner_contracts.py"
+  - "services/common/platform_db.py"
+  - "services/common/platform_errors.py"
+  - "services/common/private_user_token.py"
+  - "services/common/settings.py"
 
 # Coolify override for a single independent Git-backed Application.
 # Coolify variable discovery happens before resolving extends; mirror env keys.

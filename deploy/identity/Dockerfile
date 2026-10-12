@@ -26,6 +26,7 @@ COPY services/common/http_transport.py /app/src/common/http_transport.py
 COPY services/common/models.py /app/src/common/models.py
 COPY services/common/oauth_session_contracts.py /app/src/common/oauth_session_contracts.py
 COPY services/common/observability.py /app/src/common/observability.py
+COPY services/common/owner_bff_models.py /app/src/common/owner_bff_models.py
 COPY services/common/owner_contracts.py /app/src/common/owner_contracts.py
 COPY services/common/owner_effect_authorization.py /app/src/common/owner_effect_authorization.py
 COPY services/common/owner_migrations.py /app/src/common/owner_migrations.py
@@ -39,6 +40,7 @@ COPY services/common/platform_db.py /app/src/common/platform_db.py
 COPY services/common/platform_errors.py /app/src/common/platform_errors.py
 COPY services/common/platform_ids.py /app/src/common/platform_ids.py
 COPY services/common/platform_telemetry.py /app/src/common/platform_telemetry.py
+COPY services/common/private_user_token.py /app/src/common/private_user_token.py
 COPY services/common/runtime_policy_contracts.py /app/src/common/runtime_policy_contracts.py
 COPY services/common/settings.py /app/src/common/settings.py
 COPY services/identity/__init__.py /app/src/identity/__init__.py
@@ -49,11 +51,15 @@ COPY services/identity/_operator_channel.py /app/src/identity/_operator_channel.
 COPY services/identity/_owner_ledger.py /app/src/identity/_owner_ledger.py
 COPY services/identity/_owner_proof_reader.py /app/src/identity/_owner_proof_reader.py
 COPY services/identity/_persistence.py /app/src/identity/_persistence.py
+COPY services/identity/_private_current_user.py /app/src/identity/_private_current_user.py
+COPY services/identity/_private_onboarding.py /app/src/identity/_private_onboarding.py
+COPY services/identity/_private_user_session.py /app/src/identity/_private_user_session.py
 COPY services/identity/_repository.py /app/src/identity/_repository.py
 COPY services/identity/_service.py /app/src/identity/_service.py
 COPY services/identity/_settings.py /app/src/identity/_settings.py
 COPY services/identity/_user_delete_source.py /app/src/identity/_user_delete_source.py
 COPY services/identity/platform_runtime.py /app/src/identity/platform_runtime.py
+COPY services/identity/private_login_source.py /app/src/identity/private_login_source.py
 # No installation of the Briareus project: source-only uv run.
 COPY deploy/runtime_write_provenance.py /app/runtime_write_provenance.py
 RUN python /app/runtime_write_provenance.py identity
