@@ -20,7 +20,7 @@ class ImpactError(RuntimeError):
 
 
 def watch_list(module: str) -> list[str]:
-    manifest = REPO / "services/external/docker-compose.coolify.yaml" if module == "external" else ROOT / module / "docker-compose.coolify.yaml"
+    manifest = REPO / "services" / module / "docker-compose.coolify.yaml" if module in {"external", "platform", "resources"} else ROOT / module / "docker-compose.coolify.yaml"
     source = manifest.read_text()
     header = "x-watch-path-coolify:\n"
     if not source.startswith(header):

@@ -135,6 +135,32 @@
         "shared/hand_runtime/**"
       ],
       "toolchain": "python"
+    },
+    {
+      "slug": "platform",
+      "uuid": "uvr5zfb9729ptfyfuxo3htmc",
+      "folder": "services/platform",
+      "base_directory": "/services/platform",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/platform/**",
+        "services/common/**",
+        "shared/build/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "resources",
+      "uuid": "6vdxwespr1ufxeohy6xpa7wg",
+      "folder": "services/resources",
+      "base_directory": "/services/resources",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/resources/**",
+        "services/common/**",
+        "shared/build/**"
+      ],
+      "toolchain": "python"
     }
   ],
   "held": [
@@ -142,18 +168,6 @@
       "slug": "identity",
       "uuid": "01sg4odymffwvc0kyrgspzvh",
       "reason": "Legacy Identity retained until verified Rauthy/OIDC cutover; no root service artifact.",
-      "action": "preserve existing app configuration and data; no guessed Base/Compose/Watch"
-    },
-    {
-      "slug": "platform",
-      "uuid": "uvr5zfb9729ptfyfuxo3htmc",
-      "reason": "No services/platform Docker/Compose target published; Backend owns decision.",
-      "action": "preserve existing app configuration and data; no guessed Base/Compose/Watch"
-    },
-    {
-      "slug": "resources",
-      "uuid": "6vdxwespr1ufxeohy6xpa7wg",
-      "reason": "No services/resources Docker/Compose target published; Backend owns decision.",
       "action": "preserve existing app configuration and data; no guessed Base/Compose/Watch"
     }
   ]
