@@ -1,0 +1,32 @@
+# Briareus Gateway — independently deployed service
+
+Owner: Runtime. This folder contains its ASGI source, uv dependency lock,
+Dockerfile, Docker build ignore, and both Compose inputs. It never imports
+private Control Panel, Identity, Authorization, or Hand implementation source.
+
+The one public origin is `https://briareus.koba-nexus.ru`. Public landing and
+Panel static resources are fetched from `briareus-admin-ui:8080` and all
+`/api/*` is forwarded unchanged to `briareus-admin-api:8000`. Browser login,
+sessions, Identity and API permissions are enforced exclusively by Backend.
+Unapproved `/hands/*` and OAuth paths remain unavailable.
+
+## Scoped Coolify Development cutover
+
+Use only the existing Gateway App UUID `vpuhamswqggqtau3als7siuo` under
+Briareus MCP / development. Preserve its domain, network, env references,
+Auto Deploy and container identity. After this directory is merged, set:
+
+- Base directory: `/services/infrastructure/gateway`
+- Docker Compose location: `/docker-compose.coolify.yaml`
+- Watch Paths: `services/infrastructure/gateway/**`
+
+The build context remains repository root, but the Dockerfile copies only
+this service folder. Native application imports do not require monorepo
+runtime source overlays. The TCP healthcheck proves an accepting listener,
+not Backend API readiness or authenticated product success.
+
+Rollback (only if this cutover fails): restore the previous Gateway-only
+Base directory `/deploy/gateway`, Compose location
+`/docker-compose.coolify.yaml`, and prior exact 26 Watch Paths from its
+known-good Coolify release, then redeploy only Gateway. Do not touch Panel,
+Backend, Hands, secrets or volumes.
