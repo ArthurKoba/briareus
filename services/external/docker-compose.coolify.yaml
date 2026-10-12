@@ -33,10 +33,11 @@ services:
       ENC_KEY_ACTIVE: "v1"
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
 
+# Explicit empty maps survive Coolify's Compose normalization.
 volumes:
-  postgres-data:
-  valkey-data:
-  rauthy-data:
+  postgres-data: {}
+  valkey-data: {}
+  rauthy-data: {}
 networks:
   briareus:
     external: true

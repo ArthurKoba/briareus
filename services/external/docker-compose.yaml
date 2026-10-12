@@ -120,10 +120,11 @@ services:
         aliases: ["briareus-rauthy"]
 
 # Coolify names and scopes managed volumes per Application. No env/version suffixes.
+# Explicit empty maps survive Coolify's Compose normalization.
 volumes:
-  postgres-data:
-  valkey-data:
-  rauthy-data:
+  postgres-data: {}
+  valkey-data: {}
+  rauthy-data: {}
 networks:
   briareus:
     external: true
