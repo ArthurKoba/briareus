@@ -1,4 +1,4 @@
-"""A fail-closed ASGI shell used until a Hand's OAuth/Cedar ports are verified."""
+"""Private Hand HTTP with real safe diagnostics and closed protected effects."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from starlette.websockets import WebSocket
 _ALLOWED_HTTP_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 
-def create_closed_hand_app(
+def create_diagnostic_hand_app(
     *,
     unavailable_code: str,
     health_fields: Mapping[str, str] | None = None,
@@ -31,7 +31,24 @@ def create_closed_hand_app(
         from ._catalog import source_capabilities
 
         catalog = source_capabilities(hand, source_root / "modules")
-    health_info = {"state": "live", "mcp": "not_mounted"}
+    diagnostic_app = None
+    if catalog is not None:
+        from ._diagnostics import diagnostic_mcp
+
+        mcp = diagnostic_mcp(hand, catalog)
+        catalog["mcp_transport"] = "diagnostic_only"
+        diagnostic_app = mcp.http_app(
+            path="/mcp",
+            stateless_http=True,
+            json_response=True,
+            host_origin_protection=True,
+            allowed_hosts=[
+                f"briareus-{hand}:8000",
+                "127.0.0.1:8000",
+                "localhost:8000",
+            ],
+        )
+    health_info = {"state": "live", "mcp": "diagnostic_only" if diagnostic_app else "not_mounted"}
     if health_fields:
         health_info.update(health_fields)
 
@@ -41,7 +58,11 @@ def create_closed_hand_app(
     async def readiness(_request: Request) -> Response:
         # A live private process is not an authorized or registered MCP Hand.
         return JSONResponse(
-            {"state": "not_ready", "mcp": "not_mounted", "authorization": "not_configured"},
+            {
+                "state": "not_ready",
+                "mcp": "diagnostic_only" if diagnostic_app else "not_mounted",
+                "authorization": "not_configured",
+            },
             status_code=503,
             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
         )
@@ -69,6 +90,10 @@ def create_closed_hand_app(
     ]
     if catalog is not None:
         routes.append(Route("/internal/v1/capabilities", capabilities, methods=["GET", "HEAD"]))
+    if diagnostic_app is not None:
+        # Pass requests through the complete FastMCP ASGI app, NOT its bare
+        # routes: Host/Origin middleware belongs to that app's security boundary.
+        routes.append(Route("/mcp", endpoint=diagnostic_app, methods=["POST", "DELETE"]))
     routes.extend(
         [
             Route("/", unavailable, methods=_ALLOWED_HTTP_METHODS),
@@ -76,4 +101,7 @@ def create_closed_hand_app(
             WebSocketRoute("/{path:path}", deny_ws),
         ]
     )
-    return Starlette(routes=routes)
+    return Starlette(
+        routes=routes,
+        lifespan=diagnostic_app.router.lifespan_context if diagnostic_app else None,
+    )
