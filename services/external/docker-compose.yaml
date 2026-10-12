@@ -1,0 +1,142 @@
+x-watch-path-coolify:
+  - "services/external/**"
+
+# Briareus third-party data dependencies: ONE Coolify Application, THREE
+# vendor containers. No application module lives in this release unit.
+# This release unit is independent of Admin/Gateway/Authorization/MCP domains.
+services:
+  briareus-postgres:
+    build:
+      context: ../..
+      dockerfile: services/external/Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-briareus_dev}"
+      POSTGRES_USER: "${POSTGRES_USER:-briareus}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      TZ: "${TZ:-UTC}"
+    expose:
+      - "5432"
+    networks:
+      briareus:
+        aliases: ["briareus-postgres"]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+  briareus-valkey:
+    image: valkey/valkey:9.1.2-alpine
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      VALKEY_PASSWORD: "${VALKEY_PASSWORD:?}"
+      TZ: "${TZ:-UTC}"
+    expose:
+      - "6379"
+    networks:
+      briareus:
+        aliases: ["briareus-valkey"]
+    volumes:
+      - valkey-data:/data
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        case "$$VALKEY_PASSWORD" in
+          ""|*[!0-9a-f]*) echo "invalid Valkey credential format" >&2; exit 78 ;;
+        esac
+        [ "$$(printf %s "$$VALKEY_PASSWORD" | wc -c)" -eq 64 ] || exit 78
+        printf 'save ""\nappendonly yes\nrequirepass %s\nmaxmemory 128mb\nmaxmemory-policy allkeys-lru\n' "$$VALKEY_PASSWORD" > /tmp/valkey.conf
+        exec valkey-server /tmp/valkey.conf
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    healthcheck:
+      test: ["CMD-SHELL", "VALKEYCLI_AUTH=\"$$VALKEY_PASSWORD\" valkey-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+  briareus-rauthy:
+    # Official upstream 0.37.1 OCI digest; no separate Coolify Application.
+    image: ghcr.io/sebadob/rauthy@sha256:72b4734a7c52bd67cd544e7b72a4ab64932a7060844ef475fc2bb3d3da3074d9
+    command: ["serve", "-c", "/app/config.toml"]
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      briareus-postgres:
+        condition: service_healthy
+    environment:
+      TZ: "${TZ:-UTC}"
+      HIQLITE: "false"
+      PG_HOST: briareus-postgres
+      PG_PORT: "5432"
+      PG_DB_NAME: briareus_rauthy
+      PG_USER: "${POSTGRES_USER:?}"
+      PG_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      HQL_DATA_DIR: /app/data
+      HQL_NODE_ID: "1"
+      HQL_NODES: "1 localhost:8100 localhost:8200"
+      HQL_SECRET_RAFT: "${RAUTHY_HQL_SECRET_RAFT:?}"
+      HQL_SECRET_API: "${RAUTHY_HQL_SECRET_API:?}"
+      ENC_KEYS: "${RAUTHY_ENC_KEYS:?}"
+      ENC_KEY_ACTIVE: "${RAUTHY_ENC_KEY_ACTIVE:?}"
+      LISTEN_ADDRESS: 0.0.0.0
+      LISTEN_PORT_HTTP: "8080"
+      LISTEN_SCHEME: http
+      PUB_URL: briareus.koba-nexus.ru
+      PROXY_MODE: "true"
+      TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
+      RP_ID: briareus.koba-nexus.ru
+      RP_ORIGIN: https://briareus.koba-nexus.ru:443
+      RP_NAME: Briareus
+      BOOTSTRAP_ADMIN_EMAIL: "${RAUTHY_BOOTSTRAP_ADMIN_EMAIL:?}"
+      BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID: "${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID:?}"
+      LOCAL_TEST: "false"
+      SWAGGER_UI_PUBLIC: "false"
+    configs:
+      - source: rauthy-configuration
+        target: /app/config.toml
+        mode: 0444
+    volumes:
+      - rauthy-state:/app/data
+    expose:
+      - "8080"
+    networks:
+      - briareus
+
+# Physical volume names intentionally preserve the existing live storage IDs;
+# runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
+volumes:
+  postgres-data:
+    name: briareus-dev-postgres-v1
+  valkey-data:
+    name: briareus-dev-valkey-v1
+  rauthy-state:
+    name: briareus-dev-rauthy-v1
+networks:
+  briareus:
+    external: true
+    name: briareus-net
+
+configs:
+  rauthy-configuration:
+    file: ./rauthy/config.toml

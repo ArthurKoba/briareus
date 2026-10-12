@@ -1,0 +1,5 @@
+*
+!services/
+!services/external/
+!services/external/postgres-entrypoint.sh
+!services/external/owner-bootstrap.psql
