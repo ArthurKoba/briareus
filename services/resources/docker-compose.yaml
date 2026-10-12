@@ -1,0 +1,41 @@
+# Private Resource Catalog release: owns only briareus_resources logical PostgreSQL DB.
+# Independent migration runs in normal ASGI owner lifespan, not a sidecar.
+services:
+  briareus-resources:
+    build:
+      context: ../..
+      dockerfile: services/resources/Dockerfile
+    restart: "no"
+    stop_grace_period: 30s
+    environment:
+      TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:?}"
+      POSTGRES_HOST: "briareus-postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "briareus_resources"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+    expose:
+      - "8000"
+    networks:
+      briareus:
+        aliases: ["briareus-resources"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8000/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 180s
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+networks:
+  briareus:
+    external: true
+    name: briareus-net

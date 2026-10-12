@@ -53,14 +53,14 @@
     },
     {
       "name": "Platform Control",
-      "base_directory": "/deploy/platform",
+      "base_directory": "/services/platform",
       "docker_compose_location": "/docker-compose.coolify.yaml",
       "compose_services": [
         "briareus-platform"
       ],
-      "watch_paths_source": "deploy/platform/docker-compose.coolify.yaml#x-watch-path-coolify",
-      "activation": "source_only_uv_direct_image_build_live_activation_blocked",
-      "dockerfile": "deploy/platform/Dockerfile",
+      "watch_paths_source": "services/platform/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "source_ready_existing_resource_cutover_pending",
+      "dockerfile": "services/platform/Dockerfile",
       "module": "platform",
       "shared_variables": {
         "TZ": "{{team.TZ}}",
@@ -74,14 +74,14 @@
     },
     {
       "name": "Resource Catalog",
-      "base_directory": "/deploy/resources",
+      "base_directory": "/services/resources",
       "docker_compose_location": "/docker-compose.coolify.yaml",
       "compose_services": [
         "briareus-resources"
       ],
-      "watch_paths_source": "deploy/resources/docker-compose.coolify.yaml#x-watch-path-coolify",
-      "activation": "source_only_uv_direct_image_build_live_activation_blocked",
-      "dockerfile": "deploy/resources/Dockerfile",
+      "watch_paths_source": "services/resources/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "source_ready_existing_resource_cutover_pending",
+      "dockerfile": "services/resources/Dockerfile",
       "module": "resources",
       "shared_variables": {
         "TZ": "{{team.TZ}}",
