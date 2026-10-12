@@ -2,6 +2,7 @@
 
 The private decision endpoint is fail-closed until Deployment/Runtime wires
 verified Rauthy+peer and Project membership ports. Health is not permission.
+A successful image build does not activate unconfigured decision trust.
 """
 
 from __future__ import annotations
