@@ -1,8 +1,12 @@
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
 COPY hands/infrastructure/pyproject.toml /app/pyproject.toml
 COPY hands/infrastructure/uv.lock /app/uv.lock
 COPY hands/infrastructure/.python-version /app/.python-version

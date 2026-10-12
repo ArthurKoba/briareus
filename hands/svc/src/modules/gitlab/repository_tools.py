@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+from common.models import JsonObject
+
+from .gitlab_client import GitLabClient
+from .models import GitLabCommitAction
+
+
+def register_gitlab_repository_tools(
+    mcp: FastMCP,
+    client_factory: Callable[[str], GitLabClient],
+    read_annotations: ToolAnnotations,
+    write_annotations: ToolAnnotations,
+    destructive_annotations: ToolAnnotations,
+) -> None:
+    @mcp.tool(title="GitLab checkout repository", annotations=write_annotations)
+    def checkout_repository(
+        account_id: str,
+        project: str,
+        destination: str,
+        mode: str = "snapshot",
+        ref: str = "",
+        overwrite: bool = False,
+    ) -> JsonObject:
+        """Checkout a GitLab repository into the shared workspace.
+
+        mode='snapshot' creates a shallow working tree without .git.
+        mode='git' keeps full Git metadata and history.
+        account_id may be a stable account alias.
+        """
+        return client_factory(account_id).checkout_repository(
+            project,
+            destination,
+            mode=mode,
+            ref=ref,
+            overwrite=overwrite,
+        )
+
+    @mcp.tool(title="Authorize local Git workspace", annotations=write_annotations)
+    def authorize_local_git(
+        account_id: str,
+        project: str,
+        destination: str,
+        remote: str = "origin",
+    ) -> JsonObject:
+        """Authorize an existing GitLab checkout for secure ordinary Git transport."""
+        return client_factory(account_id).authorize_local_git(
+            project,
+            destination,
+            remote=remote,
+        )
+
+    @mcp.tool(title="Push local Git workspace", annotations=write_annotations)
+    def push_local_git(
+        account_id: str,
+        project: str,
+        destination: str,
+        branch: str = "",
+        remote: str = "origin",
+        set_upstream: bool = True,
+        expected_remote_sha: str = "",
+    ) -> JsonObject:
+        """Push local Git HEAD, optionally using CAS-safe force-with-lease."""
+        return client_factory(account_id).push_local_git(
+            project,
+            destination,
+            branch=branch,
+            remote=remote,
+            set_upstream=set_upstream,
+            expected_remote_sha=expected_remote_sha,
+        )
+
+    @mcp.tool(title="GitLab get file", annotations=read_annotations)
+    def get_file(
+        account_id: str,
+        project: str,
+        path: str,
+        ref: str = "main",
+    ) -> JsonObject:
+        """Read one UTF-8 repository file."""
+        return client_factory(account_id).get_file(project, path, ref)
+
+    @mcp.tool(title="GitLab repository tree", annotations=read_annotations)
+    def list_tree(
+        account_id: str,
+        project: str,
+        path: str = "",
+        ref: str = "main",
+        recursive: bool = False,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        """List repository tree entries."""
+        return client_factory(account_id).list_tree(
+            project, path, ref, recursive, page, per_page
+        )
+
+    @mcp.tool(title="GitLab code search", annotations=read_annotations)
+    def search_code(
+        account_id: str,
+        project: str,
+        search: str,
+        ref: str = "",
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        """Search repository blobs inside one project."""
+        return client_factory(account_id).search_code(project, search, ref, page, per_page)
+
+
+    @mcp.tool(title="GitLab list commits", annotations=read_annotations)
+    def list_commits(
+        account_id: str,
+        project: str,
+        ref: str = "",
+        path: str = "",
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        """List repository commit history, optionally filtered by ref and path."""
+        return client_factory(account_id).list_commits(
+            project,
+            ref,
+            path,
+            page,
+            per_page,
+        )
+
+    @mcp.tool(title="GitLab get commit", annotations=read_annotations)
+    def get_commit(
+        account_id: str,
+        project: str,
+        sha: str,
+    ) -> JsonObject:
+        """Read one commit together with its repository diff."""
+        return client_factory(account_id).get_commit(project, sha)
+
+    @mcp.tool(title="GitLab put file", annotations=write_annotations)
+    def put_file(
+        account_id: str,
+        project: str,
+        path: str,
+        content: str,
+        branch: str,
+        commit_message: str,
+        last_commit_id: str = "",
+    ) -> JsonObject:
+        """Create or update one UTF-8 file on a non-protected branch."""
+        return client_factory(account_id).put_file(
+            project, path, content, branch, commit_message, last_commit_id
+        )
+
+    @mcp.tool(title="GitLab delete file", annotations=destructive_annotations)
+    def delete_file(
+        account_id: str,
+        project: str,
+        path: str,
+        branch: str,
+        commit_message: str,
+        last_commit_id: str = "",
+    ) -> JsonObject:
+        """Delete one file on a non-protected branch."""
+        return client_factory(account_id).delete_file(
+            project, path, branch, commit_message, last_commit_id
+        )
+
+    @mcp.tool(title="GitLab atomic commit", annotations=write_annotations)
+    def commit_actions(
+        account_id: str,
+        project: str,
+        branch: str,
+        commit_message: str,
+        actions: list[GitLabCommitAction],
+        start_branch: str = "",
+    ) -> JsonObject:
+        """Create one atomic multi-file commit using GitLab repository commit actions."""
+        return client_factory(account_id).commit_actions(
+            project, branch, commit_message, actions, start_branch
+        )
+
+    @mcp.tool(title="GitLab list branches", annotations=read_annotations)
+    def list_branches(
+        account_id: str,
+        project: str,
+        search: str = "",
+        page: int = 1,
+        per_page: int = 100,
+    ) -> JsonObject:
+        """List repository branches."""
+        return client_factory(account_id).list_branches(project, search, page, per_page)
+
+    @mcp.tool(title="GitLab create branch", annotations=write_annotations)
+    def create_branch(
+        account_id: str,
+        project: str,
+        branch: str,
+        ref: str,
+    ) -> JsonObject:
+        """Create a non-protected branch from a ref."""
+        return client_factory(account_id).create_branch(project, branch, ref)
+
+    @mcp.tool(title="GitLab delete branch", annotations=destructive_annotations)
+    def delete_branch(
+        account_id: str,
+        project: str,
+        branch: str,
+    ) -> JsonObject:
+        """Delete a non-protected repository branch."""
+        return client_factory(account_id).delete_branch(project, branch)
+
+    @mcp.tool(title="GitLab compare refs", annotations=read_annotations)
+    def compare(
+        account_id: str,
+        project: str,
+        from_ref: str,
+        to_ref: str,
+        straight: bool = False,
+    ) -> JsonObject:
+        """Compare two repository refs."""
+        return client_factory(account_id).compare(project, from_ref, to_ref, straight)
