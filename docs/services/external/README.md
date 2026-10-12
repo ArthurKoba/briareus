@@ -1,7 +1,9 @@
 # Briareus External Services — source and operator contract
 
 This is the **existing** Coolify Development Application called **External Services**.
-Its approved UUID remains `rgne4jjrnc6j6qb6zy5nelbp` in Briareus MCP / development.
+The previous Application UUID `rgne4jjrnc6j6qb6zy5nelbp` was removed by the owner.
+A new, explicitly scoped Development Application must be created; record its
+new UUID in the source allowlist after creation.
 No new Coolify Application for Rauthy, and no Cedar container.
 Cedar stays embedded as the Rust-backed `cedarpy` library in Python Authorization.
 
@@ -12,9 +14,12 @@ Cedar stays embedded as the Rust-backed `cedarpy` library in Python Authorizatio
 - `services/external/Dockerfile`, `Dockerfile.dockerignore`, `postgres-entrypoint.sh`,
   `owner-bootstrap.psql`: existing PostgreSQL release logic, using the new folder.
 - `services/external/config/owner-databases.json`: inventory of owner DBs plus isolated Rauthy namespace.
-- `services/external/rauthy/config.toml`: upstream Rauthy nonsecret settings.
-- Persistent volumes: existing `briareus-dev-postgres-v1`, `briareus-dev-valkey-v1`;
-  new `briareus-dev-rauthy-v1` for upstream cache and internal state.
+- Rauthy uses its official `serve` command and native `ENV` variables
+  from the Compose, with **no separately mounted TOML file**. This avoids
+  the missing `rauthy/config.toml` bind source from the failed deploy.
+- Compose volumes: `postgres-data`, `valkey-data`, `rauthy-data`;
+  **no hardcoded environment, project name or version** in a physical volume
+  name. Coolify owns the application-specific naming.
 - Existing shared external Docker network: `briareus-net`.
 - Rauthy is private on 8080; public OIDC ingress belongs to the existing Gateway.
 - Coolify Base directory: `/services/external`; Compose location: `/docker-compose.coolify.yaml`;
@@ -86,6 +91,16 @@ https://sebadob.github.io/rauthy/config/bootstrap.html
 https://sebadob.github.io/rauthy/config/encryption.html
 https://sebadob.github.io/rauthy/config/ha.html
 
+## Fresh deployment
+
+The owner removed the previous Coolify `External Services` application and
+explicitly selected a clean MVP setup. The new application starts with fresh
+Coolify-managed volumes; no old `briareus-dev-*-v1` resources, data migration,
+or preexisting application UUID are assumed. **Container identities remain
+prefixed**: `briareus-postgres`, `briareus-valkey`, `briareus-rauthy` and
+their matching network aliases, because other Briareus services depend on
+these stable Docker DNS names. Volume keys are independent of service identity.
+
 ## PostgreSQL and migration contract
 
 The existing physical `briareus-postgres` server and its volume remain
@@ -107,13 +122,12 @@ contract** and requested immediate cleanup. The Git change removes
 `services/external/**`. Previous Git revisions remain available for
 rollback; the old folder is not duplicated as a second active manifest.
 
-The existing Coolify Application UUID is retained. Its CURRENT observed
-Base before this migration was `/deploy/data`, with both existing data
-volumes mounted. Its new desired-state Base is `/services/external`,
-Compose location `/docker-compose.coolify.yaml`, and source Watch
-`services/external/**`. Merely changing the Git registry does not
-update existing Coolify parser/saved state. The stack must not be
-started with unset required Rauthy secrets.
+Create **one** Git-backed Docker Compose Application in Briareus MCP /
+Development, Base `/services/external`, Compose location
+`/docker-compose.coolify.yaml`, Watch `services/external/**`.
+Set the three Rauthy and existing PostgreSQL / Valkey Application references
+to their protected Environment Shared keys. No secret value belongs in Git.
+Deploy only after the ordinary required parameters are configured.
 
 Operator supplies the protected Rauthy values and valid proxy CIDR.
 The existing Application is then repointed and re-parsed; verify all

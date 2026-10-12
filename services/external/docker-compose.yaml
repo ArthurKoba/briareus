@@ -73,7 +73,6 @@ services:
   briareus-rauthy:
     # Official upstream 0.37.1 OCI digest; no separate Coolify Application.
     image: ghcr.io/sebadob/rauthy@sha256:72b4734a7c52bd67cd544e7b72a4ab64932a7060844ef475fc2bb3d3da3074d9
-    command: ["serve", "-c", "/app/config.toml"]
     user: "10001:10001"
     restart: unless-stopped
     init: true
@@ -102,6 +101,7 @@ services:
       LISTEN_ADDRESS: 0.0.0.0
       LISTEN_PORT_HTTP: "8080"
       LISTEN_SCHEME: http
+      HTTP_WORKERS: "2"
       PUB_URL: briareus.koba-nexus.ru
       PROXY_MODE: "true"
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
@@ -111,26 +111,18 @@ services:
       LOCAL_TEST: "false"
       SWAGGER_UI_PUBLIC: "false"
     volumes:
-      - rauthy-state:/app/data
-      - type: bind
-        source: ./rauthy/config.toml
-        target: /app/config.toml
-        read_only: true
+      - rauthy-data:/app/data
     expose:
       - "8080"
     networks:
       briareus:
         aliases: ["briareus-rauthy"]
 
-# Physical volume names intentionally preserve the existing live storage IDs;
-# runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
+# Coolify names and scopes managed volumes per Application. No env/version suffixes.
 volumes:
   postgres-data:
-    name: briareus-dev-postgres-v1
   valkey-data:
-    name: briareus-dev-valkey-v1
-  rauthy-state:
-    name: briareus-dev-rauthy-v1
+  rauthy-data:
 networks:
   briareus:
     external: true

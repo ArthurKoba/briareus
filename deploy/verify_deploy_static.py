@@ -294,7 +294,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal('external: Rauthy must own its independent database')
             if 'ports' in rauthy or not rauthy['image'].startswith('ghcr.io/sebadob/rauthy@sha256:'):
                 fatal('external: Rauthy must use private pinned upstream image')
-            if set(base['volumes']) != {'postgres-data','valkey-data','rauthy-state'}:
+            if set(base['volumes']) != {'postgres-data','valkey-data','rauthy-data'}:
                 fatal('external: vendor state volumes differ from intended topology')
             continue
         docker=ROOT/module/'Dockerfile'
@@ -447,9 +447,16 @@ def run(source_root: Path, allow_pending: bool) -> None:
         elif module=='admin-ui':
             if 'OTLP_BEARER_TOKEN' in str(override):
                 fatal('browser receives collector secret')
-    for name in ('briareus-dev-postgres-v1','briareus-dev-valkey-v1'):
-        if name not in (source_root/'services/external/docker-compose.yaml').read_text():
-            fatal('existing Data physical volume identity changed')
+    external=yaml.safe_load((source_root/'services/external/docker-compose.coolify.yaml').read_text())
+    if set(external['volumes'])!={'postgres-data','valkey-data','rauthy-data'}:
+        fatal('External Compose must own exactly three concise named volumes')
+    if any(value is not None for value in external['volumes'].values()):
+        fatal('External Compose must use Coolify-scoped volumes with no custom physical name')
+    rauthy=external['services']['briareus-rauthy']
+    if any(x.get('target') == '/app/config.toml' for x in rauthy.get('volumes',[]) if isinstance(x,dict)):
+        fatal('External Rauthy must configure via native ENV, never missing config bind')
+    if (source_root/'services/external/rauthy/config.toml').exists():
+        fatal('unused Rauthy TOML should not remain as a second config source')
     if 'allow-owner' in (ROOT/'authorization/docker-compose.yaml').read_text():
         fatal('unapproved Auth runtime bypass')
     if any(ROOT.glob('*/wheel-pin.json')) or (ROOT/'install_wheel_release.py').exists():
