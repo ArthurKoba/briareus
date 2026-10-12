@@ -43,6 +43,7 @@ class CurrentGrant:
     expires_at: datetime
     version: int
     minimum_current_version: int
+    is_elevated: bool = False
 
 
 class CedarPolicyEvaluator:
@@ -94,6 +95,7 @@ class CedarPolicyEvaluator:
                 "project": str(operation.project_uuid),
                 "agentSession": str(operation.agent_session_uuid),
                 "grantVersion": grant.version,
+                "isElevated": grant.is_elevated,
             },
         }
         # This is a policy layer, not a grant source. Invalid policy, missing

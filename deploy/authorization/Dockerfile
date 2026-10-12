@@ -17,6 +17,7 @@ RUN useradd -u 1000 -m -d /home/briareus briareus
 COPY scripts/alembic_owners/access/env.py /app/src/common/alembic_owners/access/env.py
 COPY scripts/alembic_owners/access/versions/0001_access_baseline.py /app/src/common/alembic_owners/access/versions/0001_access_baseline.py
 COPY services/authorization/__init__.py /app/src/authorization/__init__.py
+COPY services/authorization/_access_cedar.py /app/src/authorization/_access_cedar.py
 COPY services/authorization/_access_proof_reader.py /app/src/authorization/_access_proof_reader.py
 COPY services/authorization/_access_source.py /app/src/authorization/_access_source.py
 COPY services/authorization/_cedar_policy.py /app/src/authorization/_cedar_policy.py

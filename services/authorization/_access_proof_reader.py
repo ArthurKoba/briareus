@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import SecretStr
 from sqlalchemy import select
 
+from authorization._access_cedar import permits_current_project_grant
 from authorization._session_persistence import ProjectAgentSessionRow
 from common.owner_contracts import (
     OwnerAuthorityUnavailable,
@@ -132,6 +133,14 @@ class AccessOwnerProofReader:
                 or needed_grant not in granted
             ):
                 raise OwnerAuthorityUnavailable("required live AgentSession grant not active")
+            if not permits_current_project_grant(
+                row=row,
+                actor_uuid=actor.user_id,
+                project_uuid=command.project_id,
+                operation=needed_grant,
+                expected_version=command.expected_access_revision,
+            ):
+                raise OwnerAuthorityUnavailable("Cedar denies current Project AgentSession grant")
             snapshot = OwnerVerifiedSourceSnapshot(
                 owner="access",
                 caller_user_id=actor.user_id,
