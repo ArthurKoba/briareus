@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+export PYTHONPATH="$PWD/src"
+uv run --no-project --with 'fastmcp==4.0.10' --with 'pydantic>=2.12,<3' --python 3.13 \
+  python -m unittest discover -s tests -p 'test_external_browser_sessions.py'
+uv run --no-project --with 'ruff>=0.12,<1' --python 3.13 \
+  ruff check src/modules/web/external_browser_proxy.py \
+    src/management/presentation/web_api.py tests/test_external_browser_sessions.py
+(cd admin-web-app && bun run typecheck)

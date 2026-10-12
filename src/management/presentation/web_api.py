@@ -1007,7 +1007,12 @@ def build_admin_api_router(
         try:
             result = await api.web.external_connect()
             if api.realtime is not None:
-                await api.realtime.publish("browser.runtime", "external.connected", result)
+                event = (
+                    "external.connected"
+                    if result.get("ok") is not False
+                    else "external.connect_failed"
+                )
+                await api.realtime.publish("browser.runtime", event, result)
             return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc

@@ -18,7 +18,9 @@ import { RelativeTime } from "@/shared/ui/relative-time"
 import { PaginatedTable, VirtualInfiniteTable, type DataTableColumn } from "@/shared/ui/table"
 
 const { t } = useI18n()
-const rows = computed(() => callStore.state.mode === "pagination" ? callStore.state.pageRows : callStore.state.rows)
+const rows = computed(() => [
+  ...(callStore.state.mode === "pagination" ? callStore.state.pageRows : callStore.state.rows),
+])
 const loading = computed(() => callStore.state.mode === "pagination" ? callStore.state.pageLoading : callStore.state.loading)
 const error = computed(() => callStore.state.error)
 const selected = ref<InvocationRecord | null>(null)
