@@ -55,8 +55,8 @@ def _validate_browser(request: Request) -> None:
     if request.headers.get("origin") not in (None, _ORIGIN):
         raise HTTPException(403, detail="untrusted browser origin")
     if any(
-        name.startswith(("x-forwarded-", "x-user-", "x-service-", "x-identity-"))
-        or name in {"forwarded", "proxy-authorization", "x-original-url", "x-rewrite-url"}
+        name.startswith(("x-user-", "x-service-", "x-identity-"))
+        or name in {"proxy-authorization", "x-original-url", "x-rewrite-url"}
         for name in request.headers
     ):
         raise HTTPException(403, detail="untrusted internal identity headers")
