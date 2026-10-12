@@ -22,8 +22,20 @@ from green Coolify liveness or the Control Panel's source-only module catalog.
   "hand": "files",
   "source": "packaged_tool_declarations",
   "declared_tool_count": 12,
+  "interface_format": "python_declaration_not_mcp_json_schema",
   "declared_tools": [
-    {"name": "file_read", "module": "modules.files.file_tools"}
+    {
+      "name": "file_read",
+      "module": "modules.files.file_tools",
+      "title": "File read",
+      "arguments": [
+        {"name": "path", "annotation": "str", "required": true},
+        {"name": "offset", "annotation": "int", "required": false, "default": 0},
+        {"name": "length", "annotation": "int", "required": false}
+      ],
+      "return_annotation": "JsonObject",
+      "source_annotation_ref": "read_annotations"
+    }
   ],
   "mcp_transport": "not_mounted",
   "authorization": "not_configured",
@@ -35,9 +47,20 @@ The example `declared_tools` array is shortened for documentation; an actual
 response includes all parsed declarations. The *count* is the number of
 source-level `@mcp.tool(...)` function declarations found in the source tree,
 not a claim that a tool is mounted, registered with any consumer or safe to
-invoke. Names and fully qualified module locations are derived by Python AST
-without constructing tools or instantiating clients. The legacy implementation
-is packaged independently inside the Hand, not imported from `services/`.
+invoke. Names, static titles, docstrings, return annotations, parameter type
+expressions, literal primitive defaults and any source annotation reference
+are derived by Python AST without constructing tools or instantiating clients.
+
+**This is a source-signature format, not MCP `tools/list` or a validated input
+JSON Schema.** Complex types such as `ClientFile`, `JsonObject`, unions and
+Pydantic models are retained as literal annotation expressions, *not* silently
+converted into incorrect or permissive JSON schemas. Dynamic default values
+are omitted; such parameters may have `required: false` without a `default`
+field. Source annotation names such as `read_annotations` are only identifiers,
+not current permission grants, verified read-only guarantees or executable
+capability flags. A real FastMCP registration and per-effect authorization are
+still needed before invoking a tool. The copied implementation lives inside
+the Hand, never imported from `services/` at runtime.
 
 Every response is non-cacheable. Other paths, including `/mcp` and private
 provider operations, remain HTTP 503 and WebSockets remain rejected until
