@@ -119,6 +119,28 @@ and callback path will be defined jointly with Backend/Runtime/Frontend,
 never guessed. Panel receives BFF-only credentials, Gateway stays a proxy,
 Hands separately check token audiences and Authorization/Cedar decisions.
 
+## Verified upstream route declarations (v0.37.1 source, NOT live)
+
+Official tagged Rust source: https://github.com/sebadob/rauthy/blob/v0.37.1/src/api/src/oidc.rs
+Routes are mounted under the Rauthy /auth/v1 API prefix.
+
+- GET /auth/v1/oidc/authorize: OIDC interactive authorization.
+- POST /auth/v1/oidc/token: token exchange and refresh.
+- GET /auth/v1/oidc/certs: signing keys.
+- GET and POST /auth/v1/oidc/logout: logout variants.
+- GET /auth/v1/.well-known/openid-configuration: OIDC discovery.
+- GET /auth/v1/.well-known/oauth-authorization-server: extra metadata.
+
+Official Admin REST relative route declarations: src/api/src/users.rs,
+clients.rs, groups.rs, roles.rs and api_keys.rs; these handle /users,
+/clients, /groups, /roles, /api_keys. They are upstream PROTECTED REST
+routes, not Briareus browser BFF endpoints.
+
+Static upstream source does NOT prove a live issuer, JWKS URI, client
+audience, callback, authorization grants or final reverse-proxy path.
+Backend/Runtime/Frontend must consume actual returned discovery JSON after
+new Coolify target authorization and first supported provider enrollment.
+
 ## Hard Coolify authorization boundary
 
 Project Briareus MCP UUID 3xshlpoghb9wcyhjgktlqzzp;
