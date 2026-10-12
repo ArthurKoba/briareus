@@ -15,7 +15,7 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 | --- | --- | --- |
 | admin-api | Admin API | rf5gaooeijfzyiizgaw9kznr |
 | admin-ui | Admin UI | pxv5fbwcogun3va4vygnejd4 |
-| authorization | Authorization | kx1dpuamhtrlkbo4dg7tzanj |
+| authorization | Authorization | 95podguiawtnf2tvlemvk3ef |
 | data | External Services | rgne4jjrnc6j6qb6zy5nelbp |
 | files | Files | oeoerknk5tmjc3imqxljciga |
 | gateway | Gateway | vpuhamswqggqtau3als7siuo |
@@ -28,6 +28,8 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 | terminal | Terminal | f2pguiu8qwlljggbfhmnim6z |
 | web | Web | 1czkj4zvjrsaganivglrdvpy |
 
+
+**Owner-authorized replacement:** the former Authorization UUID `kx1dpuamhtrlkbo4dg7tzanj` was deleted; the owner explicitly authorized recreation in this same Briareus Development scope on 2026-10-12. The new Authorization UUID `95podguiawtnf2tvlemvk3ef` was observed immediately after creation from `ArthurKoba/briareus`, branch `main`, Base `/services/authorization`, Compose `/docker-compose.coolify.yaml`, using the existing `tambov` / `briareus-net`. The old UUID is no longer approved. The new resource has not yet passed Compose/runtime acceptance.
 
 The known 14 UUIDs are an allowlist, not instructions to enumerate, inspect, or edit everything. New UUIDs or renamed apps are not automatically trusted; exact membership must be established by an already scoped trusted source or explicit owner consent, not by browsing other projects or guessing.
 

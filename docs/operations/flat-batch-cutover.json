@@ -32,7 +32,7 @@
     },
     {
       "slug": "authorization",
-      "uuid": "kx1dpuamhtrlkbo4dg7tzanj",
+      "uuid": "95podguiawtnf2tvlemvk3ef",
       "folder": "services/authorization",
       "base_directory": "/services/authorization",
       "compose_location": "/docker-compose.coolify.yaml",
