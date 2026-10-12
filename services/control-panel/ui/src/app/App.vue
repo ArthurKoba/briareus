@@ -12,7 +12,7 @@ import PlatformNav from "@/app/PlatformNav.vue"
 import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
 import ScopedRealtimeStatus from "@/features/platform/ui/ScopedRealtimeStatus.vue"
 import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
-import FirstUserPage from "@/pages/platform/FirstUserPage.vue"
+import ControlPanelAccessPage from "@/pages/platform/ControlPanelAccessPage.vue"
 import Button from "@/shared/ui/Button.vue"
 import ToastHost from "@/shared/notifications/ToastHost.vue"
 import { useUiPreferences } from "@/shared/lib/preferences"
@@ -86,7 +86,7 @@ function expireAuth():void {
 function readOneUseLink():void {
   // The previous native-password invitation/reset flow is RETIRED from the
   // browser. Never render its form, log its token or forward it to the IdP.
-  // Rauthy onboarding will use the independently accepted BFF/IdP contract.
+  // Account onboarding needs the published Control Panel API contract.
   const url=new URL(location.href)
   const hasLegacyCode=url.searchParams.has("invite")||url.searchParams.has("reset")
   if(!hasLegacyCode)return
@@ -268,9 +268,9 @@ onBeforeUnmount(()=>{
   <div v-if="loading" role="status" class="grid min-h-screen place-items-center text-sm text-muted-foreground">{{t('app.loading')}}</div>
   <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
     <div class="w-full">
-      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('oidc.legacyLinkUnavailable')}}</p>
+      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
       <!-- Anonymous visitors see only provider readiness, never a password form. -->
-      <FirstUserPage />
+      <ControlPanelAccessPage />
     </div>
   </div>
   <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
@@ -284,8 +284,8 @@ onBeforeUnmount(()=>{
   <div v-else-if="!verified" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
     <div class="w-full">
       <p v-if="projectContext.state.scope==='suspended'" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('platform.suspendedNotice')}}</p>
-      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('oidc.legacyLinkUnavailable')}}</p>
-      <FirstUserPage />
+      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
+      <ControlPanelAccessPage />
     </div>
   </div>
   <div v-else class="min-h-screen bg-background text-foreground md:grid" :class="sidebarCollapsed?'md:grid-cols-[68px_minmax(0,1fr)]':'md:grid-cols-[240px_minmax(0,1fr)]'">
