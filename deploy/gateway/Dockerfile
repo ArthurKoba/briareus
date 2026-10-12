@@ -17,7 +17,7 @@ RUN useradd -u 1000 -m -d /home/bridge bridge
 # remains uninstalled and runs directly via uv run --no-sync.
 COPY services/bridge/__init__.py /app/src/bridge/__init__.py
 COPY services/bridge/server.py /app/src/bridge/server.py
-COPY services/bridge/gateway_transport.py /app/src/bridge/gateway_transport.py
+COPY services/bridge/thin_gateway.py /app/src/bridge/thin_gateway.py
 COPY services/bridge/single_origin.py /app/src/bridge/single_origin.py
 COPY services/common/__init__.py /app/src/common/__init__.py
 COPY services/common/account_contracts.py /app/src/common/account_contracts.py
