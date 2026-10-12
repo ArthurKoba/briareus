@@ -10,7 +10,6 @@ services:
       TZ: "${TZ:-UTC}"
       OIDC_ISSUER: "${OIDC_ISSUER:-}"
       OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:-}"
-      SERVICE_URL_BRIAREUS_ADMIN_API_8000: "/"
 networks:
   briareus:
     external: true
