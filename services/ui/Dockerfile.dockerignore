@@ -1,0 +1,14 @@
+**
+!services/
+!services/ui/
+!services/ui/package.json
+!services/ui/bun.lock
+!services/ui/components.json
+!services/ui/index.html
+!services/ui/tsconfig.json
+!services/ui/vite.config.ts
+!services/ui/src/
+!services/ui/src/**
+!services/ui/public/
+!services/ui/public/**
+!services/ui/nginx.conf.template
