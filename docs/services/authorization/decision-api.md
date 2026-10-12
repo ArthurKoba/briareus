@@ -26,3 +26,21 @@ No automated suites are added in the MVP. Native import, compiled Cedar, fail-cl
 ## Service-local decision lifecycle binding (source only)
 
 The Authorization factory now accepts explicit trusted ingress and Rauthy/service-peer/Platform attestor adapters. Only after the existing Access owner lifespan successfully migrates/verifies its own database and ingress does it open an additional **owner-local** verified SQL reader pool for decisions; that pool is closed on shutdown. No other owner DB, schema or service is touched. The default release supplies neither adapter and continues to deny with HTTP 503. This is a prepared source integration, not a live OAuth Permit or a claim that authenticated grants are accepted.
+
+## Verified Rauthy signature and Project trust composition (source-only)
+
+The Authorization private verifier module now checks Rauthy JWT signatures
+against independently trusted issuer signing keys, limiting algorithms
+to supported RSA/EdDSA families, enforcing the verified HTTPS issuer,
+resource audience distinct from browser OAuth client ID, key ID and expiry.
+It rejects unsigned, mismatched and token-directed key references.
+Key-set origin and rotation are still verified separately by the provider owner.
+
+The decision attestor composes that verified bearer with two required
+independently trusted ports: the authenticated service transport verifier and
+the current Platform User/Project membership resolver. It checks the peer's
+exact Hand action family, permits Gateway only for coarse mcp.connect, and
+bounds proof expiry by the shortest upstream/peer/Project lifetime. The
+Access owner SQL + Cedar policy must still verify the current durable grant.
+Without actual trusted provider enrollment, peer and Platform ports, the
+runtime default remains 503 fail-closed; no real Permit is claimed.
