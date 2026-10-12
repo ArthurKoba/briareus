@@ -541,7 +541,7 @@ class GitHubPolicySettings(ProcessSettings):
         validation_alias="GITHUB_PUBLIC_ALLOW_ANONYMOUS_FALLBACK",
     )
     protected_branches: Annotated[frozenset[str], NoDecode] = Field(
-        frozenset({"main", "master"}),
+        frozenset(),
         validation_alias="GITHUB_AGENT_PROTECTED_BRANCHES",
     )
     required_checks: Annotated[tuple[str, ...], NoDecode] = Field(
