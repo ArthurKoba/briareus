@@ -62,3 +62,14 @@ A UI-only edit must not build Control Panel API, Identity or the Hands.
 Do not add SQL migrations, credentials, broad shared watches or public UI
 secrets. Observe real Coolify deployment and `/`, `/panel/`, assets, sitemap,
 then separately report any still-unavailable backend-authenticated API.
+
+## MCP module migration
+
+The legacy Browser, Files, Terminal, GitHub/GitLab, Analysis, Calls, OAuth,
+Observability and service-tool **interface inventory** is preserved as
+separate modules with nested settings. An explicit anonymous module-preview
+mode shows that layout without presenting fabricated server data, permissions
+or fake successful saves. Global display preferences are functional; backend
+module settings require verified, provider-agnostic Control Panel API DTOs.
+See `docs/services/ui/mcp-module-migration.md` for the evidence and missing
+BFF contracts.

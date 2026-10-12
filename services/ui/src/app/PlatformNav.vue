@@ -14,7 +14,7 @@ const sections = computed(()=>[
 ] as const)
 const items=computed(()=>visiblePlatformPages())
 const icons: Record<PlatformPageId, Component> = {
-  home:LayoutDashboard,users:Users,teams:UsersRound,projects:FolderKanban,
+  home:LayoutDashboard,mcp:AppWindow,users:Users,teams:UsersRound,projects:FolderKanban,
   agents:Bot,sessions:ShieldCheck,integrations:GitBranch,variables:FileKey,
   dashboard:Activity,calls:Blocks,oauth:Wrench,files:FileText,terminal:TerminalSquare,
   "browser-managed":AppWindow,"browser-external":Globe,analysis:Database,settings:Settings,

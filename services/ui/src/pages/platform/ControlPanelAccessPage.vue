@@ -6,6 +6,7 @@ import { useI18n } from "vue-i18n"
 import { checkControlPanelAccess, type ControlPanelAccessState } from "@/features/platform/api/control-panel-access"
 
 const { t } = useI18n()
+const emit=defineEmits<{preview:[]}>()
 const { locale, theme } = useUiPreferences()
 function selectTheme(value: ThemePreference) { theme.value = value }
 const state = ref<ControlPanelAccessState>("checking")
@@ -80,6 +81,8 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null })
         <button type="button" disabled class="min-h-12 rounded-xl border border-border px-4 py-3 text-sm font-medium text-muted-foreground opacity-60">{{ t('panelAccess.registrationPending') }}</button>
       </div>
       <button type="button" class="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm font-medium transition hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50" :disabled="state==='checking'" @click="verifyApi">{{ t('panelAccess.retry') }}</button>
+      <button type="button" class="mt-4 w-full rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" @click="emit('preview')">{{t('panelAccess.exploreModules')}}</button>
+      <p class="mt-2 text-xs leading-6 text-muted-foreground">{{t('panelAccess.previewNotice')}}</p>
       <p class="mt-4 text-xs leading-6 text-muted-foreground">{{ t('panelAccess.accountServices') }}</p>
       <div class="mt-8 border-t border-border pt-5 text-center text-sm text-muted-foreground">
         <a href="/" class="inline-flex min-h-10 items-center gap-2 rounded-lg px-2 text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">← {{ t('app.publicWebsite') }}</a>
