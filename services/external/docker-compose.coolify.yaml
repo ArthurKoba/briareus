@@ -1,10 +1,5 @@
 x-watch-path-coolify:
-  - "deploy/data/Dockerfile"
-  - "deploy/data/Dockerfile.dockerignore"
-  - "deploy/data/owner-bootstrap.psql"
-  - "deploy/data/postgres-entrypoint.sh"
-  - "deploy/data/docker-compose.yaml"
-  - "deploy/data/docker-compose.coolify.yaml"
+  - "services/external/**"
 
 # Per-Application Coolify adapter: vendor services deploy together as one data release.
 services:
@@ -24,6 +19,21 @@ services:
     environment:
       VALKEY_PASSWORD: "${VALKEY_PASSWORD:?}"
       TZ: "${TZ:-UTC}"
+  briareus-rauthy:
+    extends:
+      file: docker-compose.yaml
+      service: briareus-rauthy
+    environment:
+      TZ: "${TZ:-UTC}"
+      PG_USER: "${POSTGRES_USER:?}"
+      PG_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      HQL_SECRET_RAFT: "${RAUTHY_HQL_SECRET_RAFT:?}"
+      HQL_SECRET_API: "${RAUTHY_HQL_SECRET_API:?}"
+      ENC_KEYS: "${RAUTHY_ENC_KEYS:?}"
+      ENC_KEY_ACTIVE: "${RAUTHY_ENC_KEY_ACTIVE:?}"
+      TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
+      BOOTSTRAP_ADMIN_EMAIL: "${RAUTHY_BOOTSTRAP_ADMIN_EMAIL:?}"
+      BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID: "${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID:?}"
 # Physical volume names intentionally preserve the existing live storage IDs;
 # runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
 volumes:
@@ -31,7 +41,13 @@ volumes:
     name: briareus-dev-postgres-v1
   valkey-data:
     name: briareus-dev-valkey-v1
+  rauthy-state:
+    name: briareus-dev-rauthy-v1
 networks:
   briareus:
     external: true
     name: briareus-net
+
+configs:
+  rauthy-configuration:
+    file: ./rauthy/config.toml

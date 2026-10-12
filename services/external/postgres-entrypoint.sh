@@ -1,5 +1,5 @@
 #!/bin/sh
-# Bootstrap four independent databases in the EXISTING Data PostgreSQL service.
+# Bootstrap five independent databases in the EXISTING Data PostgreSQL service.
 # The upstream entrypoint remains responsible for pg_initdb and normal PGDATA.
 set -eu
 if [ "${1:-postgres}" != "postgres" ]; then
@@ -45,7 +45,7 @@ while [ "$i" -lt 90 ]; do
         fi
         unset PGPASSWORD
         touch "$ready_file"
-        echo 'briareus owner bootstrap: four databases and restricted roles verified'
+        echo 'briareus owner bootstrap: five databases and restricted roles verified'
         wait "$child"
         exit $?
     fi

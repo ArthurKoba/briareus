@@ -1,19 +1,14 @@
 x-watch-path-coolify:
-  - "deploy/data/Dockerfile"
-  - "deploy/data/Dockerfile.dockerignore"
-  - "deploy/data/owner-bootstrap.psql"
-  - "deploy/data/postgres-entrypoint.sh"
-  - "deploy/data/docker-compose.yaml"
-  - "deploy/data/docker-compose.coolify.yaml"
+  - "services/external/**"
 
-# Briareus third-party data dependencies: ONE Coolify Application, TWO
+# Briareus third-party data dependencies: ONE Coolify Application, THREE
 # vendor containers. No application module lives in this release unit.
 # This release unit is independent of Admin/Gateway/Authorization/MCP domains.
 services:
   briareus-postgres:
     build:
       context: ../..
-      dockerfile: deploy/data/Dockerfile
+      dockerfile: services/external/Dockerfile
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
@@ -75,6 +70,60 @@ services:
     pids_limit: 64
     security_opt:
       - no-new-privileges:true
+  briareus-rauthy:
+    # Official upstream 0.37.1 OCI digest; no separate Coolify Application.
+    image: ghcr.io/sebadob/rauthy@sha256:72b4734a7c52bd67cd544e7b72a4ab64932a7060844ef475fc2bb3d3da3074d9
+    command: ["serve", "-c", "/app/config.toml"]
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      briareus-postgres:
+        condition: service_healthy
+    environment:
+      TZ: "${TZ:-UTC}"
+      HIQLITE: "false"
+      PG_HOST: briareus-postgres
+      PG_PORT: "5432"
+      PG_DB_NAME: briareus_rauthy
+      PG_USER: "${POSTGRES_USER:?}"
+      PG_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      HQL_DATA_DIR: /app/data
+      HQL_NODE_ID: "1"
+      HQL_NODES: "1 localhost:8100 localhost:8200"
+      HQL_SECRET_RAFT: "${RAUTHY_HQL_SECRET_RAFT:?}"
+      HQL_SECRET_API: "${RAUTHY_HQL_SECRET_API:?}"
+      ENC_KEYS: "${RAUTHY_ENC_KEYS:?}"
+      ENC_KEY_ACTIVE: "${RAUTHY_ENC_KEY_ACTIVE:?}"
+      LISTEN_ADDRESS: 0.0.0.0
+      LISTEN_PORT_HTTP: "8080"
+      LISTEN_SCHEME: http
+      PUB_URL: briareus.koba-nexus.ru
+      PROXY_MODE: "true"
+      TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
+      RP_ID: briareus.koba-nexus.ru
+      RP_ORIGIN: https://briareus.koba-nexus.ru:443
+      RP_NAME: Briareus
+      BOOTSTRAP_ADMIN_EMAIL: "${RAUTHY_BOOTSTRAP_ADMIN_EMAIL:?}"
+      BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID: "${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID:?}"
+      LOCAL_TEST: "false"
+      SWAGGER_UI_PUBLIC: "false"
+    configs:
+      - source: rauthy-configuration
+        target: /app/config.toml
+        mode: 0444
+    volumes:
+      - rauthy-state:/app/data
+    expose:
+      - "8080"
+    networks:
+      briareus:
+        aliases: ["briareus-rauthy"]
+
 # Physical volume names intentionally preserve the existing live storage IDs;
 # runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
 volumes:
@@ -82,7 +131,13 @@ volumes:
     name: briareus-dev-postgres-v1
   valkey-data:
     name: briareus-dev-valkey-v1
+  rauthy-state:
+    name: briareus-dev-rauthy-v1
 networks:
   briareus:
     external: true
     name: briareus-net
+
+configs:
+  rauthy-configuration:
+    file: ./rauthy/config.toml

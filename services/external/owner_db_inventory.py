@@ -14,14 +14,17 @@ def main() -> int:
     path=Path(__file__).resolve().parent/'config/owner-databases.json'
     data=json.loads(path.read_text())
     assert data['provisioning_status']=='automatic_on_data_start_pending_live_observation'
-    assert len(data['initial'])==4
+    assert len(data['initial'])==5
     if args.json:
         print(json.dumps(data,indent=2))
     else:
         print('AUTO BOOTSTRAP OWNER DATABASES — LIVE STATUS UNVERIFIED')
         for row in data['initial']:
-            print(f"{row['owner']}: database={row['database']} source_user={row['role_env']} secret_source={row['secret_env']}")
-        print('PostgreSQL creates the four DBs at start; each ASGI owner runs Alembic automatically')
+            print(
+                f"{row['owner']}: database={row['database']} "
+                f"source_user={row['role_env']} secret_source={row['secret_env']}"
+            )
+        print('Five databases are reconciled at Postgres startup')
     return 0
 
 

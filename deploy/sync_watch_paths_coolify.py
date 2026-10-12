@@ -106,7 +106,8 @@ def main() -> int:
     if current.get("git_branch") != args.branch:
         raise SyncError("unexpected published Git branch; refusing update")
     service = args.compose.parent.name
-    if current.get("base_directory") != f"/deploy/{service}":
+    expected_base = f"/services/external" if service == "external" else f"/deploy/{service}"
+    if current.get("base_directory") != expected_base:
         raise SyncError("unexpected Base directory; refusing update")
     if current.get("build_pack") != "dockercompose":
         raise SyncError("target is not a Git-backed Docker Compose Application")

@@ -95,21 +95,26 @@ def read_registry(root: Path) -> dict:
     return registry
 
 
+def compose_source(root: Path, module: str) -> Path:
+    return (root.parent / "services/external/docker-compose.coolify.yaml"
+            if module == "external" else root / module / "docker-compose.coolify.yaml")
+
+
 def required_variables(root: Path, app: dict) -> list[str]:
     module = app["module"]
-    source = (root / module / "docker-compose.coolify.yaml").read_text()
+    source = compose_source(root, module).read_text()
     return sorted(set(REQUIRED.findall(source)))
 
 
 def autogenerate_domain(root: Path, app: dict) -> bool:
     module = app["module"]
-    source = (root / module / "docker-compose.coolify.yaml").read_text()
+    source = compose_source(root, module).read_text()
     return bool(GENERATED_DOMAIN.search(source))
 
 
 def watch_paths(root: Path, app: dict) -> str:
     module = app["module"]
-    source = (root / module / "docker-compose.coolify.yaml").read_text()
+    source = compose_source(root, module).read_text()
     marker = "x-watch-path-coolify:\n"
     if not source.startswith(marker):
         raise BootstrapError(f"{module}: missing top-level x-watch-path-coolify")
@@ -156,7 +161,7 @@ def main() -> int:
     bindings_by_app={}
     for app in registry["applications"]:
         module=app["module"]
-        source=(root/module/"docker-compose.coolify.yaml").read_text()
+        source=compose_source(root, module).read_text()
         declared=set(INTERPOLATED.findall(source))
         bindings=app.get("shared_variables",{})
         if not isinstance(bindings,dict):
@@ -181,7 +186,11 @@ def main() -> int:
     classified=set().union(*(set(x) for x in bindings_by_app.values()))
     # Service identity is selected by each operator-managed Python Application.
     # It is intentionally not a Team/Project/Environment Shared value.
-    permitted_local={'OTEL_SERVICE_NAME'}
+    permitted_local={'OTEL_SERVICE_NAME', 'RAUTHY_HQL_SECRET_RAFT',
+                     'RAUTHY_HQL_SECRET_API', 'RAUTHY_ENC_KEYS',
+                     'RAUTHY_ENC_KEY_ACTIVE', 'RAUTHY_TRUSTED_PROXIES',
+                     'RAUTHY_BOOTSTRAP_ADMIN_EMAIL',
+                     'RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID'}
     unknown_required=sorted(all_required-classified-permitted_local)
     if unknown_required:
         raise BootstrapError(

@@ -9,22 +9,23 @@
   "applications": [
     {
       "name": "External Services",
-      "base_directory": "/deploy/data",
+      "base_directory": "/services/external",
       "docker_compose_location": "/docker-compose.coolify.yaml",
       "compose_services": [
         "briareus-postgres",
-        "briareus-valkey"
+        "briareus-valkey",
+        "briareus-rauthy"
       ],
-      "watch_paths_source": "deploy/data/docker-compose.coolify.yaml#x-watch-path-coolify",
-      "activation": "candidate_private_data",
-      "module": "data",
+      "watch_paths_source": "services/external/docker-compose.coolify.yaml#x-watch-path-coolify",
+      "activation": "source_ready_secrets_pending_runtime",
+      "module": "external",
       "shared_variables": {
         "TZ": "{{team.TZ}}",
         "POSTGRES_USER": "{{environment.POSTGRES_USER}}",
         "POSTGRES_PASSWORD": "{{environment.POSTGRES_PASSWORD}}",
         "VALKEY_PASSWORD": "{{environment.VALKEY_PASSWORD}}"
       },
-      "dockerfile": "deploy/data/Dockerfile"
+      "dockerfile": "services/external/Dockerfile"
     },
     {
       "name": "Identity",
@@ -279,7 +280,7 @@
     }
   ],
   "provisioning_status": "source_only_uv_direct_live_provisioning_blocked",
-  "layout": "deploy/<module>",
+  "layout": "mixed_legacy_deploy_and_flat_services",
   "management": {
     "bootstrap": "deploy/bootstrap_coolify.py",
     "watch_sync": "deploy/sync_watch_paths_coolify.py",

@@ -20,7 +20,8 @@ class ImpactError(RuntimeError):
 
 
 def watch_list(module: str) -> list[str]:
-    source = (ROOT / module / "docker-compose.coolify.yaml").read_text()
+    manifest = REPO / "services/external/docker-compose.coolify.yaml" if module == "external" else ROOT / module / "docker-compose.coolify.yaml"
+    source = manifest.read_text()
     header = "x-watch-path-coolify:\n"
     if not source.startswith(header):
         raise ImpactError(f"{module}: missing top-level watch source")
@@ -124,7 +125,7 @@ def check_coverage(source_root: Path, allow_pending: bool) -> list[str]:
         'services/projects/_catalog_ledger.py':['resources'],
         'services/modules/files/project_files.py':['files','web'],
         'admin-web-app/src/main.ts':['admin-ui'],
-        'deploy/data/docker-compose.yaml':['data'],
+        'services/external/docker-compose.yaml':['external'],
     }
     for source,expected in samples.items():
         actual=generated_impact([source])[source]
