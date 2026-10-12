@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "name": "Briareus flat-layout batch source acceptance",
+  "scope": {
+    "project": "3xshlpoghb9wcyhjgktlqzzp",
+    "environment": "naibrku1omovvmw5o0bcnp5c",
+    "repository": "ArthurKoba/briareus"
+  },
+  "release_policy": "One Git revision and one aggregated CI gate for all target modules. Do not apply partial Coolify mutations or deploy until all target manifests, source and real rollout prerequisites are accepted. Never change offscope applications, secrets or volumes.",
+  "candidates": [
+    {
+      "slug": "admin-api",
+      "uuid": "rf5gaooeijfzyiizgaw9kznr",
+      "folder": "services/api",
+      "base_directory": "/services/api",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/api/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "admin-ui",
+      "uuid": "pxv5fbwcogun3va4vygnejd4",
+      "folder": "services/ui",
+      "base_directory": "/services/ui",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/ui/**"
+      ],
+      "toolchain": "bun"
+    },
+    {
+      "slug": "authorization",
+      "uuid": "kx1dpuamhtrlkbo4dg7tzanj",
+      "folder": "services/authorization",
+      "base_directory": "/services/authorization",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/authorization/**",
+        "services/common/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "data",
+      "uuid": "rgne4jjrnc6j6qb6zy5nelbp",
+      "folder": "services/external",
+      "base_directory": "/services/external",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/external/**"
+      ],
+      "toolchain": "upstream"
+    },
+    {
+      "slug": "gateway",
+      "uuid": "vpuhamswqggqtau3als7siuo",
+      "folder": "services/gateway",
+      "base_directory": "/services/gateway",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "services/gateway/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "files",
+      "uuid": "oeoerknk5tmjc3imqxljciga",
+      "folder": "hands/files",
+      "base_directory": "/hands/files",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "hands/files/**",
+        "shared/hand_runtime/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "terminal",
+      "uuid": "f2pguiu8qwlljggbfhmnim6z",
+      "folder": "hands/terminal",
+      "base_directory": "/hands/terminal",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "hands/terminal/**",
+        "shared/hand_runtime/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "web",
+      "uuid": "1czkj4zvjrsaganivglrdvpy",
+      "folder": "hands/web",
+      "base_directory": "/hands/web",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "hands/web/**",
+        "shared/hand_runtime/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "reverse",
+      "uuid": "wi49v2ea1urrchti6nxstr74",
+      "folder": "hands/reverse",
+      "base_directory": "/hands/reverse",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "hands/reverse/**",
+        "shared/hand_runtime/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "infrastructure",
+      "uuid": "mfhydae1l2xkxxkf31gomrw2",
+      "folder": "hands/infrastructure",
+      "base_directory": "/hands/infrastructure",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "hands/infrastructure/**",
+        "shared/hand_runtime/**"
+      ],
+      "toolchain": "python"
+    },
+    {
+      "slug": "svc",
+      "uuid": "0tsnkigy4fanthoywmatouig",
+      "folder": "hands/svc",
+      "base_directory": "/hands/svc",
+      "compose_location": "/docker-compose.coolify.yaml",
+      "watch_paths": [
+        "hands/svc/**",
+        "shared/hand_runtime/**"
+      ],
+      "toolchain": "python"
+    }
+  ],
+  "held": [
+    {
+      "slug": "identity",
+      "uuid": "01sg4odymffwvc0kyrgspzvh",
+      "reason": "Legacy Identity retained until verified Rauthy/OIDC cutover; no root service artifact.",
+      "action": "preserve existing app configuration and data; no guessed Base/Compose/Watch"
+    },
+    {
+      "slug": "platform",
+      "uuid": "uvr5zfb9729ptfyfuxo3htmc",
+      "reason": "No services/platform Docker/Compose target published; Backend owns decision.",
+      "action": "preserve existing app configuration and data; no guessed Base/Compose/Watch"
+    },
+    {
+      "slug": "resources",
+      "uuid": "6vdxwespr1ufxeohy6xpa7wg",
+      "reason": "No services/resources Docker/Compose target published; Backend owns decision.",
+      "action": "preserve existing app configuration and data; no guessed Base/Compose/Watch"
+    }
+  ]
+}
