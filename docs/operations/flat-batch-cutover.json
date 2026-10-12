@@ -44,7 +44,7 @@
     },
     {
       "slug": "data",
-      "uuid": "rgne4jjrnc6j6qb6zy5nelbp",
+      "uuid": "pdx35bwnh9tjeopx30jslrb9",
       "folder": "services/external",
       "base_directory": "/services/external",
       "compose_location": "/docker-compose.coolify.yaml",

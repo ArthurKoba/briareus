@@ -4,6 +4,7 @@ x-watch-path-coolify:
 # Briareus third-party data dependencies: ONE Coolify Application, THREE
 # vendor containers. No application module lives in this release unit.
 # This release unit is independent of Admin/Gateway/Authorization/MCP domains.
+# Preserve briareus-* service/DNS names; only per-app data volume keys are concise.
 services:
   briareus-postgres:
     build:
