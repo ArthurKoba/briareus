@@ -1,71 +1,12 @@
-# Architecture overview
+# Briareus — architecture overview
 
-The source architecture separates external OAuth identity, agent access, public routing, administration and provider execution.
+Current owner decision: owner-decisions-20261012.md.
+Product/Team/Project model: target-project-platform.md.
+Implementation: ../operations/agent-migration-plan-20261012.md.
+Service documentation mirror: ../services/README.md.
 
-```mermaid
-flowchart TB
-    Client[ChatGPT / MCP clients] --> GW[gateway]
-    Client -->|OAuth| AU[authorization]
+Gateway routes traffic/stream/MCP and collects bounded safe telemetry; it never validates User JWT or Project grants. Control Panel API is a lightweight BFF calling independent Identity, Authorization, Platform/Resources and Hands owner APIs. Control Panel UI is a separate Vue browser application. Domain services and individual Hands are independent deployment units, with one source/build/Compose/lock folder each.
 
-    AU --> ADB[(authorization DB)]
+Target directories: services/infrastructure/**, services/platform/**, services/control-panel/**, services/hands/**, narrow shared/**; documentation separately in docs/services/**. No mandatory global wheel, AST exact per-file Watch/COPY or long-lasting deploy/<module> split. Changing one service must not restart its callers.
 
-    GW -->|agent-session validation| AU
-    AU --> VK[(Valkey cache)]
-
-    GW --> GH[github]
-    GW --> GL[gitlab]
-    GW --> FI[files]
-    GW --> WEB[web]
-    GW --> AN[analysis]
-    GW --> TERM[terminal]
-    GW --> OBS[observability]
-
-    AN --> GD[ghidra private runtime]
-
-    UI[admin-ui] --> API[admin-api]
-    API --> AU
-```
-
-## Source ownership
-
-- `authorization` — local users, OAuth/token state, JWT signing, agent sessions, access elevation, per-MCP controls, account scopes and access security history.
-- `bridge` — public gateway, MCP routing, protected-resource metadata, local OAuth token verification and access enforcement middleware.
-- `common` — provider-neutral contracts, stable MCP surface IDs and typed settings.
-- `admin-api` — administration BFF/realtime surface; it does not own authorization persistence.
-- `modules.github`, `modules.gitlab`, `modules.files`, `modules.web`, `modules.analysis`, `modules.terminal`, `modules.observability` — provider/domain runtimes.
-- `modules.ghidra` — private native analysis backend adapter.
-
-## OAuth model
-
-The `authorization` runtime is the authorization server at `https://authorization.mcp.koba-nexus.ru`. Public MCP URLs remain under `https://mcp.koba-nexus.ru` and are exact protected resources/access-token audiences. Gateway publishes protected-resource metadata that points clients to the separate authorization-server URL; OAuth operational endpoints are served directly by authorization.
-
-Authorization issues ES256 tokens. The private signing key remains in authorization; gateway verifies with the public key/JWKS.
-
-## Agent access model
-
-OAuth identifies the local user/client. Agent sessions independently decide whether a concrete agent context may execute against a concrete MCP surface.
-
-The MVP has automatic read-only sessions and one elevated `full_access` level. Session state is durable in PostgreSQL, with Valkey as a read-through cache. Per-user/per-surface enforcement can be `unrestricted` or `session_enforced`.
-
-See `docs/architecture/authorization-access.md`.
-
-## Public surfaces
-
-```text
-/mcp
-/github/mcp
-/gitlab/mcp
-/files/mcp
-/web/mcp
-/analysis/mcp
-/terminal/mcp
-/observability/mcp
-```
-
-Raw Ghidra is private.
-
-## Deployment isolation
-
-Production uses one Coolify application per Docker target. The legacy monolith stays pinned until split-runtime acceptance. Provider-only changes do not require authorization/gateway restarts unless their shared contract changes.
-
-See `docs/deployment.md`.
+Identity logs one system invitation only while zero superusers exist; then superuser creates invites. Stable Identity signing key from protected Environment Shared, Team Shared for shared telemetry and timezone. Development keeps existing shared PostgreSQL user and owner databases; urgent network isolation is to deny untrusted MCP Hands sandbox arbitrary internal egress. No new test suites or routine prepublication review stages in MVP.

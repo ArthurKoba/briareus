@@ -1,113 +1,22 @@
-## CURRENT OWNER ARCHITECTURE — SERVICE BOXES + CONTROL PANEL + TRY-FIRST (2026-10-12)
+# Briareus — AGENTS.md (рабочая карта)
 
-New overriding owner-selected architecture: docs/architecture/independent-services-control-panel-mvp.md. Independent infrastructure/Identity/Authorization/Platform/Resources/MCP Hands with self-contained service folder, local build/Compose/lock and folder/** Watch plus tiny consumed shared/**. Control Panel API/UI are renamed and independently deployed; Panel API calls independent owner service APIs without restart cascade. Gateway is ONLY simple routing/streaming/metrics, no JWT/C2/business. No Go/gRPC prerequisite. Deliver TRY -> build -> scoped Briareus Dev deploy -> observe -> fix, NO extra prepublication review hoops; actual data/secret/real service access safety remains mandatory. This supersedes old per-file AST Watch/COPY, Gateway C2 and old Admin/Core/Central API architecture statements anywhere below. Active work routes through agents/<lane>.task.md top, coordination/requests and contracts. Worker chat SHORT TEXT, only Orchestrator-to-owner uses a 3-agent start/stop table.
+Перед любой substantial задачей: прочитать это, current task/progress и выборочный skill из ArthurKoba/ai-agent-workflow. Source authority — актуальный опубликованный GitHub main; локальная central repo может быть старой или содержать незавершённый dirty-код.
 
----
+**ЕДИНСТВЕННОЕ действующее владельческое ТЗ:** docs/architecture/owner-decisions-20261012.md.
+**Исполнимый план трёх агентов:** docs/operations/agent-migration-plan-20261012.md.
+**Процедура файлового обмена:** docs/operations/AGENT_COORDINATION.md.
+**Локальные workspace paths:** agents/backend.task.md, agents/runtime.task.md, agents/frontend.task.md, их *.progress.md, coordination/CONTRACTS.md, coordination/OWNERSHIP.md, coordination/requests/<lane>.md. Не выполнять исторические задания/примеры из архива.
 
-## CURRENT OWNER ROUTER — WORKER SHORT TEXT, ORCHESTRATOR LAUNCH TABLE (2026-10-12)
+## Владелец и работа
+Backend — самостоятельные Identity/Authorization/Platform/Resources и Control Panel API; Runtime — тонкий Gateway, инфраструктурный runtime и Hands/MCP; Frontend — отдельный Control Panel UI. Общие контракты только через согласованные тематические shared папки. Код, Compose, uv/Bun lock и Watch каждого сервиса — внутри его собственной папки; docs отдельно в docs/services аналогичной структуры.
 
-Current canonical project contract: docs/operations/AGENT_COORDINATION.md (CHAT-REPORT-V2). WORKER chat status is short readable TEXT, never a table. Only the ORCHESTRATOR-to-owner AGENT MANAGEMENT/LAUNCH summary uses a compact table (three agents; start/stop). Tasks and corrections are exchanged via agents/<lane>.task.md and coordination/requests/<lane>.md; status and full self-test/CI/Dev deployment evidence in agents/<lane>.progress.md. Agent performs builds, tests, own PR/CI and scoped Dev verification independently; sets READY_FOR_AUDIT as a FILE handoff. ONLY Orchestrator records independent ACCEPTED or CHANGES_REQUESTED after examining exact published SHA and evidence, and returns findings via the SAME files. GitHub required checks and independent Reviewer PR merge still apply. No old pasted НА ПРИЁМКУ, no duplicate pre-push approvals. Strict Briareus Dev-only access retained.
+TRY-first: агент сам меняет только принадлежащий ему сервис, native compile/build, PR + реально обязательные GitHub checks, Reviewer merge, реальный Briareus Development app deploy/логи/HTTP, оперативное исправление. **Не писать/запускать unit/integration/e2e/smoke suites и необязательные CI тесты.** Обязательные Git protection/checks не обходить. Оркестратор проводит независимую проверку ПОСЛЕ публикации, не делает рутинный билд за агента.
 
----
+Worker чат: короткий текстовый статус, 3–5 строк с emoji, НИКОГДА не таблица. Таблица только от Оркестратора владельцу для трёх агентов (запускать/не запускать). Новые задачи и замечания идут ЧЕРЕЗ файлы, без переписывания в чате. FIRST State сохраняет смысл; не сбрасывать реально работающего агента при правках документации.
 
-## LATEST OWNER HARD ACCESS RESTRICTION — BRIAREUS DEV ONLY (2026-10-12)
+## Жёсткие ограничения
+Coolify читать/изменять ТОЛЬКО проект Briareus MCP UUID 3xshlpoghb9wcyhjgktlqzzp, environment development UUID naibrku1omovvmw5o0bcnp5c, и точные одобренные приложения docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Запрещён ДАЖЕ ПРОСМОТР других проектов, environments, Shared Environments, глобальных страниц, Shared secret values/host-wide данных. Не раскрывать credentials, не удалять или мигрировать существующие PG/Valkey volumes, не делать фиктивный User/JWT/право доступа, не давать sandbox Hands свободный egress во внутреннюю сеть.
 
-This overrides ALL previous broad browser/terminal/Coolify/Observability access authority. ONLY project Briareus MCP UUID 3xshlpoghb9wcyhjgktlqzzp, environment development UUID naibrku1omovvmw5o0bcnp5c, and the exact preapproved 14 applications may be READ or MODIFIED. **FORBIDDEN EVEN TO VIEW** other projects, non-Dev environments, Shared Environments, Shared Variables/secrets, global/root/team pages, broad app lists, unfiltered logs or other containers. No off-scope clicks, redirects, APIs or host-wide commands even with admin credentials. Backend/Frontend/Runtime may self-configure their OWN Dev application Watch Paths/settings and inspect own Dev logs via direct scoped browser/API, without Deployment approval. Preserve secrets/data/privileged C2 and Auto Deploy. If target membership is unclear, STOP BEFORE requesting it. Canonical full scope: docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md; local mirror: coordination/BRIAREUS_DEV_ACCESS_SCOPE.md.
+Gateway исключительно transport/маршруты/метрики, независимо от Identity бизнес-логики; Control Panel API — управляющий BFF-клиент независимых owner API. System invitation в операторских startup logs только при count(superuser)<1; дальше invitations через superuser. Постоянный Identity signing key, Team Shared TZ/OTLP, Environment Shared DB/Valkey/Identity secrets, нет старого ADMIN_JWT_SIGNING_KEY. Только uv per-service, никакого общего wheel/пофайлового AST manifest как нормы.
 
----
-
-## LATEST OWNER DECISION 2026-10-12 — AUTONOMOUS RELEASE / POST-FACT AUDIT (OVERRIDES EARLIER PRE-REVIEW AND NO-PUSH RULES)
-
-**Launch priority and authority:** Backend, Frontend and Runtime are now allowed to independently implement, commit, PUSH their own owned files to a GitHub working branch, submit a PR, obtain required GitHub checks, merge through the configured permitted mechanism, observe live Coolify Auto Deploy, diagnose real build/runtime/browser/API failures, and iterate WITHOUT waiting for Orchestrator's prepublication SOURCE acceptance. **Orchestrator reviews the published exact Git commit and its deployment receipts AFTER the release** and returns specific findings to the owning agent. This policy overrides older instructions in this file and elsewhere requiring prior `READY_FOR_REVIEW`, orchestrator hash-integration, orchestrator Git publication or forbidding commits/PRs/tests. It does NOT automatically grant bypass of GitHub branch protection or other credentials.
-
-**Self-release procedure — one engineering loop, no micro-handoffs:**
-1. Start from CURRENT `agents/<lane>.task.md`, own exclusive paths and actual `main` SHA. Work exclusively in the agent-owned workspace; preserve all pre-existing dirty files. Use `coordination/agent_sync.py status <lane>` for owner delta; do not run `integrate/refresh --apply` against another active worker.
-2. For publication, construct an ISOLATED CLEAN checkout/branch from latest published `main`; overlay ONLY the verified intended owner-path snapshot, never push the shared dirty central `repo/` or a whole inherited dirty `agents/<lane>` checkout. Include only specifically owner-authorized `deploy/<module>/**` and cross-owner already frozen source with a recorded exact path+SHA handoff; no incidental file deletion/cross-owner overwrite. Validate the exact resulting diff. Rebase/reconcile only inside disposable release clone; preserve known-good original worktree. Keep source code/manifest hashes in progress.
-3. Agent itself commits, pushes working branch, opens one focused PR, waits for real required GitHub checks and permitted merge; **do not bypass required CI, protected main, or require fake independent approvals**. If repository permissions physically prevent auto-merge, report that *specific* GitHub control as BLOCKED, continue other safe work, and request a one-time repo policy automation change instead of manual approval for every PR. Existing writer/reviewer tool identities may be used only within their actual granted scopes; merely invoking a reviewer identity is not an independent audit.
-4. After real merge, inspect exact `main` SHA, Coolify webhook/deployment, image build and Runtime Logs, source provenance, real consumer HTTP/browser behavior. A passed Docker build or app health is NOT feature acceptance. Fix observed failures in the SAME task and repeat branch/PR/merge/deploy. Never set DONE based only on SOURCE, lint, generic `test` or `docker` checks. Native per-service uv and scoped app unit/integration/browser tests are allowed NOW when useful to establish the specific regression/acceptance, overriding prior blanket test-suite prohibition; avoid expensive unrelated suite creation.
-5. The FIRST `State:` in each `agents/<lane>.progress.md` is operational: `READY` available work, `IN_PROGRESS` implementing, `RELEASING` PR/checks/merge, `OBSERVING` Coolify/live verification and repair, `READY_FOR_AUDIT` exact merged SHA + real validation/remaining gaps frozen for retrospective review, `BLOCKED` real external dependency/permission, `WAITING` no authorized active assignment. Historical `READY_FOR_REVIEW` from an in-flight task now means **resume self-publication**, not wait for orchestrator. Reporter uses concise Git URL, commit SHA, touched paths, CI/deploy status, 1–2 actual failures; do not invent `ACCEPTED` (only independent auditor may call it accepted).
-6. Orchestrator is NOT a release bottleneck: audit merged commits, diffs, contracts, source→image→Watch mapping, actual logs, authorization/DB/data integrity AFTER agent publication; write targeted follow-ups and issue #390 summary only for material findings. Do not routinely re-run every Ruff/Mypy/build check already evidenced by CI. Reviews do not retroactively imply security/production readiness.
-
-**Invariants not waived:** exact single canonical HTTPS origin `https://briareus.koba-nexus.ru`; per-module native uv and selective Watch; no reset/wipe/irreversible SQL migration or deletion of real PostgreSQL/Valkey volumes; no exposure/logging of protected credentials, forging trusted mTLS/Unix peers/JTI, bypassing current User/Project/AgentSession permission or publishing unreviewed privileged C2/MCP effects. Ordinary public static Gateway / Panel build-and-test does NOT need A19 protected auth to finish first public HTTP 200. Destructive data/credential/privilege operations stay behind actual independently established trust and authorized operator boundaries. Deployment lane remains on-demand **only** for persisted Coolify infrastructure Watch/App/ENV/domain/network changes, not each Docker/source release. Preserve Auto Deploy ON. Do not give a blocked lane fake IN_PROGRESS reports.
-
-**Current one-owner focus:** Runtime R23 owns fixing Gateway + staging already authored B20 public landing, including Gateway-only Compose exit78, Docker COPY for bridge.gateway_transport, selective Watch and real HTTPS 200; do not interrupt with pre-review. Backend A19 independently completes signed first-user registration/login and self-release when ready. Frontend B20 remains WAITING unless a new owner task overrides it; Runtime must not mutate its worker tree. First external Gateway public static HTTP200 is the immediate acceptance metric; protected login and MCP are separately observed later.
-
----
-
-# MCP Bridge — local engineering map
-
-This repository checkout belongs to the persistent Koba Terminal workspace
-`mcp-bridge-platform` (`/workspace/projects/mcp-bridge-platform/repo`).
-
-## Authority and navigation
-
-**LATEST IMPLEMENTATION AUTHORITY (2026-10-10):** Owner directed the Orchestrator to make all work executable through «Продолжай». The selected SOURCE implementation architecture is `docs/architecture/storage-ownership-orchestrator-review.md`; Backend A11, Frontend B15, Runtime R13 and Deployment D4 have FULL SOURCE/STAGING tasks in `agents/*.task.md`. Previous ARCH READ-ONLY-only restrictions are superseded **for code/staging**, but NOT for live infrastructure: do NOT start Authorization/global Alembic `0001/0002`, provision DBs/roles, modify Coolify applications/volumes/secrets or enable C1-B2/C2 without a separate explicitly authorized rollout and independent review. Four initial logical databases in existing physical PostgreSQL: Identity, Access, Platform Control, Resource Catalog; later Files/Runtime/Reverse. No god-Core/migrator/cross-DB FKs. Follow the final SOURCE-IMPLEMENTATION section of `coordination/CONTRACTS.md` and latest owner tasks, not older historical holds.
-
-**LATEST OWNER HOLD (2026-10-10): do NOT create/start Authorization or run published global Alembic `0001/0002`, create/delete/split live databases, or activate protected C1-B2/C2. The owner demands independent domain-owned storage/migrations. Read `docs/architecture/storage-ownership-orchestrator-review.md` (selected SOURCE implementation authority; live approval pending), `docs/architecture/storage-ownership-redesign-draft.md` (D4 DRAFT), `coordination/requests/orchestrator.md` (owner intent intake) and final `coordination/CONTRACTS.md` storage source-implementation contract before acting. Existing healthy Coolify resources/volumes are untouched; A/B/R may implement independently safe SOURCE, D4 may stage deployment files offline, and real DB/Authorization/Coolify changes remain held.**
-
-- Current target: `docs/architecture/target-project-platform.md` (still DRAFT for unresolved matters).
-- ONLY active implementation tracker: ArthurKoba/mcp-bridge issue #390 (all slices and future implementation). Issue #391 is a separate POST-REFACTOR INDEPENDENT AUDIT, not a worker task, activated only after stable implementation. Do not create slice issues.
-- Current application code is historical implementation evidence, not accepted target state.
-- Read the root `README.md` for the old runtime map and load relevant workflow-library skills before changing a domain.
-- Admin UI/API refactor is a cross-cutting part of #390; use architecture §14 and the project-scoped API contracts. Post-refactor acceptance belongs to #391 only.
-- Identity/Team/Project/Agent/Authorization are separate logical domains; one domain does not imply one container.
-
-## Work contract
-
-**Current Python release contract (2026-10-10):** `coordination/CONTRACTS.md` §PACKAGING-V1 selects ONE immutable versioned + SHA-pinned installed `briareus` wheel for all first-party Python Applications; service lifecycles remain independent through scoped DB roles/entrypoints and per-App artifact selection. D4 Dockerfiles cannot stop at `uv sync --no-install-project` or use source-overlay only; shared Python artifact builder has its own input graph and Coolify App watches only genuine module release-pin inputs. Backend owns `pyproject.toml`/metadata, Runtime root Dockerfile, D4 deploy staging. No live infrastructure activation.
-
-- Edit ONLY this local checkout for active tasks. Scratch, temporary Alembic revisions,
-  local runtime state and logs belong in `../local/`, outside this Git repository.
-- Never import legacy users/sessions/files/provider data into the new greenfield platform.
-- Follow async FastAPI/Pydantic/Pydantic Settings/SQLAlchemy, explicit transaction and idempotency contracts.
-- Keep REST/OpenAPI as default inter-runtime API, FastMCP for agents, and leave gRPC/GraphQL optional.
-- Do not create Git commits, push, open PRs, or merge during individual task slices.
-  Maintain a recoverable working tree; one intentional publication/review cycle after slice integration.
-- **SUPERSEDED for live deployment (2026-10-10):** published A10 Authorization-global Alembic revisions are historical artifacts, not authorized live migrations. New owner-local source-tracked Alembic baselines/startup lifecycles can be implemented ONLY after approval of the specific logical store owner/role/API architecture. No manual one-shot schema init, `create_all` workaround, new universal Core/migrator or legacy data migration.
-- Do not add/run unit/integration/e2e/CI suites or write test-policy files.
-  Local app configuration, builds, runtime investigation, and isolated schema migration application are allowed.
-- Do not modify production containers/databases or wipe existing infrastructure from this checkout.
-- Stop at architectural/security contradictions and record them before coding across that boundary.
-
-## HISTORICAL report format — V1 superseded by current V2 table and file handoff
-
-**CHAT-REPORT-V1** из `coordination/CONTRACTS.md` обязателен для сообщений пользователю: статус с эмодзи, до 4 результатов, только проверенные проверки, 1–2 следующих действия. Сдача агентом `READY_FOR_REVIEW` оформляется fenced `text` кодовым блоком с копируемой строкой «НА ПРИЁМКУ»; статус `ACCEPTED` может выдавать только оркестратор после независимой проверки. Большие техотчёты и доказательства остаются в `agents/<lane>.progress.md`, не в чате.
-
-## Orchestrator repeatable handoff
-
-When the human requests acceptance of A/B/C, reread current progress files,
-exact owned source deltas using coordination hash snapshots, current contracts
-and tasks; independently review source/security/static/build levels, then
-integrate only accepted changes into central `repo/`, refresh all worktrees,
-write next large tasks in `agents/<lane>.task.md`, reset their first progress
-`State:` to READY, and update the same #390 issue. The human can then say
-`Продолжай работу` in each agent's existing chat; each lane's own AGENTS.md
-routes this short command to its current task, ownership and contracts.
-
-Never claim that a source/static/build check is a live auth or product
-acceptance. Keep #391 as separate later post-refactor audit; do not run
-forbidden unit/integration/e2e/smoke tests or create intermediate Git
-commits/pushes/PRs/issues.
-
-## Compact #390 tracker rule after EACH independent acceptance
-
-The owner wants issue #390 SHORT. Keep at its top: general progress, the
-conceptual MVP checklist, six implementation slices, actual blockers and one
-compact accepted-waves table. **Do not add acceptance checklists**, large
-per-wave sections or repeat the agent progress report in issue comments.
-
-After an independent acceptance: (1) verify the lane's source and evidence,
-(2) mark only genuinely completed conceptual/slice checklist items and leave
-PUBLIC/LIVE/OS/DB/security gates open, (3) edit the relevant row in the
-three-lane accepted-wave summary and current A/B/C states, (4) mention only
-NEW material blockers, and (5) update the existing #390 BODY and verify it.
-The complete detailed evidence belongs in `agents/<lane>.progress.md` and
-coordination request/contract files, not duplicated as GitHub checklists.
-
-Accepted means the specified SOURCE/STATIC/BUILD work was implemented and
-integrated locally, **never** automatically deployed into production. F1–F7
-remain deferred outside MVP. Do not treat checked-box totals as a product
-completion percentage. Preserve the original historical issue snapshot in
-Koba Files `mcp-bridge-platform/review-archives/issue-390-original-2026-10-09.md`.
-Do not edit active agent worktrees, create new issues/commits/push/PRs, or
-run forbidden test suites as part of tracker maintenance.
+Исторические PACKAGING-V1, ENV-1, C2 в Gateway, старые README и READY_FOR_REVIEW не являются приказами. Архив, если нужен для расследования: local/artifacts/owner-policy-reconciliation-20261012/originals/. **Нет других обязательных длинных стартовых карт.**

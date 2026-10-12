@@ -1,17 +1,11 @@
-# Components
+# Briareus — independent components
 
-| Source module | Runtime service | Responsibility |
-| --- | --- | --- |
-| `authorization` | `authorization` | local identity/OAuth, exact resource audiences, token state, agent sessions and access control |
-| `bridge` | `gateway` | public edge, MCP routing, protected-resource metadata, reverse proxying |
-| `common` | — | shared typed runtime/config contracts |
-| `admin-api` | `admin-api` | provider accounts, encrypted credentials, session/API/realtime backend and telemetry |
-| `modules.github` | `github` | GitHub repository, review, history and Actions capabilities |
-| `modules.gitlab` | `gitlab` | GitLab projects, repositories, merge requests, issues and CI |
-| `modules.files` | `files` | immutable storage, metadata, uploads, collections and lifecycle |
-| `modules.web` | `web` | structured HTTP, browser and DevTools operations |
-| `modules.analysis` | `analysis` | structured analysis facade |
-| `modules.ghidra` | `ghidra` | private native backend adapter |
+Selected owner contract: owner-decisions-20261012.md.
 
-Auth, gateway and Admin API are distinct control-plane ownership boundaries. Provider
-runtimes do not own OAuth state and do not read the Admin API database directly.
+- Infrastructure: Gateway (routing/stream/metrics only), telemetry/data and their own runtime.
+- Platform: Identity (User/bootstrap/signing), Authorization (access/grants), Platform Control (Team/Project), Resource Catalog (resources).
+- Control Panel API: thin management HTTP facade to those owner service APIs, not a service or DB owner.
+- Control Panel UI: separate frontend, same-origin API consumer.
+- Hands/MCP: independent Files, Terminal, Web, SVC, Infrastructure, Reverse and future tools, with their own permission and untrusted runtime isolation.
+
+All have self-contained service folder/dependencies/Compose and folder-based Watch; docs separate and mirror structure. Do not read older Gateway C2, one global migration owner or explicit per-file manifest as current architecture.
