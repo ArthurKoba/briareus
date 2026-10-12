@@ -15,3 +15,21 @@ Keep the existing approved Coolify Control Panel API Application UUID. Set its B
 The new folder includes a **transitional copy** of precisely the four legacy first-user routes: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/platform/me`. They use the same private Identity service DNS, bounded request/response, original-operation-id headers, origin and bearer validation. A successful `/health/live` alone is NOT sufficient; compare real pre- and post-cutover HTTP routes including denial modes and schema, plus independent service restart/Watch. Retire transitional first-user code only once Rauthy OAuth sign-in/current User works end-to-end.
 
 **Public ingress:** this private Compose must never declare `SERVICE_URL_BRIAREUS_ADMIN_API_8000` or a generated Coolify domain. All public `/api/*` traffic terminates at Gateway. During the flat-folder Base Directory migration the old magic variable briefly created an unintended default sslip.io domain; it was removed from the scoped Development Application's Domains configuration before deploying the new API. Do not reintroduce it on reparse.
+
+
+## Authorization code + PKCE (source-only)
+
+The existing Rauthy discovery adapter can now create an upstream OAuth2
+authorization request with cryptographically random state, nonce and S256 PKCE
+challenge. The code verifier stays inside a server-side SecretStr. An
+operator-approved HTTPS redirect URI is injected by a trusted controller, not
+derived from incoming Host or query arguments. The adapter exchanges a valid
+one-time code against the verified Rauthy token endpoint without inventing a
+client secret, and returns explicitly UNVERIFIED SecretStr token values.
+
+No public callback route is mounted yet: a real registered Rauthy OAuth
+client, trusted one-time state storage, signature/issuer/audience/nonce checks,
+current Platform memberships and an authenticated session writer are required
+for secure product login. An exchanged bearer or ID token is never itself a
+Briareus AgentSession or a Cedar permission. The legacy first-user route
+remains operational until real sign-in is accepted.
