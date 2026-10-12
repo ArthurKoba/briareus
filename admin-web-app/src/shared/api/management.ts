@@ -107,12 +107,14 @@ export interface BrowserExternalStatus {
   connected?: boolean
   proxy_connected?: boolean
   connection_state?: string
+  phase?: string
+  connecting?: boolean
   session_scope?: string
   other_client_sessions?: string
   grant_state?: string
   tab_access_state?: string
   last_successful_tab_probe_at?: string
-  ok?: boolean
+  ok?: boolean | null
   last_error?: {
     code: string
     stage: string

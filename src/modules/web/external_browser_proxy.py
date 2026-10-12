@@ -144,6 +144,9 @@ class ExternalBrowserProxyRuntime:
         self._tab_probe_state = "not_checked"
         self._tab_probe_at = ""
         self._last_error: JsonObject | None = None
+        self._connect_task: asyncio.Task[None] | None = None
+        self._connection_phase = "idle"
+        self._tool_count: int | None = None
 
         async def client_factory() -> ProxyClient[StreamableHttpTransport]:
             client = await self._ensure_client()
@@ -166,7 +169,15 @@ class ExternalBrowserProxyRuntime:
             raise RuntimeError("external browser is disabled in Admin settings")
         async with self._state_lock:
             if self._client is not None and self._client_policy != policy:
+                task = self._connect_task
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+                self._connect_task = None
                 await self._client.shutdown()
+                self._connection_phase = "idle"
+                self._tool_count = None
                 self._tab_probe_state = "not_checked"
                 self._tab_probe_at = ""
                 self._last_error = None
@@ -250,7 +261,17 @@ class ExternalBrowserProxyRuntime:
             state = "tab_check_failed"
         else:
             state = "proxy_connected_unverified"
+        pending = self._connect_task is not None and not self._connect_task.done()
+        phase = (
+            "disabled" if not policy.external_enabled
+            else "not_configured" if not policy.external_mcp_url
+            else self._connection_phase if pending
+            else state
+        )
         return {
+            "phase": phase,
+            "connecting": pending,
+            "tool_count": self._tool_count,
             "configured": bool(policy.external_mcp_url),
             "enabled": policy.external_enabled,
             "provider": "playwright-mcp",
@@ -274,6 +295,9 @@ class ExternalBrowserProxyRuntime:
             "last_successful_tab_probe_at": self._tab_probe_at,
             "last_error": self._last_error,
             "next_action": (
+                ("External browser access is being checked. Approve or deny the "
+                 "existing Chrome prompt; do not reconnect.")
+                if pending else
                 self._last_error["next_action"] if self._last_error else
                 ("Use Connect to check Web-owned tabs; "
                 "other clients' approved sessions are not listed.")
@@ -290,21 +314,20 @@ class ExternalBrowserProxyRuntime:
             "extension_token_configured": policy.extension_token_configured,
         }
 
-    async def connect(self) -> JsonObject:
-        # Explicit connect only. Read-only status must never initialize upstream MCP
-        # or trigger another Chrome extension approval prompt.
-        stage = "configuration"
+    async def _check_tabs(self, client: _PersistentPlaywrightProxyClient) -> None:
+        # An operator approval may outlive the management HTTP request.
+        stage = "mcp_initialize"
         try:
-            client = await self._ensure_client()
-            stage = "mcp_initialize"
             lease = await client.acquire()
             async with lease:
                 stage = "tools_list"
+                self._connection_phase = stage
                 tools = await lease.list_tools()
+                self._tool_count = len(tools)
                 stage = "tabs_list"
+                self._connection_phase = stage
                 tabs = await lease.call_tool(
-                    "browser_tabs",
-                    {"action": "list"},
+                    "browser_tabs", {"action": "list"},
                     timeout=float(client.policy.call_timeout_seconds),
                     raise_on_error=False,
                 )
@@ -313,40 +336,85 @@ class ExternalBrowserProxyRuntime:
                     self._last_error = {
                         "code": "BROWSER_TABS_FAILED",
                         "stage": stage,
-                        "message": "Playwright MCP returned an error while listing permitted tabs.",
+                        "message": "Playwright MCP could not list permitted tabs.",
                         "next_action": (
-                            "Check the existing Chrome approval prompt and the MCP server logs. "
-                            "Do not assume the session expired or request a second grant."
+                            "Inspect the existing Chrome prompt and upstream MCP logs. "
+                            "Do not treat this as revocation or open another session."
                         ),
-                        "retryable": True,
+                        "retryable": False,
                     }
-                    status = await self.status()
-                    return {**status, "ok": False, "tool_count": len(tools)}
+                    self._connection_phase = "failed"
+                    return
+        except asyncio.CancelledError:
+            self._connection_phase = "idle"
+            raise
         except Exception as error:
-            logger.warning(
-                "External browser connection failure: stage=%s exception_type=%s",
-                stage,
-                type(error).__name__,
-            )
             self._last_error = self._diagnose(stage, error)
             self._tab_probe_state = "failed" if stage == "tabs_list" else "not_checked"
-            return {**await self.status(), "ok": False}
-
+            self._connection_phase = "failed"
+            logger.warning(
+                "External browser connection failed: stage=%s type=%s",
+                stage, type(error).__name__,
+            )
+            return
         self._last_error = None
         self._tab_probe_state = "responded"
         self._tab_probe_at = datetime.now(UTC).isoformat()
-        return {**await self.status(), "ok": True, "tool_count": len(tools)}
+        self._connection_phase = "ready"
+
+    async def connect(self) -> JsonObject:
+        # A repeated Connect while approval is pending reuses the same task.
+        async with self._state_lock:
+            pending = self._connect_task is not None and not self._connect_task.done()
+        if pending:
+            return {**await self.status(), "ok": None}
+
+        try:
+            client = await self._ensure_client()
+        except Exception as error:
+            self._last_error = {
+                "code": "CONFIGURATION_UNAVAILABLE",
+                "stage": "configuration",
+                "message": "External browser configuration is unavailable or disabled.",
+                "next_action": "Check External Browser settings before connecting.",
+                "retryable": False,
+            }
+            logger.warning("External browser configuration failed: type=%s", type(error).__name__)
+            self._connection_phase = "failed"
+            return {**await self.status(), "ok": False}
+
+        async with self._state_lock:
+            if (self._connect_task is None or self._connect_task.done()) and not (
+                client.connected and self._tab_probe_state == "responded"
+            ):
+                self._last_error = None
+                self._tab_probe_state = "not_checked"
+                self._tool_count = None
+                self._connection_phase = "mcp_initialize"
+                self._connect_task = asyncio.create_task(
+                    self._check_tabs(client), name="external-browser-tab-probe",
+                )
+        result = await self.status()
+        return {**result, "ok": None if result["connecting"] else bool(result["browser_ready"])}
 
     async def disconnect(self) -> JsonObject:
         async with self._state_lock:
+            task = self._connect_task
+            if task is not None and not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            self._connect_task = None
             client = self._client
             self._client = None
             self._client_policy = None
-        if client is not None:
-            await client.shutdown()
-        self._tab_probe_state = "not_checked"
-        self._tab_probe_at = ""
-        self._last_error = None
+            if client is not None:
+                await client.shutdown()
+            self._tab_probe_state = "not_checked"
+            self._tab_probe_at = ""
+            self._last_error = None
+            self._tool_count = None
+            self._connection_phase = "idle"
         return {**await self.status(), "ok": True}
 
     async def reset(self) -> JsonObject:

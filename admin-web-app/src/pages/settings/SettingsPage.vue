@@ -34,6 +34,42 @@ const browserExternalStatusLabel = computed(() => {
   if (status.proxy_connected ?? status.connected) return t("settings.externalBrowserProxyOnly")
   return t("settings.externalBrowserProxyNotConnected")
 })
+let externalPollTimer: ReturnType<typeof setTimeout> | null = null
+let externalPollRevision = 0
+const externalBrowserBusy = computed(() => browserExternalStatus.value?.connecting === true)
+const externalBrowserPhaseLabel = computed(() => {
+  const phase = browserExternalStatus.value?.phase
+  if (phase === "mcp_initialize") return t("settings.externalBrowserInitializing")
+  if (phase === "tools_list") return t("settings.externalBrowserDiscovering")
+  if (phase === "tabs_list") return t("settings.externalBrowserCheckingTabs")
+  return browserExternalStatusLabel.value
+})
+function cancelExternalStatusPoll(): void {
+  externalPollRevision++
+  if (externalPollTimer !== null) clearTimeout(externalPollTimer)
+  externalPollTimer = null
+}
+function scheduleExternalStatusPoll(): void {
+  cancelExternalStatusPoll()
+  if (!externalBrowserBusy.value) return
+  const revision = externalPollRevision
+  externalPollTimer = setTimeout(async () => {
+    externalPollTimer = null
+    try {
+      const result = await managementApi.browserExternalStatus()
+      if (revision !== externalPollRevision) return
+      browserExternalStatus.value = result
+      if (!result.connecting && result.last_error) {
+        error.value = `${result.last_error.code} (${result.last_error.stage}): ${result.last_error.message} ${result.last_error.next_action}`
+      }
+      scheduleExternalStatusPoll()
+    } catch (caught) {
+      if (revision !== externalPollRevision) return
+      frontendTelemetry.error("settings.external_browser_status_poll_failed", caught)
+      error.value = caught instanceof Error ? caught.message : String(caught)
+    }
+  }, 3500)
+}
 const browserTheme = ref<"system" | "light" | "dark">("dark")
 const loading = ref(false)
 const saving = ref(false)
@@ -134,13 +170,18 @@ async function load(): Promise<void> {
 }
 
 async function loadBrowser(): Promise<void> {
+  cancelExternalStatusPoll()
+  const revision = externalPollRevision
   try {
     const [managed, external] = await Promise.all([
       managementApi.browserState(),
       managementApi.browserExternalStatus().catch(() => null),
     ])
     browserState.value = managed
-    browserExternalStatus.value = external
+    if (revision === externalPollRevision) {
+      browserExternalStatus.value = external
+      scheduleExternalStatusPoll()
+    }
     const scheme = browserState.value.color_scheme
     if (scheme === "system" || scheme === "light" || scheme === "dark") browserTheme.value = scheme
   } catch (caught) {
@@ -188,6 +229,7 @@ async function runExternalBrowserAction(action: "connect" | "disconnect" | "rese
     const saved = await save()
     if (!saved) return
   }
+  cancelExternalStatusPoll()
   browserExternalAction.value = action
   error.value = ""
   try {
@@ -201,9 +243,12 @@ async function runExternalBrowserAction(action: "connect" | "disconnect" | "rese
       error.value = issue
         ? `${issue.code} (${issue.stage}): ${issue.message} ${issue.next_action}`
         : browserExternalStatus.value.next_action ?? String(t("settings.externalBrowserTabsFailed"))
+    } else if (browserExternalStatus.value.connecting) {
+      notifications.info(String(t("settings.externalBrowserPending")))
     } else {
       notifications.success(String(t("notifications.saved")))
     }
+    scheduleExternalStatusPoll()
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to control external browser"
   } finally {
@@ -239,7 +284,10 @@ onMounted(() => {
   })
   void loadBrowser()
 })
-onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
+onBeforeUnmount(() => {
+  cancelExternalStatusPoll()
+  window.removeEventListener("hashchange", readHash)
+})
 </script>
 
 <template>
@@ -324,6 +372,9 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
         </span>
       </div>
       <p class="text-xs text-muted-foreground">{{ t("settings.externalBrowserScope") }}</p>
+      <p v-if="externalBrowserBusy" role="status" aria-live="polite" class="text-xs text-muted-foreground">
+        <b>{{ externalBrowserPhaseLabel }}</b> — {{ browserExternalStatus?.next_action }}
+      </p>
       <div v-if="browserExternalStatus?.last_error" role="alert" class="rounded-md border border-border p-3 text-xs">
         <p class="font-semibold">{{ browserExternalStatus.last_error.code }} · {{ browserExternalStatus.last_error.stage }}</p>
         <p class="mt-1">{{ browserExternalStatus.last_error.message }}</p>
@@ -333,7 +384,8 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
         {{ browserExternalStatus?.next_action || t("settings.externalBrowserNoProbe") }}
       </p>
       <div class="flex flex-wrap gap-2 pt-3">
-        <Button size="sm" :disabled="Boolean(browserExternalAction) || dirty || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('connect')">{{ t("settings.externalBrowserConnect") }}</Button>
+        <Button size="sm" :disabled="Boolean(browserExternalAction) || externalBrowserBusy || dirty || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('connect')">{{ t("settings.externalBrowserConnect") }}</Button>
+        <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction)" @click="loadBrowser">{{ t("settings.externalBrowserRefresh") }}</Button>
         <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction)" @click="runExternalBrowserAction('disconnect')">{{ t("settings.externalBrowserDisconnect") }}</Button>
         <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction) || dirty || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('reset')">{{ t("settings.externalBrowserReset") }}</Button>
       </div>

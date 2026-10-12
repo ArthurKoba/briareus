@@ -1008,9 +1008,9 @@ def build_admin_api_router(
             result = await api.web.external_connect()
             if api.realtime is not None:
                 event = (
-                    "external.connected"
-                    if result.get("ok") is not False
-                    else "external.connect_failed"
+                    "external.connected" if result.get("ok") is True
+                    else "external.connect_failed" if result.get("ok") is False
+                    else "external.connecting"
                 )
                 await api.realtime.publish("browser.runtime", event, result)
             return result
