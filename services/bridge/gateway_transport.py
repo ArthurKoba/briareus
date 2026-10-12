@@ -86,6 +86,11 @@ _STRICT_QUERY = re.compile(rb"^[\x20-\x7e]*$")
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_WS_MESSAGE_BYTES = 1024 * 1024
 _MAX_PUBLIC_STATIC_BYTES = 256 * 1024
+_MAX_PANEL_ASSET_BYTES = 2 * 1024 * 1024
+_PANEL_SHELL_PATHS = frozenset({"/panel", "/panel/"})
+_PANEL_ASSET = re.compile(
+    r"^/panel/assets/[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:js|css|svg|png|webp|ico|woff2)$"
+)
 _PUBLIC_STATIC_PATHS = frozenset({"/", "/robots.txt", "/sitemap.xml"})
 _HTTP_TIMEOUT = httpx.Timeout(connect=3.0, read=60.0, write=15.0, pool=3.0)
 
@@ -110,9 +115,9 @@ def route_for_path(path: str) -> GatewayRoute | None:
     segments = path.split("/")
     if any(seg in {".", ".."} or "%" in seg for seg in segments):
         return None
-    if path in _PUBLIC_STATIC_PATHS:
+    if path in _PUBLIC_STATIC_PATHS or path in _PANEL_SHELL_PATHS or _PANEL_ASSET.fullmatch(path):
         return GatewayRoute("panel", path, path, public_static=True)
-    if path in {"/panel", "/panel/"} or path.startswith("/panel/"):
+    if path.startswith("/panel/"):
         # Panel's Nginx owns /panel -> /panel/ (308) and SPA /panel/*.
         # Never strip to /: that is the distinct public project landing.
         return GatewayRoute("panel", path, path)
@@ -460,7 +465,7 @@ class PrivateGatewayTransport:
         )
 
     async def public_static(self, request: Request, route: GatewayRoute) -> Response:
-        """Only the three owner-approved public files; never consume C2/JTI.
+        """Public landing, unprivileged Panel shell and bounded hashed assets.
 
         Public release is an explicit operator-injected source flag, disabled
         in the default entrypoint and the current D6 protected exit78 image.
@@ -471,7 +476,11 @@ class PrivateGatewayTransport:
             not self.public_static_enabled
             or route.target != "panel"
             or not route.public_static
-            or route.public_path not in _PUBLIC_STATIC_PATHS
+            or not (
+                route.public_path in _PUBLIC_STATIC_PATHS
+                or route.public_path in _PANEL_SHELL_PATHS
+                or _PANEL_ASSET.fullmatch(route.public_path)
+            )
             or route.upstream_path != route.public_path
             or request.method not in {"GET", "HEAD"}
             or request.scope.get("raw_path") != route.public_path.encode("ascii")
@@ -479,6 +488,11 @@ class PrivateGatewayTransport:
             or self._draining
         ):
             return self._denied()
+        if route.public_path == "/panel":
+            return Response(
+                status_code=308,
+                headers={"Location": "/panel/", "Cache-Control": "no-store"},
+            )
         client = self._current_client()
         if client is None:
             return self._denied()
@@ -512,18 +526,33 @@ class PrivateGatewayTransport:
                 try:
                     if upstream.status_code != 200:
                         raise GatewayTransportDenied("PUBLIC_STATIC_NOT_READY")
-                    expected = {
-                        "/": ("text/html",),
-                        "/robots.txt": ("text/plain",),
-                        "/sitemap.xml": ("application/xml", "text/xml"),
-                    }[route.public_path]
+                    asset = bool(_PANEL_ASSET.fullmatch(route.public_path))
+                    if asset:
+                        ext = route.public_path.rsplit(".", 1)[-1]
+                        expected = {
+                            "js": ("text/javascript", "application/javascript"),
+                            "css": ("text/css",),
+                            "svg": ("image/svg+xml",),
+                            "png": ("image/png",),
+                            "webp": ("image/webp",),
+                            "ico": ("image/x-icon", "image/vnd.microsoft.icon"),
+                            "woff2": ("font/woff2", "application/font-woff"),
+                        }[ext]
+                    else:
+                        expected = {
+                            "/": ("text/html",),
+                            "/panel/": ("text/html",),
+                            "/robots.txt": ("text/plain",),
+                            "/sitemap.xml": ("application/xml", "text/xml"),
+                        }[route.public_path]
+                    max_bytes = _MAX_PANEL_ASSET_BYTES if asset else _MAX_PUBLIC_STATIC_BYTES
                     content_type = upstream.headers.get("content-type", "")
-                    if (
-                        not any(
-                            content_type.casefold().split(";", 1)[0].strip() == item
-                            for item in expected
-                        )
-                        or "noindex" in upstream.headers.get("x-robots-tag", "").casefold()
+                    if not any(
+                        content_type.casefold().split(";", 1)[0].strip() == item
+                        for item in expected
+                    ) or (
+                        route.public_path == "/"
+                        and "noindex" in upstream.headers.get("x-robots-tag", "").casefold()
                     ):
                         raise GatewayTransportDenied("PUBLIC_STATIC_TYPE_OR_INDEX_INVALID")
                     if upstream.headers.get("content-encoding", "identity").casefold() not in {
@@ -532,24 +561,42 @@ class PrivateGatewayTransport:
                     }:
                         raise GatewayTransportDenied("PUBLIC_STATIC_ENCODING_UNSAFE")
                     raw_size = upstream.headers.get("content-length")
-                    if raw_size is not None and not 0 <= int(raw_size) <= _MAX_PUBLIC_STATIC_BYTES:
+                    if raw_size is not None and not 0 <= int(raw_size) <= max_bytes:
                         raise GatewayTransportDenied("PUBLIC_STATIC_TOO_LARGE")
                     chunks: list[bytes] = []
                     size = 0
                     async for chunk in upstream.aiter_raw():
                         size += len(chunk)
-                        if size > _MAX_PUBLIC_STATIC_BYTES:
+                        if size > max_bytes:
                             raise GatewayTransportDenied("PUBLIC_STATIC_TOO_LARGE")
                         chunks.append(chunk)
                 finally:
                     await upstream.aclose()
+            body = b"".join(chunks)
+            if (
+                route.public_path == "/panel/"
+                and request.method == "GET"
+                and b"noindex" not in body.lower()
+            ):
+                raise GatewayTransportDenied("PANEL_SHELL_ROBOTS_MISSING")
             return Response(
-                content=b"" if request.method == "HEAD" else b"".join(chunks),
+                content=b"" if request.method == "HEAD" else body,
                 status_code=200,
                 headers={
                     "Content-Type": content_type,
-                    "Cache-Control": "public, max-age=60",
+                    "Cache-Control": (
+                        "no-store"
+                        if route.public_path in _PANEL_SHELL_PATHS
+                        else "public, max-age=3600"
+                        if asset
+                        else "public, max-age=60"
+                    ),
                     "X-Content-Type-Options": "nosniff",
+                    **(
+                        {"X-Robots-Tag": "noindex, nofollow"}
+                        if route.public_path in _PANEL_SHELL_PATHS
+                        else {}
+                    ),
                 },
             )
         except asyncio.CancelledError:
