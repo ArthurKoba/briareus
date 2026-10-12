@@ -12,7 +12,10 @@ from uuid import UUID, uuid4
 
 import jwt
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -73,6 +76,22 @@ class IdentityPrivateUserSessionIssuer:
         self._issuer = issuer
         self._audience = audience
         self._recipient = (recipient_service_id, recipient_instance_uuid)
+
+    def matches_accepted_identity_source(
+        self,
+        *,
+        database: PlatformDatabase,
+        public_key: Ed25519PublicKey,
+        issuer: str,
+        audience: str,
+    ) -> bool:
+        """One release pin and SAME owner DB for issuance and current-reader."""
+        return (
+            self._db is database
+            and self._kid == pinned_ed25519_kid(public_key)
+            and self._issuer == issuer
+            and self._audience == audience
+        )
 
     def _connection(self, admission: VerifiedIdentityLoginAdmission) -> None:
         if not isinstance(admission, VerifiedIdentityLoginAdmission):

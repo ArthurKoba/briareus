@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from common.owner_runtime import OwnerIngressVerifier
     from common.platform_db import OwnerDatabaseSettings
     from identity._private_current_user import IdentityCurrentUserSource
+    from identity._private_onboarding import IdentityPrivateInvitationRegistration
     from identity.private_login_source import IdentityPrivateLoginSource
 
 
@@ -24,10 +25,15 @@ def create_trusted_private_identity_app(
     db_settings: OwnerDatabaseSettings,
     trusted_ingress: OwnerIngressVerifier,
     current_users: IdentityCurrentUserSource,
+    registration: IdentityPrivateInvitationRegistration,
 ) -> FastAPI:
     """Source-only private first-login/logout; normal owner app unchanged."""
     from identity.private_login_source import create_unmounted_identity_private_app
 
     return create_unmounted_identity_private_app(
-        login, db_settings=db_settings, trusted_ingress=trusted_ingress, current_users=current_users
+        login,
+        db_settings=db_settings,
+        trusted_ingress=trusted_ingress,
+        current_users=current_users,
+        registration=registration,
     )

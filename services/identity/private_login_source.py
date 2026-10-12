@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
@@ -31,6 +31,9 @@ from identity._private_current_user import (
     build_unmounted_identity_current_router,
 )
 from identity._service import IdentityService
+
+if TYPE_CHECKING:
+    from identity._private_onboarding import IdentityPrivateInvitationRegistration
 
 _MAX_TTL = timedelta(minutes=15)
 
@@ -301,6 +304,7 @@ def create_unmounted_identity_private_app(
     db_settings: OwnerDatabaseSettings,
     trusted_ingress: OwnerIngressVerifier,
     current_users: IdentityCurrentUserSource,
+    registration: IdentityPrivateInvitationRegistration,
 ) -> FastAPI:
     """SOURCE-only private Identity composition; default published app unchanged.
 
@@ -308,13 +312,32 @@ def create_unmounted_identity_private_app(
     an actual call. The same reviewed URL/role must back source login and
     owner Alembic. Identity login issuer connection is closed at shutdown.
     """
+    from identity._private_onboarding import (
+        IdentityPrivateInvitationRegistration,
+        IdentityRegistrationOutcomeUnknown,
+        build_unmounted_invitation_registration_router,
+    )
+    from identity._private_user_session import IdentityPrivateUserSessionIssuer
+
     if (
         not isinstance(login, IdentityPrivateLoginSource)
+        or not isinstance(registration, IdentityPrivateInvitationRegistration)
         or db_settings.owner != "identity"
         or trusted_ingress is None
         or not isinstance(current_users, IdentityCurrentUserSource)
         or login.identity.database.engine.url != db_settings.url
         or current_users.db.engine.url != db_settings.url
+        or registration.identity.database.engine.url != db_settings.url
+        or registration.identity is not login.identity
+        or not isinstance(login.tokens, IdentityPrivateUserSessionIssuer)
+        or not login.tokens.matches_accepted_identity_source(
+            database=login.identity.database,
+            public_key=current_users.key,
+            issuer=login.issuer,
+            audience=login.audience,
+        )
+        or current_users.issuer != login.issuer
+        or current_users.audience != login.audience
     ):
         raise ValueError("Identity private login/owner migrations must share reviewed DB")
     app = create_owner_app("identity", settings=db_settings, trusted_ingress=trusted_ingress)
@@ -330,7 +353,23 @@ def create_unmounted_identity_private_app(
 
     app.router.lifespan_context = private_lifespan
     app.include_router(build_unmounted_private_identity_login_router(login))
+    app.include_router(build_unmounted_invitation_registration_router(registration))
     app.include_router(build_unmounted_identity_current_router(current_users))
+
+    @app.exception_handler(IdentityRegistrationOutcomeUnknown)
+    async def registration_uncertain(
+        _request: Request, _error: IdentityRegistrationOutcomeUnknown
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "OWNER_SOURCE_UNAVAILABLE",
+                    "originalOutcomeUnknown": True,
+                }
+            },
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
 
     @app.exception_handler(HTTPException)
     async def private_http_failure(_request: Request, error: HTTPException) -> JSONResponse:
@@ -341,11 +380,13 @@ def create_unmounted_identity_private_app(
             if error.status_code == 401
             else "AUTHENTICATION_RATE_LIMITED"
             if error.status_code == 429
+            else "INVITATION_REJECTED"
+            if error.status_code == 403
             else "INVALID_INPUT"
             if error.status_code == 422
             else "OWNER_SOURCE_UNAVAILABLE"
         )
-        status = error.status_code if error.status_code in {401, 422, 429} else 503
+        status = error.status_code if error.status_code in {401, 403, 422, 429} else 503
         return JSONResponse(
             status_code=status,
             content={"error": {"code": code, "originalOutcomeUnknown": False}},

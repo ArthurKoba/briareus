@@ -234,13 +234,13 @@ class PrivateC2BoundAdmission:
         *,
         transport: TrustedPrivateC2ConnectionPort,
         identity: TrustedIdentityBearerPort,
-        scopes: TrustedOwnerScopePort,
+        scopes: TrustedOwnerScopePort | None,
         pinned_identity_issuer: str,
         pinned_bearer_audience: str,
         recipient_service_id: UUID,
         recipient_instance_uuid: UUID,
     ) -> None:
-        if not all((transport, identity, scopes)) or not all(
+        if not all((transport, identity)) or not all(
             (pinned_identity_issuer, pinned_bearer_audience)
         ):
             raise ValueError("verified source ports mandatory")
@@ -254,6 +254,47 @@ class PrivateC2BoundAdmission:
         self.recipient_id = recipient_service_id
         self.recipient_instance = recipient_instance_uuid
 
+    async def _verified_user_and_connection(
+        self, request: Request
+    ) -> tuple[VerifiedPrivateHuman, VerifiedPrivateC2Connection]:
+        """One new signed User and TLS/Unix attestation per HTTP request."""
+        header = request.headers.get("authorization", "")
+        if (
+            not header.startswith("Bearer ")
+            or header.count(" ") != 1
+            or request.headers.get("cookie") is not None
+            or not 40 <= len(header[7:]) <= 8192
+        ):
+            raise TrustedBffAdmissionError("authentication")
+        c2 = await self.transport.verify(request=request)
+        if (
+            not isinstance(c2, VerifiedPrivateC2Connection)
+            or c2.service_peer.service_id != self.recipient_id
+            or c2.service_peer.instance_uuid != self.recipient_instance
+        ):
+            raise TrustedBffAdmissionError("authentication")
+        current = await self.identity.verify_current(bearer=SecretStr(header[7:]), connection=c2)
+        if (
+            not isinstance(current, VerifiedPrivateHuman)
+            or current.issuer != self.issuer
+            or current.audience != self.audience
+            or current.bearer_expires_at <= datetime.now(UTC)
+            or c2.expires_at <= datetime.now(UTC)
+        ):
+            raise TrustedBffAdmissionError("authentication")
+        return current, c2
+
+    async def admit_current_user(self, *, request: Request) -> VerifiedAdminCaller:
+        """Minimal first sign-in read: real signed Identity; NO fake Project."""
+        try:
+            async with asyncio.timeout(3):
+                current, _connection = await self._verified_user_and_connection(request)
+                return current.caller
+        except TrustedBffAdmissionError:
+            raise
+        except Exception:
+            raise RuntimeError("private Identity/C2 source unavailable") from None
+
     async def admit_verified_request(
         self,
         *,
@@ -263,34 +304,11 @@ class PrivateC2BoundAdmission:
         operation: str | None = None,
         agent_session_uuid: UUID | None = None,
     ) -> VerifiedAdminCaller:
-        authorization = request.headers.get("authorization", "")
-        if (
-            not authorization.startswith("Bearer ")
-            or authorization.count(" ") != 1
-            or request.headers.get("cookie") is not None
-            or not 40 <= len(authorization[7:]) <= 8192
-        ):
-            raise TrustedBffAdmissionError("authentication")
+        if self.scopes is None:
+            raise RuntimeError("private Control/Access scope verifier unavailable")
         try:
             async with asyncio.timeout(3):
-                c2 = await self.transport.verify(request=request)
-                if (
-                    not isinstance(c2, VerifiedPrivateC2Connection)
-                    or c2.service_peer.service_id != self.recipient_id
-                    or c2.service_peer.instance_uuid != self.recipient_instance
-                ):
-                    raise TrustedBffAdmissionError("authentication")
-                current = await self.identity.verify_current(
-                    bearer=SecretStr(authorization[7:]), connection=c2
-                )
-                if (
-                    not isinstance(current, VerifiedPrivateHuman)
-                    or current.issuer != self.issuer
-                    or current.audience != self.audience
-                ):
-                    raise TrustedBffAdmissionError("authentication")
-                # A caller without a current authenticated User is always
-                # rejected as 401 before checking Project/Session selectors.
+                current, connection = await self._verified_user_and_connection(request)
                 if (
                     purpose == "original_inspect"
                     and scope.kind == "project"
@@ -299,16 +317,16 @@ class PrivateC2BoundAdmission:
                     raise TrustedBffAdmissionError("permission")
                 await self.scopes.require_current(
                     actor=current,
-                    connection=c2,
+                    connection=connection,
                     scope=scope,
                     purpose=purpose,
                     operation=operation,
                     agent_session_uuid=agent_session_uuid,
                 )
-                if current.bearer_expires_at <= datetime.now(UTC) or c2.expires_at <= datetime.now(
+                if current.bearer_expires_at <= datetime.now(
                     UTC
-                ):
-                    raise RuntimeError("C2 or User bearer expired during scope lookup")
+                ) or connection.expires_at <= datetime.now(UTC):
+                    raise RuntimeError("C2/User expired after source-scope check")
                 return current.caller
         except TrustedBffAdmissionError:
             raise
@@ -348,6 +366,21 @@ class PrivateC2HttpError(Exception):
         super().__init__(code)
 
 
+class PrivateFirstUserApiPorts(Protocol):
+    """Only independently authenticated Identity User current-session source."""
+
+    c2: PrivateC2BoundAdmission
+
+    async def attest_started(self) -> None:
+        """Verify only the current signed Identity/C2 source release."""
+
+    async def require_ready(self) -> None:
+        """Ensure current bearer/JTI/peer verifier is available without Project."""
+
+    async def close(self) -> None:
+        """Close narrow Identity peer pool; never close foreign owner SQL."""
+
+
 class PrivateOwnerApiPorts(Protocol):
     bff_source: OwnerBffEvidenceSource
     c2: PrivateC2BoundAdmission
@@ -365,6 +398,40 @@ class PrivateOwnerApiPorts(Protocol):
 
     async def close(self) -> None:
         """Close private owner network clients; NEVER mutate foreign DB."""
+
+
+def private_first_user_router(c2: PrivateC2BoundAdmission) -> APIRouter:
+    """One first-user read, no Project/Team/AgentSession or mutation."""
+    if c2 is None:
+        raise ValueError("verified first User C2 source required")
+    router = APIRouter(prefix=_PRIVATE_PREFIX, tags=["private-current-user"])
+
+    @router.get("/me", response_model=VerifiedAdminCaller)
+    async def current_logged_in_user(request: Request, response: Response) -> VerifiedAdminCaller:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        try:
+            return await c2.admit_current_user(request=request)
+        except TrustedBffAdmissionError as exc:
+            if exc.reason == "authentication":
+                raise PrivateC2HttpError(
+                    status_code=401,
+                    code="AUTHENTICATION_REQUIRED",
+                    original_outcome_unknown=False,
+                ) from None
+            raise PrivateC2HttpError(
+                status_code=403,
+                code="SCOPE_DENIED",
+                original_outcome_unknown=False,
+            ) from None
+        except Exception:
+            raise PrivateC2HttpError(
+                status_code=503,
+                code="OWNER_SOURCE_UNAVAILABLE",
+                original_outcome_unknown=False,
+            ) from None
+
+    return router
 
 
 def private_api_router(ports: PrivateOwnerApiPorts) -> APIRouter:
@@ -397,6 +464,10 @@ def private_api_router(ports: PrivateOwnerApiPorts) -> APIRouter:
             code="OWNER_SOURCE_UNAVAILABLE",
             original_outcome_unknown=original,
         )
+
+    if ports.c2.scopes is None:
+        raise ValueError("full owner BFF requires fresh Control/Access scope verifier")
+    router.include_router(private_first_user_router(ports.c2))
 
     @router.get("/projects", response_model=OwnerPage[OwnerProjectView])
     async def projects(
@@ -602,5 +673,60 @@ def create_unmounted_private_owner_api(ports: PrivateOwnerApiPorts) -> FastAPI:
             return {"state": "ready", "authorization": "verified-source"}
         except Exception:
             raise HTTPException(503, detail="private C2/owner source not ready") from None
+
+    return app
+
+
+def create_unmounted_first_user_admin_app(ports: PrivateFirstUserApiPorts) -> FastAPI:
+    """Only private /me, no Control/Access dependency for first login.
+
+    Runtime C2 attestation is still mandatory, and no caller may opt into
+    it via body/headers. Default published Admin API app remains untouched.
+    """
+    if ports is None or not isinstance(ports.c2, PrivateC2BoundAdmission):
+        raise ValueError("private first User requires source-pinned identity and C2")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            await ports.attest_started()
+            yield
+        finally:
+            await ports.close()
+
+    app = FastAPI(
+        title="Briareus Identity Current User API",
+        version="1.0.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=lifespan,
+    )
+    app.include_router(private_first_user_router(ports.c2))
+
+    @app.exception_handler(PrivateC2HttpError)
+    async def private_failure(_request: Request, exc: PrivateC2HttpError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=PrivateC2ErrorEnvelope(
+                error=PrivateC2SafeError(
+                    code=exc.code, originalOutcomeUnknown=exc.original_outcome_unknown
+                )
+            ).model_dump(mode="json"),
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
+
+    @app.get("/health/live", include_in_schema=False)
+    async def live() -> dict[str, str]:
+        return {"state": "live", "api": "private-first-user", "authorization": "per-request"}
+
+    @app.get("/health/ready", include_in_schema=False)
+    async def ready() -> dict[str, str]:
+        try:
+            async with asyncio.timeout(3):
+                await ports.require_ready()
+            return {"state": "ready", "authorization": "current-user-verified"}
+        except Exception:
+            raise HTTPException(503, detail="current Identity/C2 source unavailable") from None
 
     return app
