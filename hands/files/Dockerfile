@@ -13,4 +13,4 @@ COPY shared/hand_runtime/ /app/src/hand_runtime/
 WORKDIR /app/src
 USER 1000:1000
 EXPOSE 8000
-CMD ["uv", "run", "--frozen", "--no-sync", "--no-dev", "--project", "/app", "--directory", "/app/src", "uvicorn", "files_hand.server:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["/app/.venv/bin/uvicorn", "files_hand.server:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
