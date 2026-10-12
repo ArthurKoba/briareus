@@ -1,5 +1,8 @@
 # Briareus — Rauthy + Cedar: four-agent execution (2026-10-12)
 
+**LATEST TOPOLOGY OVERRIDE (12 October 2026):** [Flat Services / Hands / Shared](../architecture/flat-services-hands-shared-20261012.md). Its folder layout, independent data-plane boundary, Gateway Authorization admission and owner locations supersede this document where they differ; Rauthy + Cedar identity/policy ownership otherwise remains valid.
+
+
 Authority: docs/architecture/identity-rauthy-cedar-20261012.md, merged PR #472, supersedes old homemade Identity/JWT and proprietary policy-engine work. Existing Backend Cedar PR #473 is SOURCE only, not live grants. This is an execution plan, NOT a replacement architecture. Official upstream product name Rauthy (user colloquial Rauti). Do not manufacture undocumented upstream URLs, options or enrollment workflows.
 
 ## Target service boundaries

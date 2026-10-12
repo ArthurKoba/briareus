@@ -101,6 +101,6 @@ class CedarPolicyEvaluator:
         # This is a policy layer, not a grant source. Invalid policy, missing
         # entities, or library errors can never turn a denial into an Allow.
         try:
-            return is_authorized(request, self._policy_set, list(trusted_entities)).allowed
+            return is_authorized(request, self._policy_set, list(trusted_entities)).allowed is True
         except Exception:  # Any engine/entity failure is an authorization denial.
             return False

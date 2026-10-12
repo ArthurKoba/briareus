@@ -3,10 +3,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy
 WORKDIR /app
-COPY services/control-panel/api/pyproject.toml services/control-panel/api/uv.lock /app/
+COPY services/api/pyproject.toml services/api/uv.lock /app/
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=shared uv sync --frozen --no-dev --no-install-project
 RUN useradd -u 1000 -m -d /home/control-panel control-panel
-COPY services/control-panel/api/src/ /app/src/
+COPY services/api/src/ /app/src/
 USER 1000:1000
 WORKDIR /app/src
 EXPOSE 8000
