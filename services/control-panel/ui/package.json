@@ -1,5 +1,5 @@
 {
-  "name": "@briareus/admin-ui",
+  "name": "@briareus/control-panel-ui",
   "version": "0.1.0",
   "private": true,
   "type": "module",

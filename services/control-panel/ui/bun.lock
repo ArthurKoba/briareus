@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@briareus/admin-ui",
+      "name": "@briareus/control-panel-ui",
       "dependencies": {
         "clsx": "2.1.1",
         "lucide-vue-next": "0.545.0",
