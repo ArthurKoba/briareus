@@ -10,12 +10,16 @@ runtime, small ASGI entrypoint, Dockerfile and two Compose manifests.
 - Watch Paths: `hands/terminal/**` and `shared/hand_runtime/**`
 - Network service alias: `briareus-terminal` on the existing internal network.
 
-**This is a deliberately non-privileged, health-only transition, NOT the final
-MCP tool implementation.** `/health/live` is liveness only. All other HTTP
-routes return HTTP 503 and WebSocket connections are denied. Do not expose
-the previous `services/modules/terminal` tool implementation until it
-verifies Rauthy issuer/signature/audience and a fresh Briareus
-Authorization/Cedar AgentSession decision per protected action.
+**Diagnostic MCP transition — not authorized business-tool execution.**
+`GET /health/live` reports process liveness; `/health/ready` remains 503.
+The internal `/mcp` Streamable HTTP endpoint now implements real MCP
+`initialize`, `tools/list`, and two bounded, read-only calls: `hand_status`
+and `hand_source_summary`. It does **not** register or call the copied
+`services/modules/terminal` privileged tools; all other private provider HTTP
+paths still return 503, and WebSockets are denied. Business tool activation
+requires verified Rauthy identity/audience, current Cedar AgentSession
+permission for each effect, and appropriate sandbox/network isolation.
+See `docs/shared/hand-runtime-capabilities.md` for the exact v1 contract.
 
 Existing `deploy/terminal/` remains a rollback source. Preserve the existing
 resource UUID, networks, DNS, variables, release history, storage and app state.

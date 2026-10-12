@@ -10,9 +10,9 @@ from green Coolify liveness or the Control Panel's source-only module catalog.
 - `GET /health/live` — HTTP 200 if the **process** is alive, regardless of
   whether MCP, its callers or tools are usable. Existing Coolify liveness uses
   this and must not be interpreted as readiness.
-- `GET /health/ready` — HTTP 503, with `state: not_ready` while the Hand is a
-  health-only ASGI process and the verified identity/AgentSession/Cedar
-  admission layer is absent. There is no grace permit or privileged shortcut.
+- `GET /health/ready` — HTTP 503, with `state: not_ready` while only
+  diagnostics are live and verified identity/AgentSession/Cedar admission is
+  absent. Liveness and diagnostic MCP connectivity are not execution readiness.
 - `GET /internal/v1/capabilities` — HTTP 200, JSON, private network only, no
   tokens, secret state, user IDs or enabled operations. The JSON shape is:
 
@@ -37,7 +37,7 @@ from green Coolify liveness or the Control Panel's source-only module catalog.
       "source_annotation_ref": "read_annotations"
     }
   ],
-  "mcp_transport": "not_mounted",
+  "mcp_transport": "diagnostic_only",
   "authorization": "not_configured",
   "execution": "disabled"
 }
@@ -58,14 +58,24 @@ converted into incorrect or permissive JSON schemas. Dynamic default values
 are omitted; such parameters may have `required: false` without a `default`
 field. Source annotation names such as `read_annotations` are only identifiers,
 not current permission grants, verified read-only guarantees or executable
-capability flags. A real FastMCP registration and per-effect authorization are
-still needed before invoking a tool. The copied implementation lives inside
+capability flags. Registration and per-effect authorization of each **business** tool are
+still needed before invoking that tool. The copied implementation lives inside
 the Hand, never imported from `services/` at runtime.
 
-Every response is non-cacheable. Other paths, including `/mcp` and private
-provider operations, remain HTTP 503 and WebSockets remain rejected until
-real Rauthy access token signature/issuer/audience and fresh Cedar/AgentSession
-checks are implemented at the effect boundary. No public domain is added.
+Every response is non-cacheable. The exact private `/mcp` route now mounts a
+**real FastMCP 4 Streamable HTTP server** with stateless JSON responses and
+an explicit internal Host allowlist. Only two actual diagnostic MCP tools are
+registered in `tools/list`: `hand_status` (process, auth, declared-source count,
+readiness) and `hand_source_summary` (module-level counts). Both are fixed,
+read-only, bounded metadata operations without credentials or provider calls.
+Native `initialize` and both `tools/call` methods work on `/mcp` when accessed
+from a permitted private host. All historical 216 source-declared business
+operations remain unregistered in the live MCP server. Calling a legacy tool
+name returns an MCP unknown-tool error; no implicit privileged fallback.
+All other private provider HTTP paths still return 503; WebSockets remain
+denied. No public domain or Gateway `/hands` route is added. Full availability
+still requires real Rauthy issuer/signature/audience and fresh Cedar/AgentSession
+checks at the execution boundary and sandbox isolation before enabling effects.
 
 ## Integration boundary
 
