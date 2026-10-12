@@ -96,9 +96,7 @@ def register_gitlab_repository_tools(
         per_page: int = 100,
     ) -> JsonObject:
         """List repository tree entries."""
-        return client_factory(account_id).list_tree(
-            project, path, ref, recursive, page, per_page
-        )
+        return client_factory(account_id).list_tree(project, path, ref, recursive, page, per_page)
 
     @mcp.tool(title="GitLab code search", annotations=read_annotations)
     def search_code(
@@ -111,7 +109,6 @@ def register_gitlab_repository_tools(
     ) -> JsonObject:
         """Search repository blobs inside one project."""
         return client_factory(account_id).search_code(project, search, ref, page, per_page)
-
 
     @mcp.tool(title="GitLab list commits", annotations=read_annotations)
     def list_commits(
@@ -150,7 +147,7 @@ def register_gitlab_repository_tools(
         commit_message: str,
         last_commit_id: str = "",
     ) -> JsonObject:
-        """Create or update one UTF-8 file on a non-protected branch."""
+        """Create or update a UTF-8 file if permitted by GitLab."""
         return client_factory(account_id).put_file(
             project, path, content, branch, commit_message, last_commit_id
         )
@@ -164,7 +161,7 @@ def register_gitlab_repository_tools(
         commit_message: str,
         last_commit_id: str = "",
     ) -> JsonObject:
-        """Delete one file on a non-protected branch."""
+        """Delete a file if permitted by GitLab."""
         return client_factory(account_id).delete_file(
             project, path, branch, commit_message, last_commit_id
         )
@@ -201,7 +198,7 @@ def register_gitlab_repository_tools(
         branch: str,
         ref: str,
     ) -> JsonObject:
-        """Create a non-protected branch from a ref."""
+        """Create a branch from a ref, subject to optional Bridge and GitLab policy."""
         return client_factory(account_id).create_branch(project, branch, ref)
 
     @mcp.tool(title="GitLab delete branch", annotations=destructive_annotations)
@@ -210,7 +207,7 @@ def register_gitlab_repository_tools(
         project: str,
         branch: str,
     ) -> JsonObject:
-        """Delete a non-protected repository branch."""
+        """Delete a branch if permitted by GitLab and optional Bridge policy."""
         return client_factory(account_id).delete_branch(project, branch)
 
     @mcp.tool(title="GitLab compare refs", annotations=read_annotations)

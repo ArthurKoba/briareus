@@ -13,7 +13,8 @@ LOCAL_FIRST_GUIDANCE = (
     "Koba GitHub workflow: for substantial source changes, prefer one local-first cycle: "
     "checkout/clone into the persistent Terminal workspace, edit and test locally, create local "
     "commits as needed, then publish once with an authenticated Git push or one batched atomic "
-    "GitHub commit, followed by one PR. Avoid repeated per-file/per-commit GitHub API mutations; "
+    "GitHub commit. Push to the requested branch if GitHub permits it; create a PR only when "
+    "repository rules require one or the user requests one. Avoid repeated GitHub API mutations; "
     "they waste API quota and fragment history."
 )
 

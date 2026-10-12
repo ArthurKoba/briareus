@@ -341,6 +341,13 @@ class GitHubPrettyIdentityClient(GitHubActionsClient):
         if not push_branch:
             raise GitHubAgentError("cannot push a detached HEAD; specify a local branch")
         self._assert_branch_mutation_allowed(repository, push_branch)
+        # Existing workspaces may retain our pre-push hook with the old deny-list.
+        if not self.protected_branches:
+            guard = target / ".git" / "hooks" / "pre-push"
+            if guard.is_file() and "# koba-managed-local-git-guard" in guard.read_text(
+                encoding="utf-8", errors="replace"
+            ):
+                guard.unlink()
         args = ["push", "--porcelain"]
         if set_upstream:
             args.append("--set-upstream")

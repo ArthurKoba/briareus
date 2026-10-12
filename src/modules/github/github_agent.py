@@ -51,7 +51,7 @@ class GitHubAppClient:
     repository_cache_ttl_seconds: float = 30.0
     max_connections: int = 8
     workspace_root: Path = Path("/workspace")
-    protected_branches: frozenset[str] = frozenset({"main", "master"})
+    protected_branches: frozenset[str] = frozenset()
     required_checks: tuple[str, ...] = ("test", "docker")
     required_reviewers: tuple[str, ...] = ()
     _transport: PooledHttpTransport = field(init=False, repr=False)

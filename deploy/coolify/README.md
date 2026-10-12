@@ -129,6 +129,20 @@ selection, cache TTLs, file limits, provider policy defaults and database/file p
 
 `AUTH_SERVICE_TOKEN`, `AUTH_URL` and `AUTH_TIMEOUT_SECONDS` are not used.
 
+## Direct Git writes
+
+GitHub and GitLab branch denylists are empty by default. The Git providers
+enforce their own branch protection and user/App permissions; Bridge no longer
+rejects main/master before attempting a permitted write. Optional extra
+Bridge denials can be set using GITHUB_AGENT_PROTECTED_BRANCHES and
+GITLAB_PROTECTED_BRANCHES (comma-separated, for example main,master).
+Blank or unset values disable the extra checks.
+
+Old Bridge-managed local pre-push hooks are removed automatically on the
+next push_local_git call when the deny-list is blank. Other Git hooks remain.
+GitHub/GitLab CI runs per upstream rules after a direct push; a failed
+post-push pipeline will not undo that commit.
+
 ## Terminal resource containment
 
 The `terminal` service is an arbitrary-command execution boundary and has hard Docker cgroup

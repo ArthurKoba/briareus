@@ -20,7 +20,7 @@ The reviewer read surface receives the same richer commit observations, but no h
 - `github_protected`: GitHub's branch-protection/ruleset result;
 - `bridge_reserved`: the branch name is reserved by `GITHUB_AGENT_PROTECTED_BRANCHES` in MCP Bridge.
 
-Each branch also reports `mutation_allowed` and `mutation_denial_reason`. A branch can therefore be `github_protected=false` while still being unavailable for direct Agent mutation because Bridge policy reserves it.
+Each branch also reports `mutation_allowed` and `mutation_denial_reason`. By default the Bridge deny-list is empty; remote GitHub branch rules, including bypass rights, decide whether the write succeeds.
 
 ## Capability introspection
 
@@ -35,7 +35,7 @@ The endpoint is intended to make permission boundaries discoverable before an Ag
 Required safety properties:
 
 - `expected_head_sha` is mandatory;
-- Bridge-reserved or GitHub-protected branches are rejected;
+- Only explicitly Bridge-reserved branches are rejected early; GitHub decides whether its protected branches accept a write;
 - only `identity_source=current_agent_app` is accepted;
 - commit messages and trees must be preserved;
 - merge commits in the rewrite range are rejected;

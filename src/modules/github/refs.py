@@ -42,8 +42,7 @@ class GitHubRefsClient(GitHubRepositoryClientBase):
         denial_reason: str | None = None
         if bridge_reserved:
             denial_reason = "branch is reserved by bridge mutation policy"
-        elif github_protected:
-            denial_reason = "branch is protected by GitHub"
+        # GitHub rulesets may permit bypass; defer actual write authorization to GitHub.
 
         return {
             "repository": repository,
@@ -84,8 +83,7 @@ class GitHubRefsClient(GitHubRepositoryClientBase):
             denial_reason = None
             if bridge_reserved:
                 denial_reason = "branch is reserved by bridge mutation policy"
-            elif github_protected:
-                denial_reason = "branch is protected by GitHub"
+            # github_protected is informational; it is not a Bridge push denial.
             branches.append(
                 {
                     "name": name,
@@ -352,10 +350,7 @@ class GitHubRefsClient(GitHubRepositoryClientBase):
             raise GitHubAgentError("target_ref must not be empty")
         if not expected_head_sha:
             raise GitHubAgentError("expected_head_sha must not be empty")
-        if (
-            branch.casefold() in self.protected_branches
-            and not allow_protected_branch
-        ):
+        if branch.casefold() in self.protected_branches and not allow_protected_branch:
             raise GitHubAgentError(
                 f"reset of protected branch requires allow_protected_branch=true: {branch}"
             )
@@ -368,9 +363,7 @@ class GitHubRefsClient(GitHubRepositoryClientBase):
         )
         if not isinstance(ref, dict):
             raise GitHubAgentError("unable to resolve branch head")
-        head_sha = json_str(
-            json_member_object(ref, "object", required=True).get("sha")
-        )
+        head_sha = json_str(json_member_object(ref, "object", required=True).get("sha"))
         if not head_sha:
             raise GitHubAgentError("branch head has no sha")
         if head_sha != expected_head_sha:
@@ -426,15 +419,12 @@ class GitHubRefsClient(GitHubRepositoryClientBase):
             f"/repos/{repository}/git/ref/heads/{branch_q}",
         )
         current_object = (
-            json_member_object(current_ref, "object")
-            if isinstance(current_ref, dict)
-            else {}
+            json_member_object(current_ref, "object") if isinstance(current_ref, dict) else {}
         )
         current_head_sha = json_str(current_object.get("sha"))
         if current_head_sha != head_sha:
             raise GitHubAgentError(
-                f"branch head changed before reset: expected {head_sha}, "
-                f"found {current_head_sha}"
+                f"branch head changed before reset: expected {head_sha}, found {current_head_sha}"
             )
 
         _, updated = self._repo_request(

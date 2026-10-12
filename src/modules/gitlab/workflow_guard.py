@@ -12,9 +12,10 @@ from common.runtime_policy_contracts import GitLabRuntimePolicy
 LOCAL_FIRST_GUIDANCE = (
     "Koba GitLab workflow: for substantial source changes, prefer one local-first cycle: "
     "checkout with mode='git' into the persistent Terminal workspace, edit and validate locally, "
-    "commit locally, authorize the checkout, then publish once with push_local_git and open "
-    "a merge "
-    "request. Avoid repeated per-file GitLab API mutations; issues, merge requests, notes and "
+    "commit locally, authorize the checkout, then publish once with push_local_git. "
+    "Push to the requested branch if GitLab permits it; create a merge request only "
+    "when repository rules require one or the user requests one. "
+    "Avoid repeated per-file GitLab API mutations; issues, merge requests, notes and "
     "pipelines remain control-plane operations."
 )
 
@@ -77,9 +78,7 @@ class GitLabLocalFirstMiddleware(Middleware):
             adapted.append(
                 tool
                 if not prefix
-                else tool.model_copy(
-                    update={"description": prefix + (tool.description or "")}
-                )
+                else tool.model_copy(update={"description": prefix + (tool.description or "")})
             )
         return adapted
 

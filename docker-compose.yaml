@@ -161,6 +161,7 @@ services:
       target: github
     environment:
       <<: [*machine, *cache-client, *management-client, *observability]
+      GITHUB_AGENT_PROTECTED_BRANCHES: "${GITHUB_AGENT_PROTECTED_BRANCHES:-}"
     volumes:
       - terminal-workspace:/workspace
 
@@ -175,6 +176,7 @@ services:
       target: gitlab
     environment:
       <<: [*machine, *cache-client, *management-client, *observability]
+      GITLAB_PROTECTED_BRANCHES: "${GITLAB_PROTECTED_BRANCHES:-}"
     volumes:
       - terminal-workspace:/workspace
 

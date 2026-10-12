@@ -39,9 +39,7 @@ class GitLabRepositoryClient(GitLabApiClient):
             elif self.profile.auth_type == "bearer":
                 auth_header = f"Authorization: Bearer {token}"
             else:
-                encoded = base64.b64encode(
-                    f"gitlab-ci-token:{token}".encode()
-                ).decode("ascii")
+                encoded = base64.b64encode(f"gitlab-ci-token:{token}".encode()).decode("ascii")
                 auth_header = f"Authorization: Basic {encoded}"
 
         result = checkout_repository(
@@ -82,9 +80,7 @@ class GitLabRepositoryClient(GitLabApiClient):
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()[-2048:]
-            raise GitLabError(
-                f"git command failed with exit code {result.returncode}: {detail}"
-            )
+            raise GitLabError(f"git command failed with exit code {result.returncode}: {detail}")
         return (result.stdout or result.stderr).strip()
 
     def _git_optional_output(self, target: Path, *args: str) -> str:
@@ -99,9 +95,7 @@ class GitLabRepositoryClient(GitLabApiClient):
             return ""
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()[-2048:]
-            raise GitLabError(
-                f"git command failed with exit code {result.returncode}: {detail}"
-            )
+            raise GitLabError(f"git command failed with exit code {result.returncode}: {detail}")
         return (result.stdout or result.stderr).strip()
 
     def _expected_remote(self, project: str) -> str:
@@ -268,11 +262,17 @@ class GitLabRepositoryClient(GitLabApiClient):
         if not push_branch:
             raise GitLabError("cannot push a detached HEAD; specify a local branch")
         push_branch = require_mutable_branch(push_branch, self.protected_branches)
+        # Only remove our obsolete guard. Preserve all third-party Git hooks.
+        if not self.protected_branches:
+            guard = target / ".git" / "hooks" / "pre-push"
+            if guard.is_file() and "# koba-managed-gitlab-local-git-guard" in guard.read_text(
+                encoding="utf-8", errors="replace"
+            ):
+                guard.unlink()
 
         expected_sha = expected_remote_sha.strip().casefold()
         if expected_sha and (
-            len(expected_sha) != 40
-            or any(ch not in "0123456789abcdef" for ch in expected_sha)
+            len(expected_sha) != 40 or any(ch not in "0123456789abcdef" for ch in expected_sha)
         ):
             raise GitLabError("expected_remote_sha must be a 40-character hexadecimal commit SHA")
 
@@ -280,9 +280,7 @@ class GitLabRepositoryClient(GitLabApiClient):
         if set_upstream:
             args.append("--set-upstream")
         if expected_sha:
-            args.append(
-                f"--force-with-lease=refs/heads/{push_branch}:{expected_sha}"
-            )
+            args.append(f"--force-with-lease=refs/heads/{push_branch}:{expected_sha}")
         args += [remote, f"HEAD:refs/heads/{push_branch}"]
         output = self._git_output(target, *args)
         head = self._git_output(target, "rev-parse", "HEAD")
@@ -387,7 +385,6 @@ class GitLabRepositoryClient(GitLabApiClient):
             "per_page": per_page,
             "next_page": response.headers.get("X-Next-Page", ""),
         }
-
 
     def list_commits(
         self,
