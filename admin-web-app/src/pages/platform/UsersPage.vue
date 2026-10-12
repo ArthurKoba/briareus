@@ -128,19 +128,19 @@ async function issue() {
   if(!globalWriteReady.value)return
   // Never expose a one-use URL just because the initial Identity owner
   // returned a response: other owner acknowledgements may remain UNKNOWN.
-  let newLink:{url:string;expiresAt:string|null}|null=null
+  const newLink=ref<{url:string;expiresAt:string|null}|null>(null)
   try {
     const done=await command.submit("invitations.issue",async(port,ctx)=>{
       const issued=await port.users.issueInvitation(ctx)
-      if(!ctx.signal.aborted)newLink={url:issued.invitationUrl,expiresAt:issued.expiresAt}
+      if(!ctx.signal.aborted)newLink.value={url:issued.invitationUrl,expiresAt:issued.expiresAt}
     })
-    if(done && newLink && projectContext.state.user?.active){
-      issuedLink.value={kind:"invitation",...newLink}
+    if(done && newLink.value && projectContext.state.user?.active){
+      issuedLink.value={kind:"invitation",...newLink.value}
       revealIssuedLink.value=false
       await invitations.reload()
     }
   }finally{
-    newLink=null
+    newLink.value=null
   }
 }
 async function confirmAction() {
@@ -162,7 +162,7 @@ async function confirmAction() {
     if(!current||!sameUserAuthority(current,pending.user)||
        !rowAction(current,pending.type as "suspend"|"role"|"remove"|"reset"))return
   }
-  let pendingResetLink:{url:string;expiresAt:string|null}|null=null
+  const pendingResetLink=ref<{url:string;expiresAt:string|null}|null>(null)
   const done = await command.submit(
     pending.type === "invitation" ? "invitations.revoke" : pending.type === "role" ? "users.roles" : pending.type === "reset" ? "users.resetPassword" : "users.manage",
     async (port, ctx) => {
@@ -173,16 +173,16 @@ async function confirmAction() {
       else if (pending.user && pending.type === "reset") {
         const result = await port.users.issueReset(ctx, pending.user.id)
         if(!ctx.signal.aborted){
-          pendingResetLink={url:result.invitationUrl,expiresAt:result.expiresAt}
+          pendingResetLink.value={url:result.invitationUrl,expiresAt:result.expiresAt}
         }
       }
     },
   )
-  if(done&&pendingResetLink&&pending.type==="reset"&&projectContext.state.user?.active){
-    issuedLink.value={kind:"reset",...pendingResetLink}
+  if(done&&pendingResetLink.value&&pending.type==="reset"&&projectContext.state.user?.active){
+    issuedLink.value={kind:"reset",...pendingResetLink.value}
     revealIssuedLink.value=false
   }
-  pendingResetLink=null
+  pendingResetLink.value=null
   if (done) {
     confirmation.value = null
     // Privilege and account changes refresh current principal FIRST; old

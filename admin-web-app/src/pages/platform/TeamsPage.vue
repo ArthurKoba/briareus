@@ -167,7 +167,7 @@ async function confirmAction() {
 }
 function askTransfer() {
   const team = active.value
-  if (!team || !currentTeamEpoch(team)||!ownershipReady.value || !can("teams.ownership") || team.allowedActions?.["teams.ownership"] !== true || !canonicalUuid(newOwnerId.value) || newOwnerId.value === team.ownerId) return
+  if (!team || !currentTeamEpoch(team)||!ownershipReady.value || !can("teams.ownership") || team.allowedActions?.["teams.ownership"] !== true || !canonicalUuid4(newOwnerId.value) || newOwnerId.value === team.ownerId) return
   pending.value = { kind: "transfer", team, userId: newOwnerId.value, label: team.id }
 }
 </script>
@@ -197,7 +197,7 @@ function askTransfer() {
             <span v-if="memberLoading" role="status" class="text-xs text-muted-foreground">{{t('app.loading')}}</span>
           </div>
           <p v-if="memberError" role="alert" class="text-xs text-destructive">{{t('platform.a6PageReadFailed')}}</p>
-          <form class="flex flex-wrap items-end gap-2" @submit.prevent="addMember"><label class="min-w-52 flex-1 text-xs">{{t('platform.memberUserId')}}<input v-model="newMemberId" class="field mt-1" autocomplete="off" :disabled="!memberReady || (command.state.busy || command.state.reconciliationRequired)" required /></label><Button type="submit" size="sm" :disabled="!memberReady || active.allowedActions?.['teams.members']!==true || (command.state.busy || command.state.reconciliationRequired) || !canonicalUuid(newMemberId.trim())">{{t('platform.addMember')}}</Button><p v-if="newMemberId && !canonicalUuid(newMemberId.trim())" class="w-full text-xs text-destructive" role="status">{{t('platform.invalidUserUuid')}}</p></form>
+          <form class="flex flex-wrap items-end gap-2" @submit.prevent="addMember"><label class="min-w-52 flex-1 text-xs">{{t('platform.memberUserId')}}<input v-model="newMemberId" class="field mt-1" autocomplete="off" :disabled="!memberReady || (command.state.busy || command.state.reconciliationRequired)" required /></label><Button type="submit" size="sm" :disabled="!memberReady || active.allowedActions?.['teams.members']!==true || (command.state.busy || command.state.reconciliationRequired) || !canonicalUuid4(newMemberId.trim())">{{t('platform.addMember')}}</Button><p v-if="newMemberId && !canonicalUuid4(newMemberId.trim())" class="w-full text-xs text-destructive" role="status">{{t('platform.invalidUserUuid')}}</p></form>
           <form class="flex flex-wrap items-end gap-2 border-t border-border pt-4" @submit.prevent="askTransfer"><label class="min-w-52 flex-1 text-xs">{{t('platform.transferTeamOwner')}}<select v-model="newOwnerId" class="field mt-1" :disabled="!ownershipReady || (command.state.busy || command.state.reconciliationRequired)"><option value="">{{t('platform.chooseMember')}}</option><option v-for="member in activeMembers.filter(item => item.active && !item.owner)" :key="member.userId" :value="member.userId">{{member.label}}</option></select></label><Button type="submit" size="sm" variant="outline" :disabled="!ownershipReady || active.allowedActions?.['teams.ownership']!==true || (command.state.busy || command.state.reconciliationRequired) || !newOwnerId">{{t('platform.transfer')}}</Button></form>
           <p class="text-xs text-muted-foreground">{{t('platform.teamDeletionDeferred')}} {{t('platform.dangerTargetIdNotice')}}</p>
         </div>
