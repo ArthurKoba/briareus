@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 if TYPE_CHECKING:
-    from presentation.private_c2_api import PrivateOwnerApiPorts
+    from presentation.private_c2_api import PrivateFirstUserApiPorts, PrivateOwnerApiPorts
 
 
 def create_platform_admin_app(services: object | None = None) -> FastAPI:
@@ -47,3 +47,12 @@ def create_trusted_private_platform_app(ports: PrivateOwnerApiPorts) -> FastAPI:
     from presentation.private_c2_api import create_unmounted_private_owner_api
 
     return create_unmounted_private_owner_api(ports)
+
+
+def create_trusted_first_user_admin_app(ports: PrivateFirstUserApiPorts) -> FastAPI:
+    """Minimal source-only /me, signed Identity without invented Project."""
+    if ports is None:
+        raise RuntimeError("first User Admin API requires trusted C2")
+    from presentation.private_c2_api import create_unmounted_first_user_admin_app
+
+    return create_unmounted_first_user_admin_app(ports)

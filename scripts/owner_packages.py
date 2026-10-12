@@ -49,6 +49,7 @@ _OWNER_SOURCE_SURFACES: dict[str, tuple[str, ...]] = {
         "identity.private_login_source",
         "identity._private_user_session",
         "identity._private_current_user",
+        "identity._private_onboarding",
     ),
     "access": (
         "authorization._access_source",
