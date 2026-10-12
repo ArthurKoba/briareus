@@ -68,7 +68,7 @@ class VerifiedDecisionCaller:
 
 
 class TrustedDecisionAttestor(Protocol):
-    async def verify(self, request: Request, command: DecisionCommand) -> VerifiedDecisionCaller:
+    async def verify(self, request: Request, command: DecisionCommand) -> object:
         """Verify bearer/peer and current Project membership; never echo claims."""
         ...
 
@@ -157,3 +157,4 @@ def authorization_decision_router(
         return DecisionPermit()
 
     return router
+
