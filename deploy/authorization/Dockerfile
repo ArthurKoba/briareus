@@ -19,6 +19,7 @@ COPY scripts/alembic_owners/access/versions/0001_access_baseline.py /app/src/com
 COPY services/authorization/__init__.py /app/src/authorization/__init__.py
 COPY services/authorization/_access_proof_reader.py /app/src/authorization/_access_proof_reader.py
 COPY services/authorization/_access_source.py /app/src/authorization/_access_source.py
+COPY services/authorization/_cedar_policy.py /app/src/authorization/_cedar_policy.py
 COPY services/authorization/_crypto_keys.py /app/src/authorization/_crypto_keys.py
 COPY services/authorization/_effect_issuer.py /app/src/authorization/_effect_issuer.py
 COPY services/authorization/_idempotency.py /app/src/authorization/_idempotency.py
