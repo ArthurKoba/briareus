@@ -1,20 +1,40 @@
 # Briareus — CHAT-REPORT-V2: tables, file handoffs, Orchestrator acceptance
 
-**Owner decision 2026-10-12.** Canonical agent workflow for workspace mcp-bridge-platform. Supersedes historical CHAT-REPORT-V1, plain-text/no-table V2, pasted НА ПРИЁМКУ and all conflicting older agent instructions. Applies to Backend, Frontend, Runtime, Deployment and Orchestrator.
+**Owner decision 2026-10-12.** Canonical agent workflow for workspace mcp-bridge-platform. Supersedes historical CHAT-REPORT-V1, plain-text/no-table V2, pasted НА ПРИЁМКУ and all conflicting older agent instructions. Applies to Backend, Frontend, Runtime workers and Orchestrator.
 
-## 1. Mandatory Markdown status table in agent chats
+## 1. Two DIFFERENT formats: worker chat text vs. Orchestrator control table
 
-Single agent: one row. Orchestrator overview: one row per lane. No standalone long prose checklists, no duplicate historical achievements.
+### Agent chat: STRICTLY NO TABLES
 
-| Агент / волна | State | Новое сделано | Сборка и проверка самого агента | Далее / блокер | PR / main SHA |
-| --- | --- | --- | --- | --- | --- |
-| Runtime R23 | OBSERVING | Panel static available | uv/CI PASS, Dev /panel/ 200, /api/auth/login 503 | Trusted Identity pre-auth peer missing | #456 / 6a47ba5 |
+Backend, Frontend, Runtime worker chats must send a **short, readable text update**, NOT a Markdown table. This is a direct owner correction: long six-column tables wrap vertically and make worker chats unusable. Worker answers should normally contain 3–5 short lines, no giant markdown table, no fenced log dump, no agent-to-agent commands, no repeated achievements. Actual evidence stays in progress.md.
 
-Always use actual FIRST State from agents/<lane>.progress.md: READY, IN_PROGRESS, RELEASING, OBSERVING, READY_FOR_AUDIT, CHANGES_REQUESTED, BLOCKED or WAITING. Deployment READY can mean STANDBY/no assignment. Explain missing evidence as NOT VERIFIED, not as success. Include exact published PR/merge SHA when present; Build/CI, image startup, actual Dev HTTP/browser/DB and authenticated product acceptance are distinct. Git CI placeholders are not evidence of actual Docker builds. For a brief report include only deltas since last user-facing report; for detailed report show the whole current table and material blockers. If user explicitly requests another format, honor it.
+Example for an individual worker:
+
+🟡 Backend A19 — OBSERVING
+Сделано: исправлен Docker COPY и опубликован PR #455.
+Проверка: собственная сборка PASS; Identity Dev запущен; реальный login ещё недоступен.
+Дальше: подключить доверенный Identity-канал; повторно проверить вход.
+Блокер: проверенная подпись/сервисный peer не предоставлены. (Only if materially true.)
+
+Use the exact FIRST State in agents/<lane>.progress.md; truthful one new result, own build/test/CI/Dev evidence, one or two next actions and only a real blocker. Emojis are for the status, not decorative lists. No Markdown TABLE in worker chat even on "отчёт" unless owner explicitly asks a particular worker for a table.
+
+### Orchestrator chat with OWNER: concise AGENT-CONTROL TABLE only
+
+The **Orchestrator**, and ONLY the Orchestrator, gives the OWNER a compact table to decide WHICH of the three worker chats to start or leave stopped. This is a management table, NOT the worker reporting template. Maximum four short columns:
+
+| Агент | State | Запускать? | Команда или причина |
+| --- | --- | --- | --- |
+| 🟡 Backend | OBSERVING | ⏸️ Нет | Уже наблюдает; не перезапускать |
+| 🔵 Runtime | WAITING | ⏸️ Нет | Нет нового задания |
+| 🟣 Frontend | READY | ▶️ Да | Продолжай работу |
+
+These rows are an EXAMPLE, not current state. On every answer read real FIRST States from the shared progress files, inspect the latest assigned work and do not invent active sessions. There are EXACTLY THREE agents to display: Backend, Runtime, Frontend. Do not add inactive historical lanes. Provide one command per agent only when launch is actually needed; for IN_PROGRESS/RELEASING/OBSERVING do NOT reflexively tell owner to send "Продолжай". Avoid excessive technical details in table cells. The Orchestrator may provide a short plain-language summary before or after the management table when genuinely useful.
+
+If owner asks the Orchestrator to inspect a specific technical issue or write task corrections, do that in files; the agent-control table is most useful for management/status/launch requests, not mandatory for unrelated general conversation.
 
 ## 2. Commands and replies are FILE-BASED, not chat-based
 
-Worker chats report the table only. Tasks, change requests, cross-agent answers, acceptance decisions and full evidence are exchanged in existing shared workspace files. No forwarding command payloads between worker chats by a human.
+Worker chats report short status TEXT only; only the Orchestrator-to-owner launch/status summary uses the compact management table. Tasks, change requests, cross-agent answers, acceptance decisions and full evidence are exchanged in existing shared workspace files. No forwarding command payloads between worker chats by a human.
 
 | File | Who writes | Who reads | What lives there |
 | --- | --- | --- | --- |
@@ -35,13 +55,13 @@ Backend, Frontend and Runtime implement only owned paths, preserve dirty known-g
 
 When own scope and release evidence are ready for independent acceptance, agent sets FIRST State READY_FOR_AUDIT in progress and records exact published merged main SHA, relevant changed paths, tests/CI, Dev image/deploy result, live HTTP and remaining explicit unknowns. This FILE IS the handoff: no pasted НА ПРИЁМКУ block to user. Agent does not mark itself ACCEPTED. Genuine external blockers may remain named even when source/Dev release is ready for partial acceptance.
 
-Dev-only hard allowlist: docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Agents may manage their OWN Briareus Dev app Watch Paths/nonsecret settings independently; Deployment is optional on demand. Forbidden even viewing other projects, environments, Shared Environments, Shared Variables/secret values, global Coolify/host data. Never wipe DB/Valkey or invent privileged Identity/JTI/Service peer or bypass C2.
+Dev-only hard allowlist: docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Agents may manage their OWN Briareus Dev app Watch Paths/nonsecret settings independently;  Forbidden even viewing other projects, environments, Shared Environments, Shared Variables/secret values, global Coolify/host data. Never wipe DB/Valkey or invent privileged Identity/JTI/Service peer or bypass C2.
 
 ## 4. Independent ACCEPTANCE is Orchestrator's exclusive action
 
 Orchestrator takes READY_FOR_AUDIT file handoff, reads exact published diff/main SHA, PR/CI evidence, app logs/HTTP and cross-owner contracts, checks critical correctness/security/architecture with focused verification (NOT blindly repeating every agent build/test). Then Orchestrator writes scoped ACCEPTED (SOURCE, BUILD, DEV_RUNTIME, AUTH_PRODUCT as actually evidenced), or CHANGES_REQUESTED with specific findings, to the owning agents/<lane>.progress.md; actionable changes to agents/<lane>.task.md TOP; cross-owner dependencies to coordination/requests/<lane>.md.
 
-On CHANGES_REQUESTED, agent revises the same wave, performs self-build/test/PR/deploy and returns READY_FOR_AUDIT through files. On ACCEPTED, Orchestrator may set READY with a distinct next task or WAITING if there is none; do not leave a false active task. GitHub Reviewer merge and protected checks are separate from Orchestrator product/source acceptance. Orchestrator reports back to the user with a status TABLE, including real blockers and named owners.
+On CHANGES_REQUESTED, agent revises the same wave, performs self-build/test/PR/deploy and returns READY_FOR_AUDIT through files. On ACCEPTED, Orchestrator may set READY with a distinct next task or WAITING if there is none; do not leave a false active task. GitHub Reviewer merge and protected checks are separate from Orchestrator product/source acceptance. Orchestrator reports to the owner with the compact THREE-AGENT LAUNCH/STOP management table only for status/management requests; workers never receive that table as their reporting format.
 
 ## 5. Current first-user acceptance boundary
 
