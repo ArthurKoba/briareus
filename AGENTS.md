@@ -1,3 +1,9 @@
+## CURRENT CHAT-REPORT-V2 and AUTONOMOUS LOOP (2026-10-12)
+
+Overrides historical CHAT-REPORT-V1, READY_FOR_REVIEW / НА ПРИЁМКУ handoff, no-push and manual-acceptance wording below. Each agent implements, commits, pushes, passes required CI, merges if GitHub permits, checks exact Briareus Development Coolify app logs and real HTTP, fixes and reports READY_FOR_AUDIT with exact SHA. Independent Orchestrator audit is AFTER merge. Concise user output: one header icon/lane/wave matching FIRST State; Сделано 1–4 NEW verified facts; Проверка actual CI/deploy/HTTP; Следующее 1–2 tasks; Блокер ONLY if actual unowned external block. No fake DONE, old status or lengthy report. READY/IN_PROGRESS/RELEASING/OBSERVING/READY_FOR_AUDIT/BLOCKED/WAITING defined in coordination/CONTRACTS.md TOP. No Shared Environments/other projects: access ONLY Briareus MCP development.
+
+---
+
 ## LATEST OWNER HARD ACCESS RESTRICTION — BRIAREUS DEV ONLY (2026-10-12)
 
 This overrides ALL previous broad browser/terminal/Coolify/Observability access authority. ONLY project Briareus MCP UUID 3xshlpoghb9wcyhjgktlqzzp, environment development UUID naibrku1omovvmw5o0bcnp5c, and the exact preapproved 14 applications may be READ or MODIFIED. **FORBIDDEN EVEN TO VIEW** other projects, non-Dev environments, Shared Environments, Shared Variables/secrets, global/root/team pages, broad app lists, unfiltered logs or other containers. No off-scope clicks, redirects, APIs or host-wide commands even with admin credentials. Backend/Frontend/Runtime may self-configure their OWN Dev application Watch Paths/settings and inspect own Dev logs via direct scoped browser/API, without Deployment approval. Preserve secrets/data/privileged C2 and Auto Deploy. If target membership is unclear, STOP BEFORE requesting it. Canonical full scope: docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md; local mirror: coordination/BRIAREUS_DEV_ACCESS_SCOPE.md.
