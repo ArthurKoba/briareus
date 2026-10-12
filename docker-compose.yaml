@@ -200,6 +200,8 @@ services:
     devices:
       - ${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}:${BROWSER_DRI_DEVICE:-/dev/dri/renderD128}
     shm_size: 1gb
+    mem_limit: 2560m
+    memswap_limit: 2560m
 
   terminal:
     <<: *private-service
