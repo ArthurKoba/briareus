@@ -1,9 +1,9 @@
 # Briareus External Services — source and operator contract
 
 This is the **existing** Coolify Development Application called **External Services**.
-The previous Application UUID `rgne4jjrnc6j6qb6zy5nelbp` was removed by the owner.
-A new, explicitly scoped Development Application must be created; record its
-new UUID in the source allowlist after creation.
+The owner deleted the previous app. The newly created, allowlisted Briareus
+Development application UUID is `pdx35bwnh9tjeopx30jslrb9`. No other
+Coolify application is responsible for PostgreSQL, Valkey or Rauthy.
 No new Coolify Application for Rauthy, and no Cedar container.
 Cedar stays embedded as the Rust-backed `cedarpy` library in Python Authorization.
 

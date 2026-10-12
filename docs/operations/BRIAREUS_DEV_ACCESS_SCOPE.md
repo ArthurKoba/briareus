@@ -16,7 +16,7 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 | admin-api | Admin API | rf5gaooeijfzyiizgaw9kznr |
 | admin-ui | Admin UI | pxv5fbwcogun3va4vygnejd4 |
 | authorization | Authorization | 95podguiawtnf2tvlemvk3ef |
-| data | External Services | rgne4jjrnc6j6qb6zy5nelbp |
+| data | External Services | pdx35bwnh9tjeopx30jslrb9 |
 | files | Files | oeoerknk5tmjc3imqxljciga |
 | gateway | Gateway | vpuhamswqggqtau3als7siuo |
 | identity | Identity | 01sg4odymffwvc0kyrgspzvh |
