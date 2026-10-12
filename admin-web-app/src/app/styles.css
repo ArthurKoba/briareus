@@ -6,44 +6,44 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: light;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.98 0.008 196);
+  --foreground: oklch(0.19 0.022 225);
   --card: oklch(1 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.37 0.074 191);
   --primary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.48 0 0);
-  --accent: oklch(0.94 0 0);
+  --muted: oklch(0.95 0.012 192);
+  --muted-foreground: oklch(0.43 0.016 221);
+  --accent: oklch(0.91 0.026 187);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.58 0.23 27);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.91 0 0);
-  --input: oklch(0.91 0 0);
-  --ring: oklch(0.56 0 0);
-  --sidebar: oklch(0.97 0 0);
+  --border: oklch(0.86 0.02 205);
+  --input: oklch(0.86 0.02 205);
+  --ring: oklch(0.57 0.1 186);
+  --sidebar: oklch(0.96 0.01 196);
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.185 0 0);
+  --background: oklch(0.16 0.016 221);
+  --foreground: oklch(0.97 0.006 190);
+  --card: oklch(0.21 0.018 221);
   --popover: oklch(0.185 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0 0);
+  --primary: oklch(0.81 0.1 178);
   --primary-foreground: oklch(0.18 0 0);
-  --muted: oklch(0.23 0 0);
+  --muted: oklch(0.27 0.018 220);
   --muted-foreground: oklch(0.7 0 0);
-  --accent: oklch(0.26 0 0);
+  --accent: oklch(0.29 0.037 192);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.7 0.19 22);
   --destructive-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.55 0 0);
-  --sidebar: oklch(0.17 0 0);
+  --ring: oklch(0.76 0.1 175);
+  --sidebar: oklch(0.18 0.02 220);
 }
 
 @theme inline {
@@ -71,6 +71,11 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--backgro
 
 .field { width:100%; min-height:2.25rem; border:1px solid var(--input); border-radius:.375rem; background:var(--background); padding:.45rem .7rem; color:var(--foreground); outline:none; }
 .field:focus { box-shadow:0 0 0 2px color-mix(in oklab,var(--ring) 45%,transparent); }
+.secret-field { padding-right: 5rem; }
+.first-user-stage {
+  background-image: radial-gradient(ellipse 55% 42% at 8% 12%, color-mix(in oklab, var(--ring) 11%, transparent), transparent),
+    radial-gradient(ellipse 50% 45% at 92% 91%, color-mix(in oklab, var(--primary) 7%, transparent), transparent);
+}
 .settings-card { border:1px solid var(--border); border-radius:.75rem; background:var(--card); padding:1.25rem; box-shadow:0 1px 2px rgb(0 0 0 / .04); }
 .settings-card>h2 { margin:0 0 .8rem; font-size:.9rem; font-weight:600; }
 
