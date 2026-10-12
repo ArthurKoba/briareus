@@ -21,6 +21,7 @@ from authorization._decision_api import (
     VerifiedDecisionCaller,
 )
 from authorization._rauthy_jwks import RauthyJwksVerifier, RauthyTokenRejected
+from authorization._service_identity import ACTION_AUDIENCES
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +55,6 @@ class CurrentProjectMembershipResolver(Protocol):
         rauthy_subject: str,
         project_uuid: UUID,
     ) -> VerifiedProjectMembership: ...
-
-
-# Gateway admission is coarse-only. The verified Hand identity must match
-# its actual effect family, regardless of bearer or posted action claims.
-_HAND_AUDIENCE: dict[str, frozenset[str]] = {
-    "files.read": frozenset({"files"}),
-    "files.write": frozenset({"files"}),
-    "terminal.execute": frozenset({"terminal"}),
-    "web.access": frozenset({"web"}),
-    "analysis.import": frozenset({"reverse"}),
-    "integrations.use": frozenset({"svc", "infrastructure"}),
-    "variables.use": frozenset({"svc", "infrastructure"}),
-}
 
 
 class RauthyDecisionAttestor:
@@ -110,7 +98,8 @@ class RauthyDecisionAttestor:
                 command.action != "mcp.connect"
                 and (
                     peer.consumer != "hand"
-                    or peer.source_audience not in _HAND_AUDIENCE.get(command.action, frozenset())
+                    or peer.source_audience == "gateway"
+                    or peer.source_audience not in ACTION_AUDIENCES.get(command.action, frozenset())
                 )
             )
         ):
