@@ -23,9 +23,10 @@ export function normalizeUiError(error: unknown, phase: "read" | "mutation" = "r
   // are all POSSIBLY post-commit. Only the ORIGINAL signed BFF owner status
   // plus a current affected-domain read may resolve the retry fence.
   if(phase==="mutation")return {kind:"uncertain",code,message:"outcomeUncertain"}
-  if (code === "contract_not_available") {
-    return { kind: "unavailable", code, message: "contractPending" }
-  }
+  // HTTP authorization and throttling outcomes take precedence over a
+  // free-form transport error code. In particular a forged/stale
+  // `contract_not_available` MUST NOT turn an authenticated 401 into an
+  // offline state that retains the previous User context.
   if (status === 401) return { kind: "unauthorized", code, message: "authenticationExpired" }
   // A future Authorization-owned schema migration may temporarily keep
   // verified Admin callers unavailable. 503 is NOT evidence migrations ran;
@@ -33,6 +34,9 @@ export function normalizeUiError(error: unknown, phase: "read" | "mutation" = "r
   if (status === 503 && phase === "read")return {kind:"unavailable",code:"service_unavailable",message:"serviceUnavailableOrUpgrading"}
   if (status === 429) return { kind: "unavailable", code, message: "rateLimited" }
   if (status === 403) return { kind: "forbidden", code, message: "permissionDenied" }
+  if (code === "contract_not_available" && (status === null || status === 404 || status === 501)) {
+    return { kind: "unavailable", code, message: "contractPending" }
+  }
   if (code === "invalid_invitation" && (status === 400 || status === 422)) {
     return { kind: "invalid", code, message: "invitationInvalid" }
   }

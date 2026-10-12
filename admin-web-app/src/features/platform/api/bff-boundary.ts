@@ -1,4 +1,4 @@
-import type { PlatformPort, QueryContext, ScopeSelection, SourceCommandBinding, UiCapability } from "@/features/platform/model/contracts"
+import { canonicalUuid4, type PlatformPort, type QueryContext, type ScopeSelection, type SourceCommandBinding, type UiCapability } from "@/features/platform/model/contracts"
 
 /** Selected B15 ownership model. These are DOMAIN OWNERS behind one BFF,
  * not browser-addressable database/service origins or HTTP wire DTOs. */
@@ -39,14 +39,11 @@ export interface BffEffectEvidence {
   readonly owners: Readonly<Partial<Record<BffOwner, BffOwnerEffect>>>
   readonly observedAtUtc: string
 }
-/** Accepted A12 private owner-signed source is NOT this reviewed public
- * interface: its normalized `BffEffectEvidence` omits the ORIGINAL
- * Operation-UUID. A12 recipient effect receipts also require
- * `operation_uuid === idempotency_uuid`, whereas B17/B18 UI preserves two
- * independently minted UUIDv4 values. Backend A13 must reconcile both
- * contracts before a source-authenticated public same-origin BFF can supply
- * a value of this type. Never synthesize or echo the request Operation-UUID
- * as a result. The installer remains closed under C1-B2/C2. */
+/** Independently SOURCE-accepted Backend A13 returns original operationUuid
+ * bound by owner-signed statuses and requires an identical canonical UUIDv4
+ * Idempotency-Key. This interface is NOT a browser-side signature verifier.
+ * Never synthesize or echo the request UUID as result evidence; a physically
+ * authenticated BFF/owner transport is still gated by D4 and C1-B2/C2. */
 export interface AuthenticatedBffBoundary {
   current(context: QueryContext): Promise<BffOwnerEvidence>
   inspectOriginalCommand?(context: QueryContext, input: {
@@ -112,10 +109,11 @@ export function isPrivilegedAction(action:UiCapability):boolean {
 /** Local owner-local ACK is NOT a distributed commit. A multi-owner effect is
  * confirmed only after BFF source reports every required owner confirmed. */
 export function confirmedBffEffect(value:BffEffectEvidence,input:{actor:string;scope:ScopeSelection;binding:SourceCommandBinding;idempotencyKey:string;operationUuid:string;action:UiCapability;ownerEvidence:BffOwnerEvidence},now=Date.now()):boolean {
-  // A12's PRIVATE `BffEffectEvidence` has no response Operation-UUID, so
-  // even an apparently `confirmed` A12 result MUST fail here. This is a
-  // source-identity equality check, not browser-side signature verification.
-  if(typeof value?.operationUuid!=="string"||
+  // A13 requires one canonical original UUIDv4 for BOTH headers. Historical
+  // distinct-UUID requests are nonreplayable UNKNOWN, never confirmed here.
+  // This checks normalized source identity, not a signature in the browser.
+  if(!canonicalUuid4(input.operationUuid)||input.idempotencyKey!==input.operationUuid||
+     typeof value?.operationUuid!=="string"||
      value.phase!=="confirmed"||value.actorUserId!==input.actor||!sameBffScope(value.scope,input.scope)||
      value.idempotencyKey!==input.idempotencyKey||value.operationUuid!==input.operationUuid||
      value.binding.operation!==input.binding.operation||

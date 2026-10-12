@@ -75,7 +75,7 @@ export interface PendingCommand {
   readonly scopeKey: string
   readonly action: UiCapability
   readonly commandId: string
-  /** Source A11 Operation-UUID header and immutable owner-local command ID. */
+  /** Original A13 Operation-UUID, identical to canonical Idempotency-Key text. */
   readonly operationUuid:string
   readonly decisionVersion: string | null
   /** Exact immutable A5 idempotency operation, never derived from UI label. */
@@ -129,9 +129,12 @@ function begin(principal: string, scope: ScopeSelection, action: UiCapability, d
   // Only one unfinished mutation is permitted in a scope. A confirmation
   // dialog or route remount must never mint a fresh idempotency key for it.
   if (lookup(principal, scope)) return null
+  // Accepted A13 owner wire binds the SAME immutable canonical UUIDv4 to
+  // Operation-UUID and the printable HTTP Idempotency-Key. Never mint two.
+  const originalUuid=crypto.randomUUID().toLowerCase()
   const entry: PendingCommand = {
-    scopeKey: key,originalScope:{...scope}, action, commandId: crypto.randomUUID(),
-    operationUuid:crypto.randomUUID(),
+    scopeKey: key,originalScope:{...scope}, action, commandId:originalUuid,
+    operationUuid:originalUuid,
     decisionVersion,sourceOperation:binding?.operation??null,
     sourceTarget:binding?.target??null,state: "pending",
   }

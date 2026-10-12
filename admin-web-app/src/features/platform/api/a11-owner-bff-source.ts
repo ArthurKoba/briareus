@@ -202,12 +202,15 @@ export const A11_LOCAL_STATUS_IS_NOT_DISTRIBUTED_PROOF = true as const
  * This never includes response body, secrets, raw error, URL or operation IDs.
  * After any sent mutation, even 401/403/422/503 could occur post-commit. */
 export type A11FailurePhase="read"|"after-write"|"status-inspect"
-export type A11BffErrorCategory="authentication"|"permission"|"upgrading"|"unknown"|"rejected"
+export type A11BffErrorCategory="authentication"|"permission"|"rate_limited"|"upgrading"|"unknown"|"rejected"
 export function classifyA11BffError(status:unknown,phase:A11FailurePhase):A11BffErrorCategory {
   if(phase!=="read")return "unknown"
   if(status===401)return "authentication"
   if(status===403)return "permission"
-  if(status===503||status===502||status===504||status===429)return "upgrading"
+  // A18 SQL-backed Identity 429 is rate limiting, not an Owner DB outage.
+  // Status inspection/after-write still stays UNKNOWN, never a retry grant.
+  if(status===429)return "rate_limited"
+  if(status===503||status===502||status===504)return "upgrading"
   if(status===400||status===422)return "rejected"
   return "unknown"
 }
