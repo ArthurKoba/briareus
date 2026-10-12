@@ -334,7 +334,7 @@ onBeforeUnmount(()=>{
   <div v-else-if="publicFlow" class="grid min-h-screen place-items-center bg-muted/30 p-6">
     <PublicAccountPage :key="`${publicFlow}:${publicLinkRevision}`" :mode="publicFlow" :initial-token="publicToken" @token-copied="publicToken=''" @back="closePublicFlow" />
   </div>
-  <div v-else-if="missingTransport" class="grid min-h-screen place-items-center p-6">
+  <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
     <!-- First User only. No owner-wide PlatformPort or privileged grant is installed. -->
     <FirstUserPage />
   </div>

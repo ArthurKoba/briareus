@@ -25,65 +25,69 @@
     "inLanguage": "ru-RU",
     "description": "Проектно-ориентированная платформа для AI-агентов и MCP-инструментов"
   }</script>
-  <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; line-height: 1.55; background: #0b1423; color: #edf3ff; }
+    <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; background: #091421; color: #eef6f6; line-height: 1.6; }
     *, *::before, *::after { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body { margin: 0; min-width: 320px; background: radial-gradient(ellipse 68% 25% at 85% 4%, #223e65 0%, transparent 100%), #0b1423; }
+    html { scroll-behavior: smooth; scroll-padding-top: 95px; }
+    body { margin: 0; min-width: 320px; background: radial-gradient(ellipse 55% 22% at 80% 3%, rgba(23,133,139,.2), transparent 85%), radial-gradient(ellipse 55% 24% at 8% 23%, rgba(22,66,109,.35), transparent 88%), #091421; }
+    body::before { content: ""; position: absolute; inset: 76px 0 auto; height: 540px; background-image: linear-gradient(rgba(157,231,225,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(157,231,225,.035) 1px, transparent 1px); background-size: 52px 52px; mask-image: linear-gradient(#000, transparent); pointer-events: none; }
     a { color: inherit; }
-    a:focus-visible { outline: 3px solid #9acfff; outline-offset: 4px; }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
-    .skip-link { position: absolute; top: -100px; left: 18px; z-index: 10; padding: 12px 16px; background: #95ccff; color: #102039; border-radius: 8px; font-weight: 700; }
-    .skip-link:focus { top: 12px; }
-    .site-header { border-bottom: 1px solid #29384d; }
-    .header-inner { display: flex; min-height: 82px; align-items: center; justify-content: space-between; gap: 20px; }
-    .brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 760; font-size: 19px; letter-spacing: .02em; text-decoration: none; }
-    .mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; border: 1px solid #4e799b; background: #183552; color: #badfff; font-weight: 850; }
-    .nav { display: flex; align-items: center; gap: 26px; }
-    .nav a { text-decoration: none; color: #b4c5db; font-size: 14px; }
-    .nav a:hover { color: #fff; }
-    .nav .nav-panel { border: 1px solid #536781; border-radius: 9px; padding: 9px 14px; color: #edf3ff; }
-    .hero { padding: 92px 0 96px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 58px; align-items: center; }
-    .eyebrow { display: inline-block; padding: 6px 10px; border: 1px solid #365d7b; background: #132c45; color: #a9d5f4; font-size: 12px; letter-spacing: .06em; font-weight: 700; text-transform: uppercase; border-radius: 99px; }
-    h1 { font-size: clamp(37px, 5vw, 62px); line-height: 1.11; letter-spacing: -.045em; margin: 24px 0 25px; font-weight: 800; }
-    .hero p { max-width: 620px; color: #b7c7dc; font-size: 17px; line-height: 1.75; }
-    .buttons { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 30px; }
-    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 49px; padding: 12px 20px; border-radius: 11px; font-size: 15px; font-weight: 700; text-decoration: none; }
-    .primary { background: #95ccff; color: #102039; }
-    .primary:hover { background: #b8dfff; }
-    .secondary { border: 1px solid #4d607b; color: #e7effb; }
-    .secondary:hover { border-color: #8db0d1; }
-    .diagram { border: 1px solid #364965; border-radius: 22px; padding: 24px; background: linear-gradient(150deg, #1a2c46, #102139); box-shadow: 0 18px 60px #0004; }
-    .diagram-title { margin-bottom: 20px; color: #a9bfd9; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
-    .node { padding: 14px 17px; border: 1px solid #45607d; border-radius: 12px; background: #152c48; }
+    a:focus-visible { outline: 3px solid #74e6d0; outline-offset: 4px; }
+    .wrap { position: relative; max-width: 1180px; margin: 0 auto; padding: 0 30px; }
+    .skip-link { position: absolute; left: 16px; top: -100px; z-index: 99; padding: 12px 16px; border-radius: 8px; background: #89ecd8; color: #09202b; font-weight: 700; }
+    .skip-link:focus { top: 14px; }
+    .site-header { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid rgba(127,183,193,.16); background: rgba(9,20,33,.92); backdrop-filter: blur(18px); }
+    .header-inner { min-height: 80px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; font-size: 19px; font-weight: 790; letter-spacing: -.03em; text-decoration: none; }
+    .mark { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid rgba(119,239,211,.35); border-radius: 12px; background: linear-gradient(145deg, #163d47, #102c43); color: #9ef8df; font-weight: 850; box-shadow: 0 4px 24px #24a9a019; }
+    .nav { display: flex; gap: 30px; align-items: center; }
+    .nav a { color: #b0c5cc; font-size: 14px; font-weight: 550; text-decoration: none; }
+    .nav a:hover { color: #efffff; }
+    .nav .nav-panel { min-height: 42px; display: inline-flex; align-items: center; padding: 8px 17px; border: 1px solid rgba(139,231,220,.5); border-radius: 10px; background: rgba(63,171,159,.11); color: #b8fbeb; font-weight: 700; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr); gap: clamp(32px, 6vw, 78px); align-items: center; padding-top: 110px; padding-bottom: 100px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid rgba(128,226,210,.28); border-radius: 99px; background: rgba(34,97,102,.22); color: #a6f5dd; font-size: 11px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #85e2c8; box-shadow: 0 0 0 4px rgba(133,226,200,.12); }
+    h1 { max-width: 760px; font-size: clamp(42px, 5.2vw, 68px); line-height: 1.095; letter-spacing: -.057em; margin: 29px 0 28px; font-weight: 780; text-wrap: balance; }
+    h1 .accent { color: #98edd6; }
+    .hero p { max-width: 640px; font-size: clamp(16px, 1.7vw, 18px); line-height: 1.78; color: #b4c9d0; }
+    .buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 33px; }
+    .button { display: inline-flex; min-height: 52px; align-items: center; justify-content: center; gap: 9px; padding: 12px 21px; border-radius: 11px; font-size: 14px; font-weight: 750; text-align: center; text-decoration: none; transition: background-color .15s ease, border-color .15s ease, transform .15s ease; }
+    .button:hover { transform: translateY(-1px); }
+    .primary { background: #92ecd5; color: #0d2833; box-shadow: 0 10px 30px rgba(56,190,171,.12); }
+    .primary:hover { background: #b4ffe9; }
+    .secondary { border: 1px solid rgba(144,183,196,.35); background: rgba(255,255,255,.035); color: #ebf5fa; }
+    .secondary:hover { border-color: rgba(153,232,214,.6); background: rgba(255,255,255,.06); }
+    .diagram { position: relative; border: 1px solid rgba(119,184,190,.32); border-radius: 23px; padding: clamp(20px, 3vw, 31px); background: linear-gradient(145deg, rgba(22,43,61,.97), rgba(11,29,45,.97)); box-shadow: 0 30px 80px rgba(2,14,22,.38), inset 0 1px rgba(255,255,255,.04); }
+    .diagram::before { content: ""; position: absolute; inset: -9px -9px auto auto; width: 92px; height: 92px; border-top: 2px solid #73dbbe; border-right: 2px solid #73dbbe; border-radius: 0 29px 0 0; opacity: .48; pointer-events: none; }
+    .diagram-title { color: #92afaF; margin-bottom: 22px; font-size: 11px; font-weight: 760; letter-spacing: .15em; text-transform: uppercase; }
+    .node { border: 1px solid rgba(125,179,191,.24); background: rgba(28,60,76,.64); border-radius: 12px; padding: 15px 18px; }
     .node strong, .node span { display: block; }
-    .node strong { font-size: 15px; }
-    .node span { color: #afc3da; font-size: 12px; margin-top: 2px; }
-    .arrow { text-align: center; padding: 8px 0; color: #7f9dbd; font-size: 18px; }
-    .split { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
-    .split .node { padding: 13px 11px; }
-    section { padding: 35px 0 76px; }
-    section h2 { font-size: clamp(26px, 3.5vw, 35px); letter-spacing: -.025em; margin: 0 0 13px; }
-    .section-lead { margin: 0 0 30px; color: #aebfd4; max-width: 740px; }
-    .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-    .fact { padding: 21px 23px; border: 1px solid #30415a; background: #111f33; border-radius: 15px; }
-    .fact .value { display: block; color: #c7e5ff; font-size: clamp(27px, 3.5vw, 36px); font-weight: 790; line-height: 1.15; margin-bottom: 9px; }
-    .fact .meaning { display: block; font-size: 14px; color: #c9d6e6; }
-    .fact .detail { display: block; margin-top: 7px; font-size: 12px; color: #91a8c1; }
-    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-    .card { padding: 23px; border: 1px solid #30415a; background: #111f33; border-radius: 15px; }
-    .card .number { display: inline-block; color: #91c8f4; font-size: 13px; font-weight: 750; margin-bottom: 13px; }
-    .card h3 { font-size: 17px; margin: 0 0 10px; }
-    .card p { font-size: 14px; line-height: 1.65; color: #b1bfd2; margin: 0; }
-    .callout { padding: 28px 32px; border: 1px solid #3b5673; background: #132b45; border-radius: 17px; display: flex; gap: 28px; align-items: center; justify-content: space-between; }
-    .callout h2 { font-size: 23px; margin: 0 0 10px; }
-    .callout p { margin: 0; color: #bbcee1; font-size: 14px; max-width: 690px; }
-    footer { padding: 30px 0 40px; border-top: 1px solid #29384d; color: #95aac2; font-size: 13px; }
+    .node strong { color: #eefbfc; font-size: 15px; }
+    .node span { color: #9cb9c5; font-size: 12px; margin-top: 3px; }
+    .arrow { padding: 8px 0; color: #88d9c6; text-align: center; font-size: 20px; line-height: 1; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .split .node { padding: 12px; }
+    section { padding: 48px 0 80px; }
+    section h2 { margin: 0 0 15px; font-size: clamp(29px, 3.3vw, 39px); letter-spacing: -.04em; line-height: 1.2; text-wrap: balance; }
+    .section-lead { max-width: 710px; margin: 0 0 32px; color: #aec5cd; font-size: 15px; line-height: 1.8; }
+    .facts, .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .fact, .card { border: 1px solid rgba(129,171,184,.19); border-radius: 17px; padding: 26px; background: linear-gradient(140deg, rgba(28,53,67,.65), rgba(16,37,53,.65)); }
+    .fact { border-top: 2px solid rgba(123,232,206,.55); }
+    .fact .value { display: block; margin-bottom: 10px; color: #b3f6e4; font-size: clamp(27px, 3.5vw, 39px); font-weight: 800; line-height: 1.12; letter-spacing: -.035em; }
+    .fact .meaning { display: block; color: #edf7fa; font-size: 14px; font-weight: 690; }
+    .fact .detail { display: block; margin-top: 9px; color: #94b3c0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+    .card .number { display: inline-block; margin-bottom: 26px; color: #87dfca; font-size: 12px; font-weight: 760; letter-spacing: .07em; }
+    .card h3 { font-size: 18px; letter-spacing: -.02em; margin: 0 0 12px; }
+    .card p { font-size: 14px; line-height: 1.75; margin: 0; color: #aac1ca; }
+    .callout { display: flex; justify-content: space-between; align-items: center; gap: 30px; padding: 33px; border: 1px solid rgba(112,231,211,.35); border-radius: 20px; background: linear-gradient(110deg, rgba(27,84,86,.43), rgba(16,43,62,.8)); }
+    .callout h2 { font-size: 24px; margin-bottom: 10px; }
+    .callout p { max-width: 660px; color: #bfd5da; font-size: 14px; line-height: 1.7; margin: 0; }
+    footer { border-top: 1px solid rgba(127,183,193,.17); padding: 34px 0 43px; color: #91abb7; font-size: 12px; }
     footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
-    @media (max-width: 860px) { .hero { grid-template-columns: 1fr; gap: 30px; padding: 65px 0; } .diagram { max-width: 610px; } .cards { grid-template-columns: 1fr 1fr; } }
-    @media (max-width: 700px) { .facts { grid-template-columns: 1fr; } .fact { padding: 17px 21px; } }
-    @media (max-width: 580px) { .wrap { padding: 0 18px; } .header-inner { min-height: 72px; } .nav { gap: 12px; } .nav a:not(.nav-panel) { display: none; } .hero { padding: 52px 0 58px; } .hero p { font-size: 15px; } .cards { grid-template-columns: 1fr; } .callout { display: block; padding: 22px; } .callout .button { margin-top: 19px; width: 100%; } section { padding-bottom: 55px; } }
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media (max-width: 900px) { .hero { grid-template-columns: 1fr; gap: 36px; padding-top: 65px; padding-bottom: 72px; } .diagram { max-width: 640px; } .cards { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 680px) { .facts, .cards { grid-template-columns: 1fr; } .fact, .card { padding: 23px; } .callout { display: block; } .callout .button { margin-top: 22px; width: 100%; } }
+    @media (max-width: 560px) { .wrap { padding: 0 20px; } .header-inner { min-height: 70px; } .nav { gap: 9px; } .nav a:not(.nav-panel) { display: none; } .nav .nav-panel { padding: 7px 12px; } .hero { gap: 32px; padding-top: 54px; padding-bottom: 55px; } h1 { font-size: clamp(37px, 10vw, 48px); letter-spacing: -.055em; } .hero p { font-size: 15px; } .buttons .button { width: 100%; } section { padding: 37px 0 60px; } .diagram { padding: 20px; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
   </style>
 </head>
 <body>
@@ -98,7 +102,7 @@
     <div class="wrap hero">
       <div>
         <span class="eyebrow">Платформа AI и MCP · в разработке</span>
-        <h1>Инфраструктура для AI-агентов, объединённая вокруг проектов.</h1>
+        <h1>Инфраструктура для <span class="accent">AI-агентов</span>, объединённая вокруг проектов.</h1>
         <p>Briareus — проектно-ориентированная платформа для команд, пользователей и AI-агентов. Она объединяет управление доступом, контекстом проектов и MCP-инструментами в одном пространстве.</p>
         <div class="buttons"><a class="button primary" href="/panel/">Перейти в панель управления <span aria-hidden="true">&nbsp;↗</span></a><a class="button secondary" href="#platform">О проекте</a></div>
       </div>
