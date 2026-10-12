@@ -20,6 +20,8 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
+from ._oidc_id_token import VerifiedOidcIdentity, verify_rauthy_id_token
+
 
 class OidcProviderUnavailable(Exception):
     """Issuer is unconfigured, unavailable, or returned untrusted metadata."""
@@ -237,6 +239,23 @@ class RauthyOidcAdapter:
             return token
         except (httpx.HTTPError, ValidationError, ValueError, TypeError) as exc:
             raise OidcProviderUnavailable("OIDC token exchange unavailable") from exc
+
+    async def verify_exchanged_id_token(
+        self,
+        *,
+        tokens: UnverifiedOidcTokenResponse,
+        expected_nonce: str,
+    ) -> VerifiedOidcIdentity:
+        """Verify real Rauthy signature before trusting a returned identity."""
+        metadata = await self.discovery()
+        return await verify_rauthy_id_token(
+            tokens.id_token,
+            expected_nonce=expected_nonce,
+            issuer=metadata.issuer,
+            client_id=self._client_id,
+            jwks_uri=metadata.jwks_uri,
+            client=self._client,
+        )
 
     async def public_configuration(self) -> PublicOidcConfiguration:
         metadata = await self.discovery()

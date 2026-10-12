@@ -33,3 +33,19 @@ current Platform memberships and an authenticated session writer are required
 for secure product login. An exchanged bearer or ID token is never itself a
 Briareus AgentSession or a Cedar permission. The legacy first-user route
 remains operational until real sign-in is accepted.
+
+
+## Verified upstream ID-token identity (source-only)
+
+After a trusted, single-use PKCE/state callback has exchanged its code, the
+Control Panel API provider adapter now verifies the returned Rauthy ID token
+against HTTPS discovery-pinned issuer/JWKS, with no redirect or token-header
+key URL, allowed RSA/EdDSA signatures, exact browser OAuth client audience,
+bounded issued/expiry times and constant-time nonce matching. The result is
+a signed external Rauthy subject only. Neither ID-token identity nor Group
+claims are current Team/Project membership or an authenticated AgentSession.
+
+The callback/session route remains unmounted until owner-approved OAuth
+client enrollment, one-time state store and current Platform User/membership
+resolution are integrated. Unsupported/expired/mismatched ID tokens always
+deny; do not fall back to legacy Identity JWT issuer or grant fake access.
