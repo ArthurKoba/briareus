@@ -105,7 +105,24 @@ export interface BrowserExternalStatus {
   configured?: boolean
   enabled?: boolean
   connected?: boolean
-  browser_ready?: boolean
+  proxy_connected?: boolean
+  connection_state?: string
+  session_scope?: string
+  other_client_sessions?: string
+  grant_state?: string
+  tab_access_state?: string
+  last_successful_tab_probe_at?: string
+  ok?: boolean
+  last_error?: {
+    code: string
+    stage: string
+    message: string
+    next_action: string
+    retryable: boolean
+    http_status?: number
+  } | null
+  next_action?: string
+  browser_ready?: boolean | null
   provider?: string
   namespace?: string
   endpoint_origin?: string

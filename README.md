@@ -133,7 +133,7 @@ uv sync --frozen --no-dev --no-install-project
 
 This prevents clean deployments from resolving a different dependency graph.
 
-## Files
+Local contributions can enable the tracked source and UI validation hook with\n`git config core.hooksPath .githooks`. The pre-push hook runs focused external\nbrowser regression tests, Ruff and management UI typechecking; GitHub CI is\nindependent and remains the final PR gate.\n\n## Files
 
 Files is the path-based file manager for the shared persistent `/workspace` filesystem.
 Terminal, Files, Web/curl and the Management API see the same working files immediately.
@@ -174,7 +174,7 @@ Terminal command/stdin/output payloads are bounded or omitted in Management MCP-
 
 ## Web browser
 
-The Web MCP combines structured curl operations with a persistent Playwright/Chromium
+For external operator Chrome session status and recovery, see\n[External Playwright MCP sessions](docs/external-browser-sessions.md).\n\nThe Web MCP combines structured curl operations with a persistent Playwright/Chromium
 browser profile. Browser cookies and local session state live in a dedicated persistent
 volume, while screenshots, uploads and downloads use the shared `/workspace`. Browser
 snapshots return bounded page text plus short-lived interactive element refs so agents can

@@ -25,6 +25,15 @@ const state = ref<SettingsState | null>(null)
 const browserState = ref<BrowserState | null>(null)
 const browserExternalStatus = ref<BrowserExternalStatus | null>(null)
 const browserExternalAction = ref<"" | "connect" | "disconnect" | "reset">("")
+const browserExternalStatusLabel = computed(() => {
+  const status = browserExternalStatus.value
+  if (!status) return t("settings.externalBrowserUnknown")
+  if (!status.enabled) return t("settings.externalBrowserDisabled")
+  if (status.connection_state === "tab_list_responded") return t("settings.externalBrowserTabsVerified")
+  if (status.connection_state === "tab_check_failed") return t("settings.externalBrowserTabsFailed")
+  if (status.proxy_connected ?? status.connected) return t("settings.externalBrowserProxyOnly")
+  return t("settings.externalBrowserProxyNotConnected")
+})
 const browserTheme = ref<"system" | "light" | "dark">("dark")
 const loading = ref(false)
 const saving = ref(false)
@@ -187,7 +196,14 @@ async function runExternalBrowserAction(action: "connect" | "disconnect" | "rese
       : action === "disconnect"
         ? await managementApi.browserExternalDisconnect()
         : await managementApi.browserExternalReset()
-    notifications.success(String(t("notifications.saved")))
+    if (browserExternalStatus.value.ok === false) {
+      const issue = browserExternalStatus.value.last_error
+      error.value = issue
+        ? `${issue.code} (${issue.stage}): ${issue.message} ${issue.next_action}`
+        : browserExternalStatus.value.next_action ?? String(t("settings.externalBrowserTabsFailed"))
+    } else {
+      notifications.success(String(t("notifications.saved")))
+    }
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Unable to control external browser"
   } finally {
@@ -303,10 +319,19 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash))
       </label>
       <div class="setting-row">
         <span><b>{{ t("settings.externalBrowserStatus") }}</b><small>{{ browserExternalStatus?.endpoint_origin || form.browser_external_mcp_url || '—' }}</small></span>
-        <span class="rounded-md bg-muted px-2 py-1 text-xs" :class="browserExternalStatus?.connected ? 'text-emerald-600' : 'text-muted-foreground'">
-          {{ browserExternalStatus?.connected ? t("common.connected") : t("common.disconnected") }}
+        <span class="rounded-md bg-muted px-2 py-1 text-xs" :class="browserExternalStatus?.connection_state === 'tab_list_responded' ? 'text-emerald-600' : 'text-muted-foreground'">
+          {{ browserExternalStatusLabel }}
         </span>
       </div>
+      <p class="text-xs text-muted-foreground">{{ t("settings.externalBrowserScope") }}</p>
+      <div v-if="browserExternalStatus?.last_error" role="alert" class="rounded-md border border-border p-3 text-xs">
+        <p class="font-semibold">{{ browserExternalStatus.last_error.code }} · {{ browserExternalStatus.last_error.stage }}</p>
+        <p class="mt-1">{{ browserExternalStatus.last_error.message }}</p>
+        <p class="mt-1">{{ browserExternalStatus.last_error.next_action }}</p>
+      </div>
+      <p v-else-if="browserExternalStatus?.connection_state !== 'tab_list_responded'" class="text-xs text-muted-foreground">
+        {{ browserExternalStatus?.next_action || t("settings.externalBrowserNoProbe") }}
+      </p>
       <div class="flex flex-wrap gap-2 pt-3">
         <Button size="sm" :disabled="Boolean(browserExternalAction) || dirty || !form.browser_external_enabled || !form.browser_external_mcp_url.trim()" @click="runExternalBrowserAction('connect')">{{ t("settings.externalBrowserConnect") }}</Button>
         <Button variant="outline" size="sm" :disabled="Boolean(browserExternalAction)" @click="runExternalBrowserAction('disconnect')">{{ t("settings.externalBrowserDisconnect") }}</Button>
