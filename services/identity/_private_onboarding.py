@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from common.platform_errors import Conflict, InvalidInput, InvalidInvitation
+from common.platform_errors import AccessDenied, Conflict, InvalidInput, InvalidInvitation
 from identity._operator_channel import UnixFirstAdminOperatorGate
 from identity._service import IdentityService
 from identity.private_login_source import (
@@ -195,3 +195,49 @@ class RestrictedFirstAdminCodeDelivery:
             raise IdentitySourceUnavailable("initial operator delivery outcome unknown") from None
         finally:
             accepted_socket.close()
+
+
+class RestrictedFirstAdminOperatorListener:
+    """Accept only kernel-verified operator peers on a pre-provisioned AF_UNIX listener.
+
+    The process never creates a listening socket or selects a UID/ACL from HTTP,
+    headers or an ENV override. An infrastructure-owned supervisor supplies
+    an already bound, permission-restricted listener. A valid delivery is
+    at-most-once; uncertain delivery never silently reissues an invitation.
+    """
+
+    def __init__(self, delivery: RestrictedFirstAdminCodeDelivery) -> None:
+        if not isinstance(delivery, RestrictedFirstAdminCodeDelivery):
+            raise ValueError("operator setup requires accepted Identity owner delivery")
+        self.delivery = delivery
+
+    async def deliver_once(self, listener: socket.socket) -> None:
+        if (
+            not isinstance(listener, socket.socket)
+            or listener.family != socket.AF_UNIX
+            or listener.type & socket.SOCK_STREAM != socket.SOCK_STREAM
+            or listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1
+        ):
+            raise IdentitySourceUnavailable("restricted operator listening socket unavailable")
+        listener.setblocking(False)
+        loop = asyncio.get_running_loop()
+        # Bounded attempts. Invalid peers never receive a token; valid issuer
+        # failure is UNKNOWN and must be inspected instead of automatically
+        # regenerating a one-use first-admin code.
+        for _ in range(8):
+            try:
+                # The invitation is issued only when a real operator arrives.
+                # The ASGI lifespan cancels this wait on normal shutdown.
+                accepted, _ = await loop.sock_accept(listener)
+            except OSError:
+                raise IdentitySourceUnavailable(
+                    "restricted operator listener unavailable"
+                ) from None
+            try:
+                self.delivery.operator_gate.verify_accepted_peer(accepted)
+            except AccessDenied:
+                accepted.close()
+                continue
+            await self.delivery.issue_and_deliver(accepted)
+            return
+        raise IdentitySourceUnavailable("restricted operator peer attestation denied")

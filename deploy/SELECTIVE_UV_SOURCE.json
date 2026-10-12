@@ -413,7 +413,7 @@
       "runtime_validated": false,
       "runtime_version": "computed_from_actual_image_source_by_uv_build_without_wheel",
       "uv_mode": "uv run --frozen --no-sync --no-dev --project /app --directory /app/src",
-      "version": "0.1.0+identity.s90719a02a44f",
+      "version": "0.1.0+identity.secbdc29d088b",
       "watches": [
         "deploy/identity/Dockerfile",
         "deploy/identity/Dockerfile.dockerignore",

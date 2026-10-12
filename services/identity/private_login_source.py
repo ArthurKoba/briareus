@@ -1,3 +1,4 @@
+# ruff: noqa: B008  # FastAPI Header descriptors are framework-executed defaults
 """Unmounted Identity-owned login and current JWT issue/verification boundary.
 
 No Admin API, Authorization, Control or Gateway may connect directly to
@@ -9,23 +10,29 @@ No cookie/username-header fallback, fake token or password in event logs.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert
 
 from common.owner_contracts import VerifiedOwnerServicePeer
 from common.owner_runtime import OwnerIngressVerifier, create_owner_app
 from common.platform_db import OwnerDatabaseSettings
 from common.platform_errors import AuthenticationRateLimited, AuthenticationRequired
 from identity._domain import User
+from identity._owner_ledger import OwnerCommandRow
 from identity._private_current_user import (
     IdentityCurrentUserSource,
     build_unmounted_identity_current_router,
@@ -33,7 +40,10 @@ from identity._private_current_user import (
 from identity._service import IdentityService
 
 if TYPE_CHECKING:
-    from identity._private_onboarding import IdentityPrivateInvitationRegistration
+    from identity._private_onboarding import (
+        IdentityPrivateInvitationRegistration,
+        RestrictedFirstAdminCodeDelivery,
+    )
 
 _MAX_TTL = timedelta(minutes=15)
 
@@ -158,12 +168,79 @@ class IdentityPrivateLoginSource:
         self.issuer = pinned_issuer
         self.audience = pinned_audience
 
+    async def _reserve_original_login(
+        self,
+        *,
+        original_uuid: UUID,
+        username: str,
+        password: SecretStr,
+        admission: VerifiedIdentityLoginAdmission,
+    ) -> UUID:
+        """Durably consume one original pre-auth operation before issuing a JTI.
+
+        An ambiguous response must never mint another bearer for the same
+        original operation. Existing Identity commands migration owns this
+        table, and no secret or reversible password fingerprint is persisted.
+        """
+        if original_uuid.version != 4:
+            raise AuthenticationRequired("canonical original login UUID required")
+        digest = hmac.new(
+            self.identity_login_pepper,
+            b"identity-login-v1\0"
+            + username.encode("utf-8")
+            + b"\0"
+            + password.get_secret_value().encode("utf-8")
+            + b"\0"
+            + admission.source_fingerprint.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+        receipt_id = uuid4()
+        now = datetime.now(UTC)
+        statement = (
+            insert(OwnerCommandRow)
+            .values(
+                id=receipt_id,
+                operation_uuid=original_uuid,
+                actor_scope="identity:preauth",
+                project_scope="none",
+                operation="identity.login",
+                key=str(original_uuid),
+                fingerprint=digest,
+                expected_owner_revision="identity-login-v1",
+                state="pending",
+                encrypted_outcome=None,
+                created_at=now,
+                updated_at=now,
+                expires_at=now + timedelta(days=1),
+            )
+            .on_conflict_do_nothing()
+            .returning(OwnerCommandRow.id)
+        )
+        async with self.identity.database.transaction() as tx:
+            if await tx.scalar(statement) is None:
+                raise IdentitySourceUnavailable(
+                    "original Identity login already consumed; outcome may be unknown"
+                )
+        return receipt_id
+
+    async def _complete_original_login(self, receipt_id: UUID) -> None:
+        async with self.identity.database.transaction() as tx:
+            result = await tx.execute(
+                update(OwnerCommandRow)
+                .where(OwnerCommandRow.id == receipt_id, OwnerCommandRow.state == "pending")
+                .values(state="completed", updated_at=datetime.now(UTC))
+                .returning(OwnerCommandRow.id)
+            )
+            if result.scalar_one_or_none() != receipt_id:
+                raise IdentitySourceUnavailable("original Identity login status unavailable")
+
     async def login(
         self,
         *,
         evidence: object,
         username: str,
         password: SecretStr,
+        original_uuid: UUID,
     ) -> IssuedIdentityBearer:
         if not 3 <= len(username) <= 128 or not 12 <= len(password.get_secret_value()) <= 4096:
             raise AuthenticationRequired("valid Identity login required")
@@ -180,9 +257,16 @@ class IdentityPrivateLoginSource:
                 )
                 if user is None or not user.enabled:
                     raise AuthenticationRequired("invalid Identity credentials")
+                receipt_id = await self._reserve_original_login(
+                    original_uuid=original_uuid,
+                    username=username,
+                    password=password,
+                    admission=admission,
+                )
                 issued = await self.tokens.issue_for_current_user(user=user, admission=admission)
                 issued.require_current_shape(user, issuer=self.issuer, audience=self.audience)
                 await self.tokens.require_current(issued=issued, admission=admission)
+                await self._complete_original_login(receipt_id)
                 return issued
         except (AuthenticationRequired, AuthenticationRateLimited):
             raise
@@ -230,7 +314,11 @@ def build_unmounted_private_identity_login_router(
         request: Request,
         response: Response,
         body: PrivateIdentityLoginPayload,
+        operation_uuid: UUID = Header(alias="Operation-UUID"),
+        idempotency_key: str = Header(alias="Idempotency-Key", min_length=36, max_length=36),
     ) -> PrivateIdentityLoginResult:
+        if operation_uuid.version != 4 or idempotency_key != str(operation_uuid):
+            raise HTTPException(422, detail="original Identity login key mismatch")
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
         if request.headers.get("cookie") is not None:
@@ -241,7 +329,10 @@ def build_unmounted_private_identity_login_router(
             )
         try:
             issued = await login.login(
-                evidence=request, username=body.username, password=body.password
+                evidence=request,
+                username=body.username,
+                password=body.password,
+                original_uuid=operation_uuid,
             )
         except AuthenticationRateLimited:
             raise HTTPException(
@@ -269,7 +360,14 @@ def build_unmounted_private_identity_login_router(
         )
 
     @router.post("/logout", status_code=204)
-    async def logout_user(request: Request, response: Response) -> None:
+    async def logout_user(
+        request: Request,
+        response: Response,
+        operation_uuid: UUID = Header(alias="Operation-UUID"),
+        idempotency_key: str = Header(alias="Idempotency-Key", min_length=36, max_length=36),
+    ) -> None:
+        if operation_uuid.version != 4 or idempotency_key != str(operation_uuid):
+            raise HTTPException(422, detail="original Identity logout key mismatch")
         response.headers["Cache-Control"] = "no-store"
         if request.headers.get("cookie") is not None:
             raise HTTPException(
@@ -305,6 +403,8 @@ def create_unmounted_identity_private_app(
     trusted_ingress: OwnerIngressVerifier,
     current_users: IdentityCurrentUserSource,
     registration: IdentityPrivateInvitationRegistration,
+    operator_delivery: RestrictedFirstAdminCodeDelivery | None = None,
+    operator_listener: socket.socket | None = None,
 ) -> FastAPI:
     """SOURCE-only private Identity composition; default published app unchanged.
 
@@ -315,6 +415,8 @@ def create_unmounted_identity_private_app(
     from identity._private_onboarding import (
         IdentityPrivateInvitationRegistration,
         IdentityRegistrationOutcomeUnknown,
+        RestrictedFirstAdminCodeDelivery,
+        RestrictedFirstAdminOperatorListener,
         build_unmounted_invitation_registration_router,
     )
     from identity._private_user_session import IdentityPrivateUserSessionIssuer
@@ -340,6 +442,22 @@ def create_unmounted_identity_private_app(
         or current_users.audience != login.audience
     ):
         raise ValueError("Identity private login/owner migrations must share reviewed DB")
+    if (operator_delivery is None) != (operator_listener is None):
+        raise ValueError("operator socket and approved kernel gate must be provided together")
+    if operator_delivery is not None and (
+        not isinstance(operator_delivery, RestrictedFirstAdminCodeDelivery)
+        or operator_delivery.identity is not login.identity
+        or not isinstance(operator_listener, socket.socket)
+        or operator_listener.family != socket.AF_UNIX
+        or operator_listener.type & socket.SOCK_STREAM != socket.SOCK_STREAM
+        or operator_listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1
+    ):
+        raise ValueError("first admin operator listener must share the current Identity owner")
+    operator_supervisor = (
+        RestrictedFirstAdminOperatorListener(operator_delivery)
+        if operator_delivery is not None
+        else None
+    )
     app = create_owner_app("identity", settings=db_settings, trusted_ingress=trusted_ingress)
     original_lifespan = app.router.lifespan_context
 
@@ -347,7 +465,17 @@ def create_unmounted_identity_private_app(
     async def private_lifespan(application: FastAPI) -> AsyncIterator[None]:
         try:
             async with original_lifespan(application):
-                yield
+                # Only a real supervisor-owned listening socket can activate
+                # first-admin code delivery. No public HTTP/ENV bootstrap path.
+                if operator_supervisor is None or operator_listener is None:
+                    yield
+                else:
+                    task = asyncio.create_task(operator_supervisor.deliver_once(operator_listener))
+                    try:
+                        yield
+                    finally:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
         finally:
             await login.identity.database.close()
 
