@@ -1,5 +1,6 @@
 # Briareus — current AGENTS map (flat Services/Hands/Shared, 2026-10-12)
 
+**CANONICAL GIT REPOSITORY:** `KobaProduction/briareus` (previous `ArthurKoba/briareus` redirects). Current Dev app Git source and agent App installation permissions require independent verification; see `docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md`.
 **LATEST OWNER TOPOLOGY:** docs/architecture/flat-services-hands-shared-20261012.md (flat root `services/`, `hands/`, `shared/`, independent management/data planes).
 **IDENTITY/AUTH DESIGN:** docs/architecture/identity-rauthy-cedar-20261012.md (Rauthy + Cedar).
 **FOUR OWNERS / HANDOFF:** docs/operations/rauthy-cedar-four-agent-migration-20261012.md.
