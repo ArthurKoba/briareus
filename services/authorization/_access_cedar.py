@@ -17,6 +17,11 @@ from authorization._session_persistence import ProjectAgentSessionRow
 # Two explicit policy tiers; elevated rights can never be authorized by a
 # normal AgentSession even if malformed/stale DB JSON lists those grants.
 _BASELINE_POLICY = """
+// Admission is only a connection-level check. The Hand separately evaluates
+// the specific tool operation before every protected effect.
+permit(principal is User, action == Action::"mcp.connect", resource is Project)
+when { context.grantVersion >= 1 };
+
 permit(principal is User,
        action in [Action::"files.read", Action::"project.metadata.read"],
        resource is Project)
@@ -60,7 +65,8 @@ def permits_current_project_grant(
         not isinstance(operations, list)
         or len(operations) > 32
         or not all(isinstance(value, str) and len(value) <= 128 for value in operations)
-        or operation not in operations
+        or not operations
+        or (operation != "mcp.connect" and operation not in operations)
     ):
         return False
     return _POLICY.permits(
