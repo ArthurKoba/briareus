@@ -23,7 +23,10 @@
         "TZ": "{{team.TZ}}",
         "POSTGRES_USER": "{{environment.POSTGRES_USER}}",
         "POSTGRES_PASSWORD": "{{environment.POSTGRES_PASSWORD}}",
-        "VALKEY_PASSWORD": "{{environment.VALKEY_PASSWORD}}"
+        "VALKEY_PASSWORD": "{{environment.VALKEY_PASSWORD}}",
+        "RAUTHY_HIQLITE_RAFT_SECRET": "{{environment.RAUTHY_HIQLITE_RAFT_SECRET}}",
+        "RAUTHY_HIQLITE_API_SECRET": "{{environment.RAUTHY_HIQLITE_API_SECRET}}",
+        "RAUTHY_ENCRYPTION_KEY": "{{environment.RAUTHY_ENCRYPTION_KEY}}"
       },
       "dockerfile": "services/external/Dockerfile"
     },
@@ -301,7 +304,10 @@
       "OTEL_DEPLOYMENT_ENVIRONMENT_NAME",
       "POSTGRES_USER",
       "POSTGRES_PASSWORD",
-      "VALKEY_PASSWORD"
+      "VALKEY_PASSWORD",
+      "RAUTHY_HIQLITE_RAFT_SECRET",
+      "RAUTHY_HIQLITE_API_SECRET",
+      "RAUTHY_ENCRYPTION_KEY"
     ],
     "secret_keys": [
       "OTLP_BEARER_TOKEN",
