@@ -5,18 +5,23 @@
  */
 const CURRENT_USER_ROUTE = "/api/platform/me"
 
-export type ControlPanelAccessState = "checking" | "reachable" | "unavailable"
+export type ControlPanelAccessState = "checking" | "signed_out" | "denied" | "unverified" | "unavailable"
 
 /** Connectivity is not an authenticated User or login-readiness assertion.
- * HTTP 200 may be stale/untrusted without a verified BFF User projection.
- * HTTP 401/403 are expected before a human session and prove only that
- * the API is answering, not that a session-start route is available.
+ * A 200 without a typed, accepted User projection is not a signed-in User.
+ * A 401 is ordinary signed-out behavior; 403 is a permission denial.
+ * A reachable BFF does not prove that a login/start route exists.
  */
 export async function checkControlPanelAccess(signal: AbortSignal): Promise<Exclude<ControlPanelAccessState, "checking">> {
+  if (signal.aborted) return "unavailable"
+  const timeout = new AbortController()
+  const cancel = () => timeout.abort()
+  const deadline = setTimeout(cancel, 8000)
+  signal.addEventListener("abort", cancel, { once: true })
   try {
     const response = await fetch(CURRENT_USER_ROUTE, {
       method: "GET",
-      signal,
+      signal: timeout.signal,
       mode: "same-origin",
       credentials: "same-origin",
       cache: "no-store",
@@ -24,7 +29,14 @@ export async function checkControlPanelAccess(signal: AbortSignal): Promise<Excl
       referrerPolicy: "no-referrer",
       headers: { Accept: "application/json" },
     })
-    // Never parse response bodies or assume user identity/authorization.
-    return [200, 401, 403].includes(response.status) ? "reachable" : "unavailable"
+    // Never parse a possible User body without an accepted BFF DTO.
+    if (response.status === 401) return "signed_out"
+    if (response.status === 403) return "denied"
+    if (response.status === 200) return "unverified"
+    return "unavailable"
   } catch { return "unavailable" }
+  finally {
+    clearTimeout(deadline)
+    signal.removeEventListener("abort", cancel)
+  }
 }

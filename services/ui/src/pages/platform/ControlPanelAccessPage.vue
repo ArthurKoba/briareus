@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue"
+import { setLocale } from "@/shared/i18n"
+import { useUiPreferences } from "@/shared/lib/preferences"
 import { useI18n } from "vue-i18n"
 import { checkControlPanelAccess, type ControlPanelAccessState } from "@/features/platform/api/control-panel-access"
 
 const { t } = useI18n()
+const { locale, theme } = useUiPreferences()
+function toggleTheme() {
+  theme.value = theme.value === "dark" ? "light" : "dark"
+}
 const state = ref<ControlPanelAccessState>("checking")
 let controller: AbortController | null = null
 let generation = 0
@@ -42,6 +48,13 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null })
       <div class="relative z-10 mt-8 border-t border-white/15 pt-5 text-xs leading-6 text-slate-400">{{ t('panelAccess.permissionNotice') }}</div>
     </aside>
     <div class="flex min-w-0 flex-col justify-center px-5 py-9 sm:px-10 sm:py-12 lg:px-14">
+      <div class="mb-7 flex flex-wrap items-center justify-end gap-3">
+        <div class="inline-flex rounded-lg border border-border p-0.5" role="group" :aria-label="t('panelAccess.language')">
+          <button type="button" class="min-h-10 min-w-11 rounded-md px-3 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="locale==='ru'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="locale==='ru'" lang="ru" @click="setLocale('ru')">RU</button>
+          <button type="button" class="min-h-10 min-w-11 rounded-md px-3 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="locale==='en'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="locale==='en'" lang="en" @click="setLocale('en')">EN</button>
+        </div>
+        <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :aria-label="theme==='dark'?t('panelAccess.switchToLight'):t('panelAccess.switchToDark')" @click="toggleTheme">{{ theme==='dark'?t('panelAccess.light'):t('panelAccess.dark') }}</button>
+      </div>
       <div class="mb-8">
         <p class="mb-2 text-xs font-bold uppercase tracking-widest text-primary">{{ t('panelAccess.firstStep') }}</p>
         <h1 id="control-panel-login-title" class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{{ t('panelAccess.title') }}</h1>
@@ -53,7 +66,9 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null })
           <p class="text-sm font-semibold text-foreground">{{ t('panelAccess.connectionTitle') }}</p>
         </div>
         <p v-if="state==='checking'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.checking') }}</p>
-        <p v-else-if="state==='reachable'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.reachableNotAuthenticated') }}</p>
+        <p v-else-if="state==='signed_out'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.signedOut') }}</p>
+        <p v-else-if="state==='denied'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.denied') }}</p>
+        <p v-else-if="state==='unverified'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unverified') }}</p>
         <p v-else class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unavailable') }}</p>
       </div>
       <!-- Backend must first publish verified session creation, callback,
