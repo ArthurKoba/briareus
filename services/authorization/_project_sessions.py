@@ -215,6 +215,8 @@ class ProjectSessionService:
         explicit_expansion_confirmation: bool = False,
         expected_version: int,
     ) -> AgentSessionView | None:
+        # Preserve the accepted keyword argument without granting expansion.
+        _ = explicit_expansion_confirmation
         await self.application.project_allowed(
             session, caller, project_id, ProjectPermission.APPROVE_AGENT_SESSION, for_write=True
         )
@@ -247,8 +249,10 @@ class ProjectSessionService:
                 allowed_grants if allowed_grants is not None else requested,
                 allow_privileged=True,
             )
-            if not set(actual).issubset(requested) and not explicit_expansion_confirmation:
-                raise AccessDenied("expanded grants require explicit confirmation")
+            # Never expand a pending request into additional capabilities:
+            # require a separate requested scope and a fresh approval.
+            if not set(actual).issubset(requested):
+                raise AccessDenied("approved grants exceed original request")
             expires_at = min(request.requested_expires_at, now + ELEVATED_HARD_TTL)
             if expires_at <= now:
                 raise Conflict("elevation request TTL expired")

@@ -343,8 +343,11 @@ class AccessSourceService:
                 final = sorted(set(allowed_grants if allowed_grants is not None else initial))
                 if not final or not set(final) <= _ALLOWED:
                     raise AccessDenied("unapproved elevated grant")
-                if not set(final) <= set(initial) and not explicit_expansion_confirmation:
-                    raise AccessDenied("expanded grants require explicit approval")
+                # The signed confirmation flag is retained for wire compatibility,
+                # but it cannot mint capabilities the agent never requested.
+                # Broader access needs a new request and verified approver scope.
+                if not set(final) <= set(initial):
+                    raise AccessDenied("approved grants exceed original request")
                 from uuid import uuid4
 
                 issued = uuid4()
