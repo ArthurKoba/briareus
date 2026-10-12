@@ -32,6 +32,40 @@ services:
       ENC_KEYS: "${RAUTHY_ENCRYPTION_KEY:?}"
       ENC_KEY_ACTIVE: "v1"
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
+    # Coolify materializes this config file during deployment instead of
+    # depending on the Git checkout inside its temporary build container.
+    volumes:
+      - type: bind
+        source: ./rauthy/config.toml
+        target: /app/config.toml
+        read_only: true
+        content: |
+          # Official Rauthy v0.37.1; only nonsecret static Briareus Dev settings.
+          # Secret keys and trusted reverse proxy CIDRs are REQUIRED via application ENV.
+          [cluster]
+          node_id = 1
+          nodes = ["1 localhost:8100 localhost:8200"]
+          data_dir = "/app/data"
+
+          [database]
+          hiqlite = false
+          pg_host = "briareus-postgres"
+          pg_port = 5432
+          pg_db_name = "briareus_rauthy"
+          pg_max_conn = 10
+
+          [server]
+          listen_address = "0.0.0.0"
+          port_http = 8080
+          scheme = "http"
+          pub_url = "briareus.koba-nexus.ru"
+          proxy_mode = true
+          http_workers = 2
+
+          [webauthn]
+          rp_id = "briareus.koba-nexus.ru"
+          rp_origin = "https://briareus.koba-nexus.ru:443"
+          rp_name = "Briareus"
 # Physical volume names intentionally preserve the existing live storage IDs;
 # runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
 volumes:
@@ -45,7 +79,3 @@ networks:
   briareus:
     external: true
     name: briareus-net
-
-configs:
-  rauthy-configuration:
-    file: ./rauthy/config.toml
