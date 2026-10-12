@@ -2,7 +2,7 @@
 
 This is one independently deployable **Vue 3 / TypeScript / Bun** frontend service.
 Source, local dependency lock, Dockerfile, Docker-specific ignore, Nginx and
-Coolify Compose are all in `services/control-panel/ui/`. It owns no SQL data,
+Coolify Compose are all in `services/ui/`. It owns no SQL data,
 Identity credentials, Authorization grants or MCP Hand runtimes.
 
 ## Public paths
@@ -39,10 +39,10 @@ Existing Briareus Development application UUID:
 `pxv5fbwcogun3va4vygnejd4` — rename display to **Control Panel UI**, but
 reuse the SAME application (not a new instance).
 
-- Base directory: `/services/control-panel/ui`
+- Base directory: `/services/ui`
 - Compose file: `/docker-compose.coolify.yaml`
-- Service-local Dockerfile: `services/control-panel/ui/Dockerfile`
-- Single Watch path: `services/control-panel/ui/**`
+- Service-local Dockerfile: `services/ui/Dockerfile`
+- Single Watch path: `services/ui/**`
 - Existing private `briareus-net` remains; keep `briareus-admin-ui` as a
   temporary internal network alias for the published Gateway, while also
   advertising `briareus-control-panel-ui`.

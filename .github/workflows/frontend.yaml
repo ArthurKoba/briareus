@@ -3,7 +3,7 @@ name: Frontend
 on:
   pull_request:
     paths:
-      - "services/control-panel/ui/**"
+      - "services/ui/**"
       - ".github/workflows/frontend.yaml"
   workflow_dispatch:
 
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/control-panel/ui
+        working-directory: services/ui
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
