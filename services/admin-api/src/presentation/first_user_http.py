@@ -52,6 +52,8 @@ def _fail(status: int = 503) -> JSONResponse:
 def _validate_browser(request: Request) -> None:
     if request.headers.get("cookie") is not None:
         raise HTTPException(401, detail="bearer-only first User API")
+    if len(request.headers.getlist("origin")) > 1:
+        raise HTTPException(403, detail="ambiguous browser origin")
     if request.headers.get("origin") not in (None, _ORIGIN):
         raise HTTPException(403, detail="untrusted browser origin")
     if any(
@@ -63,6 +65,11 @@ def _validate_browser(request: Request) -> None:
 
 
 def _original(request: Request) -> str:
+    if (
+        len(request.headers.getlist("operation-uuid")) != 1
+        or len(request.headers.getlist("idempotency-key")) != 1
+    ):
+        raise HTTPException(422, detail="single original operation headers required")
     raw = request.headers.get("operation-uuid", "")
     key = request.headers.get("idempotency-key", "")
     try:
@@ -75,6 +82,8 @@ def _original(request: Request) -> str:
 
 
 def _bearer(request: Request) -> str:
+    if len(request.headers.getlist("authorization")) != 1:
+        raise HTTPException(401, detail="single signed bearer required")
     auth = request.headers.get("authorization", "")
     if (
         not auth.startswith("Bearer ")
