@@ -46,7 +46,7 @@ def run(*, compose: bool, uv_locks: bool) -> int:
     expected = {
         "project": "3xshlpoghb9wcyhjgktlqzzp",
         "environment": "naibrku1omovvmw5o0bcnp5c",
-        "repository": "ArthurKoba/briareus",
+        "repository": "KobaProduction/briareus",
     }
     if plan.get("scope") != expected:
         errors.append("scope does not match authorized Briareus Development")
