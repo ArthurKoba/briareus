@@ -1,5 +1,7 @@
 # Briareus
 
+Canonical GitHub repository: [KobaProduction/briareus](https://github.com/KobaProduction/briareus).
+
 An independent-service, service-folder monorepo with modular MCP Hands, a thin routing Gateway and separate Control Panel API/UI.
 
 **NEW OWNER LAYOUT:** [Flat Services / Hands / Shared](docs/architecture/flat-services-hands-shared-20261012.md).

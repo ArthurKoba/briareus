@@ -8,7 +8,7 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 - Environment: **development**, UUID naibrku1omovvmw5o0bcnp5c.
 - Only permitted root URL path: /project/3xshlpoghb9wcyhjgktlqzzp/environment/naibrku1omovvmw5o0bcnp5c and the direct application pages nested under that exact pair.
 - Briareus public site: https://briareus.koba-nexus.ru/ for external HTTP checks.
-- Git repository: ArthurKoba/briareus.
+- Canonical Git repository: **KobaProduction/briareus** (`https://github.com/KobaProduction/briareus`). The former `ArthurKoba/briareus` URL is historical and redirects; a redirect is not evidence that Coolify Git application settings or GitHub App installations have been migrated.
 - Known allowed development Applications:
 
 | Slug | Name | UUID |
@@ -29,7 +29,14 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 | web | Web | 1czkj4zvjrsaganivglrdvpy |
 
 
-**Owner-authorized replacement:** the former Authorization UUID `kx1dpuamhtrlkbo4dg7tzanj` was deleted; the owner explicitly authorized recreation in this same Briareus Development scope on 2026-10-12. The new Authorization UUID `95podguiawtnf2tvlemvk3ef` was observed immediately after creation from `ArthurKoba/briareus`, branch `main`, Base `/services/authorization`, Compose `/docker-compose.coolify.yaml`, using the existing `tambov` / `briareus-net`. The old UUID is no longer approved. The new resource has not yet passed Compose/runtime acceptance.
+**Owner-authorized replacement:** the former Authorization UUID `kx1dpuamhtrlkbo4dg7tzanj` was deleted; the owner explicitly authorized recreation in this same Briareus Development scope on 2026-10-12. The new Authorization UUID `95podguiawtnf2tvlemvk3ef` was originally observed from the **former** `ArthurKoba/briareus`, branch `main`, Base `/services/authorization`, Compose `/docker-compose.coolify.yaml`, using the existing `tambov` / `briareus-net`. The old UUID is no longer approved. The new resource has not yet passed Compose/runtime acceptance.
+
+## Git account relocation boundary
+
+- New source edits, agent Git operations and Pull Requests for Briareus target the verified `KobaProduction/briareus` repository. Stable writer `koba-ai-agent` and reviewer `koba-ai-reviewer` roles do not change, but their **actual installation permissions** on the relocated repository must be verified independently; never copy credentials or infer access from the old owner.
+- The existing approved Coolify Development Applications keep their UUIDs, environment fence, secret bindings, Base Directory, Compose location and Watch Paths. The service owner verifies and updates **only its own** persisted Git repository/branch to the canonical remote through its authorized Coolify surface, then proves the exact deployed commit; no global/bulk inventory or implicit recreation.
+- Historic records describing `ArthurKoba/briareus` remain historic evidence, not current deployment instructions. Git-side manifests/bootstrap/CI repository-identity literals are separate migration inputs and must be reconciled by their source owners before reuse; do not blindly apply legacy bootstrap tooling to a live service.
+- No change to the strict 14-resource allowlist, protected Shared variables, persistent data, or permitted project/environment is authorized by this repository rename.
 
 The known 14 UUIDs are an allowlist, not instructions to enumerate, inspect, or edit everything. New UUIDs or renamed apps are not automatically trusted; exact membership must be established by an already scoped trusted source or explicit owner consent, not by browsing other projects or guessing.
 
