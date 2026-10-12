@@ -1,7 +1,7 @@
-"""Public static Panel and transparent /api reverse proxy.
+"""Single-origin Panel, API, and upstream Rauthy OIDC reverse proxy.
 
-Authentication, sessions, identity and all API routing belong to Admin API.
-No Gateway C2 adapter, JWT verifier or special Identity destination exists.
+Gateway only forwards fixed public namespaces; identity, JWT verification,
+business permissions and authentication remain upstream responsibilities.
 """
 
 from __future__ import annotations
@@ -22,10 +22,11 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from .route_telemetry import RouteTelemetry
-from .single_origin import SingleOriginGuard, unavailable_routes
+from .single_origin import PUBLIC_HOST, SingleOriginGuard, unavailable_routes
 
 _PANEL_UPSTREAM = "http://briareus-admin-ui:8080"
 _API_UPSTREAM = "http://briareus-admin-api:8000"
+_RAUTHY_UPSTREAM = "http://briareus-rauthy:8080"
 _PUBLIC_FILES = frozenset({"/", "/robots.txt", "/sitemap.xml", "/panel/"})
 _PANEL_ASSET = re.compile(
     r"^/panel/assets/[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:js|css|svg|png|webp|ico|woff2)$"
@@ -80,7 +81,7 @@ class RouteSpec:
     """Public route template and its fixed internal service destination."""
 
     template: str
-    target: Literal["panel-ui", "panel-api"]
+    target: Literal["panel-ui", "panel-api", "rauthy"]
 
 
 # Runtime routing policy contains no principal, permissions or Identity paths.
@@ -92,6 +93,8 @@ _ROUTE_TABLE: tuple[RouteSpec, ...] = (
     RouteSpec("/panel/{path:path}", "panel-ui"),
     RouteSpec("/api", "panel-api"),
     RouteSpec("/api/{path:path}", "panel-api"),
+    RouteSpec("/auth/v1", "rauthy"),
+    RouteSpec("/auth/v1/{path:path}", "rauthy"),
 )
 
 
@@ -237,9 +240,17 @@ class ThinGateway:
             self._slots.release()
 
     async def api(self, request: Request) -> Response:
-        """Forward the original /api path and method. Admin API owns all auth."""
+        """Preserve the Admin API's unmodified public /api/* contract."""
+        return await self._proxy(request, rauthy=False)
+
+    async def oidc(self, request: Request) -> Response:
+        """Forward only the real upstream Rauthy /auth/v1/* namespace."""
+        return await self._proxy(request, rauthy=True)
+
+    async def _proxy(self, request: Request, *, rauthy: bool) -> Response:
         path = _raw_path(request)
-        if path is None or (path != "/api" and not path.startswith("/api/")):
+        prefix = "/auth/v1" if rauthy else "/api"
+        if path is None or (path != prefix and not path.startswith(prefix + "/")):
             return Response(status_code=404)
         query = request.scope.get("query_string", b"")
         if not isinstance(query, bytes):
@@ -247,8 +258,11 @@ class ThinGateway:
         # Construct only a fixed private destination; the public Host is never a URL target.
         try:
             raw_url = path + ("?" + query.decode("ascii") if query else "")
-            target_url = httpx.URL(_API_UPSTREAM + raw_url)
-            if target_url.host != "briareus-admin-api" or target_url.port != 8000:
+            upstream = _RAUTHY_UPSTREAM if rauthy else _API_UPSTREAM
+            target_url = httpx.URL(upstream + raw_url)
+            if (target_url.host, target_url.port) != (
+                ("briareus-rauthy", 8080) if rauthy else ("briareus-admin-api", 8000)
+            ):
                 return Response(status_code=400)
         except (UnicodeDecodeError, ValueError, httpx.InvalidURL):
             return Response(status_code=400)
@@ -260,10 +274,20 @@ class ThinGateway:
         except TimeoutError:
             return self._unavailable()
         try:
+            headers = _api_headers(request)
+            if rauthy:
+                # Derive proxy claims from our fixed public origin, never the caller.
+                headers.extend(
+                    (
+                        (b"host", PUBLIC_HOST.encode("ascii")),
+                        (b"x-forwarded-host", PUBLIC_HOST.encode("ascii")),
+                        (b"x-forwarded-proto", b"https"),
+                    )
+                )
             upstream_request = client.build_request(
                 request.method,
                 target_url,
-                headers=_api_headers(request),
+                headers=headers,
                 content=request.stream(),
             )
             upstream = await client.send(upstream_request, stream=True)
@@ -300,7 +324,11 @@ class ThinGateway:
 
 def build_app() -> Starlette:
     transport = ThinGateway()
-    handlers = {"panel-ui": transport.static, "panel-api": transport.api}
+    handlers = {
+        "panel-ui": transport.static,
+        "panel-api": transport.api,
+        "rauthy": transport.oidc,
+    }
     return Starlette(
         routes=[
             *[
