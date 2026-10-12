@@ -31,7 +31,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from .single_origin import MCP_ENDPOINTS, PUBLIC_ORIGIN
 
 GatewayTarget = Literal[
-    "panel", "api", "files", "terminal", "web", "svc", "infrastructure", "reverse"
+    "panel", "api", "identity", "files", "terminal", "web", "svc", "infrastructure", "reverse"
 ]
 
 # Derived from accepted, published deploy/<module>/docker-compose.yaml
@@ -39,6 +39,7 @@ GatewayTarget = Literal[
 PRIVATE_UPSTREAMS: Mapping[GatewayTarget, tuple[str, int]] = {
     "panel": ("briareus-admin-ui", 8080),
     "api": ("briareus-admin-api", 8000),
+    "identity": ("briareus-identity", 8000),
     "files": ("briareus-files", 8000),
     "terminal": ("briareus-terminal", 8000),
     "web": ("briareus-web", 8000),
@@ -106,6 +107,7 @@ class GatewayRoute:
     public_path: str
     original_mcp: bool = False
     public_static: bool = False
+    preauth: bool = False
 
 
 def route_for_path(path: str) -> GatewayRoute | None:
@@ -121,11 +123,17 @@ def route_for_path(path: str) -> GatewayRoute | None:
         # Panel's Nginx owns /panel -> /panel/ (308) and SPA /panel/*.
         # Never strip to /: that is the distinct public project landing.
         return GatewayRoute("panel", path, path)
-    if path in {"/api", "/api/"}:
-        return GatewayRoute("api", "/", path)
-    if path.startswith("/api/"):
-        # Private Admin API source must independently verify this namespace.
-        return GatewayRoute("api", "/" + path[len("/api/") :], path)
+    # Auth ingress is explicitly selected by recipient and trust phase.
+    # Login/registration cannot require an EXISTING human User bearer;
+    # they require a separate pinned service-peer/preauth admission instead.
+    if path in {"/api/auth/register", "/api/auth/login"}:
+        action = path.rsplit("/", 1)[-1]
+        return GatewayRoute("identity", f"/internal/v1/identity/{action}", path, preauth=True)
+    if path == "/api/auth/logout":
+        return GatewayRoute("identity", "/internal/v1/identity/logout", path)
+    if path == "/api/platform/me":
+        return GatewayRoute("api", "/internal/v1/platform/me", path)
+    # Never forward arbitrary public /api/* to an internal owner route.
     for module, public in MCP_ENDPOINTS.items():
         if path == public:
             return GatewayRoute(module, "/mcp", path, original_mcp=True)  # type: ignore[arg-type]
@@ -169,6 +177,36 @@ class TrustedGatewaySourcePort(Protocol):
         against authoritative current Identity/Control/Access source.
         An unavailable owner or a stale/revoked original fails closed.
         """
+        ...
+
+
+class TrustedGatewayPreauthPort(Protocol):
+    """A19-signed, registered SERVICE peer at browser first-user boundary.
+
+    Unlike authenticated User/JTI grants, the first registration/login has
+    no current User bearer. The trusted port must validate the actual TLS/Unix
+    peer, browser Origin, owner issuance, rate limit and one original UUID.
+    No proxy method infers authority from a request header or JSON claim.
+    """
+
+    async def require_preauth(
+        self,
+        request: Request,
+        *,
+        target: GatewayTarget,
+        path: str,
+        original_operation_uuid: UUID,
+        body_sha256: str,
+    ) -> VerifiedGatewayForwarding: ...
+
+    async def revalidate_preauth(
+        self,
+        request: Request,
+        *,
+        previous: VerifiedGatewayForwarding,
+        body_sha256: str,
+    ) -> VerifiedGatewayForwarding:
+        """Read-only current trust check; never consume original JTI twice."""
         ...
 
 
@@ -388,6 +426,7 @@ class PrivateGatewayTransport:
         self,
         *,
         source: TrustedGatewaySourcePort | None = None,
+        preauth: TrustedGatewayPreauthPort | None = None,
         websocket_dialer: TrustedWebSocketDialer | None = None,
         public_static_enabled: bool = False,
         max_in_flight: int = 32,
@@ -395,6 +434,7 @@ class PrivateGatewayTransport:
         if not 1 <= max_in_flight <= 256:
             raise ValueError("bounded gateway concurrency required")
         self.source = source
+        self.preauth = preauth
         if type(public_static_enabled) is not bool:
             raise ValueError("public static release gate must be explicit")
         self.websocket_dialer = websocket_dialer
@@ -417,7 +457,7 @@ class PrivateGatewayTransport:
         # Default closed Gateway has no public listener or upstream pool.
         # A separately accepted D6 static-only release may opt into public
         # GET/HEAD even while protected A18/C2 source remains unconfigured.
-        if self.source is None and not self.public_static_enabled:
+        if self.source is None and self.preauth is None and not self.public_static_enabled:
             yield
             return
         self._draining = False
@@ -616,12 +656,149 @@ class PrivateGatewayTransport:
             if acquired:
                 self._slots.release()
 
+    async def first_user_preauth(self, request: Request, route: GatewayRoute) -> Response:
+        """No current human token exists before register/login.
+
+        Only an independently installed A19 service-peer signer can allow an
+        exact original POST. Never trust browser-supplied C2 headers, bypass
+        real Identity ingress verification, or retry an UNKNOWN original.
+        """
+        if (
+            not route.preauth
+            or route.public_path not in {"/api/auth/register", "/api/auth/login"}
+            or route.target != "identity"
+            or request.method != "POST"
+            or request.scope.get("raw_path") != route.public_path.encode("ascii")
+            or request.scope.get("query_string", b"")
+            or request.headers.get("origin") != PUBLIC_ORIGIN
+            or request.headers.get("cookie") is not None
+            or request.headers.get("authorization") is not None
+            or request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+            != "application/json"
+            or self.preauth is None
+            or self._client is None
+            or self._draining
+        ):
+            return self._denied()
+        acquired = False
+        try:
+            names = [
+                name.lower()
+                for name, _value in request.scope.get("headers", [])
+                if name.lower() in {b"operation-uuid", b"idempotency-key"}
+            ]
+            raw_original = request.headers.get("operation-uuid", "")
+            original = UUID(raw_original)
+            if (
+                names.count(b"operation-uuid") != 1
+                or names.count(b"idempotency-key") != 1
+                or original.version != 4
+                or str(original) != raw_original
+                or request.headers.get("idempotency-key") != raw_original
+            ):
+                raise GatewayTransportDenied("ORIGINAL_OPERATION_BINDING_REQUIRED")
+            chunks: list[bytes] = []
+            total = 0
+            async with asyncio.timeout(10):
+                async for chunk in request.stream():
+                    total += len(chunk)
+                    if total > 16 * 1024:
+                        raise GatewayTransportDenied("PREAUTH_BODY_TOO_LARGE")
+                    chunks.append(chunk)
+            declared = request.headers.get("content-length")
+            if declared is not None and int(declared) != total:
+                raise GatewayTransportDenied("PREAUTH_BODY_LENGTH_MISMATCH")
+            body = b"".join(chunks)
+            body_sha256 = hashlib.sha256(body).hexdigest()
+            source = self.preauth
+            if source is None:
+                raise GatewayTransportDenied("TRUSTED_PREAUTH_SOURCE_UNAVAILABLE")
+            async with asyncio.timeout(5):
+                grant = await source.require_preauth(
+                    request,
+                    target="identity",
+                    path=route.public_path,
+                    original_operation_uuid=original,
+                    body_sha256=body_sha256,
+                )
+            headers = require_forwarding(
+                grant, target="identity", method="POST", original=raw_original
+            )
+            if headers.get("content-type", "").split(";", 1)[0].casefold() != "application/json":
+                raise GatewayTransportDenied("TRUSTED_PREAUTH_CONTENT_TYPE_REQUIRED")
+            await asyncio.wait_for(self._slots.acquire(), timeout=3)
+            acquired = True
+            if self._draining:
+                raise GatewayTransportDenied("GATEWAY_DRAINING")
+            async with asyncio.timeout(5):
+                refreshed = await source.revalidate_preauth(
+                    request, previous=grant, body_sha256=body_sha256
+                )
+            headers = require_fresh_forwarding(
+                grant, refreshed, target="identity", method="POST", original=raw_original
+            )
+            if refreshed.expires_at <= datetime.now(UTC) + timedelta(seconds=10):
+                raise GatewayTransportDenied("PREAUTH_PERMIT_EXPIRED")
+            client = self._current_client()
+            if client is None:
+                raise GatewayTransportDenied("PREAUTH_CLIENT_UNAVAILABLE")
+            # No redirect, no cookies, no query/token-in-URL, no retransmit.
+            async with asyncio.timeout(8):
+                upstream = await client.send(
+                    client.build_request(
+                        "POST", _private_url(route, b""), headers=headers, content=body
+                    ),
+                    stream=True,
+                )
+                try:
+                    if upstream.status_code not in {200, 201, 401, 403, 422, 429, 503}:
+                        raise GatewayTransportDenied("PREAUTH_OWNER_STATUS_NOT_ALLOWED")
+                    if (
+                        upstream.headers.get("content-type", "").split(";", 1)[0].casefold()
+                        != "application/json"
+                    ):
+                        raise GatewayTransportDenied("PREAUTH_OWNER_JSON_REQUIRED")
+                    if upstream.headers.get("content-encoding", "identity").casefold() not in {
+                        "",
+                        "identity",
+                    }:
+                        raise GatewayTransportDenied("PREAUTH_OWNER_ENCODING_UNSAFE")
+                    parts: list[bytes] = []
+                    total_response = 0
+                    async for chunk in upstream.aiter_raw():
+                        total_response += len(chunk)
+                        if total_response > 32 * 1024:
+                            raise GatewayTransportDenied("PREAUTH_OWNER_RESPONSE_TOO_LARGE")
+                        parts.append(chunk)
+                    status = upstream.status_code
+                finally:
+                    await upstream.aclose()
+            return Response(
+                content=b"".join(parts),
+                status_code=status,
+                headers={
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Never echo peer/JTI, credentials, input or upstream details.
+            return self._denied()
+        finally:
+            if acquired:
+                self._slots.release()
+
     async def http(self, request: Request) -> Response:
         route = route_for_path(request.url.path)
         if route is None:
             return self._denied()
         if route.public_static:
             return await self.public_static(request, route)
+        if route.preauth:
+            return await self.first_user_preauth(request, route)
         if self.source is None or self._client is None or self._draining:
             return self._denied()
         if route.original_mcp and request.scope.get("raw_path") != route.public_path.encode(
@@ -812,6 +989,7 @@ class PrivateGatewayTransport:
         if (
             route is None
             or route.public_static
+            or route.preauth
             or (
                 route.original_mcp
                 and socket.scope.get("raw_path") != route.public_path.encode("ascii")
