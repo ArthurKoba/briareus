@@ -34,11 +34,21 @@ last_successful_tab_probe_at is the last Web-owned successful check.
 On disconnect it clears; an old probe must not masquerade as live access.
 The status endpoint does not independently check upstream TCP reachability.
 
-Each explicit Connect returns ok, connection_state and, on failure,
-last_error = {code, stage, message, next_action, retryable}. It never
+Connect starts a single background tab probe and immediately returns
+ok = null with connecting = true. phase moves through mcp_initialize,
+tools_list and tabs_list. Read-only status polling observes this one probe
+without creating sessions or repeating approval requests. When complete,
+connecting = false and browser_ready / last_error describe the outcome.
+Explicit Disconnect cancels this Web-owned pending probe.
+
+The completed Connect status or subsequent read-only status provides
+connection_state and, on failure, last_error =
+{code, stage, message, next_action, retryable}. It never
 returns upstream session IDs, extension tokens, private tab URLs,
 raw exceptions or auth headers. Management must not emit
-external.connected when ok is false; emit external.connect_failed.
+external.connected when ok is false or null. Emit external.connecting
+while the probe remains pending, and external.connect_failed only for a
+confirmed failure during the initial request.
 
 ## Failure / next action
 

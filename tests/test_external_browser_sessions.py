@@ -15,7 +15,10 @@ from modules.web.external_browser_proxy import (
 
 
 class _FakeLease:
-    def __init__(self, *, failed_stage: str = "", tabs_error: bool = False) -> None:
+    def __init__(
+        self, *, failed_stage: str = "", tabs_error: bool = False,
+        approval_gate: asyncio.Event | None = None,
+    ) -> None:
         self.failed_stage = failed_stage
         self.tabs_error = tabs_error
         self.policy = BrowserRuntimePolicy()
@@ -23,6 +26,11 @@ class _FakeLease:
         self.connect_count = 1
         self.last_activity_at = "2026-10-12T00:00:00Z"
         self.tab_calls = 0
+        self.approval_gate = approval_gate
+        self.shutdown_count = 0
+
+    async def shutdown(self) -> None:
+        self.shutdown_count += 1
 
     async def acquire(self) -> _FakeLease:
         if self.failed_stage == "mcp_initialize":
@@ -43,6 +51,8 @@ class _FakeLease:
     async def call_tool(self, name: str, arguments: object, **_kwargs: object) -> object:
         assert name == "browser_tabs" and arguments == {"action": "list"}
         self.tab_calls += 1
+        if self.approval_gate is not None:
+            await self.approval_gate.wait()
         if self.failed_stage == "tabs_list":
             raise TimeoutError("PRIVATE-BROWSER-URL")
         return SimpleNamespace(is_error=self.tabs_error)
@@ -74,38 +84,109 @@ class ExternalBrowserSessionTests(unittest.TestCase):
         self.assertEqual(status["grant_state"], "unverified")
 
     def test_successful_tab_probe_not_equivalent_to_grant(self) -> None:
-        lease = _FakeLease()
-        result = asyncio.run(self.runtime(lease).connect())
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["browser_ready"])
-        self.assertEqual(result["connection_state"], "tab_list_responded")
-        self.assertEqual(result["grant_state"], "unverified")
-        self.assertEqual(lease.tab_calls, 1)
-        self.assertEqual(result["tool_count"], 1)
+        async def scenario() -> None:
+            lease = _FakeLease()
+            runtime = self.runtime(lease)
+            pending = await runtime.connect()
+            self.assertIsNone(pending["ok"])
+            self.assertTrue(pending["connecting"])
+            assert runtime._connect_task is not None
+            await runtime._connect_task
+            result = await runtime.status()
+            self.assertTrue(result["browser_ready"])
+            self.assertEqual(result["connection_state"], "tab_list_responded")
+            self.assertEqual(result["grant_state"], "unverified")
+            self.assertEqual(lease.tab_calls, 1)
+            self.assertEqual(result["tool_count"], 1)
+            self.assertFalse(result["connecting"])
+            self.assertEqual((await runtime.connect())["ok"], True)
+            self.assertEqual(lease.tab_calls, 1)
+        asyncio.run(scenario())
 
     def test_tabs_error_is_explicit_not_false_success(self) -> None:
-        status = asyncio.run(self.runtime(_FakeLease(tabs_error=True)).connect())
-        self.assertFalse(status["ok"])
-        self.assertEqual(status["connection_state"], "tab_check_failed")
-        self.assertEqual(status["last_error"]["code"], "BROWSER_TABS_FAILED")
-        self.assertEqual(status["last_error"]["stage"], "tabs_list")
-        self.assertTrue(status["connected"])
+        async def scenario() -> None:
+            runtime = self.runtime(_FakeLease(tabs_error=True))
+            await runtime.connect()
+            assert runtime._connect_task is not None
+            await runtime._connect_task
+            status = await runtime.status()
+            self.assertEqual(status["connection_state"], "tab_check_failed")
+            self.assertEqual(status["last_error"]["code"], "BROWSER_TABS_FAILED")
+            self.assertEqual(status["last_error"]["stage"], "tabs_list")
+            self.assertTrue(status["connected"])
+        asyncio.run(scenario())
 
     def test_staged_failures_are_actionable_without_secrets(self) -> None:
+        async def scenario(stage: str, expected: str) -> None:
+            runtime = self.runtime(_FakeLease(failed_stage=stage))
+            await runtime.connect()
+            assert runtime._connect_task is not None
+            await runtime._connect_task
+            status = await runtime.status()
+            error = status["last_error"]
+            self.assertEqual(error["stage"], stage)
+            self.assertEqual(error["code"], expected)
+            self.assertTrue(error["next_action"])
+            self.assertNotIn("PRIVATE", str(error))
+            self.assertNotIn("PRIVATE", str(status))
         for stage, expected in [
             ("mcp_initialize", "UPSTREAM_TIMEOUT"),
             ("tools_list", "UPSTREAM_UNREACHABLE"),
             ("tabs_list", "UPSTREAM_TIMEOUT"),
         ]:
             with self.subTest(stage=stage):
-                result = asyncio.run(self.runtime(_FakeLease(failed_stage=stage)).connect())
-                self.assertFalse(result["ok"])
-                error = result["last_error"]
-                self.assertEqual(error["stage"], stage)
-                self.assertEqual(error["code"], expected)
-                self.assertTrue(error["next_action"])
-                self.assertNotIn("PRIVATE", str(error))
-                self.assertNotIn("PRIVATE", str(result))
+                asyncio.run(scenario(stage, expected))
+
+    def test_pending_approval_is_reused_and_disconnect_cancels(self) -> None:
+        async def scenario() -> None:
+            gate = asyncio.Event()
+            lease = _FakeLease(approval_gate=gate)
+            runtime = self.runtime(lease)
+            first = await runtime.connect()
+            self.assertIsNone(first["ok"])
+            await asyncio.sleep(0)
+            self.assertEqual(lease.tab_calls, 1)
+            second = await runtime.connect()
+            self.assertIsNone(second["ok"])
+            self.assertEqual(lease.tab_calls, 1)
+            self.assertEqual((await runtime.status())["phase"], "tabs_list")
+            self.assertEqual((await runtime.disconnect())["ok"], True)
+            self.assertEqual(lease.shutdown_count, 1)
+            self.assertEqual((await runtime.status())["connection_state"], "proxy_disconnected")
+            self.assertIsNone(runtime._connect_task)
+        asyncio.run(scenario())
+
+    def test_approval_can_complete_after_initiating_request(self) -> None:
+        async def scenario() -> None:
+            gate = asyncio.Event()
+            runtime = self.runtime(_FakeLease(approval_gate=gate))
+            self.assertTrue((await runtime.connect())["connecting"])
+            await asyncio.sleep(0)
+            self.assertTrue((await runtime.status())["connecting"])
+            gate.set()
+            assert runtime._connect_task is not None
+            await runtime._connect_task
+            self.assertEqual((await runtime.status())["phase"], "tab_list_responded")
+            self.assertTrue((await runtime.status())["browser_ready"])
+        asyncio.run(scenario())
+
+    def test_policy_change_cancels_only_the_old_proxy_probe(self) -> None:
+        async def scenario() -> None:
+            gate = asyncio.Event()
+            lease = _FakeLease(approval_gate=gate)
+            runtime = self.runtime(lease)
+            await runtime.connect()
+            await asyncio.sleep(0)
+            self.assertEqual(lease.tab_calls, 1)
+            self.policy = BrowserRuntimePolicy(
+                external_enabled=True, external_mcp_url="http://localhost:8932/mcp",
+            )
+            replacement = await runtime._ensure_client()
+            self.assertIsInstance(replacement, _PersistentPlaywrightProxyClient)
+            self.assertEqual(lease.shutdown_count, 1)
+            self.assertIsNone(runtime._connect_task)
+            self.assertEqual((await runtime.status())["tab_access_state"], "not_checked")
+        asyncio.run(scenario())
 
     def test_http_error_is_stage_scoped(self) -> None:
         error = RuntimeError("PRIVATE-SID")
