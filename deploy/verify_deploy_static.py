@@ -450,7 +450,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
     external=yaml.safe_load((source_root/'services/external/docker-compose.coolify.yaml').read_text())
     if set(external['volumes'])!={'postgres-data','valkey-data','rauthy-data'}:
         fatal('External Compose must own exactly three concise named volumes')
-    if any(value is not None for value in external['volumes'].values()):
+    if any(value != {} for value in external['volumes'].values()):
         fatal('External Compose must use Coolify-scoped volumes with no custom physical name')
     rauthy=external['services']['briareus-rauthy']
     if any(x.get('target') == '/app/config.toml' for x in rauthy.get('volumes',[]) if isinstance(x,dict)):
