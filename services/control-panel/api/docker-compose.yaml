@@ -1,18 +1,18 @@
 services:
-  briareus-control-panel-api:
+  briareus-admin-api:
     build:
       context: ../../../
       dockerfile: services/control-panel/api/Dockerfile
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      OIDC_ISSUER: "${OIDC_ISSUER:?}"
-      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:?}"
+      OIDC_ISSUER: "${OIDC_ISSUER:-}"
+      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:-}"
     expose:
       - "8000"
     networks:
       briareus:
-        aliases: ["briareus-control-panel-api"]
+        aliases: ["briareus-admin-api", "briareus-control-panel-api"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"]
       interval: 10s

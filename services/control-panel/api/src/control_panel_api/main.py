@@ -6,9 +6,11 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 
+from ._legacy_identity import create_first_user_api_router
 from ._oidc import OidcProviderUnavailable, RauthyOidcAdapter
 
 
@@ -35,11 +37,22 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        try:
-            yield
-        finally:
-            if managed_provider is not None:
-                await managed_provider.close()
+        # Preserve the existing /api/auth and /api/platform/me routes until
+        # the Rauthy code+PKCE cutover is verified. Never import Identity ORM.
+        async with httpx.AsyncClient(
+            base_url="http://briareus-identity:8000",
+            trust_env=False,
+            follow_redirects=False,
+            timeout=httpx.Timeout(5, connect=2),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        ) as identity_client:
+            _app.state.identity_client = identity_client
+            try:
+                yield
+            finally:
+                _app.state.identity_client = None
+                if managed_provider is not None:
+                    await managed_provider.close()
 
     app = FastAPI(
         title="Briareus Control Panel API",
@@ -52,7 +65,14 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
 
     @app.get("/health/live", include_in_schema=False)
     async def live() -> dict[str, str]:
-        return {"state": "live", "service": "control-panel-api"}
+        return {
+            "state": "live",
+            "service": "control-panel-api",
+            "api": "first-user-http",
+            "authorization": "identity-owned",
+        }
+
+    app.include_router(create_first_user_api_router())
 
     @app.get("/api/auth/oidc/config", response_model=OidcBrowserConfiguration)
     async def oidc_config(response: Response) -> OidcBrowserConfiguration:
