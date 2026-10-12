@@ -32,20 +32,12 @@ services:
       ENC_KEYS: "${RAUTHY_ENCRYPTION_KEY:?}"
       ENC_KEY_ACTIVE: "v1"
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
-# Physical volume names intentionally preserve the existing live storage IDs;
-# runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.
+
 volumes:
   postgres-data:
-    name: briareus-dev-postgres-v1
   valkey-data:
-    name: briareus-dev-valkey-v1
-  rauthy-state:
-    name: briareus-dev-rauthy-v1
+  rauthy-data:
 networks:
   briareus:
     external: true
     name: briareus-net
-
-configs:
-  rauthy-configuration:
-    file: ./rauthy/config.toml
