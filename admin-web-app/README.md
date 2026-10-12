@@ -1,9 +1,47 @@
-# Briareus Admin UI
+# Briareus Panel
 
-Standalone Vue 3 + TypeScript + Vite application for Briareus Users, Teams,
+Standalone Vue 3 + TypeScript + Vite Panel application for Briareus Users, Teams,
 Projects, AgentIdentity, AgentSessions and source-authorized resources.
 The old MCP Bridge operator UI, cookie REST client, telemetry and global
 realtime components have been **removed from this product source**.
+
+## Public landing and private Panel routing (owner-agreed, Gateway implementation pending)
+
+The current D5/Orchestrator-accepted canonical public Gateway origin is
+`https://briareus.koba-nexus.ru`. **Briareus** is the platform; **Panel** is
+its user-facing control interface. The owner requested a public indexed
+project landing at `/` rather than a redirect to the administrative UI.
+The owner explicitly confirmed that this route split is FINAL, not a pending
+architecture choice: only Gateway source/physical implementation remains.
+
+Frontend now builds **two intentionally separate documents** in one static
+Nginx image. `public/_site/index.html` is a static, pre-rendered Russian
+project overview at `/`, with a normal relative link to `/panel/`, a
+keyboard-accessible skip link, source-grounded architectural summary (four
+logical owner domains and one planned public ingress), WebSite/schema.org,
+description, canonical and social metadata. `index.html`
+is the Vue Panel shell at `/panel/` with `noindex, nofollow`. Static
+`robots.txt` and `sitemap.xml` describe ONLY the landing page; robots is
+not a security boundary. The public page does not read a browser token,
+connect to owner databases or display made-up availability/usage metrics.
+Optional aggregate service analytics require an independently accepted
+public, anonymized owner endpoint and privacy/release review.
+
+**Agreed route, pending independent Gateway implementation:** Runtime R22
+must forward `/` and
+`/robots.txt`/`/sitemap.xml` to private Panel Nginx **without redirecting root**,
+and forward `/panel/*` **without stripping the `/panel/` prefix**. Stripping
+`/panel/` to `/` would show the public page instead of the Panel login.
+The distinct namespaces `/api/*`, `/hands/<module>/mcp` and OAuth discovery
+remain owned by the Gateway/Backend. Private Panel returns 404 for wrongly
+forwarded API/MCP/OAuth traffic and missing assets. D5 owns source COPY and
+Watch inputs, real HTTPS/Host/Origin/CSRF/WS, deployed image/route and
+Coolify. No public authenticated BFF installer is enabled until C1-B2/C2
+and owner runtime readiness are independently accepted.
+On the Panel's unauthenticated, offline or unconnected API screens, the
+visitor can return to the PUBLIC home using a simple same-origin link.
+Authenticated Panel's project overview link opens a separate tab to avoid
+silently dropping memory-only credentials on full-page navigation.
 
 ## Source layout
 
@@ -118,30 +156,18 @@ authorizations. An A11 local `COMMITTED` status is NEVER a BFF-composite
 success. There is no public installer, direct owner API call or browser DB
 client.
 
-Accepted A11 original command status requires **two independent immutable
-identifiers**: `Operation-UUID` (UUIDv4) and a printable ASCII
-`Idempotency-Key` (the current frontend generates a UUIDv4 key). Briareus holds both
-inside its current-tab command fence and checks both with the original actor,
-scope, operation/target and authenticated signed multi-owner evidence before
-any confirmation; it never remints either for a retry. Team ownership transfer
-uses accepted A11 `team.owner.transfer`, NOT historical A9
-`team.transfer_owner`. Backend A12 must still supply the signed recipient-
-bound result and authenticated current owner revisions; an A11 owner-local
-HTTP status has no source to do that.
-
-**Accepted A12 compatibility blocker (tracked for Backend A13):** private
-`owner_bff_evidence.BffEffectEvidence` does **not** return the original
-`Operation-UUID`, while the B17/B18 UI's BFF result requires the server to
-return it and match it to the original in-memory command. A12's recipient-
-signed `OwnerEffectCommand` / `OwnerEffectReceipt` also require
-`operation_uuid === idempotency_uuid`, whereas the current UI keeps the
-original operation UUID and printable Idempotency-Key as independently
-minted UUIDv4 values. These are distinct source wire contracts. Do NOT
-silently copy the sent operation UUID into a response, coerce the two keys
-equal, or treat a local `COMMITTED` as signed all-owner confirmation. Until
-A13 provides a reviewed binding/translation and trusted C1-B2/C2 transport,
-all mutation effects remain UNKNOWN/fenced and public Port activation remains
-blocked.
+**Current independently SOURCE-accepted A13 original command contract:**
+one immutable canonical lowercase UUIDv4 is both `Operation-UUID` and HTTP
+`Idempotency-Key`; server-signed original `BffEffectEvidence.operationUuid`
+must match it exactly. Future commands generate one UUID and never remint it
+for retries. Historical commands minted with two different identifiers stay
+UNKNOWN and cannot be replayed or reconciled by guessing a key. An owner-local
+`COMMITTED` or a browser-echoed UUID is not a signed all-owner effect.
+Backend A13 source approval is **not** protected public C1-B2/C2, real owner
+DB roles/migration readiness or authenticated `/api/*` transport. Team
+ownership transfer remains `team.owner.transfer`, not obsolete A9 names;
+all protected Panel writes and live API/login stay unmounted until independently
+accepted transport and server permissions exist.
 
 Source-approved Project lifecycle is required to open/reassign a Project;
 missing `lifecycleStatus` is **unknown**, not permission to assume `active`.

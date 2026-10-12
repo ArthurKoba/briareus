@@ -4,13 +4,24 @@ import { A11_ACCEPTED_SOURCE_ONLY } from "@/features/platform/api/a11-owner-bff-
 /**
  * The cutover is intentionally NOT a runtime feature flag. It requires an
  * independently approved, actually mounted trusted server composition and
- * a verified current principal. The accepted A11/A12 source remains private
- * and unmounted; A12 normalized effects lack original Operation-UUID and
- * cannot satisfy the B17/B18 reviewed original-key confirmation contract.
+ * a verified current principal. A13's corrected signed original-key
+ * evidence is independently SOURCE-accepted, but remains private/unmounted;
+ * physical D4/C1-B2/C2 peer, owner DB and public user-auth transport are NOT.
  *
  * This is the future integration contract for the orchestrator/reviewer, not
  * a credential or permission check and not an authority users can supply.
  */
+/** Owner-approved 2026-10-11 public Gateway NAMESPACE only, not an
+ * authenticated API client, endpoint discovery, or permission grant.
+ * The browser must use its current HTTPS origin; never another host/port.
+ * Gateway/D5 own actual TLS, /api/* peer auth, CSRF, WS and MCP routing.
+ */
+export const PANEL_PUBLIC_PATHS = Object.freeze({
+  panel:"/panel/",
+  api:"/api/",
+  filesMcp:"/hands/files/mcp",
+} as const)
+
 export type PlatformCutoverPrerequisite =
   | "independent-owner-schema-heads"
   | "verified-owner-service-attestations"
@@ -39,11 +50,11 @@ export interface ReviewedPlatformRuntimeComposition {
 
 export const platformCutoverReadiness: Readonly<{
   state:"blocked"
-  acceptedSource:"A11 private four-owner BFF source (UNMOUNTED)"
+  acceptedSource:"A13 signed private four-owner BFF source (UNMOUNTED)"
   missing:readonly PlatformCutoverPrerequisite[]
 }> = Object.freeze({
   state:"blocked",
-  acceptedSource:"A11 private four-owner BFF source (UNMOUNTED)",
+  acceptedSource:"A13 signed private four-owner BFF source (UNMOUNTED)",
   missing:Object.freeze([
     "independent-owner-schema-heads",
     "verified-owner-service-attestations",

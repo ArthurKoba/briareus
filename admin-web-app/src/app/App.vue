@@ -13,6 +13,7 @@ import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
 import ScopedRealtimeStatus from "@/features/platform/ui/ScopedRealtimeStatus.vue"
 import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
 import PublicAccountPage from "@/pages/platform/PublicAccountPage.vue"
+import FirstUserPage from "@/pages/platform/FirstUserPage.vue"
 import Button from "@/shared/ui/Button.vue"
 import ToastHost from "@/shared/notifications/ToastHost.vue"
 import { useUiPreferences } from "@/shared/lib/preferences"
@@ -220,8 +221,12 @@ async function login():Promise<void>{
     if(generation===authGeneration&&!controller.signal.aborted){
       const issue=normalizeUiError(cause)
       browserTelemetry.error("app","authentication")
-      error.value=String(t(issue.message==="serviceUnavailableOrUpgrading"?
-        "platform.serviceUnavailableOrUpgrading":"platform.signInFailed"))
+      const safeMessage=issue.message==="rateLimited"?"platform.errors.rateLimited":
+        issue.message==="serviceUnavailableOrUpgrading"?"platform.serviceUnavailableOrUpgrading":
+        "platform.signInFailed"
+      // The accepted Identity 429 is SQL-backed throttling, not a 503.
+      // Do not invent a Retry-After delay or automatically retry credentials.
+      error.value=String(t(safeMessage))
     }
   }finally{
     password.value=""
@@ -330,18 +335,15 @@ onBeforeUnmount(()=>{
     <PublicAccountPage :key="`${publicFlow}:${publicLinkRevision}`" :mode="publicFlow" :initial-token="publicToken" @token-copied="publicToken=''" @back="closePublicFlow" />
   </div>
   <div v-else-if="missingTransport" class="grid min-h-screen place-items-center p-6">
-    <section class="w-full max-w-lg rounded-xl border border-border bg-card p-6 text-center shadow-sm" role="status">
-      <h1 class="text-xl font-semibold">{{t('platform.brand')}}</h1>
-      <p class="mt-3 text-sm text-muted-foreground">{{t('platform.adminApiNotConnected')}}</p>
-      <p class="mt-2 text-xs text-muted-foreground">{{t('platform.noLegacyFallback')}}</p>
-      <p v-if="publicLinkError" class="mt-3 text-sm text-destructive" role="alert">{{t('platform.ambiguousPublicLink')}}</p>
-    </section>
+    <!-- First User only. No owner-wide PlatformPort or privileged grant is installed. -->
+    <FirstUserPage />
   </div>
   <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
     <section class="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm" role="alert">
       <h1 class="text-lg font-semibold">{{t('platform.brand')}}</h1>
       <p class="mt-2 text-sm text-muted-foreground">{{t(serviceUpgradingPossible?'platform.serviceUnavailableOrUpgrading':'platform.unverifiedOffline')}}</p>
       <Button class="mt-5" @click="restore">{{t('common.retry')}}</Button>
+      <p class="mt-4"><a href="/" class="text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80">{{t('app.publicWebsite')}}</a></p>
     </section>
   </div>
   <div v-else-if="!verified" class="grid min-h-screen place-items-center bg-muted/30 p-6">
@@ -360,6 +362,7 @@ onBeforeUnmount(()=>{
         <Button variant="ghost" size="sm" @click="publicFlow='invitation'">{{t('platform.haveInvitation')}}</Button>
         <Button variant="ghost" size="sm" @click="publicFlow='reset'">{{t('platform.haveResetLink')}}</Button>
       </div>
+      <p class="mt-4 text-center"><a href="/" class="text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80">{{t('app.publicWebsite')}}</a></p>
     </section>
   </div>
   <div v-else class="min-h-screen bg-background text-foreground md:grid" :class="sidebarCollapsed?'md:grid-cols-[68px_minmax(0,1fr)]':'md:grid-cols-[240px_minmax(0,1fr)]'">
@@ -379,6 +382,7 @@ onBeforeUnmount(()=>{
         <Button id="mobile-nav-trigger" variant="ghost" size="icon" class="md:hidden" :aria-label="t('platform.openMenu')" :aria-expanded="mobileNavOpen" @click="mobileNavOpen=true"><Menu class="size-4"/></Button>
         <h1 id="briareus-page-title" tabindex="-1" class="min-w-0 flex-1 truncate text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">{{title}}</h1>
         <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <a href="/" target="_blank" rel="noopener noreferrer" class="hidden text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground sm:inline" :title="t('app.publicWebsite')">{{t('app.publicWebsite')}} ↗</a>
           <ContextSwitcher />
           <ScopedRealtimeStatus />
           <span class="hidden max-w-32 truncate text-xs text-muted-foreground lg:inline">{{projectContext.coreOwnerReady()?projectContext.state.user?.label:t('platform.ownerBoundaryState.unknown')}}</span>

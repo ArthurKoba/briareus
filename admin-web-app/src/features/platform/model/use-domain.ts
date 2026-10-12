@@ -10,7 +10,7 @@ import { appendVerifiedKeyset } from "@/features/platform/model/scoped-keyset"
 import { commandCoordinator, resourceForAction, type CommandResource, type PendingCommand } from "@/features/platform/model/command-coordinator"
 import { confirmedBffEffect, crossOwnerMutation, groupVerifiedBffCapabilities,
   verifiedBffEvidence } from "@/features/platform/api/bff-boundary"
-import type { CommandContext, PlatformPort, QueryContext, ScopeSelection, UiCapability, SourceCommandBinding } from "@/features/platform/model/contracts"
+import { canonicalUuid4, type CommandContext, type PlatformPort, type QueryContext, type ScopeSelection, type UiCapability, type SourceCommandBinding } from "@/features/platform/model/contracts"
 
 function verifiedDecisionVersion(scope: ScopeSelection): string | null {
   if(scope.kind==="project")return projectContext.state.projectDecisionVersions[scope.projectId]??null
@@ -78,6 +78,9 @@ async function readActionDomain(port:PlatformPort, context:QueryContext, resourc
  * status. An A10 Project/Team HTTP 2xx alone is not a distributed commit. */
 async function completeCrossOwnerEffect(port:PlatformPort,context:QueryContext,entry:PendingCommand):Promise<boolean>{
   if(!crossOwnerMutation(entry.action))return true
+  // Pre-A13 commands with independently minted UUIDs are permanently UNKNOWN.
+  // Never repackage, query a different original, or POST a replacement key.
+  if(!canonicalUuid4(entry.commandId)||entry.operationUuid!==entry.commandId)return false
   if(!port.bff?.inspectOriginalCommand||!entry.sourceOperation||!entry.sourceTarget)return false
   const binding={operation:entry.sourceOperation,target:entry.sourceTarget}
   // A write may advance owner revision. Recheck the current actor/scope/owner
