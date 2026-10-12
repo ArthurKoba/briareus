@@ -31,7 +31,7 @@
       "runtime_validated": false,
       "runtime_version": "computed_from_actual_image_source_by_uv_build_without_wheel",
       "uv_mode": "uv run --frozen --no-sync --no-dev --project /app --directory /app/src",
-      "version": "0.1.0+adminapi.s222975b37a5f",
+      "version": "0.1.0+adminapi.s19261547c6b8",
       "watches": [
         "deploy/admin-api/Dockerfile",
         "deploy/admin-api/Dockerfile.dockerignore",
