@@ -1,0 +1,9 @@
+# Control Panel API — Rauthy transition
+
+**State: source-only, not switched to active Coolify app.** New independently deployable Python Control Panel API is separate from the existing `briareus-admin-api` alias and legacy `services/admin-api` rollback. Do not deploy both with the same DNS alias or remove existing `Gateway /api/*` behavior before replacing the running app and validating real auth.
+
+`GET /api/auth/oidc/config` obtains and validates the actual upstream Rauthy OpenID Connect discovery document (strict issuer comparison, HTTPS endpoints, Authorization Code and PKCE S256) and returns only public client settings. It caches the metadata for 5 minutes; unavailable/unconfigured issuer fails with 503. `GET /health/live` remains local when the identity service is unavailable. No password, client secret, token, registration or grant is accepted by this route.
+
+Config supplied by the Rauthy owner: canonical public `OIDC_ISSUER` and public `OIDC_CLIENT_ID`, as protected/approved environment-scoped references or nonsecret app settings as applicable. The concrete public issuer and OAuth client ID are not known until the other agent publishes and verifies them. Avoid inventing an issuer URL or exposing client secrets to the browser.
+
+**Remaining integration:** verified authorization-code+PKCE callback and session storage with anti-CSRF state/nonce; token and JWKS verification; scoped Rauthy Admin REST adapter once verified upstream API permissions and contract are available; authenticated `/api/platform/me` by real Platform owner membership; Authorization/Cedar grant/approval/revocation owner ports; production routes and service-local folder Cutover with existing Coolify UUID and Gateway alias. Do not conflate OAuth UserSession, AgentSession or persistent Terminal execution session. Do not make a new JWT issuer inside Control Panel API.
