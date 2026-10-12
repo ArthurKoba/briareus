@@ -42,8 +42,6 @@ class BrowserManager:
         screen_height: int | None = None,
         max_snapshot_text_chars: int,
         max_snapshot_elements: int,
-        max_agent_tabs: int = 6,
-        max_tabs: int = 8,
         locale: str = "ru-RU",
         accept_language: str = "ru-RU,ru,en-US,en",
         display: str = ":99",
@@ -72,13 +70,6 @@ class BrowserManager:
         self.chromium_args = tuple(arg.strip() for arg in chromium_args if arg.strip())
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
-        if not 1 <= max_agent_tabs <= max_tabs:
-            raise ValueError("max_agent_tabs must be between 1 and max_tabs")
-        self.max_agent_tabs = max_agent_tabs
-        self.max_tabs = max_tabs
-        self._tab_create_lock = asyncio.Lock()
-        self._agent_open_semaphore = asyncio.Semaphore(2)
-        self._agent_page_ids: set[str] = set()
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._browser_process: asyncio.subprocess.Process | None = None
@@ -452,7 +443,6 @@ class BrowserManager:
 
         self._pages.clear()
         self._page_ids.clear()
-        self._agent_page_ids.clear()
         self._page_labels.clear()
         self._page_agent_access.clear()
         async with self._operator_lock:
@@ -501,7 +491,9 @@ class BrowserManager:
         try:
             await page.goto("chrome://extensions/", wait_until="domcontentloaded")
             requested_ids = (
-                None if extension_ids is None else [value for value in extension_ids if value]
+                None
+                if extension_ids is None
+                else [value for value in extension_ids if value]
             )
             result = await page.evaluate(
                 """
@@ -581,7 +573,9 @@ class BrowserManager:
                 },
             )
         except Exception as exc:
-            raise BrowserError(f"Chromium developer-mode synchronization failed: {exc}") from exc
+            raise BrowserError(
+                f"Chromium developer-mode synchronization failed: {exc}"
+            ) from exc
         finally:
             with contextlib.suppress(Exception):
                 await page.close()
@@ -591,11 +585,10 @@ class BrowserManager:
         extensions = payload.get("extensions")
         extension_items = extensions if isinstance(extensions, list) else []
         eligible_raw = payload.get("eligibleExtensionIds")
-        eligible_ids = (
-            {value for value in eligible_raw if isinstance(value, str)}
-            if isinstance(eligible_raw, list)
-            else set()
-        )
+        eligible_ids = {
+            value
+            for value in eligible_raw if isinstance(value, str)
+        } if isinstance(eligible_raw, list) else set()
         if extension_ids is None:
             self._managed_user_scripts_extension_ids = eligible_ids
         else:
@@ -606,7 +599,9 @@ class BrowserManager:
                     self._managed_user_scripts_extension_ids.discard(extension_id)
 
         failures = [
-            item for item in extension_items if isinstance(item, dict) and not bool(item.get("ok"))
+            item
+            for item in extension_items
+            if isinstance(item, dict) and not bool(item.get("ok"))
         ]
         if failures:
             details = "; ".join(
@@ -650,13 +645,6 @@ class BrowserManager:
             raise BrowserError(f"browser color scheme update failed: {exc}") from exc
 
     def _on_context_page(self, page: Page) -> None:
-        # Direct CDP/DevTools tab creation bypasses browser_open. Reject only
-        # *new* excess tabs; do not close existing user/operator tabs.
-        context = self._context
-        if context is not None and self._live_tab_count(context) > self.max_tabs:
-            task = asyncio.create_task(page.close(), name="browser-reject-overflow-tab")
-            task.add_done_callback(lambda item: item.exception() if not item.cancelled() else None)
-            return
         self._register_page(page)
         task = asyncio.create_task(
             self._apply_color_scheme(page), name="browser-apply-color-scheme"
@@ -703,24 +691,6 @@ class BrowserManager:
             "url": page.url,
         }
 
-    @staticmethod
-    def _live_tab_count(context: BrowserContext) -> int:
-        return sum(not page.is_closed() for page in context.pages)
-
-    def _require_tab_capacity(self, context: BrowserContext) -> None:
-        if self._live_tab_count(context) >= self.max_tabs:
-            raise BrowserError(
-                f"browser tab limit reached ({self.max_tabs}); "
-                "reuse an existing page_id or close a tab before opening another"
-            )
-
-    def _live_agent_tab_count(self) -> int:
-        return sum(
-            page is not None and not page.is_closed()
-            for page_id in self._agent_page_ids
-            if (page := self._pages.get(page_id)) is not None
-        )
-
     def _register_page(self, page: Page) -> str:
         key = id(page)
         existing = self._page_ids.get(key)
@@ -737,7 +707,6 @@ class BrowserManager:
             self._page_ids.pop(id(page), None)
         self._page_labels.pop(page_id, None)
         self._page_agent_access.pop(page_id, None)
-        self._agent_page_ids.discard(page_id)
         for owner_token, selected_page_id in list(self._operator_pages.items()):
             if selected_page_id == page_id:
                 self._operator_pages[owner_token] = ""
@@ -932,14 +901,13 @@ class BrowserManager:
             "executable_path": self.executable_path,
             "profile_dir": str(self.profile_dir),
             "dev_extensions": self.dev_extensions(),
-            "managed_user_scripts_extension_count": len(self._managed_user_scripts_extension_ids),
+            "managed_user_scripts_extension_count": len(
+                self._managed_user_scripts_extension_ids
+            ),
             "user_scripts_follow_developer_access": True,
             "user_scripts_sync_error": self._user_scripts_sync_error,
             "observed": observed,
             "page_count": len(pages),
-            "max_tabs": self.max_tabs,
-            "max_agent_tabs": self.max_agent_tabs,
-            "agent_tab_count": self._live_agent_tab_count(),
             "pages": pages,
         }
 
@@ -950,28 +918,18 @@ class BrowserManager:
         return {"count": len(pages), "pages": pages}
 
     async def open(self, url: str, page_id: str = "") -> JsonObject:
-        # At most two in-flight agent navigations, including reused tabs.
-        async with self._agent_open_semaphore:
-            context = await self._ensure_started()
-            target_url = self._url(url)
-            self._require_agent_access(page_id)
-            if page_id:
-                page = await self._page(page_id)
-            else:
-                async with self._tab_create_lock:
-                    self._require_tab_capacity(context)
-                    if self._live_agent_tab_count() >= self.max_agent_tabs:
-                        raise BrowserError(
-                            f"agent tab limit reached ({self.max_agent_tabs}); "
-                            "reuse a page_id or call browser_close_page"
-                        )
-                    page = await context.new_page()
-                    page_id = self._register_page(page)
-                    self._agent_page_ids.add(page_id)
-            response = await page.goto(target_url, wait_until="domcontentloaded")
-            result = await self._summary(page_id, page)
-            result["http_status"] = response.status if response is not None else None
-            return result
+        context = await self._ensure_started()
+        target_url = self._url(url)
+        self._require_agent_access(page_id)
+        if page_id:
+            page = await self._page(page_id)
+        else:
+            page = await context.new_page()
+            page_id = self._register_page(page)
+        response = await page.goto(target_url, wait_until="domcontentloaded")
+        result = await self._summary(page_id, page)
+        result["http_status"] = response.status if response is not None else None
+        return result
 
     async def snapshot(
         self,
@@ -1369,10 +1327,8 @@ class BrowserManager:
     async def operator_new_page(self, owner_token: str, url: str = "") -> JsonObject:
         self._require_operator(owner_token)
         context = await self._ensure_started()
-        async with self._tab_create_lock:
-            self._require_tab_capacity(context)
-            page = await context.new_page()
-            page_id = self._register_page(page)
+        page = await context.new_page()
+        page_id = self._register_page(page)
         if url.strip():
             await page.goto(self._operator_url(url), wait_until="domcontentloaded")
         async with self._operator_lock:
@@ -1498,12 +1454,10 @@ class BrowserManager:
         self._require_operator(owner_token)
         if not self._closed_pages:
             raise BrowserError("no recently closed browser tab")
-        context = await self._ensure_started()
-        async with self._tab_create_lock:
-            self._require_tab_capacity(context)
-            page = await context.new_page()
-            page_id = self._register_page(page)
         item = self._closed_pages.pop()
+        context = await self._ensure_started()
+        page = await context.new_page()
+        page_id = self._register_page(page)
         url = str(item.get("url") or "about:blank")
         if url != "about:blank":
             await page.goto(self._operator_url(url), wait_until="domcontentloaded")

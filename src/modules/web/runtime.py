@@ -68,8 +68,6 @@ _browser = BrowserManager(
     chromium_args=(*_browser_profile.chromium_args, *resolve_chromium_gpu_args()),
     max_snapshot_text_chars=_browser_settings.max_snapshot_text_chars,
     max_snapshot_elements=_browser_settings.max_snapshot_elements,
-    max_agent_tabs=_browser_settings.max_agent_tabs,
-    max_tabs=_browser_settings.max_tabs,
 )
 
 register_curl_tools(
@@ -90,7 +88,6 @@ register_browser_tools(
 
 _devtools = DevToolsProxyRuntime(_browser, _browser_settings)
 mcp.mount(_devtools.server, namespace="devtools")
-
 
 async def _external_browser_policy() -> BrowserRuntimePolicy:
     return await asyncio.to_thread(_management.browser_runtime_policy)

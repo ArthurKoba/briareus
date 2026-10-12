@@ -145,35 +145,6 @@ Coolify may override these restart-required infrastructure limits with:
 
 Increase these only deliberately for a known workload; do not remove the containment boundary.
 
-## Host memory and agent tab containment
-
-The production Compose application caps each heavy workload rather than relying
-on the host's 512 MiB swap allocation:
-
-- Web: 2560 MiB memory and equal total memory+swap (no container swap), 2 CPUs,
-  768 PIDs. Overrides: WEB_MEMORY_LIMIT, WEB_MEMORY_SWAP_LIMIT,
-  WEB_CPU_LIMIT, WEB_PIDS_LIMIT.
-- Analysis: 2560 MiB memory and equal memory+swap, 2 CPUs, 256 PIDs.
-  Overrides: ANALYSIS_MEMORY_LIMIT, ANALYSIS_MEMORY_SWAP_LIMIT,
-  ANALYSIS_CPU_LIMIT, ANALYSIS_PIDS_LIMIT.
-- Ghidra adapter: lightweight Python process only, 512 MiB RAM, no swap,
-  1 CPU, 128 PIDs. The separate ghidra-mcp Java application has its own
-  Compose limits and worker heap policy in ArthurKoba/ghidra-mcp.
-
-The managed Chromium allows at most 6 agent-created tabs and 8 total live tabs
-by default (BROWSER_MAX_AGENT_TABS, BROWSER_MAX_TABS). At most 2
-browser_open agent navigations are in flight concurrently. When at capacity,
-agents must navigate an existing page_id or explicitly close a tab.
-Playwright's page-create event rejects only *new* overflow tabs created through
-CDP; existing browser/operator pages are never automatically destroyed. Tabs
-restored from the persistent profile also remain untouched. This is a best-effort
-policy for the managed browser, not a strict boundary for independent
-external browser sessions. The container cgroup is the final safety boundary.
-
-Large tasks may fail with explicit capacity errors or container OOM instead of
-exhausting the entire host. Deploy source changes only after review because
-Coolify's Compose reconcile can recreate the containers.
-
 ## Persistent browser identity
 
 The `web` image runs persistent Chromium headful by default on an internal Xvfb display.
