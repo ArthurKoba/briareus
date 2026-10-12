@@ -1,33 +1,41 @@
-# Portable Authorization deployment. Supply runtime secrets externally.
-# PostgreSQL and Valkey are independent existing services, not owned here.
+# Private Authorization release: owns only briareus_access logical PostgreSQL DB.
+# Independent migration runs in normal ASGI owner lifespan, not a sidecar.
 services:
-  authorization:
+  briareus-authorization:
     build:
       context: ../..
       dockerfile: services/authorization/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     stop_grace_period: 30s
     environment:
-      # Portable Compose accepts an explicit public issuer; fail closed at app startup if missing.
-      AUTHORIZATION_PUBLIC_BASE_URL: ${AUTHORIZATION_PUBLIC_BASE_URL:-}
-      MCP_PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:?}
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-authorization}
-      POSTGRES_USER: ${POSTGRES_USER:?}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      AUTHORIZATION_BOOTSTRAP_USERNAME: ${AUTHORIZATION_BOOTSTRAP_USERNAME:?}
-      AUTHORIZATION_BOOTSTRAP_PASSWORD: ${AUTHORIZATION_BOOTSTRAP_PASSWORD:?}
-      AUTHORIZATION_JWT_PRIVATE_KEY_PEM: ${AUTHORIZATION_JWT_PRIVATE_KEY_PEM:?}
-      AUTHORIZATION_JWT_KEY_ID: ${AUTHORIZATION_JWT_KEY_ID:-authorization-1}
-      AUTHORIZATION_GATEWAY_SERVICE_TOKEN: ${AUTHORIZATION_GATEWAY_SERVICE_TOKEN:?}
-      AUTHORIZATION_ADMIN_SERVICE_TOKEN: ${AUTHORIZATION_ADMIN_SERVICE_TOKEN:?}
-      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
+      TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:?}"
+      POSTGRES_HOST: "briareus-postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "briareus_access"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
     expose:
       - "8000"
+    networks:
+      briareus:
+        aliases: ["briareus-authorization"]
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "2", "http://127.0.0.1:8000/health"]
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8000/health/live"]
       interval: 10s
       timeout: 3s
-      start_period: 30s
-      retries: 6
+      retries: 8
+      start_period: 180s
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+networks:
+  briareus:
+    external: true
+    name: briareus-net
