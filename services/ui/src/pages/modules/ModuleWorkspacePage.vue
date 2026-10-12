@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import { ArrowLeft, ChevronRight, CircleAlert, Clock3, FolderOpen, Github, Monitor, Settings2, TerminalSquare, WifiOff } from "lucide-vue-next"
+import { ArrowLeft, ChevronRight, CircleAlert, Monitor, Settings2, WifiOff } from "lucide-vue-next"
 import { useUiPreferences } from "@/shared/lib/preferences"
 import { setLocale } from "@/shared/i18n"
+import ModuleOperationsPanel from "@/pages/modules/ModuleOperationsPanel.vue"
 import { moduleById, modules, type ModuleId, type ModuleSetting, type ModuleView } from "@/features/modules/catalog"
 import Button from "@/shared/ui/Button.vue"
 
@@ -24,8 +25,6 @@ const words=computed(()=>lang.value==="ru"?{
 })
 const filter=ref("")
 const visible=computed(()=>modules.filter(m=>`${m.title.en} ${m.title.ru} ${m.summary.en} ${m.summary.ru}`.toLocaleLowerCase().includes(filter.value.toLocaleLowerCase().trim())))
-const modulesWithGit=new Set<ModuleId>(["github","gitlab"])
-const tabular=computed(()=>selected.value==="web"?words.value.tabs:selected.value==="files"?words.value.files:selected.value==="terminal"?words.value.jobs:modulesWithGit.has(selected.value)?words.value.git:words.value.noData)
 function onSetting(event:Event, field:ModuleSetting):void {
  const input=event.target as HTMLInputElement|HTMLSelectElement
  values.value={...values.value,[field.key]:field.kind==="toggle"?(input as HTMLInputElement).checked:input.value}
@@ -70,11 +69,10 @@ function selectedSetting(field:ModuleSetting):string|boolean {return values.valu
               <div v-for="(capability,i) in module.features" :key="i" class="flex gap-2 rounded-xl border border-border bg-muted/20 p-3 text-sm text-foreground"><span class="mt-1 size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true"/><span>{{capability[lang]}}</span></div>
             </div>
           </section>
+          <ModuleOperationsPanel :module="selected" />
           <section class="settings-card space-y-3">
             <h4 class="text-sm font-semibold">{{words.connection}}</h4>
             <p class="text-sm text-muted-foreground" role="status">{{words.unavailable}}</p>
-            <div v-if="selected==='web'" class="rounded-lg border border-dashed border-border bg-muted/10 p-5 text-center"><Monitor class="mx-auto size-7 text-muted-foreground" aria-hidden="true"/><h5 class="mt-3 text-sm font-semibold">{{words.tabs}}</h5><p class="mt-2 text-xs text-muted-foreground">{{words.emptyTabs}}</p></div>
-            <div v-else class="overflow-x-auto rounded-lg border border-border p-4 text-sm text-muted-foreground"><div class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide"><FolderOpen v-if="selected==='files'" class="size-4"/><TerminalSquare v-else-if="selected==='terminal'" class="size-4"/><Github v-else-if="modulesWithGit.has(selected)" class="size-4"/><Clock3 v-else class="size-4"/>{{tabular}}</div><p>{{modulesWithGit.has(selected)?words.gitRecords:words.noData}}</p></div>
           </section>
         </div>
         <div v-else-if="view==='settings'" class="space-y-4" role="tabpanel">
