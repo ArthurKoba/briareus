@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue"
 import { setLocale } from "@/shared/i18n"
-import { useUiPreferences } from "@/shared/lib/preferences"
+import { useUiPreferences, type ThemePreference } from "@/shared/lib/preferences"
 import { useI18n } from "vue-i18n"
 import { checkControlPanelAccess, type ControlPanelAccessState } from "@/features/platform/api/control-panel-access"
 
 const { t } = useI18n()
 const { locale, theme } = useUiPreferences()
-function toggleTheme() {
-  theme.value = theme.value === "dark" ? "light" : "dark"
-}
+function selectTheme(value: ThemePreference) { theme.value = value }
 const state = ref<ControlPanelAccessState>("checking")
 let controller: AbortController | null = null
 let generation = 0
@@ -53,7 +51,11 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null })
           <button type="button" class="min-h-10 min-w-11 rounded-md px-3 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="locale==='ru'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="locale==='ru'" lang="ru" @click="setLocale('ru')">RU</button>
           <button type="button" class="min-h-10 min-w-11 rounded-md px-3 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="locale==='en'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="locale==='en'" lang="en" @click="setLocale('en')">EN</button>
         </div>
-        <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :aria-label="theme==='dark'?t('panelAccess.switchToLight'):t('panelAccess.switchToDark')" @click="toggleTheme">{{ theme==='dark'?t('panelAccess.light'):t('panelAccess.dark') }}</button>
+        <div class="inline-flex max-w-full flex-wrap rounded-lg border border-border p-0.5" role="group" :aria-label="t('panelAccess.themeLabel')">
+          <button type="button" class="min-h-10 rounded-md px-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="theme==='system'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="theme==='system'" @click="selectTheme('system')">{{ t('panelAccess.themeSystem') }}</button>
+          <button type="button" class="min-h-10 rounded-md px-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="theme==='light'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="theme==='light'" @click="selectTheme('light')">{{ t('panelAccess.light') }}</button>
+          <button type="button" class="min-h-10 rounded-md px-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="theme==='dark'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="theme==='dark'" @click="selectTheme('dark')">{{ t('panelAccess.dark') }}</button>
+        </div>
       </div>
       <div class="mb-8">
         <p class="mb-2 text-xs font-bold uppercase tracking-widest text-primary">{{ t('panelAccess.firstStep') }}</p>
