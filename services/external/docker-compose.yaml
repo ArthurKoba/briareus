@@ -121,7 +121,8 @@ services:
     expose:
       - "8080"
     networks:
-      - briareus
+      briareus:
+        aliases: ["briareus-rauthy"]
 
 # Physical volume names intentionally preserve the existing live storage IDs;
 # runtime/container/DNS naming is environment-neutral. Rename storage only via explicit data migration.

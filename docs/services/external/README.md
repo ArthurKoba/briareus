@@ -80,29 +80,32 @@ reinitialized or used by Rauthy. Do not set `MIGRATE_DB_FROM`.
 the exact owner approval before real deployment; the source diff alone must
 never be called proof that new schema/data exists.
 
-## Coolify safe migration — two separate phases
+## Direct migration of unused source and live activation
 
-1. **Publish source only**: stage `services/external/**` and review it.
-   Retain `deploy/data/**` as the rollback source while live External Services
-   still has Base `/deploy/data`. Do not merge any deletion of the old path.
-   Watch isolation means the new source files should not implicitly redeploy
-   the currently configured Data stack.
-2. **Operator-supplied secrets + exact existing Application cutover**:
-   validate protected references without revealing values, saved volumes,
-   network, parser-managed file config and 3 private services. Change the
-   SAME Application Base to `/services/external`, set exact Watch, then
-   deploy after checking whether Rauthy bootstrap/database inputs are ready.
-   Verify Postgres/Valkey health, the old four owner DBs and Rauthy's
-   own database and persistent state separately. Confirm real Rauthy HTTP
-   health, OIDC discovery, issuer, JWKS and restart persistence. Gateway
-   OAuth routing, signed token audience and first login are independent gates.
-   Retire `deploy/data/**` only after the new stack is demonstrably stable.
-   Use the old published source / unchanged volumes as the rollback baseline;
-   never run `down -v`, prune volumes or bulk wipe during cutover.
+The owner confirmed the old **deployment source path is unused as a development
+contract** and requested immediate cleanup. The Git change removes
+`deploy/data/**` in the same commit as the complete relocation to
+`services/external/**`. Previous Git revisions remain available for
+rollback; the old folder is not duplicated as a second active manifest.
 
-The current `deploy/APPLICATIONS.json` and remote Coolify Base/Watch remain
-on the **old** path until the physical cutover. They must be updated atomically
-with the live operator change, not falsely marked as already switched.
+The existing Coolify Application UUID is retained. Its CURRENT observed
+Base before this migration was `/deploy/data`, with both existing data
+volumes mounted. Its new desired-state Base is `/services/external`,
+Compose location `/docker-compose.coolify.yaml`, and source Watch
+`services/external/**`. Merely changing the Git registry does not
+update existing Coolify parser/saved state. The stack must not be
+started with unset required Rauthy secrets.
 
-Validation states: SOURCE/STATIC is not Docker BUILD, persistent Coolify
-configuration, live Rauthy identity, OAuth login or protected MCP acceptance.
+Operator supplies the protected Rauthy values and valid proxy CIDR.
+The existing Application is then repointed and re-parsed; verify all
+three service containers, old PostgreSQL database access, Valkey ping,
+Rauthy startup/real issuer/discovery/JWKS, and restart persistence.
+Only after Rauthy is verified may Gateway route live OIDC traffic.
+Do not remove the old user Identity until real OIDC login works.
+
+The existing PostgreSQL/Valkey volumes and network must NOT be wiped,
+recreated or pruned. An unused old source path is not evidence that the
+live underlying database is empty or disposable.
+
+Validation stages: Git/source, YAML/parser, Coolify saved configuration,
+container and persistent state, then actual OIDC and OAuth consumer behavior.

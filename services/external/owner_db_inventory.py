@@ -20,8 +20,11 @@ def main() -> int:
     else:
         print('AUTO BOOTSTRAP OWNER DATABASES — LIVE STATUS UNVERIFIED')
         for row in data['initial']:
-            print(f"{row['owner']}: database={row['database']} source_user={row['role_env']} secret_source={row['secret_env']}")
-        print('PostgreSQL creates the five DBs at start; each ASGI owner runs Alembic automatically')
+            print(
+                f"{row['owner']}: database={row['database']} "
+                f"source_user={row['role_env']} secret_source={row['secret_env']}"
+            )
+        print('Five databases are reconciled at Postgres startup')
     return 0
 
 

@@ -11,13 +11,13 @@
 Backend: `services/authorization/` Cedar and grants/AgentSessions/approvals, `services/api/` independent Python management BFF; the BFF is NEVER on live MCP dataplane. Rauthy itself replaces Human Identity/OAuth issuer, not Project Control and not AgentSession grants.
 Runtime: `services/gateway/` transport and coarse Authorization admission; `hands/<hand>/` per-effect enforcement and sandbox isolation.
 Frontend: `services/ui/` independent management UI with real OIDC + PKCE, truthful approval state.
-Deployment: `services/identity/` upstream Rauthy image/Compose/Dev provisioning and real issuer/storage/Admin API contract. It does not duplicate Backend/Cedar/Gateway/UI implementation.
+Deployment: `services/external/` upstream Rauthy alongside Postgres and Valkey/Dev provisioning and real issuer/storage/Admin API contract. It does not duplicate Backend/Cedar/Gateway/UI implementation.
 
 ## Autonomous release
 TRY: independently owned small real source change -> native build -> protected GitHub PR/reviewer merge -> exact approved Briareus Development app logs/real OAuth/HTTP/MCP outcome -> fix. No new unit/integration/e2e/smoke suites. Orchestrator accepts retrospectively; no prepublication review committee. Agent chats use short emoji TEXT, never tables; Orchestrator-to-owner start/stop TABLE has four lanes only.
 
 ## Security / data
-Coolify MUST stay inside Briareus MCP project UUID 3xshlpoghb9wcyhjgktlqzzp, development environment UUID naibrku1omovvmw5o0bcnp5c, exact 14 existing allowed app UUIDs in docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Forbidden EVEN TO VIEW other projects, non-Dev, Shared Environments, global resources or plaintext secrets. New Rauthy Application UUID is not automatically allowed; establish explicit exact target scope first. Existing Identity cannot be repurposed before real cutover and storage/rollback acceptance. Preserve DB/Valkey/volumes, no fictitious IdP issuer, principal/authorization grant or secret values.
+Coolify MUST stay inside Briareus MCP project UUID 3xshlpoghb9wcyhjgktlqzzp, development environment UUID naibrku1omovvmw5o0bcnp5c, exact 14 existing allowed app UUIDs in docs/operations/BRIAREUS_DEV_ACCESS_SCOPE.md. Forbidden EVEN TO VIEW other projects, non-Dev, Shared Environments, global resources or plaintext secrets. Rauthy must join the existing allowlisted External Services Application; do not create another app. Preserve legacy Identity until independently verified cutover and rollback acceptance. Preserve DB/Valkey/volumes, no fictitious IdP issuer, principal/authorization grant or secret values.
 Only Rauthy owns OAuth/JWT User tokens, Authorization owns Cedar policy/grants, Hands enforce resource access, Gateway transports traffic. No unsupported mass cutover or broad private-network access for sandbox executors.
 
-**Cutover precedence:** the flat layout document supersedes all older nested-folder examples. No central deploy/ target, no shared Compose restarts, no management API in Gateway→Authorization→Hand execution checks.
+**Cutover precedence:** the flat layout document supersedes all older nested-folder examples. No central deploy/ target, no cross-owner Compose restarts (External vendor stack is explicitly shared), no management API in Gateway→Authorization→Hand execution checks.

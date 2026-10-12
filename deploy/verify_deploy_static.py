@@ -25,7 +25,7 @@ OWNERS = {
     'resources': ('resources','briareus_resources','CATALOG'),
 }
 MODULES = frozenset({
-    'data','identity','authorization','platform','resources','admin-api','admin-ui',
+    'external','identity','authorization','platform','resources','admin-api','admin-ui',
     'gateway','files','terminal','web','svc','infrastructure','reverse',
 })
 REQUIRED = re.compile(r'\$\{([A-Z][A-Z0-9_]*):\?\}')
@@ -110,7 +110,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
         fatal('exact 14 module registry is required')
     if len({a['name'] for a in apps})!=len(apps):
         fatal('duplicate Application display name')
-    if {p.name for p in ROOT.iterdir() if p.is_dir() and p.name not in {'__pycache__', '.ruff_cache'}} != MODULES:
+    if {p.name for p in ROOT.iterdir() if p.is_dir() and p.name not in {'__pycache__', '.ruff_cache'}} != MODULES-{'external'}:
         fatal('wrong deploy module directories')
     if registry['provisioning_status']!='source_only_uv_direct_live_provisioning_blocked':
         fatal('live Apply guard not present')
@@ -123,16 +123,16 @@ def run(source_root: Path, allow_pending: bool) -> None:
         fatal('obsolete provider-parent FANIN must not be active')
     source_inputs=json.loads((ROOT/'SELECTIVE_UV_SOURCE.json').read_text())
     source_units=source_inputs['modules']
-    expected_python=MODULES-{'data','admin-ui'}
+    expected_python=MODULES-{'external','admin-ui'}
     if set(source_units)!=expected_python:
         fatal('source-only uv graph must cover exactly twelve Python Apps')
     check_independently_recomputed_source_graph(source_root,source_units)
     cfg=registry['configuration_contract']
-    manifest=json.loads((ROOT/'data/config/owner-databases.json').read_text())
+    manifest=json.loads((source_root/'services/external/config/owner-databases.json').read_text())
     rows={x['module']:x for x in manifest['initial']}
-    if set(rows)!=set(OWNERS) or manifest['provisioning_status']!='automatic_on_data_start_pending_live_observation':
-        fatal('four owner databases must be automatically created at Data startup')
-    if manifest.get('role_model') != 'shared_existing_postgres_principal_four_logical_databases':
+    if set(rows)!=set(OWNERS)|{'external'} or manifest['provisioning_status']!='automatic_on_data_start_pending_live_observation':
+        fatal('five databases including Rauthy must be reconciled at External startup')
+    if manifest.get('role_model') != 'shared_existing_postgres_principal_five_logical_databases':
         fatal('DB role configuration must use one accepted existing PostgreSQL principal')
     if manifest['legacy_database_do_not_migrate']!='briareus_dev':
         fatal('live historical DB may not be repurposed')
@@ -142,16 +142,17 @@ def run(source_root: Path, allow_pending: bool) -> None:
     for module in MODULES:
         a=next(x for x in apps if x['module']==module)
         name=next(iter(a['compose_services']),None)
-        if not name or len(a['compose_services'])!=(2 if module=='data' else 1):
+        if not name or len(a['compose_services'])!=(3 if module=='external' else 1):
             fatal(f'{module}: wrong declared service count')
-        if module!='data' and name!=f'briareus-{module}':
+        if module!='external' and name!=f'briareus-{module}':
             fatal(f'{module}: environment leaks into service naming')
-        if a['base_directory']!=f'/deploy/{module}' or a['docker_compose_location']!='/docker-compose.coolify.yaml':
+        if a['base_directory']!=('/services/external' if module=='external' else f'/deploy/{module}') or a['docker_compose_location']!='/docker-compose.coolify.yaml':
             fatal(f'{module}: invalid source path')
-        if a['watch_paths_source']!=f'deploy/{module}/docker-compose.coolify.yaml#x-watch-path-coolify':
+        if a['watch_paths_source']!=('services/external/docker-compose.coolify.yaml#x-watch-path-coolify' if module=='external' else f'deploy/{module}/docker-compose.coolify.yaml#x-watch-path-coolify'):
             fatal(f'{module}: duplicate/mispointed Watch Paths registry')
-        plain=ROOT/module/'docker-compose.yaml'
-        cool=ROOT/module/'docker-compose.coolify.yaml'
+        app_root=source_root/'services/external' if module=='external' else ROOT/module
+        plain=app_root/'docker-compose.yaml'
+        cool=app_root/'docker-compose.coolify.yaml'
         base=yaml.safe_load(plain.read_text())
         override=yaml.safe_load(cool.read_text())
         if base['networks']!=override['networks'] or base['networks']!=NETWORK:
@@ -189,7 +190,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
         # Telemetry configuration is never named SERVICE_*, which Coolify
         # reserves for generated values. Match real OpenTelemetry resource keys
         # through our Briareus-specific environment aliases.
-        if module not in {'data','admin-ui'}:
+        if module not in {'external','admin-ui'}:
             service = f'briareus-{module}'
             env = override['services'][service]['environment']
             if env.get('OTEL_SERVICE_NAMESPACE') != '${OTEL_SERVICE_NAMESPACE:?}':
@@ -211,7 +212,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
         for path in watches:
             if path in {'deploy/README.md','deploy/SHA256SUMS','deploy/APPLICATIONS.json','deploy/watch_impact.py'} or path.startswith('docs/'):
                 fatal(f'{module}: source-doc change triggers redeploy')
-        if f'deploy/{module}/docker-compose.yaml' not in watches or f'deploy/{module}/docker-compose.coolify.yaml' not in watches:
+        if not watch_covered(('services/external/' if module=='external' else f'deploy/{module}/')+'docker-compose.yaml',watches) or not watch_covered(('services/external/' if module=='external' else f'deploy/{module}/')+'docker-compose.coolify.yaml',watches):
             fatal(f'{module}: Compose watch missing')
         for service,body in base['services'].items():
             if 'ports' in body or body.get('network_mode') == 'host':
@@ -223,11 +224,16 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal(f'{module}: bad Coolify extends')
             for key,value in body.get('environment',{}).items():
                 actual=override['services'][service]['environment'].get(key)
-                if actual!=value:
+                if actual!=value and not (module=='external' and service=='briareus-rauthy' and key not in override['services'][service]['environment']):
                     fatal(f'{module}: base/Coolify ENV mismatch {key}')
             used=set(REQUIRED.findall(str(override['services'][service]['environment'])))
             bindings=a.get('shared_variables',{})
-            allowed_required=set(bindings) | ({'OTEL_SERVICE_NAME'} if module not in {'data','admin-ui'} else set())
+            allowed_required=set(bindings) | ({'OTEL_SERVICE_NAME'} if module not in {'external','admin-ui'} else set())
+            if module=='external':
+                allowed_required |= {'RAUTHY_HQL_SECRET_RAFT','RAUTHY_HQL_SECRET_API',
+                                     'RAUTHY_ENC_KEYS','RAUTHY_ENC_KEY_ACTIVE',
+                                     'RAUTHY_TRUSTED_PROXIES','RAUTHY_BOOTSTRAP_ADMIN_EMAIL',
+                                     'RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID'}
             if not used<=allowed_required:
                 fatal(f'{module}: required ENV lacks scoped reference: {used-allowed_required}')
             for key,ref in bindings.items():
@@ -235,20 +241,17 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 if (match is None or match.group(2)!=key
                         or key not in cfg[match.group(1)+'_shared']):
                     fatal(f'{module}: bad Shared binding {key}')
-        if module=='data':
-            if (ROOT/module/'greenfield_schema.py').exists():
+        if module=='external':
+            if (app_root/'greenfield_schema.py').exists():
                 fatal('manual metadata initializer is forbidden')
             expected_data={
-                'deploy/data/Dockerfile','deploy/data/Dockerfile.dockerignore',
-                'deploy/data/owner-bootstrap.psql',
-                'deploy/data/postgres-entrypoint.sh',
-                'deploy/data/docker-compose.yaml','deploy/data/docker-compose.coolify.yaml',
+                'services/external/**',
             }
             if set(watches)!=expected_data:
                 fatal('data: bootstrap inputs not fully watched')
-            docker=(ROOT/module/'Dockerfile')
-            shell=(ROOT/module/'postgres-entrypoint.sh')
-            sql=(ROOT/module/'owner-bootstrap.psql')
+            docker=(app_root/'Dockerfile')
+            shell=(app_root/'postgres-entrypoint.sh')
+            sql=(app_root/'owner-bootstrap.psql')
             if not all(p.is_file() for p in (docker,shell,sql)):
                 fatal('data: missing existing-PostgreSQL-container owner bootstrap source')
             # This release uses only the existing PostgreSQL user/password.
@@ -264,14 +267,14 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal('data: automatic PostgreSQL database provisioning missing')
             if 'FROM postgres:18.6-alpine' not in docker.read_text():
                 fatal('data: upstream PostgreSQL version changed')
-            copy_ignore=(ROOT/module/'Dockerfile.dockerignore').read_text()
-            if any(x not in copy_ignore for x in ('!deploy/data/owner-bootstrap.psql',
-                                                   '!deploy/data/postgres-entrypoint.sh')):
+            copy_ignore=(app_root/'Dockerfile.dockerignore').read_text()
+            if any(x not in copy_ignore for x in ('!services/external/owner-bootstrap.psql',
+                                                   '!services/external/postgres-entrypoint.sh')):
                 fatal('data: Dockerfile context silently excludes bootstrap source')
             if 'ENTRYPOINT ["/usr/local/bin/briareus-postgres-entrypoint"]' not in docker.read_text():
                 fatal('data: ordinary PostgreSQL entrypoint bootstrap gate missing')
             if base['services']['briareus-postgres']['build'] != {
-                'context':'../..','dockerfile':'deploy/data/Dockerfile'
+                'context':'../..','dockerfile':'services/external/Dockerfile'
             }:
                 fatal('data: PostgreSQL must build only its existing extended image')
             if base['services']['briareus-postgres']['healthcheck']['test'] != [
@@ -284,9 +287,18 @@ def run(source_root: Path, allow_pending: bool) -> None:
                 fatal('data: blocked owner bootstrap must preserve underlying DB process')
             if 'docker-entrypoint.sh "$@" &' not in shell.read_text() or 'ON_ERROR_STOP=1' not in shell.read_text():
                 fatal('data: SQL bootstrap not owned by existing PostgreSQL lifecycle')
-            for db in ('briareus_identity','briareus_access','briareus_platform','briareus_resources'):
+            for db in ('briareus_identity','briareus_access','briareus_platform','briareus_resources','briareus_rauthy'):
                 if db not in sql.read_text():
                     fatal(f'data: missing provisioned domain database: {db}')
+            if a['dockerfile'] != 'services/external/Dockerfile':
+                fatal('external: registry Dockerfile is not migrated')
+            rauthy = base['services']['briareus-rauthy']
+            if 'briareus_rauthy' != rauthy['environment']['PG_DB_NAME']:
+                fatal('external: Rauthy must own its independent database')
+            if 'ports' in rauthy or not rauthy['image'].startswith('ghcr.io/sebadob/rauthy@sha256:'):
+                fatal('external: Rauthy must use private pinned upstream image')
+            if set(base['volumes']) != {'postgres-data','valkey-data','rauthy-state'}:
+                fatal('external: vendor state volumes differ from intended topology')
             continue
         docker=ROOT/module/'Dockerfile'
         if not docker.is_file() or a['dockerfile']!=f'deploy/{module}/Dockerfile':
@@ -439,7 +451,7 @@ def run(source_root: Path, allow_pending: bool) -> None:
             if 'OTLP_BEARER_TOKEN' in str(override):
                 fatal('browser receives collector secret')
     for name in ('briareus-dev-postgres-v1','briareus-dev-valkey-v1'):
-        if name not in (ROOT/'data/docker-compose.yaml').read_text():
+        if name not in (source_root/'services/external/docker-compose.yaml').read_text():
             fatal('existing Data physical volume identity changed')
     if 'allow-owner' in (ROOT/'authorization/docker-compose.yaml').read_text():
         fatal('unapproved Auth runtime bypass')
