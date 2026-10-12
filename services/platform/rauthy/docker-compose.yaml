@@ -1,0 +1,62 @@
+services:
+  briareus-rauthy:
+    # Official multiarch GHCR v0.37.1 OCI index digest (2026-10-12).
+    image: ghcr.io/sebadob/rauthy@sha256:72b4734a7c52bd67cd544e7b72a4ab64932a7060844ef475fc2bb3d3da3074d9
+    command: ["serve", "-c", "/app/config.toml"]
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      # Existing PostgreSQL server; logical DB must be separately approved.
+      HIQLITE: "false"
+      PG_HOST: briareus-postgres
+      PG_PORT: "5432"
+      PG_DB_NAME: briareus_rauthy
+      PG_USER: "${POSTGRES_USER:?}"
+      PG_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      HQL_DATA_DIR: /app/data
+      HQL_NODE_ID: "1"
+      HQL_NODES: "1 localhost:8100 localhost:8200"
+      HQL_SECRET_RAFT: "${RAUTHY_HQL_SECRET_RAFT:?}"
+      HQL_SECRET_API: "${RAUTHY_HQL_SECRET_API:?}"
+      ENC_KEYS: "${RAUTHY_ENC_KEYS:?}"
+      ENC_KEY_ACTIVE: "${RAUTHY_ENC_KEY_ACTIVE:?}"
+      LISTEN_ADDRESS: 0.0.0.0
+      LISTEN_PORT_HTTP: "8080"
+      LISTEN_SCHEME: http
+      PUB_URL: briareus.koba-nexus.ru
+      PROXY_MODE: "true"
+      TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
+      RP_ID: briareus.koba-nexus.ru
+      RP_ORIGIN: "https://briareus.koba-nexus.ru:443"
+      RP_NAME: Briareus
+      BOOTSTRAP_ADMIN_EMAIL: "${RAUTHY_BOOTSTRAP_ADMIN_EMAIL:?}"
+      BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID: "${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_ARGON2ID:?}"
+      LOCAL_TEST: "false"
+      SWAGGER_UI_PUBLIC: "false"
+    configs:
+      - source: rauthy-configuration
+        target: /app/config.toml
+        mode: 0444
+    volumes:
+      - rauthy-state:/app/data
+    expose:
+      - "8080"
+    networks:
+      - briareus-net
+
+configs:
+  rauthy-configuration:
+    file: ./config.toml
+
+volumes:
+  rauthy-state:
+    name: briareus-dev-rauthy-v1
+
+networks:
+  briareus-net:
+    external: true

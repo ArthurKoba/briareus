@@ -1,0 +1,11 @@
+# A future application must have its *exact UUID* authorized before live use.
+x-watch-path-coolify:
+  - "services/platform/rauthy/config.toml"
+  - "services/platform/rauthy/docker-compose.yaml"
+  - "services/platform/rauthy/docker-compose.coolify.yaml"
+
+services:
+  briareus-rauthy:
+    extends:
+      file: ./docker-compose.yaml
+      service: briareus-rauthy
