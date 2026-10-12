@@ -109,7 +109,10 @@ export function createFirstUserClient(){
     invalidate()
     const generation=epoch
     let response:Response
-    try{response=await sameOrigin(ROUTES.login,"POST",signal,JSON.stringify({username,password}))}
+    // Gateway requires one immutable UUIDv4 for both original POST headers.
+    // Password login has no replay or automatic retry, including on timeout.
+    const operationUuid=crypto.randomUUID().toLowerCase()
+    try{response=await sameOrigin(ROUTES.login,"POST",signal,JSON.stringify({username,password}),undefined,operationUuid)}
     catch{throw new FirstUserWireError("unavailable")}
     if(!response.ok)throw new FirstUserWireError(classify(response.status))
     const receipt=parseLogin(await boundedJson(response))
@@ -138,7 +141,10 @@ export function createFirstUserClient(){
     const original=token
     invalidate()
     if(!original)return true
-    try{return (await sameOrigin(ROUTES.logout,"POST",signal,undefined,original)).status===204}
+    // The bearer is a credential, NEVER the original operation identity.
+    // A fresh UUID pair describes this one revocation attempt only.
+    const operationUuid=crypto.randomUUID().toLowerCase()
+    try{return (await sameOrigin(ROUTES.logout,"POST",signal,undefined,original,operationUuid)).status===204}
     catch{return false}
   }
   return {login,current,register,logout,invalidate,expiresAt:()=>expiresAt}
