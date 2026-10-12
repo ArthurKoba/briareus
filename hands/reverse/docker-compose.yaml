@@ -1,0 +1,38 @@
+services:
+  briareus-reverse:
+    build:
+      context: ../..
+      dockerfile: hands/reverse/Dockerfile
+    restart: "no"
+    stop_grace_period: 30s
+    environment:
+      TZ: "${TZ:-UTC}"
+      OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
+      OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:?}"
+    expose:
+      - "8000"
+    networks:
+      briareus:
+        aliases: ["briareus-reverse"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).close()"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    mem_limit: 1024m
+    cpus: 0.75
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - "/tmp:rw,nosuid,noexec,size=16m"
+    security_opt:
+      - no-new-privileges:true
+networks:
+  briareus:
+    external: true
+    name: briareus-net
