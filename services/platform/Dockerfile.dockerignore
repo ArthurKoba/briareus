@@ -1,5 +1,8 @@
 # Only this owner, its source graph, narrow shared runtime, and frozen uv inputs
 **
+!services/
+!shared/
+!services/platform/src/
 !services/common/
 !services/platform/
 !shared/build/
