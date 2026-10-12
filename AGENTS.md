@@ -1,6 +1,6 @@
-## CURRENT CHAT-REPORT-V2 and AUTONOMOUS LOOP (2026-10-12)
+## CURRENT OWNER ROUTER — TABLE + FILE COMMANDS + ORCHESTRATOR ACCEPTANCE (2026-10-12)
 
-Overrides historical CHAT-REPORT-V1, READY_FOR_REVIEW / НА ПРИЁМКУ handoff, no-push and manual-acceptance wording below. Each agent implements, commits, pushes, passes required CI, merges if GitHub permits, checks exact Briareus Development Coolify app logs and real HTTP, fixes and reports READY_FOR_AUDIT with exact SHA. Independent Orchestrator audit is AFTER merge. Concise user output: one header icon/lane/wave matching FIRST State; Сделано 1–4 NEW verified facts; Проверка actual CI/deploy/HTTP; Следующее 1–2 tasks; Блокер ONLY if actual unowned external block. No fake DONE, old status or lengthy report. READY/IN_PROGRESS/RELEASING/OBSERVING/READY_FOR_AUDIT/BLOCKED/WAITING defined in coordination/CONTRACTS.md TOP. No Shared Environments/other projects: access ONLY Briareus MCP development.
+Current canonical project contract: docs/operations/AGENT_COORDINATION.md (CHAT-REPORT-V2). Agent chat output is a Markdown TABLE. Tasks and corrections are exchanged via agents/<lane>.task.md and coordination/requests/<lane>.md; status and full self-test/CI/Dev deployment evidence in agents/<lane>.progress.md. Agent performs builds, tests, own PR/CI and scoped Dev verification independently; sets READY_FOR_AUDIT as a FILE handoff. ONLY Orchestrator records independent ACCEPTED or CHANGES_REQUESTED after examining exact published SHA and evidence, and returns findings via the SAME files. GitHub required checks and independent Reviewer PR merge still apply. No old pasted НА ПРИЁМКУ, no duplicate pre-push approvals. Strict Briareus Dev-only access retained.
 
 ---
 
@@ -63,7 +63,7 @@ This repository checkout belongs to the persistent Koba Terminal workspace
 - Do not modify production containers/databases or wipe existing infrastructure from this checkout.
 - Stop at architectural/security contradictions and record them before coding across that boundary.
 
-## Единый формат отчётов агентам и оркестратору
+## HISTORICAL report format — V1 superseded by current V2 table and file handoff
 
 **CHAT-REPORT-V1** из `coordination/CONTRACTS.md` обязателен для сообщений пользователю: статус с эмодзи, до 4 результатов, только проверенные проверки, 1–2 следующих действия. Сдача агентом `READY_FOR_REVIEW` оформляется fenced `text` кодовым блоком с копируемой строкой «НА ПРИЁМКУ»; статус `ACCEPTED` может выдавать только оркестратор после независимой проверки. Большие техотчёты и доказательства остаются в `agents/<lane>.progress.md`, не в чате.
 
