@@ -63,3 +63,24 @@ configuration DTO, update operation, permission proof and reconciliation path.
 UI shell coverage, NOT MCP tool execution, signed OAuth, live WebSocket,
 server settings persistence or full historical feature parity. The former
 Admin UI is a behavioral reference, not a permitted runtime auth shortcut.
+
+
+## OIDC transition: real Rauthy sign-in panel
+
+ControlPanelAccessPage embeds the independently controlled RauthySignIn
+feature without replacing legacy first-user compatibility until full
+provider/Platform acceptance. The feature reads only same-origin
+GET /api/auth/oidc/config and GET /api/auth/oidc/session. The
+signed-out state is exposed only when public provider config responds
+successfully and the mounted session route returns HTTP 401.
+While provider/client/session storage are missing, the UI accurately
+shows an unavailable message and does not present a dead login button.
+
+Once ready, login navigation uses the fixed Backend-controlled
+/api/auth/oidc/start Authorization Code + PKCE flow; never accepts
+credentials or client secrets in frontend JavaScript. Identity is shown
+only when the typed Backend session returns a signed upstream subject
+with platform_membership_verified=false and empty permissions.
+It does not unlock Projects/Teams/Hands. Same-origin POST logout is
+reported successful only on BFF HTTP 204 (private session revocation).
+OIDC backend and user/provider installation are separate runtime gates.

@@ -5,6 +5,7 @@ import { useUiPreferences, type ThemePreference } from "@/shared/lib/preferences
 import { useI18n } from "vue-i18n"
 import { checkControlPanelAccess, type ControlPanelAccessState } from "@/features/platform/api/control-panel-access"
 import { clearTemporaryBearer, FirstUserError, registerFirstUser, signInFirstUser, signOutFirstUser, type VerifiedFirstUser } from "@/features/platform/api/temporary-first-user"
+import RauthySignIn from "@/features/platform/ui/RauthySignIn.vue"
 
 const { t } = useI18n()
 const emit=defineEmits<{preview:[]}>()
@@ -183,6 +184,7 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null; au
         <p v-else-if="state==='unverified'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unverified') }}</p>
         <p v-else class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unavailable') }}</p>
       </div>
+      <RauthySignIn />
       <!-- Owner-requested TEMPORARY existing BFF login; no invented Project/Team grants. -->
       <div class="mt-5 space-y-4">
         <p class="text-xs leading-5 text-muted-foreground">{{labels.transitional}}</p>
