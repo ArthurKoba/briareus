@@ -49,3 +49,27 @@ The callback/session route remains unmounted until owner-approved OAuth
 client enrollment, one-time state store and current Platform User/membership
 resolution are integrated. Unsupported/expired/mismatched ID tokens always
 deny; do not fall back to legacy Identity JWT issuer or grant fake access.
+
+
+## Dedicated service credential for Rauthy management
+
+Rauthy Admin has the key record briareus-panel-api with only Users read,
+create, update; Groups read and Roles read. No secret has been created or
+installed yet. The operator must generate the API Key secret once and put it
+in the approved protected secret store. Configure the existing Control Panel
+API application variable RAUTHY_ADMIN_API_KEY as a reference to that secret.
+Never put a plaintext key in Git, JavaScript, browser output or logs.
+
+The server-only RauthyAdminClient uses Authorization: API-Key name$secret,
+the fixed Docker DNS briareus-rauthy:8080, no redirects, no environment HTTP
+proxy and time-limited private requests. GET /auth/v1/users verifies the
+Users:read permission without returning any user PII or the credential.
+An absent API Key leaves this feature unconfigured; there is no fallback
+to the browser administrator session or self-issued Briareus permissions.
+No public user-management route is mounted without current operator and
+Platform membership verification.
+
+Until operator-generated key material has been bound and the exact live
+Rauthy service request has succeeded, this is source-only, not real
+service-to-service acceptance. OAuth client_credentials is a separate
+service-to-resource identity mechanism, not the Rauthy Admin REST API Key.

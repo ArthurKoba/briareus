@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from ._legacy_identity import create_first_user_api_router
 from ._oidc import OidcProviderUnavailable, RauthyOidcAdapter
+from ._rauthy_admin import RauthyAdminClient
 
 
 class OidcBrowserConfiguration(BaseModel):
@@ -35,6 +36,10 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
                 raise RuntimeError("both OIDC_ISSUER and OIDC_CLIENT_ID must be configured")
             managed_provider = RauthyOidcAdapter(issuer=issuer, client_id=client_id)
 
+    # No browser cookie or User token can provision an admin API credential.
+    raw_api_key = os.environ.get("RAUTHY_ADMIN_API_KEY", "")
+    service_admin = RauthyAdminClient(api_key=SecretStr(raw_api_key)) if raw_api_key else None
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Preserve the existing /api/auth and /api/platform/me routes until
@@ -47,10 +52,14 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         ) as identity_client:
             _app.state.identity_client = identity_client
+            _app.state.rauthy_admin = service_admin
             try:
                 yield
             finally:
                 _app.state.identity_client = None
+                _app.state.rauthy_admin = None
+                if service_admin is not None:
+                    await service_admin.close()
                 if managed_provider is not None:
                     await managed_provider.close()
 
