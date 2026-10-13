@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import asdict
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
@@ -133,7 +134,7 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
             configuration = await managed_provider.public_configuration()
         except OidcProviderUnavailable as exc:
             raise HTTPException(status_code=503, detail="identity provider unavailable") from exc
-        return OidcBrowserConfiguration(**vars(configuration))
+        return OidcBrowserConfiguration(**asdict(configuration))
 
     return app
 
