@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from base64 import b64decode, b64encode
+from binascii import Error as Base64DecodeError
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -36,17 +38,23 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
                 raise RuntimeError("both OIDC_ISSUER and OIDC_CLIENT_ID must be configured")
             managed_provider = RauthyOidcAdapter(issuer=issuer, client_id=client_id)
 
-    # No browser cookie or User token can provision an admin API credential.
-    raw_api_key = os.environ.get("RAUTHY_ADMIN_API_KEY", "")
+    # Coolify/Docker Compose may interpret dollar signs in a raw API Key
+    # while resolving a Shared variable. Encode transport, decode in process.
+    # Base64 is not encryption: the value is always a protected runtime secret.
+    encoded_admin_key = os.environ.get("RAUTHY_ADMIN_API_KEY_BASE64", "")
     service_admin = None
     admin_key_state = "unconfigured"
-    if raw_api_key:
+    if encoded_admin_key:
         try:
-            service_admin = RauthyAdminClient(api_key=SecretStr(raw_api_key))
+            if not 1 <= len(encoded_admin_key) <= 8192 or not encoded_admin_key.isascii():
+                raise ValueError("invalid encoded service credential length")
+            raw_admin_bytes = b64decode(encoded_admin_key, validate=True)
+            if b64encode(raw_admin_bytes).decode("ascii") != encoded_admin_key:
+                raise ValueError("non-canonical encoded service credential")
+            service_admin = RauthyAdminClient(api_key=SecretStr(raw_admin_bytes.decode("ascii")))
             admin_key_state = "configured_unverified"
-        except RauthyAdminKeyRejected:
-            # Invalid optional integration must never crash the independent
-            # Control Panel API. Only this integration remains disabled.
+        except (ValueError, UnicodeError, Base64DecodeError, RauthyAdminKeyRejected):
+            # Invalid optional integration cannot crash the independent API.
             admin_key_state = "invalid_credential"
 
     @asynccontextmanager

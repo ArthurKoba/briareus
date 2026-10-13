@@ -84,3 +84,40 @@ The server-held state distinguishes unconfigured, invalid_credential and
 configured_unverified without exposing secret bytes or a public admin route.
 This does NOT establish Rauthy API Key acceptance; it requires a real upstream
 probe returning HTTP 200 after the protected shared key resolves.
+
+
+## Rauthy Admin API Key Compose-interpolation incident: encoded transport
+
+The original raw RAUTHY_ADMIN_API_KEY was passed through Coolify Compose.
+Its dollar sign and secret suffix were mistaken for a separate Compose
+variable. The resulting "unset variable" deployment warning exposed part
+of that credential in logs, while the running service received only
+the key name. Setting Literal on the Coolify Shared reference did not
+prevent the later Compose interpolation pass in the actual Development
+deployment. Old keys are COMPROMISED and must be revoked/rotated.
+
+The new runtime input RAUTHY_ADMIN_API_KEY_BASE64 carries a canonical
+standard Base64 encoding of the *entire new Rauthy API key*, including
+its name, dollar separator and secret suffix. Its protected Development
+Shared value and the corresponding Control Panel API Application reference
+must remain runtime-only, never build-time. Base64 contains no dollar sign,
+preventing Compose expansion at this boundary. Base64 is TRANSPORT, NOT
+ENCRYPTION: handle the encoded value with the same protections as the
+original secret; never log, reveal or include it in Git.
+
+The Python API decodes and checks canonical Base64 only in its private
+process and passes the original credential to the already-pinned Rauthy
+Admin REST Docker DNS peer, not to the browser. Empty or malformed input
+disables only this optional feature; it does not permit any fallback user
+session or bypass operator permissions.
+
+IMPORTANT MIGRATION GATE: remove both obsolete Production and Preview
+Application variable records with the old RAUTHY_ADMIN_API_KEY name
+before deploying the new source. Coolify parser-managed variables may
+remain even after deleting a declaration from Git. Revoke the previously
+exposed Rauthy keys in the operator UI. Do not touch the separate
+RAUTHY_ENCRYPTION_KEY used by External Services to encrypt stored data.
+After deploying the reviewed source and a *fresh* protected encoded secret,
+validate that no secret fragments appear in deployment logs, the API is
+healthy and a private Users:read probe returns HTTP 200 without cookies.
+Neither source readiness nor healthy state alone proves this acceptance.

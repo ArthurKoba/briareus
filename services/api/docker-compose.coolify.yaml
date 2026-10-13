@@ -10,7 +10,7 @@ services:
       TZ: "${TZ:-UTC}"
       OIDC_ISSUER: "${OIDC_ISSUER:-}"
       OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:-}"
-      RAUTHY_ADMIN_API_KEY: "${RAUTHY_ADMIN_API_KEY:-}"
+      RAUTHY_ADMIN_API_KEY_BASE64: "${RAUTHY_ADMIN_API_KEY_BASE64:-}"
 networks:
   briareus:
     external: true
