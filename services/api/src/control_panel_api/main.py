@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from ._legacy_identity import create_first_user_api_router
 from ._oidc import OidcProviderUnavailable, RauthyOidcAdapter
-from ._rauthy_admin import RauthyAdminClient
+from ._rauthy_admin import RauthyAdminClient, RauthyAdminKeyRejected
 
 
 class OidcBrowserConfiguration(BaseModel):
@@ -38,7 +38,16 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
 
     # No browser cookie or User token can provision an admin API credential.
     raw_api_key = os.environ.get("RAUTHY_ADMIN_API_KEY", "")
-    service_admin = RauthyAdminClient(api_key=SecretStr(raw_api_key)) if raw_api_key else None
+    service_admin = None
+    admin_key_state = "unconfigured"
+    if raw_api_key:
+        try:
+            service_admin = RauthyAdminClient(api_key=SecretStr(raw_api_key))
+            admin_key_state = "configured_unverified"
+        except RauthyAdminKeyRejected:
+            # Invalid optional integration must never crash the independent
+            # Control Panel API. Only this integration remains disabled.
+            admin_key_state = "invalid_credential"
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -53,11 +62,13 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
         ) as identity_client:
             _app.state.identity_client = identity_client
             _app.state.rauthy_admin = service_admin
+            _app.state.rauthy_admin_state = admin_key_state
             try:
                 yield
             finally:
                 _app.state.identity_client = None
                 _app.state.rauthy_admin = None
+                _app.state.rauthy_admin_state = None
                 if service_admin is not None:
                     await service_admin.close()
                 if managed_provider is not None:

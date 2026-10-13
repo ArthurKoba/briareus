@@ -73,3 +73,14 @@ Until operator-generated key material has been bound and the exact live
 Rauthy service request has succeeded, this is source-only, not real
 service-to-service acceptance. OAuth client_credentials is a separate
 service-to-resource identity mechanism, not the Rauthy Admin REST API Key.
+
+## Invalid private service credential must not crash public API
+
+A malformed or missing Rauthy Admin service credential now disables only that
+optional private adapter, not the entire Control Panel API application. The
+provider itself validates credential content and rights during a private
+Users:read request; local validation only rejects unsafe HTTP header bytes.
+The server-held state distinguishes unconfigured, invalid_credential and
+configured_unverified without exposing secret bytes or a public admin route.
+This does NOT establish Rauthy API Key acceptance; it requires a real upstream
+probe returning HTTP 200 after the protected shared key resolves.
