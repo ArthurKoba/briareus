@@ -3,6 +3,8 @@
 Current architecture: ../architecture/identity-rauthy-cedar-20261012.md.
 Four-agent program: rauthy-cedar-four-agent-migration-20261012.md.
 
+**Current owner-directed acceptance handoff (2026-10-13):** [Invite-only Rauthy login, UI/Backend synchronization and Cedar gates](rauthy-invite-login-handoff-20261013.md). Orchestrator reads this before updating its persistent lane task/progress files; it is a checkpoint, not a substitute for them or live acceptance.
+
 ## Who reports what
 Worker chats (Backend, Runtime, Frontend, Deployment): **3–5 short readable text lines with emoji**, NO Markdown tables, no copied full tasks/test logs. Each gives FIRST State, NEW result, own native build/Dev observation and actual blocker/next action. Only Orchestrator-to-owner management status gives ONE small FOUR-ROW table: agent | FIRST State | start/stop? | short reason. No forgotten fourth lane.
 
