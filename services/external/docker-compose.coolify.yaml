@@ -32,6 +32,8 @@ services:
       ENC_KEYS: "${RAUTHY_ENCRYPTION_KEY:?}"
       ENC_KEY_ACTIVE: "v1"
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
+      # Operator override for existing Rauthy admin MFA gate; default stays enforced.
+      ADMIN_FORCE_MFA: "${ADMIN_FORCE_MFA:-true}"
 
 # Explicit empty maps survive Coolify's Compose normalization.
 volumes:

@@ -142,3 +142,19 @@ live underlying database is empty or disposable.
 
 Validation stages: Git/source, YAML/parser, Coolify saved configuration,
 container and persistent state, then actual OIDC and OAuth consumer behavior.
+
+## Administrator MFA policy (Development override)
+
+Rauthy requires MFA for its built-in administrator by default. Upstream
+`ADMIN_FORCE_MFA` is a supported, nonsecret runtime switch. The Coolify
+Compose adapter uses `${ADMIN_FORCE_MFA:-true}` only for `briareus-rauthy`,
+so unknown or other environments keep mandatory administrator MFA.
+
+For an **explicitly authorized Development-only** temporary relaxation,
+set `ADMIN_FORCE_MFA=false` in the **existing External Services Application**
+variable, not in Team/Project/Environment Shared Secrets. Apply only with
+that application's approved Compose release. Do not change PostgreSQL,
+Valkey, volumes, encryption keys, bootstrap credentials, or OAuth settings.
+The Rauthy container must start with the new ENV for the admin UI to stop
+requiring enrollment. Restore `true` once a passkey is enrolled; disabling
+this gate leaves the administrator dependent on password-only authentication.
