@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 import httpx
 from pydantic import SecretStr
 
@@ -32,15 +30,17 @@ class RauthyAdminClient:
         api_key: SecretStr,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        name, sep, secret = api_key.get_secret_value().partition("$")
+        # Provider owns credential syntax and authentication. Do not reject
+        # a nonstandard but syntactically safe key at application startup.
+        # Local validation guards only HTTP header injection/bounds; a bad
+        # service credential is rejected by the actual upstream (401/403).
+        raw = api_key.get_secret_value()
         if (
-            sep != "$"
-            or re.fullmatch(r"[A-Za-z0-9_/-]{2,24}", name) is None
-            or not 64 <= len(secret) <= 512
-            or not secret.isascii()
-            or any(ch.isspace() for ch in secret)
+            not 1 <= len(raw) <= 4096
+            or not raw.isascii()
+            or any(ch.isspace() or ord(ch) < 33 or ord(ch) == 127 for ch in raw)
         ):
-            raise RauthyAdminKeyRejected("invalid configured Rauthy API Key")
+            raise RauthyAdminKeyRejected("unsafe configured Rauthy API Key")
         self._credential = api_key
         self._client = http_client or httpx.AsyncClient(
             base_url=_INTERNAL_ORIGIN,
