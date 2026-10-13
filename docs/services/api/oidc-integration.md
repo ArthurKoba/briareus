@@ -84,3 +84,40 @@ The server-held state distinguishes unconfigured, invalid_credential and
 configured_unverified without exposing secret bytes or a public admin route.
 This does NOT establish Rauthy API Key acceptance; it requires a real upstream
 probe returning HTTP 200 after the protected shared key resolves.
+
+## Coolify v4.4.6 Compose parser: preserve the Rauthy API Key as a reference
+
+The correct input for both `services/api/docker-compose*.yaml` is the
+**simple** `${RAUTHY_ADMIN_API_KEY}` expression, not the optional-default
+form `${RAUTHY_ADMIN_API_KEY:-}`. Rauthy requires the original full
+service API Key as a protected runtime credential, with the literal dollar
+separator. Base64 encoding of its credential format is not required.
+
+The exact upstream Coolify v4.4.6 parser
+(`bootstrap/helpers/parsers.php`, `applicationParser` and its legacy
+variant) branches on `replaceVariables`: simple `${VAR}` references are
+preserved in generated Compose and resolved by Docker from the runtime
+`.env`. Defaulted `${VAR:-}` references instead assign the database
+value into the generated Compose `environment:` map (lines near 1716 and
+3049), then resolve `{{environment.KEY}}` to its plaintext Shared value.
+That value can contain `$` and is passed into a subsequent Compose
+interpolation, causing a warning that prints the suffix as the missing
+variable name and causing truncated credentials at runtime.
+
+Coolify `app/Models/EnvironmentVariable.php` properly surrounds
+`is_literal` values with single quotes for the generated `.env` file.
+But those quotes cannot protect a separate plaintext copy injected into
+the generated Compose YAML. This explains why Literal was enabled yet
+insufficient on the defaulted-reference code path. The documented simple
+reference avoids the second plaintext YAML injection while retaining the
+original credential and ordinary provider authentication.
+
+Production/Preview `RAUTHY_ADMIN_API_KEY` Application bindings stay
+runtime-only and refer to the approved protected Shared variable. No key
+is ever put in Git or public API output. Past Rauthy Admin API Keys whose
+fragments reached deployment logs must be revoked and rotated. Validate
+with a new protected key and a real server-side GET `/auth/v1/users`:
+HTTP 200 means accepted service-only Users:read; 401/403 is not accepted.
+Before redeployment, confirm there are no other raw secret copies or
+stale custom generated Compose values. Do not change Rauthy `ENC_KEYS`
+or External Services database, volumes, or unrelated credentials.
