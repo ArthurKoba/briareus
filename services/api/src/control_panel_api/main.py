@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from ._legacy_identity import create_first_user_api_router
 from ._oidc import OidcProviderUnavailable, RauthyOidcAdapter
+from ._oidc_browser import OidcBrowserSessionStore, oidc_browser_router
 from ._rauthy_admin import RauthyAdminClient, RauthyAdminKeyRejected
 
 
@@ -49,6 +50,14 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
             # Control Panel API. Only this integration remains disabled.
             admin_key_state = "invalid_credential"
 
+    # Private, short-lived browser transactions/sessions, NOT platform grants.
+    # The Valkey credential is owned by the existing External Services stack.
+    raw_valkey_key = os.environ.get("OIDC_SESSION_VALKEY_PASSWORD", "")
+    browser_sessions = None
+    if raw_valkey_key:
+        with suppress(ValueError):
+            browser_sessions = OidcBrowserSessionStore(password=SecretStr(raw_valkey_key))
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Preserve the existing /api/auth and /api/platform/me routes until
@@ -71,6 +80,8 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
                 _app.state.rauthy_admin_state = None
                 if service_admin is not None:
                     await service_admin.close()
+                if browser_sessions is not None:
+                    await browser_sessions.close()
                 if managed_provider is not None:
                     await managed_provider.close()
 
@@ -93,6 +104,25 @@ def create_control_panel_api(*, provider: RauthyOidcAdapter | None = None) -> Fa
         }
 
     app.include_router(create_first_user_api_router())
+    if managed_provider is not None and browser_sessions is not None:
+        app.include_router(oidc_browser_router(managed_provider, browser_sessions))
+    else:
+        # Preserve a stable unconfigured API instead of a misleading 404.
+        @app.get("/api/auth/oidc/start")
+        async def oidc_start_unavailable() -> Response:
+            raise HTTPException(503, detail="OIDC login is not configured")
+
+        @app.get("/api/auth/oidc/callback")
+        async def oidc_callback_unavailable() -> Response:
+            raise HTTPException(503, detail="OIDC login is not configured")
+
+        @app.get("/api/auth/oidc/session")
+        async def oidc_session_unavailable() -> Response:
+            raise HTTPException(503, detail="OIDC login is not configured")
+
+        @app.post("/api/auth/oidc/logout")
+        async def oidc_logout_unavailable() -> Response:
+            raise HTTPException(503, detail="OIDC login is not configured")
 
     @app.get("/api/auth/oidc/config", response_model=OidcBrowserConfiguration)
     async def oidc_config(response: Response) -> OidcBrowserConfiguration:

@@ -121,3 +121,40 @@ HTTP 200 means accepted service-only Users:read; 401/403 is not accepted.
 Before redeployment, confirm there are no other raw secret copies or
 stale custom generated Compose values. Do not change Rauthy `ENC_KEYS`
 or External Services database, volumes, or unrelated credentials.
+
+
+## Browser OIDC code+PKCE login (Backend source slice)
+
+Routes added under the same public Gateway-managed /api/* path:
+- GET /api/auth/oidc/start: fetch trusted Rauthy discovery, generate S256 PKCE, cryptographic state/nonce, atomically reserve a five-minute private Valkey transaction, set Secure/HttpOnly/Lax __Host transaction cookie, and redirect to the upstream authorization endpoint;
+- GET /api/auth/oidc/callback: require exactly one matching state and code, atomically consume state once (GETDEL), exchange authorization_code using private verifier, validate real signed Rauthy ID token/JWKS/issuer/audience/nonce, issue opaque Secure/HttpOnly/Lax session cookie backed by a short-lived Valkey record, then return to /panel/;
+- GET /api/auth/oidc/session: return only the verified external Rauthy subject, issuer and client, with platform_membership_verified=false and permissions=[]; NEVER substitute for real Platform /me or internal Authorization proof;
+- POST /api/auth/oidc/logout: same-origin-only, revoke the Valkey session before clearing cookies. This is local BFF logout; provider-wide Rauthy SSO logout requires separate upstream integration.
+
+Callback URL is the confirmed same-origin Gateway route
+https://briareus.koba-nexus.ru/api/auth/oidc/callback .
+The OAuth client must be a real *public* Rauthy client, configured with the
+Authorization Code flow and S256 PKCE, exactly that callback and the actual
+registered client ID. Neither dummy credentials nor login-only Rauthy
+identity imply Briareus Platform Team/Project membership.
+
+Transactions and sessions use the existing password-protected internal
+briareus-valkey:6379 service with key namespace briareus:panel:oidc, atomic
+SET NX and GETDEL, 300-second transaction TTL and at most 900-second session
+TTL, bounded by signed ID token expiry. No access token or IdP password is
+stored in browser cookies. Valkey is never the durable grant/revocation
+authority for MCP actions. Logout fails closed when session deletion cannot
+be confirmed. Gateway, Rauthy and other stacks remain independently deployed.
+
+The owning Dev Control Panel API adds runtime-only variable
+OIDC_SESSION_VALKEY_PASSWORD; this is a **secret** and must be bound to an
+operator-owned protected Development Shared reference to the existing Valkey
+credential, not copied from Rauthy/Admin or written in Git. The two other
+variables OIDC_ISSUER and OIDC_CLIENT_ID are nonsecret; they must be set
+*together* only after actual Rauthy client registration. If any dependency
+is unavailable, existing /health/live and legacy first-user API continue
+running and new OIDC login endpoints return 503 (fail closed).
+
+Source/CI alone does not prove browser sign-in: activation requires a real
+OIDC client, runtime Valkey credential, Rauthy authorization_code callback,
+valid cookie session and explicit Platform-owned membership integration.
