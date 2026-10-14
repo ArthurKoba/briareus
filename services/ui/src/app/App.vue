@@ -53,7 +53,10 @@ const verified=computed(()=>projectContext.state.user?.active===true&&
   ["choose-project","project","team","operator"].includes(projectContext.state.scope))
 const missingTransport=computed(()=>platformPort.value===null)
 // Explicit nonprivileged preview, isolated from authenticated PlatformPort.
-const modulePreview=ref(false)
+// Anonymous /panel/ opens the nonprivileged module workspace, not an auth wall.
+const modulePreview=ref(true)
+const publicWorkspaceLabel=computed(()=>String(t("platform.navigation.mcp")))
+const publicAccessLabel=computed(()=>String(t("panelAccess.title")))
 const loading=ref(true)
 const unavailable=ref(false)
 /** Never infer DB schema version/head from unauthenticated health/ENV. */
@@ -101,12 +104,20 @@ function readOneUseLink():void {
 }
 function readHash():void {
   const [root,child]=location.hash.slice(1).split("/")
-  if(root!=="platform"){
-    // There is no legacy route and no legacy operator API fallback.
-    history.replaceState(null,"",`${location.pathname}${location.search}#platform/home`)
-    routePage.value="home"
-  }else routePage.value=child||"home"
+  // /panel/ and #platform/mcp are discoverable without a user session.
+  // Explicit #platform/home remains the account-access route.
+  const candidate=root==="platform"?(child||"mcp"):"mcp"
+  if(!validPlatformPage(candidate)){
+    const fallback=verified.value?"home":"mcp"
+    history.replaceState(null,"",`${location.pathname}${location.search}#platform/${fallback}`)
+    routePage.value=fallback
+  }else routePage.value=candidate
+  if(!verified.value)modulePreview.value=routePage.value==="mcp"
   mobileNavOpen.value=false
+}
+function showPublicRoute(page:"mcp"|"home"):void {
+  window.location.hash=`platform/${page}`
+  readHash()
 }
 function onHistory():void {
   readOneUseLink()
@@ -230,7 +241,7 @@ function handleMobileNavKey(event:KeyboardEvent):void {
 function handleSidebarClick(event:MouseEvent):void {
   if(mobileNavOpen.value&&event.target instanceof Element&&event.target.closest("nav button"))closeMobileNav()
 }
-watch(platformPort,()=>{modulePreview.value=false;observeCredential();expireAuth();void restore()})
+watch(platformPort,()=>{modulePreview.value=routePage.value==="mcp";observeCredential();expireAuth();void restore()})
 watch(routePage,async()=>{
   // SPA hash-route navigation must move keyboard/screen-reader focus from
   // the old menu into the new page heading after the lazy view changes.
@@ -271,13 +282,26 @@ onBeforeUnmount(()=>{
   <ToastHost />
   <div v-if="loading" role="status" class="grid min-h-screen place-items-center text-sm text-muted-foreground">{{t('app.loading')}}</div>
   <div v-else-if="modulePreview && !verified" class="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-9">
-    <ModuleWorkspacePage preview @close="modulePreview=false" />
+    <header class="mx-auto mb-4 flex w-full max-w-[1440px] flex-wrap items-center justify-between gap-3" aria-label="Briareus">
+      <div class="flex min-w-0 items-center gap-3">
+        <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-base font-black text-primary-foreground" aria-hidden="true">B</span>
+        <div class="min-w-0">
+          <p class="font-semibold tracking-tight">Briareus Control Panel</p>
+          <p class="text-xs text-muted-foreground">{{publicWorkspaceLabel}}</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <a href="/" class="inline-flex min-h-11 items-center rounded-lg px-3 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">{{t('app.publicWebsite')}}</a>
+        <Button variant="default" size="sm" @click="showPublicRoute('home')">{{publicAccessLabel}}</Button>
+      </div>
+    </header>
+    <ModuleWorkspacePage preview @close="showPublicRoute('home')" />
   </div>
   <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
     <div class="w-full">
       <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
       <!-- Transitional Identity login stays inside the scoped Control Panel BFF; no project grants are inferred. -->
-      <ControlPanelAccessPage @preview="modulePreview=true" />
+      <ControlPanelAccessPage @preview="showPublicRoute('mcp')" />
     </div>
   </div>
   <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
@@ -292,7 +316,7 @@ onBeforeUnmount(()=>{
     <div class="w-full">
       <p v-if="projectContext.state.scope==='suspended'" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('platform.suspendedNotice')}}</p>
       <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
-      <ControlPanelAccessPage @preview="modulePreview=true" />
+      <ControlPanelAccessPage @preview="showPublicRoute('mcp')" />
     </div>
   </div>
   <div v-else class="min-h-screen bg-background text-foreground md:grid" :class="sidebarCollapsed?'md:grid-cols-[68px_minmax(0,1fr)]':'md:grid-cols-[240px_minmax(0,1fr)]'">
