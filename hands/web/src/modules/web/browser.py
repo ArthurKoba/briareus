@@ -326,16 +326,6 @@ class BrowserManager:
             environment["DISPLAY"] = self.display
         return environment
 
-    def _browser_process_command(self) -> list[str]:
-        # /usr/bin/env -i clears Docker/Hand service credentials. Only the
-        # browser-owned nonsecret values are explicitly restored.
-        environment = ["/usr/bin/env", "-i"]
-        environment.extend(
-            f"{key}={value}"
-            for key, value in sorted(self._browser_subprocess_environment().items())
-        )
-        return [*environment, *self._browser_command()]
-
     async def _ensure_display_locked(self) -> str:
         if self.headless:
             return ""
@@ -378,12 +368,13 @@ class BrowserManager:
 
         await self._ensure_display_locked()
         playwright = await async_playwright().start()
-        command = self._browser_process_command()
+        command = self._browser_command()
         process: asyncio.subprocess.Process | None = None
         browser: Browser | None = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
+                env=self._browser_subprocess_environment(),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
