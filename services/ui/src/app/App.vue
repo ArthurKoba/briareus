@@ -13,6 +13,7 @@ import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
 import ScopedRealtimeStatus from "@/features/platform/ui/ScopedRealtimeStatus.vue"
 import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
 import ControlPanelAccessPage from "@/pages/platform/ControlPanelAccessPage.vue"
+import PublicIdentityStatus from "@/features/platform/ui/PublicIdentityStatus.vue"
 import ModuleWorkspacePage from "@/pages/modules/ModuleWorkspacePage.vue"
 import Button from "@/shared/ui/Button.vue"
 import ToastHost from "@/shared/notifications/ToastHost.vue"
@@ -290,7 +291,8 @@ onBeforeUnmount(()=>{
           <p class="text-xs text-muted-foreground">{{publicWorkspaceLabel}}</p>
         </div>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <PublicIdentityStatus />
         <a href="/" class="inline-flex min-h-11 items-center rounded-lg px-3 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">{{t('app.publicWebsite')}}</a>
         <Button variant="default" size="sm" @click="showPublicRoute('home')">{{publicAccessLabel}}</Button>
       </div>
