@@ -21,8 +21,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from ._mcp_admission import (
+    McpAdmissionRejected,
+    admission_error,
+    authorize_connection,
+    parse_connection_admission,
+)
 from .route_telemetry import RouteTelemetry
-from .single_origin import PUBLIC_HOST, SingleOriginGuard, unavailable_routes
+from .single_origin import MCP_ENDPOINTS, PUBLIC_HOST, SingleOriginGuard, unavailable_routes
 
 _PANEL_UPSTREAM = "http://briareus-admin-ui:8080"
 _API_UPSTREAM = "http://briareus-admin-api:8000"
@@ -247,6 +253,81 @@ class ThinGateway:
         """Forward only the real upstream Rauthy /auth/v1/* namespace."""
         return await self._proxy(request, rauthy=True)
 
+    async def mcp(self, request: Request) -> Response:
+        """Coarse `mcp.connect` admission; Hand independently checks each effect."""
+        try:
+            admission = parse_connection_admission(request)
+        except McpAdmissionRejected as exc:
+            return admission_error(exc.code, exc.status_code)
+        if request.headers.get("content-type", "").split(";", 1)[0].lower() != "application/json":
+            return admission_error("MCP_CONTENT_TYPE_INVALID", 415)
+        client = self._client
+        if client is None or self._draining:
+            return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
+        try:
+            await asyncio.wait_for(self._slots.acquire(), timeout=3)
+        except TimeoutError:
+            return admission_error("MCP_GATEWAY_BUSY", 503)
+        try:
+            blocked = await authorize_connection(client, admission)
+            if blocked is not None:
+                self._slots.release()
+                return blocked
+            payload = bytearray()
+            async for chunk in request.stream():
+                payload.extend(chunk)
+                if len(payload) > 1024 * 1024:
+                    self._slots.release()
+                    return admission_error("MCP_BODY_TOO_LARGE", 413)
+            headers = {
+                "Authorization": admission.bearer,
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            }
+            protocol = request.headers.getlist("mcp-protocol-version")
+            if len(protocol) == 1 and 0 < len(protocol[0]) <= 64:
+                headers["Mcp-Protocol-Version"] = protocol[0]
+            upstream_request = client.build_request(
+                "POST", admission.target, headers=headers, content=bytes(payload)
+            )
+            upstream = await client.send(upstream_request, stream=True)
+        except asyncio.CancelledError:
+            self._slots.release()
+            raise
+        except (httpx.HTTPError, ValueError, TimeoutError):
+            self._slots.release()
+            return admission_error("MCP_UPSTREAM_UNAVAILABLE", 503)
+        except BaseException:
+            self._slots.release()
+            raise
+        # HTTP MCP also uses 202 for accepted notifications, and Hands may
+        # independently deny a protected effect despite coarse admission.
+        if upstream.status_code not in {200, 202, 204, 400, 401, 403, 404, 409, 422, 429, 503}:
+            await upstream.aclose()
+            self._slots.release()
+            return admission_error("MCP_UPSTREAM_UNAVAILABLE", 503)
+        self._open.add(upstream)
+
+        async def stream() -> AsyncIterator[bytes]:
+            try:
+                async for data in upstream.aiter_raw():
+                    yield data
+            finally:
+                self._open.discard(upstream)
+                await upstream.aclose()
+                self._slots.release()
+
+        streamed = StreamingResponse(stream(), status_code=upstream.status_code)
+        # Only protocol framing metadata may cross the private Hand boundary.
+        # Never forward a provider Set-Cookie, Location or internal server hint.
+        streamed.raw_headers = [
+            (key, value)
+            for key, value in upstream.headers.raw
+            if key.decode("ascii").casefold()
+            in {"content-type", "mcp-session-id", "mcp-protocol-version"}
+        ] + [(b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff")]
+        return streamed
+
     async def _proxy(self, request: Request, *, rauthy: bool) -> Response:
         path = _raw_path(request)
         prefix = "/auth/v1" if rauthy else "/api"
@@ -335,6 +416,7 @@ def build_app() -> Starlette:
                 Route(spec.template, handlers[spec.target], methods=_METHODS)
                 for spec in _ROUTE_TABLE
             ],
+            *[Route(path, transport.mcp, methods=["POST"]) for path in MCP_ENDPOINTS.values()],
             *unavailable_routes(),
         ],
         middleware=[Middleware(SingleOriginGuard), Middleware(RouteTelemetry)],

@@ -8,6 +8,8 @@ from typing import Any
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .single_origin import MCP_ENDPOINTS
+
 _LOG = logging.getLogger("uvicorn.error")
 _SUPPORTED = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 
@@ -21,6 +23,8 @@ def _route(path: str) -> tuple[str, str]:
         return "panel-asset", "panel-ui"
     if path == "/api" or path.startswith("/api/"):
         return "api", "panel-api"
+    if path in MCP_ENDPOINTS.values():
+        return "mcp-admission", "authorization"
     if path.startswith("/hands/"):
         return "hands-disabled", "deny"
     return "other", "deny"

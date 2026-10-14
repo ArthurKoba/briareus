@@ -11,8 +11,46 @@ public `/auth/v1/*` namespace is transparently proxied to
 `briareus-rauthy:8080` without rewriting the issuer, method, path, query,
 body, cookies or return status. Gateway sets canonical HTTPS forwarding
 headers itself and ignores caller-supplied forwarding claims. Rauthy owns
-OAuth/OIDC login and tokens; Backend owns Panel API permissions. Unapproved
-`/hands/*`, root `/.well-known/*` and `/oauth/*` paths remain unavailable.
+OAuth/OIDC login and tokens; Backend owns Panel API permissions. Unapproved root `/.well-known/*`, `/oauth/*` and unknown `/hands/*`
+paths remain unavailable. Exact allowlisted `/hands/<hand>/mcp` POST paths
+are handled by the coarse-admission gate below, never a blanket proxy.
+
+## Fail-closed MCP connection admission (source, not live Permit acceptance)
+
+The only ingress targets are the six static `hands/<hand>/mcp` paths, where
+`hand` is `files`, `terminal`, `web`, `svc`, `infrastructure` or `reverse`.
+No arbitrary service name, user-provided upstream or open proxy is allowed.
+
+`POST` requires exactly one `Authorization: Bearer ...` and three required
+**untrusted selectors**: `X-Briareus-Project-UUID` (UUIDv4),
+`X-Briareus-Agent-Session-UUID` (UUIDv4) and
+`X-Briareus-Grant-Revision` (positive integer). A client-provided selector
+never establishes identity, grant, membership, authority or a peer identity.
+Gateway forwards the original bearer and only `{project_uuid,
+agent_session_uuid, action: "mcp.connect", expected_grant_revision}` to
+independent `briareus-authorization:8000` via
+`POST /internal/v1/authorization/decide`. Only its exact 200
+`{"allowed":true}` means coarse access; the Authorization owner is
+responsible for independent signed Rauthy identity, authenticated Gateway
+service peer, current Platform membership and revisioned Cedar grant.
+Gateway never verifies Cedar or constructs a User / AgentSession assertion.
+
+Absent bearer -> 401; absent/malformed selectors -> 400; upstream decision
+401/403 -> 401/403; unavailable, unconfigured attestor or unexpected response
+-> 503. Any non-Permit response leaves the Hand untouched. Even after coarse
+Permit the receiving Hand MUST verify token audience, signed service trust,
+current AgentSession grant and each tool/effect itself; Gateway Permit is not
+an execution grant. Protected Tools remain unregistered until those invariants
+are accepted. Unapproved browser cookies are rejected. Fixed Hand routing
+preserves protocol-version metadata and streams MCP HTTP (including SSE and
+notification 202) without Control Panel API in the data plane. Public Origin
+and Host spoof protection still applies. No token or request body is logged.
+
+As of source publication there is no verified Gateway/Hand access-token
+resource audience or live signed service-peer attestor. The private
+Authorization API defaults to HTTP 503, so **no public positive MCP grant is
+claimed**. This change prepares explicit deny semantics only; do not use a
+self-asserted header or disabled sandbox as an emergency bypass.
 
 ## Scoped Coolify Development cutover
 
