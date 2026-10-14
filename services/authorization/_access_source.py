@@ -322,6 +322,8 @@ class AccessSourceService:
                 raise AccessDenied("approval has no signed Project/session ownership")
             if approval.version != expected_approval_version or approval.status != "pending":
                 raise Conflict("approval already resolved or revision changed")
+            if approve and approval.requested_by_user_id == request.caller_user_id:
+                raise AccessDenied("an elevation requester cannot approve their own request")
             base = await tx.get(ProjectAgentSessionRow, request.session_uuid, with_for_update=True)
             now = datetime.now(UTC)
             if (
