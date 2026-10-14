@@ -68,6 +68,17 @@ class BrowserManager:
         self.timezone = timezone.strip() or "UTC"
         self.posix_locale = posix_locale.strip()
         self.chromium_args = tuple(arg.strip() for arg in chromium_args if arg.strip())
+        # A Hand executor must never opt out of Chromium's process sandbox.
+        # Docker cap_drop/read_only are not a replacement for browser isolation.
+        unsafe = (
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-seccomp-filter-sandbox",
+            "--disable-namespace-sandbox",
+            "--disable-gpu-sandbox",
+        )
+        if any(arg.split("=", 1)[0] in unsafe for arg in self.chromium_args):
+            raise BrowserError("Chromium sandbox-disabling arguments are prohibited")
         self.max_snapshot_text_chars = max_snapshot_text_chars
         self.max_snapshot_elements = max_snapshot_elements
         self._playwright: Playwright | None = None
@@ -276,7 +287,6 @@ class BrowserManager:
     def _browser_command(self) -> list[str]:
         command = [
             self.executable_path,
-            "--no-sandbox",
             f"--remote-debugging-address={_REMOTE_DEBUGGING_HOST}",
             f"--remote-debugging-port={_REMOTE_DEBUGGING_PORT}",
             f"--user-data-dir={self.profile_dir}",
@@ -788,7 +798,6 @@ class BrowserManager:
         ) as temporary_profile:
             probe_code, probe_stdout, probe_stderr = await run(
                 "--headless",
-                "--no-sandbox",
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
                 f"--user-data-dir={temporary_profile}",
