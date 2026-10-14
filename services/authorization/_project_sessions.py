@@ -232,6 +232,8 @@ class ProjectSessionService:
             raise Conflict("elevation request already resolved")
         if request.version != expected_version:
             raise Conflict("AgentSession approval revision mismatch")
+        if approve and request.requested_by_user_id == caller.user_id:
+            raise AccessDenied("an elevation requester cannot approve their own request")
         base = await self._row(session, AgentSessionUuid(request.session_uuid), lock=True)
         if base.project_id != project_id:
             raise AccessDenied("elevation request references another Project")
