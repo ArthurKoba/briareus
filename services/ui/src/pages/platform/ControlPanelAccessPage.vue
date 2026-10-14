@@ -59,7 +59,8 @@ const labels = computed(() => locale.value === "ru" ? {
   limited: "Слишком много попыток. Повторите позже.",
   network: "Не удалось получить ответ от сервера.",
   badResponse: "Сервер вернул неподтверждённый формат авторизации.",
-  transitional: "Временный вход через действующий Backend до подключения Rauthy.",
+  transitional: "Совместимость с прежним Identity API. Этот способ не подтверждает доступ к проектам и MCP.",
+  legacyTitle: "Устаревший способ входа (переходный период)",
 } : {
   login: "Sign in with username and password",
   register: "Register with invitation",
@@ -83,7 +84,8 @@ const labels = computed(() => locale.value === "ru" ? {
   limited: "Too many attempts. Try again later.",
   network: "No response from server.",
   badResponse: "The server returned an unverified authentication format.",
-  transitional: "Temporary login via existing Backend until Rauthy is connected.",
+  transitional: "Compatibility with the retired Identity API. This does not verify access to projects or MCP.",
+  legacyTitle: "Legacy sign-in (transition only)",
 })
 function selectMode(value:"login"|"register"):void {
   mode.value=value
@@ -185,8 +187,10 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null; au
         <p v-else class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unavailable') }}</p>
       </div>
       <RauthySignIn />
-      <!-- Owner-requested TEMPORARY existing BFF login; no invented Project/Team grants. -->
-      <div class="mt-5 space-y-4">
+      <!-- Legacy Identity stays as an explicit rollback-only disclosure until accepted OIDC cutover. -->
+      <details class="mt-5 rounded-xl border border-border bg-muted/10 p-3 sm:p-4">
+        <summary class="cursor-pointer text-sm font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">{{labels.legacyTitle}}</summary>
+        <div class="mt-4 space-y-4">
         <p class="text-xs leading-5 text-muted-foreground">{{labels.transitional}}</p>
         <div v-if="confirmed" class="space-y-3 rounded-xl border border-border bg-muted/30 p-4" role="status">
           <p class="text-sm font-semibold text-foreground">{{labels.confirmed}}</p>
@@ -217,7 +221,8 @@ onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null; au
             <button type="submit" class="min-h-12 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50" :disabled="busy">{{busy?labels.signing:mode==='login'?labels.submitLogin:labels.submitRegister}}</button>
           </form>
         </template>
-      </div>
+        </div>
+      </details>
       <button type="button" class="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm font-medium transition hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50" :disabled="state==='checking'" @click="verifyApi">{{ t('panelAccess.retry') }}</button>
       <button type="button" class="mt-4 w-full rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" @click="emit('preview')">{{t('panelAccess.exploreModules')}}</button>
       <p class="mt-2 text-xs leading-6 text-muted-foreground">{{t('panelAccess.previewNotice')}}</p>
