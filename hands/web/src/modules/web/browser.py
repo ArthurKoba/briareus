@@ -307,19 +307,33 @@ class BrowserManager:
         command.append("about:blank")
         return command
 
-    def _browser_process_command(self) -> list[str]:
-        environment = ["/usr/bin/env"]
-        if not self.headless and self.display:
-            environment.append(f"DISPLAY={self.display}")
-        if self.timezone:
-            environment.append(f"TZ={self.timezone}")
+    def _browser_subprocess_environment(self) -> dict[str, str]:
+        # This reduces ambient credential inheritance but does NOT replace
+        # separate UID/network/FS isolation: same-UID children can still read
+        # other process state and private services in this controller container.
+        root = self.profile_dir.parent
+        environment = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(root),
+            "XDG_CONFIG_HOME": str(root / "config"),
+            "XDG_CACHE_HOME": str(root / "cache"),
+            "TZ": self.timezone,
+        }
         if self.posix_locale:
-            environment.extend(
-                [
-                    f"LANG={self.posix_locale}",
-                    f"LC_ALL={self.posix_locale}",
-                ]
-            )
+            environment["LANG"] = self.posix_locale
+            environment["LC_ALL"] = self.posix_locale
+        if not self.headless and self.display:
+            environment["DISPLAY"] = self.display
+        return environment
+
+    def _browser_process_command(self) -> list[str]:
+        # /usr/bin/env -i clears Docker/Hand service credentials. Only the
+        # browser-owned nonsecret values are explicitly restored.
+        environment = ["/usr/bin/env", "-i"]
+        environment.extend(
+            f"{key}={value}"
+            for key, value in sorted(self._browser_subprocess_environment().items())
+        )
         return [*environment, *self._browser_command()]
 
     async def _ensure_display_locked(self) -> str:
@@ -342,6 +356,7 @@ class BrowserManager:
             "-nolisten",
             "tcp",
             "-noreset",
+            env=self._browser_subprocess_environment(),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -776,6 +791,7 @@ class BrowserManager:
             process = await asyncio.create_subprocess_exec(
                 self.executable_path,
                 *args,
+                env=self._browser_subprocess_environment(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
