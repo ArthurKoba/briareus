@@ -1,4 +1,5 @@
 x-watch-path-coolify:
+  - "services/external/**"
   - "hands/infrastructure/**"
   - "shared/hand_runtime/**"
 services:

@@ -72,3 +72,44 @@ Base directory `/deploy/gateway`, Compose location
 `/docker-compose.coolify.yaml`, and prior exact 26 Watch Paths from its
 known-good Coolify release, then redeploy only Gateway. Do not touch Panel,
 Backend, Hands, secrets or volumes.
+
+### Native login stays in Briareus Control Panel
+
+Control Panel owns user-visible login/MFA. Gateway does not serve
+Rauthy's hosted SvelteKit UI, and no root-relative /_app or /assets
+routes are released for the native login MVP. Opaque /api/* calls
+travel only to the fixed Control Panel API owner with original
+same-origin cookie/body. Untrusted X-Forwarded-* claims are stripped;
+none authenticates a User.
+
+Source regression:
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=services/gateway/src
+services/gateway/.venv/bin/python services/gateway/tests/test_native_panel_auth_boundary.py
+
+### Versioned Control Panel Auth API
+
+Browser authentication and session calls belong to /api/v1/auth/*;
+Project, AgentSession, approvals, catalogue and Files content operations
+belong to sibling /api/v1/* routes. The URL never exposes the upstream
+native or oidc implementation names. Gateway
+forwards exact v1 URLs unchanged. Retired /api/auth/* application
+routes return 404 BEFORE contacting Backend; no redirects or legacy
+rewrite. Only GET /api/auth/oidc/callback remains as the precise
+registered OAuth provider redirect URI, not a browser application API.
+Changing the callback requires coordinated Rauthy-client registration
+and Backend verifier changes, never a Gateway URL alias.
+
+The pinned Backend source and promoted typechecked Frontend build must
+agree on v1 before the local six-owner native stack can launch. The
+source-only transport proof is
+services/gateway/tests/test_auth_api_v1_public_contract.py; it
+does not create a User, verify credentials or authorize Files.
+
+#### Versioned public API surface
+
+The wildcard /api/* Starlette route is NOT a wildcard upstream access
+policy. Only canonical /api/v1/* and the exact provider-registered
+GET /api/auth/oidc/callback may reach the fixed Backend owner.
+Other API prefixes, private Core endpoints, encoded route aliases
+and future unknown API versions are denied by Gateway with 404 before
+upstream I/O. This is separate from Cedar and Files authorization.

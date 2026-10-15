@@ -12,7 +12,7 @@ services:
       - "8080"
     networks:
       briareus:
-        aliases: ["briareus-control-panel-ui", "briareus-admin-ui"]
+        aliases: ["briareus-control-panel-ui"]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
       interval: 10s

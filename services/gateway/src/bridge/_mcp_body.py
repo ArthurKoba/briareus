@@ -1,0 +1,111 @@
+"""Strict bounded MCP JSON body before the independent coarse Cedar decision.
+
+This is a protocol transport limit, not authorization. It prevents invalid
+or abusive requests from consuming a trusted private Authorization peer call.
+The Hand independently revalidates before any protected effect.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+from typing import Any
+
+from starlette.requests import Request
+
+_MAX_BYTES = 1024 * 1024
+_MAX_CHUNKS = 1024
+_READ_TIMEOUT_SECONDS = 8
+
+
+class McpBodyRejected(Exception):
+    def __init__(self, code: str, status_code: int) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status_code = status_code
+
+
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str) -> None:
+    raise ValueError("unsupported JSON numeric constant: " + value)
+
+
+def _finite_float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("non-finite JSON number")
+    return result
+
+
+async def read_mcp_body(request: Request) -> bytes:
+    """Validate bounded UTF-8 JSON object and return original octets intact."""
+    lengths = request.headers.getlist("content-length")
+    if len(lengths) > 1:
+        raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
+    if lengths:
+        value = lengths[0]
+        if not value.isascii() or not value.isdecimal() or len(value) > 8:
+            raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
+        if int(value) > _MAX_BYTES:
+            raise McpBodyRejected("MCP_BODY_TOO_LARGE", 413)
+    # A proxy must never reinterpret conflicting framing on behalf of MCP.
+    encodings = request.headers.getlist("transfer-encoding")
+    if len(encodings) > 1 or (
+        encodings and (encodings[0].strip().casefold() != "chunked" or lengths)
+    ):
+        raise McpBodyRejected("MCP_TRANSFER_ENCODING_INVALID", 400)
+    content_encodings = request.headers.getlist("content-encoding")
+    if len(content_encodings) > 1 or (
+        content_encodings and content_encodings[0].strip().casefold() != "identity"
+    ):
+        raise McpBodyRejected("MCP_CONTENT_ENCODING_INVALID", 415)
+
+    payload = bytearray()
+    try:
+        async with asyncio.timeout(_READ_TIMEOUT_SECONDS):
+            # Request.stream() suppresses empty body chunks. Count raw ASGI
+            # messages instead, including zero-byte fragments from slow
+            # senders, so the event bound actually limits request work.
+            for _ in range(_MAX_CHUNKS):
+                event = await request.receive()
+                if event.get("type") == "http.disconnect":
+                    raise McpBodyRejected("MCP_BODY_INTERRUPTED", 400)
+                if event.get("type") != "http.request":
+                    raise McpBodyRejected("MCP_BODY_UNAVAILABLE", 400)
+                chunk = event.get("body", b"")
+                if not isinstance(chunk, bytes) or len(chunk) > _MAX_BYTES - len(payload):
+                    raise McpBodyRejected("MCP_BODY_TOO_LARGE", 413)
+                payload.extend(chunk)
+                if not event.get("more_body", False):
+                    break
+            else:
+                raise McpBodyRejected("MCP_BODY_TOO_FRAGMENTED", 413)
+    except TimeoutError as exc:
+        raise McpBodyRejected("MCP_BODY_READ_TIMEOUT", 408) from exc
+
+    try:
+        data = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_keys,
+            parse_constant=_reject_constant,
+            parse_float=_finite_float,
+        )
+        if not isinstance(data, dict):
+            raise McpBodyRejected("MCP_BATCH_NOT_SUPPORTED", 400)
+        # Unpaired UTF-16 surrogates can be syntactically valid escaped JSON
+        # but are not Unicode scalar values accepted by FastMCP handlers.
+        json.dumps(data, ensure_ascii=False).encode("utf-8")
+    except McpBodyRejected:
+        raise
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise McpBodyRejected("MCP_INVALID_JSON", 400) from exc
+    return bytes(payload)

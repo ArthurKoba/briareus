@@ -18,20 +18,26 @@ import httpx
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from ._api_contract import public_api_path, retired_auth_path
 from ._mcp_admission import (
     McpAdmissionRejected,
+    TrustedGatewayDecisionPort,
     admission_error,
     authorize_connection,
     parse_connection_admission,
 )
+from ._mcp_body import McpBodyRejected, read_mcp_body
+from ._proxy_start import PendingProxyStart
+from ._proxy_stream import ProxyStreamingResponse
+from ._rauthy_admin_privacy import classify_rauthy_public_path
 from .route_telemetry import RouteTelemetry
 from .single_origin import MCP_ENDPOINTS, PUBLIC_HOST, SingleOriginGuard, unavailable_routes
 
-_PANEL_UPSTREAM = "http://briareus-admin-ui:8080"
-_API_UPSTREAM = "http://briareus-admin-api:8000"
+_PANEL_UPSTREAM = "http://briareus-control-panel-ui:8080"
+_API_UPSTREAM = "http://briareus-control-panel-api:8000"
 _RAUTHY_UPSTREAM = "http://briareus-rauthy:8080"
 _PUBLIC_FILES = frozenset({"/", "/robots.txt", "/sitemap.xml", "/panel/"})
 _PANEL_ASSET = re.compile(
@@ -121,29 +127,82 @@ def _raw_path(request: Request) -> str | None:
     return path
 
 
+def _connection_tokens(headers: list[tuple[bytes, bytes]]) -> set[str]:
+    return {
+        token.strip().casefold()
+        for name, value in headers
+        if name.lower() == b"connection"
+        for token in value.decode("latin1").split(",")
+    }
+
+
 def _api_headers(request: Request) -> list[tuple[bytes, bytes]]:
-    """Preserve end-to-end credentials/headers; discard caller proxy claims."""
-    connection_tokens: set[str] = set()
-    for k, v in request.scope.get("headers", []):
-        if k.lower() == b"connection":
-            connection_tokens.update(
-                part.strip().casefold() for part in v.decode("latin1").split(",")
+    """Forward end-to-end headers, never browser-originated proxy identity."""
+    incoming = request.scope.get("headers", [])
+    connection_tokens = _connection_tokens(incoming)
+    result: list[tuple[bytes, bytes]] = []
+    for name, value in incoming:
+        key = name.decode("ascii").casefold()
+        if (
+            key in _HOP_HEADERS
+            or key in _PROXY_ASSERTIONS
+            or key.startswith("x-forwarded-")
+            or key in connection_tokens
+        ):
+            continue
+        result.append((name, value))
+    return result
+
+
+def _api_declared_length(request: Request, *, rauthy: bool) -> bytes | None:
+    """Preserve a single bounded original BFF length, never ambiguous framing."""
+    if rauthy:
+        # Rauthy provider routes retain their existing streaming semantics.
+        return None
+    lengths = request.headers.getlist("content-length")
+    if not lengths:
+        return None
+    value = lengths[0]
+    if (
+        len(lengths) != 1
+        or not value.isascii()
+        or not value.isdecimal()
+        or len(value) > 19
+        or int(value) > 2**63 - 1
+        or request.headers.getlist("transfer-encoding")
+    ):
+        raise ValueError("ambiguous Control Panel API HTTP framing")
+    return value.encode("ascii")
+
+
+def _upstream_headers(
+    request: Request, *, rauthy: bool, declared_length: bytes | None
+) -> list[tuple[bytes, bytes]]:
+    """Separate outbound origin claims from incoming browser request headers."""
+    headers = _api_headers(request)
+    if declared_length is not None:
+        headers.append((b"content-length", declared_length))
+    if rauthy:
+        # Canonical claims are fixed service facts, not browser input.
+        headers.extend(
+            (
+                (b"host", PUBLIC_HOST.encode("ascii")),
+                (b"x-forwarded-host", PUBLIC_HOST.encode("ascii")),
+                (b"x-forwarded-proto", b"https"),
             )
-    return [
-        (key, value)
-        for key, value in request.scope.get("headers", [])
-        if key.decode("ascii").casefold() not in _HOP_HEADERS
-        and key.decode("ascii").casefold() not in _PROXY_ASSERTIONS
-        and key.decode("ascii").casefold() not in connection_tokens
-    ]
+        )
+    return headers
 
 
 class ThinGateway:
-    def __init__(self) -> None:
+    def __init__(self, private_decision: TrustedGatewayDecisionPort | None = None) -> None:
+        self._private_decision = private_decision
         self._client: httpx.AsyncClient | None = None
         self._slots = asyncio.Semaphore(64)
         self._draining = False
         self._open: set[httpx.Response] = set()
+        self._streams: set[ProxyStreamingResponse] = set()
+        self._pending: set[PendingProxyStart] = set()
 
     @asynccontextmanager
     async def lifespan(self, _app: Starlette) -> AsyncIterator[None]:
@@ -159,10 +218,54 @@ class ThinGateway:
                 yield
             finally:
                 self._draining = True
-                for response in tuple(self._open):
-                    await response.aclose()
-                self._open.clear()
                 self._client = None
+                await self._drain_streams()
+
+    async def _drain_streams(self) -> None:
+        async def close_all() -> None:
+            # Include requests still waiting for a client body or first
+            # owner response; they have not become tracked streams yet.
+            await asyncio.gather(
+                *(pending.abort() for pending in tuple(self._pending)),
+                return_exceptions=True,
+            )
+            # Each stream owns a three-second close deadline and frees its
+            # own pool slot once. Parallel close avoids 64 sequential waits.
+            await asyncio.gather(
+                *(stream.aclose() for stream in tuple(self._streams)),
+                return_exceptions=True,
+            )
+
+        cleanup = asyncio.create_task(close_all())
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _send_upstream(
+        self, client: httpx.AsyncClient, request: httpx.Request
+    ) -> httpx.Response:
+        if self._draining:
+            raise httpx.ReadError("gateway is draining")
+        pending = PendingProxyStart(client, request)
+        self._pending.add(pending)
+        try:
+            return await pending.take_response()
+        finally:
+            self._pending.discard(pending)
+
+    def _stream_response(self, upstream: httpx.Response) -> ProxyStreamingResponse:
+        self._open.add(upstream)
+        response = ProxyStreamingResponse(
+            upstream, slots=self._slots, open_responses=self._open, tracked_streams=self._streams
+        )
+        self._streams.add(response)
+        return response
 
     @staticmethod
     def _unavailable() -> Response:
@@ -194,13 +297,13 @@ class ThinGateway:
             return self._unavailable()
         try:
             async with asyncio.timeout(8):
-                response = await client.send(
+                response = await self._send_upstream(
+                    client,
                     client.build_request(
                         request.method,
                         _PANEL_UPSTREAM + quote(path, safe="/-._~"),
                         headers={"accept": "*/*", "accept-encoding": "identity"},
                     ),
-                    stream=True,
                 )
                 try:
                     if (
@@ -259,38 +362,54 @@ class ThinGateway:
             admission = parse_connection_admission(request)
         except McpAdmissionRejected as exc:
             return admission_error(exc.code, exc.status_code)
-        if request.headers.get("content-type", "").split(";", 1)[0].lower() != "application/json":
+        content_types = request.headers.getlist("content-type")
+        if len(content_types) != 1:
+            return admission_error("MCP_CONTENT_TYPE_INVALID", 415)
+        media_type, separator, parameter = content_types[0].partition(";")
+        if media_type.strip().lower() != "application/json" or (
+            separator and parameter.strip().lower() != "charset=utf-8"
+        ):
             return admission_error("MCP_CONTENT_TYPE_INVALID", 415)
         client = self._client
-        if client is None or self._draining:
+        if client is None or self._draining or self._private_decision is None:
+            # No authenticated private peer: reject before reading an
+            # attacker-controlled request body or forwarding any Bearer.
             return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
         try:
             await asyncio.wait_for(self._slots.acquire(), timeout=3)
         except TimeoutError:
             return admission_error("MCP_GATEWAY_BUSY", 503)
         try:
-            blocked = await authorize_connection(client, admission)
+            # Reject malformed, ambiguous, oversized or slow JSON before the
+            # expensive private Authorization peer is contacted. Valid body
+            # bytes are still forwarded unchanged to the Hand's own guard.
+            try:
+                payload = await read_mcp_body(request)
+            except McpBodyRejected as exc:
+                self._slots.release()
+                return admission_error(exc.code, exc.status_code)
+            blocked = await authorize_connection(self._private_decision, admission)
             if blocked is not None:
                 self._slots.release()
                 return blocked
-            payload = bytearray()
-            async for chunk in request.stream():
-                payload.extend(chunk)
-                if len(payload) > 1024 * 1024:
-                    self._slots.release()
-                    return admission_error("MCP_BODY_TOO_LARGE", 413)
             headers = {
                 "Authorization": admission.bearer,
                 "Accept": "application/json, text/event-stream",
                 "Content-Type": "application/json",
+                # Forward bounded, canonical *selectors*, never unverified actor
+                # identity or caller-supplied peer evidence. Every Hand repeats
+                # signed identity + current Authorization/Cedar admission.
+                "X-Briareus-Project-UUID": str(admission.project_uuid),
+                "X-Briareus-Agent-Session-UUID": str(admission.agent_session_uuid),
+                "X-Briareus-Grant-Revision": str(admission.grant_revision),
             }
             protocol = request.headers.getlist("mcp-protocol-version")
             if len(protocol) == 1 and 0 < len(protocol[0]) <= 64:
                 headers["Mcp-Protocol-Version"] = protocol[0]
             upstream_request = client.build_request(
-                "POST", admission.target, headers=headers, content=bytes(payload)
+                "POST", admission.target, headers=headers, content=payload
             )
-            upstream = await client.send(upstream_request, stream=True)
+            upstream = await self._send_upstream(client, upstream_request)
         except asyncio.CancelledError:
             self._slots.release()
             raise
@@ -303,21 +422,15 @@ class ThinGateway:
         # HTTP MCP also uses 202 for accepted notifications, and Hands may
         # independently deny a protected effect despite coarse admission.
         if upstream.status_code not in {200, 202, 204, 400, 401, 403, 404, 409, 422, 429, 503}:
-            await upstream.aclose()
-            self._slots.release()
+            # Even a rejected upstream response needs the same bounded,
+            # exactly-once cleanup; a close error must not strand admission.
+            rejected_stream = self._stream_response(upstream)
+            await rejected_stream.aclose()
             return admission_error("MCP_UPSTREAM_UNAVAILABLE", 503)
-        self._open.add(upstream)
-
-        async def stream() -> AsyncIterator[bytes]:
-            try:
-                async for data in upstream.aiter_raw():
-                    yield data
-            finally:
-                self._open.discard(upstream)
-                await upstream.aclose()
-                self._slots.release()
-
-        streamed = StreamingResponse(stream(), status_code=upstream.status_code)
+        streamed = self._stream_response(upstream)
+        if self._draining:
+            await streamed.aclose()
+            return admission_error("MCP_UPSTREAM_UNAVAILABLE", 503)
         # Only protocol framing metadata may cross the private Hand boundary.
         # Never forward a provider Set-Cookie, Location or internal server hint.
         streamed.raw_headers = [
@@ -333,6 +446,36 @@ class ThinGateway:
         prefix = "/auth/v1" if rauthy else "/api"
         if path is None or (path != prefix and not path.startswith(prefix + "/")):
             return Response(status_code=404)
+        if not rauthy:
+            decoded = request.scope.get("path")
+            if retired_auth_path(raw_path=path, decoded_path=decoded, method=request.method):
+                return JSONResponse(
+                    {"code": "AUTH_API_ROUTE_RETIRED"},
+                    status_code=404,
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+                )
+            if not public_api_path(raw_path=path, decoded_path=decoded, method=request.method):
+                # No implicit /api/* access to future private API routes.
+                # The public contract is /api/v1/* plus the registered
+                # exact GET OAuth callback; neither is a trusted Permit.
+                return JSONResponse(
+                    {"code": "API_ROUTE_NOT_PUBLIC"},
+                    status_code=404,
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+                )
+        if rauthy:
+            # Rauthy 0.37.1 interleaves Admin APIs and essential login/
+            # recovery/self-service handlers; use source-verified route and
+            # method boundaries rather than a blanket /auth/v1 deny.
+            route_disposition = classify_rauthy_public_path(path, request.method)
+            if route_disposition == "bad_path":
+                return Response(status_code=400)
+            if route_disposition == "private_admin":
+                return JSONResponse(
+                    {"code": "RAUTHY_ADMIN_ROUTE_PRIVATE"},
+                    status_code=404,
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+                )
         query = request.scope.get("query_string", b"")
         if not isinstance(query, bytes):
             return Response(status_code=400)
@@ -342,10 +485,16 @@ class ThinGateway:
             upstream = _RAUTHY_UPSTREAM if rauthy else _API_UPSTREAM
             target_url = httpx.URL(upstream + raw_url)
             if (target_url.host, target_url.port) != (
-                ("briareus-rauthy", 8080) if rauthy else ("briareus-admin-api", 8000)
+                ("briareus-rauthy", 8080) if rauthy else ("briareus-control-panel-api", 8000)
             ):
                 return Response(status_code=400)
         except (UnicodeDecodeError, ValueError, httpx.InvalidURL):
+            return Response(status_code=400)
+        # The native Backend expects exact Content-Length: 2 for "{}"
+        # Init/PoW, but Rauthy must keep its established stream behavior.
+        try:
+            declared_length = _api_declared_length(request, rauthy=rauthy)
+        except ValueError:
             return Response(status_code=400)
         client = self._client
         if client is None or self._draining:
@@ -355,23 +504,14 @@ class ThinGateway:
         except TimeoutError:
             return self._unavailable()
         try:
-            headers = _api_headers(request)
-            if rauthy:
-                # Derive proxy claims from our fixed public origin, never the caller.
-                headers.extend(
-                    (
-                        (b"host", PUBLIC_HOST.encode("ascii")),
-                        (b"x-forwarded-host", PUBLIC_HOST.encode("ascii")),
-                        (b"x-forwarded-proto", b"https"),
-                    )
-                )
+            headers = _upstream_headers(request, rauthy=rauthy, declared_length=declared_length)
             upstream_request = client.build_request(
                 request.method,
                 target_url,
                 headers=headers,
                 content=request.stream(),
             )
-            upstream = await client.send(upstream_request, stream=True)
+            upstream = await self._send_upstream(client, upstream_request)
         except asyncio.CancelledError:
             self._slots.release()
             raise
@@ -381,30 +521,23 @@ class ThinGateway:
         except BaseException:
             self._slots.release()
             raise
-        self._open.add(upstream)
-
-        async def body() -> AsyncIterator[bytes]:
-            try:
-                async for data in upstream.aiter_raw():
-                    yield data
-            finally:
-                self._open.discard(upstream)
-                await upstream.aclose()
-                self._slots.release()
-
-        streamed = StreamingResponse(body(), status_code=upstream.status_code)
+        streamed = self._stream_response(upstream)
+        if self._draining:
+            await streamed.aclose()
+            return self._unavailable()
         # Preserve duplicate Set-Cookie and other end-to-end response headers.
         # ASGI streaming manages framing; do not send hop-by-hop headers.
+        excluded = _HOP_HEADERS | _connection_tokens(upstream.headers.raw)
         streamed.raw_headers = [
             (key, value)
             for key, value in upstream.headers.raw
-            if key.decode("ascii").casefold() not in _HOP_HEADERS
+            if key.decode("ascii").casefold() not in excluded
         ]
         return streamed
 
 
-def build_app() -> Starlette:
-    transport = ThinGateway()
+def build_app(*, private_decision: TrustedGatewayDecisionPort | None = None) -> Starlette:
+    transport = ThinGateway(private_decision)
     handlers = {
         "panel-ui": transport.static,
         "panel-api": transport.api,

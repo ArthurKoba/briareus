@@ -15,7 +15,6 @@ RUN useradd -u 1000 -m -d /home/briareus briareus
 # Copy owner-local source and immutable owner migration history.
 COPY services/resources/migrations/env.py /app/src/common/alembic_owners/resources/env.py
 COPY services/resources/migrations/versions/0001_resources_baseline.py /app/src/common/alembic_owners/resources/versions/0001_resources_baseline.py
-COPY services/resources/migrations/versions/0002_phase_idempotency.py /app/src/common/alembic_owners/resources/versions/0002_phase_idempotency.py
 COPY services/resources/src/ /app/src/
 # Historical services/common is shared by multiple owners; watch it explicitly.
 COPY services/common/__init__.py /app/src/common/__init__.py

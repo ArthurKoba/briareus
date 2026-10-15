@@ -35,12 +35,12 @@
 !services/resources/docker-compose.yaml
 !services/resources/migrations/env.py
 !services/resources/migrations/versions/0001_resources_baseline.py
-!services/resources/migrations/versions/0002_phase_idempotency.py
 !services/resources/pyproject.toml
 !services/resources/src/projects/__init__.py
 !services/resources/src/projects/_catalog_ledger.py
 !services/resources/src/projects/_catalog_lifecycle.py
 !services/resources/src/projects/_catalog_source.py
+!services/resources/src/projects/_rauthy_catalog_reader.py
 !services/resources/src/projects/_provider_registry.py
 !services/resources/src/projects/_resource_domain.py
 !services/resources/src/projects/_resource_persistence.py

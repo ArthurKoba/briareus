@@ -1,6 +1,7 @@
 import { ref, watch } from "vue"
 
 export type ThemePreference = "dark" | "light" | "system"
+export type AccentPreference = "graphite" | "indigo" | "amber"
 export type DensityPreference = "comfortable" | "compact"
 export type LocalePreference = "en" | "ru"
 /** Display preference ONLY. Never changes server TZ, audit timestamps or
@@ -8,7 +9,8 @@ export type LocalePreference = "en" | "ru"
 export type DisplayTimeZone = "system" | "UTC"
 
 const STORAGE_KEY = "briareus:ui:v1"
-const theme = ref<ThemePreference>("system")
+const theme = ref<ThemePreference>("dark")
+const accent = ref<AccentPreference>("graphite")
 const sidebarCollapsed = ref(false)
 const density = ref<DensityPreference>("compact")
 const locale = ref<LocalePreference>("ru")
@@ -19,6 +21,7 @@ const diagnosticsConsent = ref(false)
 
 type StoredPreferences = Partial<{
   theme: ThemePreference
+  accent: AccentPreference
   sidebarCollapsed: boolean
   density: DensityPreference
   locale: LocalePreference
@@ -27,6 +30,7 @@ type StoredPreferences = Partial<{
 
 function applyStored(p: StoredPreferences): void {
   if (["dark", "light", "system"].includes(String(p.theme))) theme.value = p.theme as ThemePreference
+  if (p.accent === "graphite" || p.accent === "indigo" || p.accent === "amber") accent.value = p.accent
   if (typeof p.sidebarCollapsed === "boolean") sidebarCollapsed.value = p.sidebarCollapsed
   if (p.density === "compact" || p.density === "comfortable") density.value = p.density
   if (p.locale === "en" || p.locale === "ru") locale.value = p.locale
@@ -51,6 +55,7 @@ function persist(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       theme: theme.value,
+      accent: accent.value,
       sidebarCollapsed: sidebarCollapsed.value,
       density: density.value,
       locale: locale.value,
@@ -69,11 +74,12 @@ function applyDensity(): void {
 }
 
 readPreferences()
-watch([theme, sidebarCollapsed, density, locale, displayTimeZone], persist)
+watch([theme, accent, sidebarCollapsed, density, locale, displayTimeZone], persist)
 // Revoke the previous B14 persisted consent grant. A fresh page/tab/user
 // always starts with diagnostics OFF; never read a previously stored opt-in.
 try {localStorage.removeItem("briareus:diagnostics-consent:v1")}catch{/* no storage access */}
 watch(theme, applyTheme, { immediate: true })
+watch(accent, value => { document.documentElement.dataset.accent = value }, { immediate: true })
 // System theme can change while the tab stays open.
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if (theme.value === "system") applyTheme()
@@ -89,5 +95,5 @@ window.addEventListener("storage", (event) => {
   }
 })
 
-export const uiPreferences = { theme, sidebarCollapsed, density, locale, displayTimeZone, diagnosticsConsent }
+export const uiPreferences = { theme, accent, sidebarCollapsed, density, locale, displayTimeZone, diagnosticsConsent }
 export function useUiPreferences() { return uiPreferences }

@@ -14,6 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from authorization._platform_application import PlatformApplication
+from authorization._resource_scope import (
+    TrustedResourceOwnerPort,
+    matches_current_owner,
+    normalized_resource_grants,
+)
 from authorization._session_persistence import ProjectAgentSessionRow, SessionApprovalRow
 from common.platform_errors import AccessDenied, Conflict, InvalidInput
 from common.platform_ids import AgentSessionUuid, PlatformProjectId
@@ -79,8 +84,14 @@ def _check_grants(grants: list[str], *, allow_privileged: bool) -> list[str]:
 
 
 class ProjectSessionService:
-    def __init__(self, application: PlatformApplication) -> None:
+    def __init__(
+        self,
+        application: PlatformApplication,
+        *,
+        resource_owner: TrustedResourceOwnerPort | None = None,
+    ) -> None:
         self.application = application
+        self.resource_owner = resource_owner
 
     async def _row(
         self,
@@ -171,11 +182,17 @@ class ProjectSessionService:
         grants: list[str],
         *,
         seconds: int,
+        expected_grant_revision: int,
+        resource_grants: list[dict[str, object]] | None = None,
     ) -> UUID:
         await self.application.project_allowed(session, caller, project_id, for_write=True)
         row = await self._row(session, session_uuid, lock=True)
         if row.project_id != project_id:
             raise AccessDenied("Project access denied")
+        if not 1 <= expected_grant_revision <= 2**63 - 1:
+            raise InvalidInput("expected AgentSession revision invalid")
+        if row.version != expected_grant_revision:
+            raise Conflict("AgentSession grant revision changed")
         if row.status != "active" or row.hard_expires_at <= datetime.now(UTC):
             raise AccessDenied("SESSION_EXPIRED")
         if row.elevation_policy != "requestable" or row.is_elevated:
@@ -183,12 +200,19 @@ class ProjectSessionService:
         if not (1 <= seconds <= 300):
             raise InvalidInput("elevated hard TTL must be at most 300 seconds")
         approved = _check_grants(grants, allow_privileged=True)
+        try:
+            resources = normalized_resource_grants(
+                resource_grants if resource_grants is not None else [],
+                allowed_actions=set(approved),
+            )
+        except ValueError as exc:
+            raise InvalidInput("invalid resource scope request") from exc
         request = SessionApprovalRow(
             id=uuid4(),
             session_uuid=session_uuid,
             project_id=project_id,
             requested_by_user_id=caller.user_id,
-            requested_grants={"operations": approved},
+            requested_grants={"operations": approved, "resources": resources},
             requested_expires_at=datetime.now(UTC) + timedelta(seconds=seconds),
             status="pending",
         )
@@ -255,6 +279,23 @@ class ProjectSessionService:
             # require a separate requested scope and a fresh approval.
             if not set(actual).issubset(requested):
                 raise AccessDenied("approved grants exceed original request")
+            try:
+                requested_resources = normalized_resource_grants(
+                    request.requested_grants.get("resources", []),
+                    allowed_actions=set(requested),
+                )
+            except ValueError as exc:
+                raise AccessDenied("stored resource approval scope invalid") from exc
+            resources = [item for item in requested_resources if item["action"] in actual]
+            if resources:
+                if self.resource_owner is None:
+                    raise AccessDenied("trusted resource owner proof unavailable")
+                for item in resources:
+                    proof = self.resource_owner.verify_current_scope(
+                        project_uuid=project_id, scope=item
+                    )
+                    if not matches_current_owner(proof, project_uuid=project_id, scope=item):
+                        raise AccessDenied("resource is not currently owned by Project")
             expires_at = min(request.requested_expires_at, now + ELEVATED_HARD_TTL)
             if expires_at <= now:
                 raise Conflict("elevation request TTL expired")
@@ -265,7 +306,7 @@ class ProjectSessionService:
                 is_elevated=True,
                 elevation_policy="fixed",
                 label=base.label,
-                grants={"operations": actual},
+                grants={"operations": actual, "resources": resources},
                 status="active",
                 version=1,
                 created_at=now,

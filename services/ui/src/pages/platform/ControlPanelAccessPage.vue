@@ -1,235 +1,255 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
-import { setLocale } from "@/shared/i18n"
-import { useUiPreferences, type ThemePreference } from "@/shared/lib/preferences"
 import { useI18n } from "vue-i18n"
-import { checkControlPanelAccess, type ControlPanelAccessState } from "@/features/platform/api/control-panel-access"
-import { clearTemporaryBearer, FirstUserError, registerFirstUser, signInFirstUser, signOutFirstUser, type VerifiedFirstUser } from "@/features/platform/api/temporary-first-user"
+import { KeyRound, LoaderCircle, LockKeyhole } from "lucide-vue-next"
+import type { RauthyPanelState } from "@/features/platform/api/rauthy-oidc"
+import { prepareNativeRauthyLogin } from "@/features/platform/api/native-rauthy"
+import {checkNativePrelogin,cancelNativePrelogin} from "@/features/platform/api/native-prelogin-control"
 import RauthySignIn from "@/features/platform/ui/RauthySignIn.vue"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card"
+import { Input } from "@/shared/ui/input"
+import { Button } from "@/shared/ui/button"
+import { Separator } from "@/shared/ui/separator"
 
-const { t } = useI18n()
-const emit=defineEmits<{preview:[]}>()
-const { locale, theme } = useUiPreferences()
-function selectTheme(value: ThemePreference) { theme.value = value }
-const state = ref<ControlPanelAccessState>("checking")
-let controller: AbortController | null = null
-let generation = 0
-async function verifyApi() {
-  controller?.abort()
-  const current = new AbortController()
-  controller = current
-  const serial = ++generation
-  state.value = "checking"
-  const result = await checkControlPanelAccess(current.signal)
-  if (!current.signal.aborted && serial === generation) {
-    state.value = result
-    controller = null
-  }
+/** Native Init and explicit cancel are safe, cookie-bound prelogin steps.
+ * The credential/PoW/MFA UI is disabled until its owner protocol can be
+ * connected and independently accepted. Neither Init nor capabilities grants access.
+ */
+const props=withDefaults(defineProps<{
+  designPreview?:boolean
+  initialSession?:RauthyPanelState|null
+  managedLogout?:boolean
+}>(),{designPreview:false})
+const emit=defineEmits<{
+  providerState:[value:RauthyPanelState|{kind:"checking"}]
+  logoutRequested:[]
+}>()
+const {locale}=useI18n()
+const status=ref<RauthyPanelState|{kind:"checking"}>(
+  props.designPreview?{kind:"signed_out"}:props.initialSession??{kind:"checking"},
+)
+const checking=computed(()=>status.value.kind==="checking")
+const native=ref<"idle"|"checking"|"prepared"|"canceling"|"cancelled"|"forbidden"|"unavailable"|"invalid"|"expired">("idle")
+const nativeCode=ref("")
+const nativeUntil=ref<number|null>(null)
+let nativeExpiry:ReturnType<typeof setTimeout>|null=null
+let nativeMonotonicUntil:number|null=null
+let nativeController:AbortController|null=null
+const secureNativeOrigin=window.location.protocol==="https:"&&window.isSecureContext
+function expireNative():void{
+  if(native.value!=="prepared"||nativeUntil.value===null||nativeMonotonicUntil===null)return
+  if(nativeExpiry!==null){clearTimeout(nativeExpiry);nativeExpiry=null}
+  const remaining=Math.min(nativeUntil.value-Date.now(),nativeMonotonicUntil-performance.now())
+  if(remaining>0){nativeExpiry=setTimeout(expireNative,Math.ceil(remaining));return}
+  native.value="expired";nativeCode.value="NATIVE_PREPARATION_EXPIRED";nativeUntil.value=null;nativeMonotonicUntil=null
 }
-const mode = ref<"login" | "register">("login")
-const username = ref("")
-const password = ref("")
-const invitation = ref("")
-const passwordVisible = ref(false)
-const busy = ref(false)
-let authController: AbortController | null = null
-const confirmed = ref<VerifiedFirstUser | null>(null)
-const notice = ref("")
-const authError = ref("")
-const labels = computed(() => locale.value === "ru" ? {
-  login: "Войти по логину и паролю",
-  register: "Регистрация по приглашению",
-  username: "Логин",
-  password: "Пароль",
-  invitation: "Ключ приглашения",
-  submitLogin: "Войти",
-  submitRegister: "Создать учётную запись",
-  signing: "Проверяем учётную запись…",
-  showPassword: "Показать пароль",
-  hidePassword: "Скрыть пароль",
-  confirmed: "Личность подтверждена сервером",
-  scopePending: "Вход выполнен через временный Identity API. Права на Projects, Teams и управление MCP пока не подтверждены Control Panel API.",
-  logout: "Выйти",
-  registered: "Учётная запись создана. Теперь войдите по логину и паролю.",
-  logoutUncertain: "Токен удалён из браузера, но подтверждения отзыва на сервере нет.",
-  unavailable: "Identity пока недоступен (503). Форма готова, но сервер не может выполнить вход. Требуется восстановить Identity или переключить BFF на Rauthy.",
-  invalid: "Проверьте логин, пароль и данные формы.",
-  denied: "Неверные данные входа или отсутствует разрешённый доступ.",
-  invite: "Ключ приглашения недействителен или уже использован.",
-  limited: "Слишком много попыток. Повторите позже.",
-  network: "Не удалось получить ответ от сервера.",
-  badResponse: "Сервер вернул неподтверждённый формат авторизации.",
-  transitional: "Совместимость с прежним Identity API. Этот способ не подтверждает доступ к проектам и MCP.",
-  legacyTitle: "Устаревший способ входа (переходный период)",
-} : {
-  login: "Sign in with username and password",
-  register: "Register with invitation",
-  username: "Username",
-  password: "Password",
-  invitation: "Invitation key",
-  submitLogin: "Sign in",
-  submitRegister: "Create account",
-  signing: "Verifying account…",
-  showPassword: "Show password",
-  hidePassword: "Hide password",
-  confirmed: "Identity verified by the server",
-  scopePending: "Signed in through the temporary Identity API. Project, Team, and MCP management permissions are not yet verified by Control Panel API.",
-  logout: "Sign out",
-  registered: "Account created. Sign in with your username and password.",
-  logoutUncertain: "Bearer cleared in browser; server revocation was not confirmed.",
-  unavailable: "Identity is currently unavailable (503). The form is ready, but the server cannot complete sign-in. Restore Identity or cut BFF over to Rauthy.",
-  invalid: "Check the username, password, and form fields.",
-  denied: "Invalid credentials or access denied.",
-  invite: "Invitation key is invalid or already used.",
-  limited: "Too many attempts. Try again later.",
-  network: "No response from server.",
-  badResponse: "The server returned an unverified authentication format.",
-  transitional: "Compatibility with the retired Identity API. This does not verify access to projects or MCP.",
-  legacyTitle: "Legacy sign-in (transition only)",
-})
-function selectMode(value:"login"|"register"):void {
-  mode.value=value
-  authError.value=""
-  notice.value=""
-  password.value=""
-  invitation.value=""
+function resetNative():void{
+  nativeController?.abort();nativeController=null
+  if(nativeExpiry!==null){clearTimeout(nativeExpiry);nativeExpiry=null}
+  nativeUntil.value=null;nativeMonotonicUntil=null;native.value="idle";nativeCode.value=""
 }
-async function submitFirstUser():Promise<void> {
-  if(busy.value || confirmed.value)return
-  authError.value=""
-  notice.value=""
-  busy.value=true
-  authController?.abort()
-  const authRequest=new AbortController()
-  authController=authRequest
-  const secret=password.value
-  try {
-    if(mode.value==="register"){
-      await registerFirstUser(invitation.value.trim(),username.value.trim(),secret,authRequest.signal)
-      selectMode("login")
-      notice.value=labels.value.registered
-    }else{
-      confirmed.value=await signInFirstUser(username.value.trim(),secret,authRequest.signal)
+function onVisible():void{if(document.visibilityState==="visible")expireNative()}
+onMounted(()=>document.addEventListener("visibilitychange",onVisible))
+
+async function prepareNative():Promise<void>{
+  if(props.designPreview||!secureNativeOrigin||
+    native.value==="checking"||native.value==="prepared"||
+    status.value.kind==="signed_in")return
+  nativeController?.abort()
+  const request=new AbortController()
+  nativeController=request
+  native.value="checking"
+  nativeCode.value=""
+  nativeUntil.value=null
+  if(nativeExpiry!==null){clearTimeout(nativeExpiry);nativeExpiry=null}
+  const deadline=setTimeout(()=>request.abort(),9000)
+  try{
+    const protocol=await checkNativePrelogin(request.signal)
+    if(nativeController!==request)return
+    if(protocol.kind!=="supported"){
+      native.value=protocol.kind==="invalid"?"invalid":protocol.kind==="forbidden"?"forbidden":"unavailable"
+      nativeCode.value=protocol.code
+      return
     }
-  }catch(e){
-    if(authRequest.signal.aborted)return
-    const code=e instanceof FirstUserError?e.code:"BAD_RESPONSE"
-    authError.value=code==="OWNER_SOURCE_UNAVAILABLE"?labels.value.unavailable:
-      code==="INVITATION_REJECTED"?(mode.value==="register"?labels.value.invite:labels.value.denied):
-      code==="AUTHENTICATION_RATE_LIMITED"?labels.value.limited:
-      code==="AUTHENTICATION_REQUIRED"?labels.value.denied:
-      code==="REQUEST_REJECTED"?labels.value.invalid:
-      code==="NETWORK_ERROR"?labels.value.network:labels.value.badResponse
+    const result=await prepareNativeRauthyLogin(request.signal)
+    if(nativeController!==request)return
+    if(request.signal.aborted){native.value="unavailable";nativeCode.value="NATIVE_PREPARATION_CANCELLED";return}
+    native.value=result.kind
+    if(result.kind==="prepared"){
+      nativeUntil.value=result.expiresAt
+      nativeMonotonicUntil=performance.now()+Math.max(0,result.expiresAt-Date.now())
+      expireNative()
+    }else nativeCode.value=result.code
   }finally{
-    password.value=""
-    busy.value=false
-    if(authController===authRequest)authController=null
+    clearTimeout(deadline)
+    if(nativeController===request)nativeController=null
   }
 }
-async function logoutFirstUser():Promise<void> {
-  if(busy.value)return
-  busy.value=true
-  const revoked=await signOutFirstUser()
-  confirmed.value=null
-  busy.value=false
-  if(!revoked)authError.value=labels.value.logoutUncertain
-  void verifyApi()
+
+async function cancelPreparedNative():Promise<void>{
+  if(native.value!=="prepared"||status.value.kind==="signed_in")return
+  const request=new AbortController()
+  nativeController?.abort()
+  nativeController=request
+  native.value="canceling"
+  nativeCode.value=""
+  const deadline=setTimeout(()=>request.abort(),8500)
+  try{
+    const result=await cancelNativePrelogin(request.signal)
+    if(nativeController!==request)return
+    if(result.kind==="cancelled"){
+      resetNative()
+      native.value="cancelled"
+      return
+    }
+    // A disconnected reply is not evidence that server cleanup succeeded.
+    native.value=result.kind==="forbidden"?"forbidden":"unavailable"
+    nativeCode.value=result.code
+    nativeUntil.value=null;nativeMonotonicUntil=null
+    if(nativeExpiry!==null){clearTimeout(nativeExpiry);nativeExpiry=null}
+  }finally{
+    clearTimeout(deadline)
+    if(nativeController===request)nativeController=null
+  }
 }
-onMounted(() => { void verifyApi() })
-onBeforeUnmount(() => { ++generation; controller?.abort(); controller = null; authController?.abort(); authController=null; clearTemporaryBearer() })
+
+const labels=computed(()=>locale.value==="ru"?{
+  title:"Вход в Control Panel",
+  description:"Используйте существующую учётную запись Briareus. Управление проектами и инструментами доступно только после подтверждения прав.",
+  username:"Логин или почта",
+  password:"Пароль",
+  show:"Показать пароль",
+  hide:"Скрыть пароль",
+  submit:"Войти",
+  coming:"Вход по паролю пока недоступен. Учётные данные здесь не вводятся и не отправляются.",
+  pending:"Проверка сервиса…",
+  online:"Сервис авторизации отвечает",
+  signedOut:"Не авторизованы",
+  identified:"Сеанс Rauthy подтверждён; права Briareus проверяются отдельно",
+  offline:"Авторизация временно недоступна",
+  provider:"Подтверждение сеанса",
+  providerNote:"Control Panel использует Rauthy через собственный Backend API. Внешний интерфейс входа не открывается.",
+  embedded:"Вход по логину и паролю",
+  prepare:"Подготовить вход",
+  preparing:"Подготавливаем защищённую сессию входа…",
+  prepared:"Сессия входа подготовлена. Ввод пароля будет доступен после подключения Rauthy к форме входа.",
+  cancel:"Отменить подготовку",canceling:"Отменяем одноразовую транзакцию…",cancelled:"Подготовка входа отменена сервером.",
+  nativeUnavailable:"Подготовка входа недоступна. Учётные данные не отправлялись.",
+  nativeExpired:"Срок подготовки входа истёк. Для следующей попытки создайте новую транзакцию.",
+  nativeUntil:"Подготовка действует до",
+  nativeInvalid:"Некорректный ответ сервера при подготовке входа. Дальнейшие действия заблокированы.",
+  nativeForbidden:"Сервер отклонил подготовку входа. Проверьте адрес и HTTPS.",
+  nativeHttps:"Подготовка входа доступна только через защищённый HTTPS-адрес.",
+}:{
+  title:"Control Panel sign-in",
+  description:"Use your existing Briareus account. Projects and tools require verified access rights.",
+  username:"Username or email",
+  password:"Password",
+  show:"Show password",
+  hide:"Hide password",
+  submit:"Sign in",
+  coming:"Password sign-in is not yet available. This screen does not collect or submit credentials.",
+  pending:"Checking service…",
+  online:"Identity service reachable",
+  signedOut:"Not authenticated",
+  identified:"Rauthy session verified; Briareus permissions are checked separately",
+  offline:"Identity service unavailable",
+  provider:"Session verification",
+  providerNote:"Control Panel uses Rauthy through its own Backend API, without opening an external sign-in interface.",
+  embedded:"Username and password sign-in",
+  prepare:"Prepare sign-in",
+  preparing:"Preparing a secure sign-in session…",
+  prepared:"Sign-in session prepared. Password entry will be available when Rauthy is connected to this form.",
+  nativeUnavailable:"Sign-in preparation is unavailable. No credentials were sent.",
+  nativeExpired:"Sign-in preparation expired. Start a new transaction for the next attempt.",
+  nativeUntil:"Preparation valid until",
+  nativeInvalid:"Invalid server response while preparing sign-in. Further actions remain blocked.",
+  nativeForbidden:"Server rejected sign-in preparation. Check the address and HTTPS.",
+  nativeHttps:"Sign-in preparation requires a secure HTTPS address.",
+})
+const connection=computed(()=>{
+  if(checking.value)return labels.value.pending
+  if(status.value.kind==="signed_in")return labels.value.identified
+  if(status.value.kind==="signed_out")return labels.value.signedOut
+  return labels.value.offline
+})
+// RauthySignIn owns the identity request once. The sidebar status below
+// follows that existing component instead of launching another /session
+// and /config request per login screen render. Verified Platform /me
+// remains separately owned by OidcPanelPage.
+function onProviderState(value:RauthyPanelState|{kind:"checking"}):void {
+  if(value.kind==="signed_in"||status.value.kind==="signed_in")resetNative()
+  status.value=value
+  emit("providerState",value)
+}
+onBeforeUnmount(()=>{resetNative();document.removeEventListener("visibilitychange",onVisible)})
 </script>
+
 <template>
-  <section class="mx-auto grid w-full max-w-[1100px] overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_32px_100px_-40px_rgba(8,35,55,.4)] lg:min-h-[600px] lg:grid-cols-[.9fr_1.1fr]" aria-labelledby="control-panel-login-title">
-    <aside class="relative isolate overflow-hidden bg-[#101f31] px-6 py-9 text-slate-100 sm:px-10 lg:flex lg:flex-col lg:justify-between lg:px-12 lg:py-12">
-      <div class="pointer-events-none absolute -right-32 -top-36 -z-10 size-[420px] rounded-full bg-teal-400/20 blur-[95px]" aria-hidden="true" />
-      <div class="pointer-events-none absolute -bottom-40 -left-24 -z-10 size-[390px] rounded-full bg-sky-500/20 blur-[95px]" aria-hidden="true" />
-      <div class="relative z-10 flex items-center gap-3">
-        <span class="grid size-11 shrink-0 place-items-center rounded-xl border border-teal-300/30 bg-teal-300/10 text-lg font-black text-teal-200" aria-hidden="true">B</span>
-        <div>
-          <p class="text-[11px] font-bold uppercase tracking-[.18em] text-teal-200/80">Briareus</p>
-          <p class="text-base font-semibold leading-6">Control Panel</p>
+  <section class="mx-auto grid w-full max-w-[1060px] gap-6 pt-2 lg:grid-cols-[minmax(0,1.05fr)_minmax(260px,.8fr)] lg:gap-8 lg:pt-10" aria-label="Control Panel sign in">
+    <Card class="min-w-0 rounded-2xl">
+      <CardHeader class="space-y-3 pb-5">
+        <span class="flex size-11 items-center justify-center rounded-xl border border-border bg-muted/40"><LockKeyhole class="size-5 text-foreground" /></span>
+        <CardTitle class="text-2xl tracking-tight">{{labels.title}}</CardTitle>
+        <CardDescription class="max-w-lg text-sm leading-6">{{labels.description}}</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-5">
+        <section v-if="!designPreview" aria-label="Rauthy authentication" class="space-y-2">
+          <h2 class="text-sm font-semibold">{{labels.provider}}</h2>
+          <p class="text-xs leading-5 text-muted-foreground">{{labels.providerNote}}</p>
+          <RauthySignIn :initial-state="initialSession" :managed-logout="managedLogout" @logout-requested="emit('logoutRequested')" @state="onProviderState"/>
+        </section>
+        <Separator v-if="!designPreview"/>
+        <h2 class="text-sm font-semibold text-foreground">{{labels.embedded}}</h2>
+        <div v-if="!designPreview" class="space-y-2">
+          <Button type="button" variant="outline" class="w-full"
+            :disabled="!secureNativeOrigin||checking||native==='checking'||native==='prepared'||native==='canceling'||status.kind==='signed_in'"
+            @click="prepareNative">
+            <LoaderCircle v-if="native==='checking'" class="mr-2 size-4 animate-spin"/>
+            {{native==='checking'?labels.preparing:labels.prepare}}
+          </Button>
+          <p role="status" class="text-xs leading-5 text-muted-foreground">
+            {{!secureNativeOrigin?labels.nativeHttps:
+              native==='prepared'?labels.prepared:
+              native==='canceling'?labels.canceling:
+              native==='cancelled'?labels.cancelled:
+              native==='checking'?labels.preparing:
+              native==='expired'?labels.nativeExpired:
+              native==='invalid'?labels.nativeInvalid:
+              native==='forbidden'?labels.nativeForbidden:
+              native==='unavailable'?labels.nativeUnavailable:labels.coming}}
+          </p>
+          <p v-if="native==='prepared'&&nativeUntil" class="text-xs text-muted-foreground">{{labels.nativeUntil}}: {{new Date(nativeUntil).toLocaleTimeString(locale)}}</p>
+          <Button v-if="native==='prepared'" type="button" variant="outline" size="sm"
+            :disabled="checking" @click="cancelPreparedNative">{{labels.cancel}}</Button>
+          <code v-if="nativeCode" class="block text-xs text-muted-foreground">{{nativeCode}}</code>
         </div>
+        <form class="space-y-4" autocomplete="off" @submit.prevent>
+          <label class="block space-y-2 text-sm font-medium">
+            <span>{{labels.username}}</span>
+            <Input autocomplete="off" type="text" :placeholder="labels.username" :disabled="true" readonly />
+          </label>
+          <label class="block space-y-2 text-sm font-medium">
+            <span>{{labels.password}}</span>
+            <span class="flex gap-2">
+              <Input type="password" autocomplete="off" :placeholder="labels.password" :disabled="true" readonly />
+            </span>
+          </label>
+          <Button type="submit" class="w-full" size="lg" :disabled="true">
+            <KeyRound class="mr-2 size-4" />{{labels.submit}}
+          </Button>
+        </form>
+        <p class="min-h-12 rounded-lg border border-border bg-muted/30 px-3 py-3 text-xs leading-5 text-muted-foreground" role="status">{{labels.coming}}</p>
+      </CardContent>
+    </Card>
+    <aside class="min-w-0 self-start rounded-xl border border-border bg-card/60 p-4 lg:mt-4 lg:p-6" aria-live="polite">
+      <p class="mb-4 text-xs font-semibold uppercase tracking-[.12em] text-muted-foreground">Briareus · Identity</p>
+      <div class="flex min-h-14 items-center gap-3">
+        <LoaderCircle v-if="checking" class="size-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+        <span v-else class="size-2.5 shrink-0 rounded-full" :class="status.kind==='unavailable'?'bg-destructive':'bg-primary'" aria-hidden="true" />
+        <p class="text-sm font-medium">{{connection}}</p>
       </div>
-      <div class="relative z-10 mt-12 lg:my-12">
-        <span class="inline-flex rounded-full border border-teal-200/25 bg-teal-200/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-teal-100">{{ t('panelAccess.workspaceLabel') }}</span>
-        <h2 class="mt-5 max-w-sm text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{{ t('panelAccess.heroTitle') }}</h2>
-        <p class="mt-4 max-w-sm text-sm leading-7 text-slate-300">{{ t('panelAccess.heroDescription') }}</p>
-      </div>
-      <div class="relative z-10 mt-8 border-t border-white/15 pt-5 text-xs leading-6 text-slate-400">{{ t('panelAccess.permissionNotice') }}</div>
+      <p class="mt-3 text-xs leading-6 text-muted-foreground">{{labels.description}}</p>
     </aside>
-    <div class="flex min-w-0 flex-col justify-center px-5 py-9 sm:px-10 sm:py-12 lg:px-14">
-      <div class="mb-7 flex flex-wrap items-center justify-end gap-3">
-        <div class="inline-flex rounded-lg border border-border p-0.5" role="group" :aria-label="t('panelAccess.language')">
-          <button type="button" class="min-h-10 min-w-11 rounded-md px-3 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="locale==='ru'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="locale==='ru'" lang="ru" @click="setLocale('ru')">RU</button>
-          <button type="button" class="min-h-10 min-w-11 rounded-md px-3 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="locale==='en'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="locale==='en'" lang="en" @click="setLocale('en')">EN</button>
-        </div>
-        <div class="inline-flex max-w-full flex-wrap rounded-lg border border-border p-0.5" role="group" :aria-label="t('panelAccess.themeLabel')">
-          <button type="button" class="min-h-10 rounded-md px-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="theme==='system'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="theme==='system'" @click="selectTheme('system')">{{ t('panelAccess.themeSystem') }}</button>
-          <button type="button" class="min-h-10 rounded-md px-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="theme==='light'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="theme==='light'" @click="selectTheme('light')">{{ t('panelAccess.light') }}</button>
-          <button type="button" class="min-h-10 rounded-md px-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" :class="theme==='dark'?'bg-primary text-primary-foreground':'text-muted-foreground hover:bg-accent hover:text-foreground'" :aria-pressed="theme==='dark'" @click="selectTheme('dark')">{{ t('panelAccess.dark') }}</button>
-        </div>
-      </div>
-      <div class="mb-8">
-        <p class="mb-2 text-xs font-bold uppercase tracking-widest text-primary">{{ t('panelAccess.firstStep') }}</p>
-        <h1 id="control-panel-login-title" class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{{ t('panelAccess.title') }}</h1>
-        <p class="mt-3 text-sm leading-7 text-muted-foreground">{{ t('panelAccess.description') }}</p>
-      </div>
-      <div class="rounded-2xl border border-border bg-muted/40 p-5 sm:p-6" role="status" aria-live="polite" aria-atomic="true">
-        <div class="mb-3 flex items-center gap-3">
-          <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-lg font-bold text-primary" aria-hidden="true">B</span>
-          <p class="text-sm font-semibold text-foreground">{{ t('panelAccess.connectionTitle') }}</p>
-        </div>
-        <p v-if="confirmed" class="text-sm leading-6 text-foreground">{{labels.confirmed}}</p>
-        <p v-else-if="state==='checking'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.checking') }}</p>
-        <p v-else-if="state==='signed_out'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.signedOut') }}</p>
-        <p v-else-if="state==='denied'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.denied') }}</p>
-        <p v-else-if="state==='unverified'" class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unverified') }}</p>
-        <p v-else class="text-sm leading-6 text-muted-foreground">{{ t('panelAccess.unavailable') }}</p>
-      </div>
-      <RauthySignIn />
-      <!-- Legacy Identity stays as an explicit rollback-only disclosure until accepted OIDC cutover. -->
-      <details class="mt-5 rounded-xl border border-border bg-muted/10 p-3 sm:p-4">
-        <summary class="cursor-pointer text-sm font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">{{labels.legacyTitle}}</summary>
-        <div class="mt-4 space-y-4">
-        <p class="text-xs leading-5 text-muted-foreground">{{labels.transitional}}</p>
-        <div v-if="confirmed" class="space-y-3 rounded-xl border border-border bg-muted/30 p-4" role="status">
-          <p class="text-sm font-semibold text-foreground">{{labels.confirmed}}</p>
-          <p class="break-all font-mono text-xs text-muted-foreground">{{confirmed.user_id}}</p>
-          <p class="text-sm text-muted-foreground">{{labels.scopePending}}</p>
-          <button type="button" class="min-h-11 w-full rounded-lg border border-border px-4 text-sm font-semibold hover:bg-accent disabled:opacity-50" :disabled="busy" @click="logoutFirstUser">{{labels.logout}}</button>
-        </div>
-        <template v-else>
-          <div class="grid grid-cols-2 gap-2" role="group" :aria-label="t('panelAccess.firstStep')">
-            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-semibold" :class="mode==='login'?'bg-primary text-primary-foreground':'text-foreground hover:bg-accent'" :aria-pressed="mode==='login'" :disabled="busy" @click="selectMode('login')">{{labels.login}}</button>
-            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm font-semibold" :class="mode==='register'?'bg-primary text-primary-foreground':'text-foreground hover:bg-accent'" :aria-pressed="mode==='register'" :disabled="busy" @click="selectMode('register')">{{labels.register}}</button>
-          </div>
-          <form class="space-y-3" @submit.prevent="submitFirstUser">
-            <label v-if="mode==='register'" class="block text-sm font-semibold text-foreground">{{labels.invitation}}
-              <input v-model="invitation" type="password" class="field mt-1.5" autocomplete="off" minlength="32" maxlength="256" required :disabled="busy" />
-            </label>
-            <label class="block text-sm font-semibold text-foreground">{{labels.username}}
-              <input v-model="username" type="text" class="field mt-1.5" autocomplete="username" minlength="3" maxlength="128" required :disabled="busy" />
-            </label>
-            <label class="block text-sm font-semibold text-foreground">{{labels.password}}
-              <span class="mt-1.5 flex min-w-0 gap-2">
-                <input v-model="password" :type="passwordVisible?'text':'password'" class="field min-w-0 flex-1" :autocomplete="mode==='login'?'current-password':'new-password'" minlength="12" maxlength="4096" required :disabled="busy" />
-                <button type="button" class="min-h-11 shrink-0 rounded-lg border border-border px-3 text-xs hover:bg-accent" :aria-label="passwordVisible?labels.hidePassword:labels.showPassword" :aria-pressed="passwordVisible" @click="passwordVisible=!passwordVisible">{{passwordVisible?labels.hidePassword:labels.showPassword}}</button>
-              </span>
-            </label>
-            <p v-if="authError" role="alert" class="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{{authError}}</p>
-            <p v-if="notice" role="status" class="rounded-lg border border-border bg-muted/30 p-3 text-sm text-foreground">{{notice}}</p>
-            <button type="submit" class="min-h-12 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50" :disabled="busy">{{busy?labels.signing:mode==='login'?labels.submitLogin:labels.submitRegister}}</button>
-          </form>
-        </template>
-        </div>
-      </details>
-      <button type="button" class="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm font-medium transition hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50" :disabled="state==='checking'" @click="verifyApi">{{ t('panelAccess.retry') }}</button>
-      <button type="button" class="mt-4 w-full rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" @click="emit('preview')">{{t('panelAccess.exploreModules')}}</button>
-      <p class="mt-2 text-xs leading-6 text-muted-foreground">{{t('panelAccess.previewNotice')}}</p>
-      <p class="mt-4 text-xs leading-6 text-muted-foreground">{{ t('panelAccess.accountServices') }}</p>
-      <div class="mt-8 border-t border-border pt-5 text-center text-sm text-muted-foreground">
-        <a href="/" class="inline-flex min-h-10 items-center gap-2 rounded-lg px-2 text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">← {{ t('app.publicWebsite') }}</a>
-      </div>
-    </div>
   </section>
 </template>

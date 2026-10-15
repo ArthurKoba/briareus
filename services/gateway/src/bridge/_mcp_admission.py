@@ -6,18 +6,37 @@ Authorization 200 with the exact Permit body may allow Gateway forwarding.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID
 
-import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .single_origin import MCP_MODULES
 
-_AUTHORIZATION_DECIDE = "http://briareus-authorization:8000/internal/v1/authorization/decide"
 _HAND_TARGETS = {name: f"http://briareus-{name}:8000/mcp" for name in MCP_MODULES}
-_DECISION_TIMEOUT = httpx.Timeout(connect=3, read=5, write=5, pool=3)
+_DECISION_TIMEOUT_SECONDS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateAdmissionReply:
+    """HTTP status and bounded response from authenticated private transport."""
+
+    status_code: int
+    body: bytes
+
+
+class TrustedGatewayDecisionPort(Protocol):
+    """Real mTLS/Unix peer, exact decision bytes and nonce proof.
+
+    A plain HTTP URL, caller Bearer, Docker DNS or untrusted header is not a
+    service identity. No default implementation is supplied by Gateway.
+    """
+
+    async def decide(self, *, bearer: str, body: bytes) -> PrivateAdmissionReply: ...
 
 
 class McpAdmissionRejected(Exception):
@@ -104,29 +123,54 @@ def parse_connection_admission(request: Request) -> ConnectionAdmission:
     return ConnectionAdmission(hand, bearer, project_uuid, agent_session_uuid, revision)
 
 
-async def authorize_connection(
-    client: httpx.AsyncClient, admission: ConnectionAdmission
-) -> JSONResponse | None:
-    """Consult real independent Authorization; unavailable/unknown means deny."""
+def _strict_permit_response(payload: bytes) -> bool:
+    """Only exact typed JSON boolean Permit without duplicate keys admits MCP."""
+
+    def no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate Permit field")
+            result[key] = value
+        return result
+
+    if not payload or len(payload) > 4096:
+        return False
     try:
-        decision = await client.post(
-            _AUTHORIZATION_DECIDE,
-            json=admission.command(),
-            headers={"Authorization": admission.bearer, "Accept": "application/json"},
-            timeout=_DECISION_TIMEOUT,
+        permit = json.loads(payload, object_pairs_hook=no_duplicates)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(permit, dict) and set(permit) == {"allowed"} and permit["allowed"] is True
+
+
+async def authorize_connection(
+    private: TrustedGatewayDecisionPort | None, admission: ConnectionAdmission
+) -> JSONResponse | None:
+    """Only a real authenticated private peer may carry Bearer to Authorization."""
+    if private is None:
+        return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
+    try:
+        wire = json.dumps(
+            admission.command(), ensure_ascii=True, allow_nan=False, separators=(",", ":")
+        ).encode("utf-8")
+        if not 0 < len(wire) <= 8192:
+            return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
+        decision = await asyncio.wait_for(
+            private.decide(bearer=admission.bearer, body=wire),
+            timeout=_DECISION_TIMEOUT_SECONDS,
         )
-    except (httpx.HTTPError, TimeoutError):
+    except Exception:
+        return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
+    if not isinstance(decision, PrivateAdmissionReply):
         return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
     if decision.status_code == 401:
         return admission_error("MCP_IDENTITY_UNVERIFIED", 401)
     if decision.status_code == 403:
         return admission_error("MCP_ACCESS_DENIED", 403)
-    if decision.status_code != 200:
-        return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
-    try:
-        permit = decision.json()
-    except ValueError:
-        return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
-    if permit != {"allowed": True}:
+    if (
+        decision.status_code != 200
+        or not isinstance(decision.body, bytes)
+        or not _strict_permit_response(decision.body)
+    ):
         return admission_error("MCP_AUTHORIZATION_UNAVAILABLE", 503)
     return None

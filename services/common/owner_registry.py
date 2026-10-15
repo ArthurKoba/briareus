@@ -41,6 +41,7 @@ _OWNER_MODELS: dict[OwnerName, tuple[type[DeclarativeBase], tuple[str, ...]]] = 
             "agents._persistence",
             "projects._scoped_events_persistence",
             "projects._control_ledger",
+            "projects._rauthy_user_links",
         ),
     ),
     "resources": (

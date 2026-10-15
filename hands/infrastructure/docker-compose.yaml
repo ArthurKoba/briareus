@@ -8,6 +8,10 @@ services:
     environment:
       TZ: "${TZ:-UTC}"
       OTLP_ENDPOINT: "${OTLP_ENDPOINT:-}"
+      # MCP resource trust remains disabled until actual Rauthy resource aud
+      # and access-token signing algorithm have been independently verified.
+      MCP_RESOURCE_AUDIENCE: "${MCP_RESOURCE_AUDIENCE:-}"
+      MCP_RESOURCE_SIGNING_ALGORITHM: "${MCP_RESOURCE_SIGNING_ALGORITHM:-}"
       OTLP_BEARER_TOKEN: "${OTLP_BEARER_TOKEN:-}"
       OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:?}"
       OTEL_DEPLOYMENT_ENVIRONMENT_NAME: "${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:?}"

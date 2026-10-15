@@ -9,11 +9,22 @@ from __future__ import annotations
 from collections import Counter
 
 from fastmcp import FastMCP
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+
+from ._effect_auth import EffectAuthorizationMiddleware
 
 
-def diagnostic_mcp(hand: str, catalog: dict[str, object]) -> FastMCP:
-    """Return a private Streamable HTTP MCP server with no side effects."""
-    mcp = FastMCP(f"briareus-{hand}-diagnostics")
+def diagnostic_mcp(
+    hand: str,
+    catalog: dict[str, object],
+    *,
+    resource_verifier: JWTVerifier | None = None,
+) -> FastMCP:
+    """Build diagnostic MCP; optional signed resource admission remains closed."""
+    mcp = FastMCP(f"briareus-{hand}-diagnostics", auth=resource_verifier)
+    # Missing OAuth configuration never removes the per-effect PEP.
+    # An accidentally registered protected tool must still fail closed.
+    mcp.add_middleware(EffectAuthorizationMiddleware(hand))
     declared_count = int(catalog["declared_tool_count"])
     tools = catalog["declared_tools"]
     assert isinstance(tools, list)
@@ -31,8 +42,10 @@ def diagnostic_mcp(hand: str, catalog: dict[str, object]) -> FastMCP:
         """Report process-level MCP diagnostics, not tool execution readiness."""
         return {
             "hand": hand,
-            "transport": "diagnostic_only",
-            "authorization": "not_configured",
+            "transport": "resource_auth_staged" if resource_verifier else "diagnostic_only",
+            "authorization": "resource_verifier_configured"
+            if resource_verifier
+            else "not_configured",
             "protected_execution": "disabled",
             "declared_legacy_tool_count": declared_count,
             "registered_diagnostic_tools": 2,
@@ -51,5 +64,20 @@ def diagnostic_mcp(hand: str, catalog: dict[str, object]) -> FastMCP:
             "source_modules": dict(sorted(groups.items())),
             "source_declarations_are_callable": False,
         }
+
+    if resource_verifier is not None:
+
+        @mcp.tool(
+            title="Current Hand permission proof",
+            annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+        )
+        def hand_permission_probe() -> dict[str, object]:
+            """Probe only action-level decision, never a resource or business effect."""
+            return {
+                "hand": hand,
+                "authorization": "action_only_decision",
+                "resource_scope_verified": False,
+                "protected_execution": "disabled",
+            }
 
     return mcp

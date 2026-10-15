@@ -83,6 +83,7 @@ class ProjectOwnershipPort(Protocol):
 
 class TeamMembershipPort(Protocol):
     async def is_active_member(self, team_id: TeamId, user_id: UserId) -> bool: ...
+    async def is_team_owner(self, team_id: TeamId, user_id: UserId) -> bool: ...
 
 
 class ProjectAccessAuthorizer:
@@ -129,8 +130,13 @@ class ProjectAccessAuthorizer:
         if ownership.owner_user_id is not None:
             return ownership.owner_user_id == caller.user_id
 
-        # MVP grants all active Team members access to Team projects
-        # and the ability to approve AgentSession elevation.
+        # Team membership permits ordinary resource access only. Escalation
+        # approval requires the current Team owner (or verified superuser),
+        # never an arbitrary member of the same Team.
         if ownership.owner_team_id is not None:
+            if permission is ProjectPermission.APPROVE_AGENT_SESSION:
+                return await self._memberships.is_active_member(
+                    ownership.owner_team_id, caller.user_id
+                ) and await self._memberships.is_team_owner(ownership.owner_team_id, caller.user_id)
             return await self._memberships.is_active_member(ownership.owner_team_id, caller.user_id)
         return False

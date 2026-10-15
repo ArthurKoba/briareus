@@ -41,8 +41,6 @@
 !services/platform/docker-compose.yaml
 !services/platform/migrations/env.py
 !services/platform/migrations/versions/0001_platform_baseline.py
-!services/platform/migrations/versions/0002_project_lifecycle.py
-!services/platform/migrations/versions/0003_phase_idempotency.py
 !services/platform/pyproject.toml
 !services/platform/src/agents/__init__.py
 !services/platform/src/agents/_domain.py
@@ -54,6 +52,12 @@
 !services/platform/src/projects/_control_source.py
 !services/platform/src/projects/_effect_issuer.py
 !services/platform/src/projects/_persistence.py
+!services/platform/src/projects/_oidc_membership_projection.py
+!services/platform/src/projects/_oidc_context_api.py
+!services/platform/src/projects/_oidc_access_project_api.py
+!services/platform/src/projects/_rauthy_user_links.py
+!services/platform/src/projects/_rauthy_user_status.py
+!services/platform/src/projects/_rauthy_first_operator.py
 !services/platform/src/projects/_scoped_events_persistence.py
 !services/platform/src/projects/_scoped_owner_source.py
 !services/platform/src/projects/_team_proof_reader.py

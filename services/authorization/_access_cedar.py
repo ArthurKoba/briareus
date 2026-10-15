@@ -12,6 +12,12 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from authorization._cedar_policy import CedarOperation, CedarPolicyEvaluator, CurrentGrant
+from authorization._resource_scope import (
+    EffectResource,
+    HandName,
+    resource_key,
+    stored_grant_matches,
+)
 from authorization._session_persistence import ProjectAgentSessionRow
 
 # Two explicit policy tiers; elevated rights can never be authorized by a
@@ -27,6 +33,13 @@ permit(principal is User,
        resource is Project)
 when { context.grantVersion >= 1 };
 
+// A Hand effect additionally requires an exact durable resource-scoped grant
+// verified against its tool arguments and a trusted authenticated Hand peer.
+permit(principal is User,
+       action in [Action::"files.read", Action::"project.metadata.read"],
+       resource is HandResource)
+when { context.grantVersion >= 1 };
+
 permit(principal is User,
        action in [Action::"files.write", Action::"terminal.execute",
                   Action::"web.access", Action::"analysis.import",
@@ -34,6 +47,15 @@ permit(principal is User,
                   Action::"variables.use", Action::"integrations.manage",
                   Action::"variables.manage"],
        resource is Project)
+when { context.grantVersion >= 1 && context.isElevated == true };
+
+permit(principal is User,
+       action in [Action::"files.write", Action::"terminal.execute",
+                  Action::"web.access", Action::"analysis.import",
+                  Action::"agents.manage", Action::"integrations.use",
+                  Action::"variables.use", Action::"integrations.manage",
+                  Action::"variables.manage"],
+       resource is HandResource)
 when { context.grantVersion >= 1 && context.isElevated == true };
 """
 
@@ -47,6 +69,9 @@ def permits_current_project_grant(
     project_uuid: UUID,
     operation: str,
     expected_version: int,
+    hand: HandName | None = None,
+    tool: str | None = None,
+    resource: EffectResource | None = None,
 ) -> bool:
     """Deny absent, stale, revoked or actor-mismatched durable grants."""
     if (
@@ -69,21 +94,41 @@ def permits_current_project_grant(
         or (operation != "mcp.connect" and operation not in operations)
     ):
         return False
+    scoped = hand is not None or tool is not None or resource is not None
+    if scoped and (
+        hand is None
+        or tool is None
+        or resource is None
+        or operation == "mcp.connect"
+        or not stored_grant_matches(
+            stored=row.grants.get("resources"),
+            hand=hand,
+            tool=tool,
+            action=operation,
+            resource=resource,
+            project_uuid=project_uuid,
+        )
+    ):
+        return False
+    # Unscoped calls are permitted only for the original verified internal
+    # owner operation API and Gateway mcp.connect. The private /decide Hand
+    # route REQUIRES a bound resource in DecisionCommand.
+    target = resource_key(hand, tool, resource) if scoped else project_uuid
     return _POLICY.permits(
         CedarOperation(
             actor_uuid=actor_uuid,
             agent_session_uuid=row.session_uuid,
             project_uuid=project_uuid,
             action=operation,
-            resource_type="Project",
-            resource_uuid=project_uuid,
+            resource_type="HandResource" if scoped else "Project",
+            resource_uuid=target,
         ),
         CurrentGrant(
             actor_uuid=row.created_by_principal_id,
             agent_session_uuid=row.session_uuid,
             project_uuid=row.project_id,
             action=operation,
-            resource_uuid=project_uuid,
+            resource_uuid=target,
             active=row.status == "active" and row.revoked_at is None,
             expires_at=row.hard_expires_at,
             version=row.version,

@@ -55,3 +55,7 @@ class SqlMembership:
 
     async def is_active_member(self, team_id: TeamId, user_id: UserId) -> bool:
         return await self.teams.active_member(self.session, team_id, user_id)
+
+    async def is_team_owner(self, team_id: TeamId, user_id: UserId) -> bool:
+        team = await self.teams.get(self.session, team_id)
+        return team is not None and team.owner_user_id == user_id

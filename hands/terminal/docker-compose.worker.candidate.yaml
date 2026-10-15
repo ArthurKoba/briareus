@@ -1,0 +1,22 @@
+# Non-deployed candidate for the existing Terminal App owner.
+# NOT referenced by current Coolify Compose; no tool operations.
+services:
+  briareus-terminal-offline-candidate:
+    build:
+      context: ../..
+      dockerfile: hands/terminal/Dockerfile
+    command: ["/app/.venv/bin/python", "-m", "terminal_hand.offline_worker"]
+    user: "1000:1000"
+    network_mode: "none"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+    init: true
+    tmpfs:
+      - "/tmp:rw,nosuid,nodev,noexec,size=8m"
+    # No secrets, resource mounts, controller IPC, networks or ports.

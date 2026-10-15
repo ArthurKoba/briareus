@@ -1,355 +1,204 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sun, X } from "lucide-vue-next"
 import { useI18n } from "vue-i18n"
 import { platformPort } from "@/features/platform/api/port"
 import { projectContext } from "@/features/platform/model/project-context"
 import { refreshBffOwnerBoundary } from "@/features/platform/model/refresh-owner-boundary"
 import { browserTelemetry } from "@/features/platform/model/browser-telemetry"
 import { normalizeUiError } from "@/features/platform/model/errors"
-import { validPlatformPage, type PlatformPageId } from "@/app/platform-navigation"
-import PlatformNav from "@/app/PlatformNav.vue"
-import ContextSwitcher from "@/features/platform/ui/ContextSwitcher.vue"
-import ScopedRealtimeStatus from "@/features/platform/ui/ScopedRealtimeStatus.vue"
-import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
+import { validPlatformPage } from "@/features/platform"
+import type { PlatformPageId } from "@/features/platform/types"
+import { ControlPanelShell } from "@/widgets/control-panel"
 import ControlPanelAccessPage from "@/pages/platform/ControlPanelAccessPage.vue"
-import PublicIdentityStatus from "@/features/platform/ui/PublicIdentityStatus.vue"
-import ModuleWorkspacePage from "@/pages/modules/ModuleWorkspacePage.vue"
-import Button from "@/shared/ui/Button.vue"
+import OidcPanelPage from "@/pages/platform/OidcPanelPage.vue"
+import OperationProgress from "@/features/platform/ui/OperationProgress.vue"
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card"
+import { Button } from "@/shared/ui/button"
 import ToastHost from "@/shared/notifications/ToastHost.vue"
-import { useUiPreferences } from "@/shared/lib/preferences"
+const LocalDesignPreview = import.meta.env.DEV
+  ? defineAsyncComponent(() => import("@/pages/preview/LocalDesignPreview.vue"))
+  : null
 
-/** Briareus is a greenfield application, not a legacy MCP operator console. */
-const pages:Record<PlatformPageId,ReturnType<typeof defineAsyncComponent>>={
-  home:defineAsyncComponent(()=>import("@/pages/platform/PlatformHomePage.vue")),
-  mcp:defineAsyncComponent(()=>import("@/pages/modules/ModuleWorkspacePage.vue")),
-  users:defineAsyncComponent(()=>import("@/pages/platform/UsersPage.vue")),
-  teams:defineAsyncComponent(()=>import("@/pages/platform/TeamsPage.vue")),
-  projects:defineAsyncComponent(()=>import("@/pages/platform/ProjectsPage.vue")),
-  agents:defineAsyncComponent(()=>import("@/pages/platform/AgentsPage.vue")),
-  sessions:defineAsyncComponent(()=>import("@/pages/platform/AgentSessionsPage.vue")),
-  integrations:defineAsyncComponent(()=>import("@/pages/platform/ProjectAccountsPage.vue")),
-  variables:defineAsyncComponent(()=>import("@/pages/platform/ProjectVariablesPage.vue")),
-  dashboard:defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  calls:defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  oauth:defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  files:defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  terminal:defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  "browser-managed":defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  "browser-external":defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  analysis:defineAsyncComponent(()=>import("@/pages/platform/ResourceBoundaryPage.vue")),
-  settings:defineAsyncComponent(()=>import("@/pages/platform/PlatformSettingsPage.vue")),
+/** Module/source loading is separate from authoritative Platform permissions. */
+const pages: Record<PlatformPageId, ReturnType<typeof defineAsyncComponent>> = {
+  home: defineAsyncComponent(() => import("@/pages/platform/PlatformHomePage.vue")),
+  mcp: defineAsyncComponent(() => import("@/pages/modules/ModuleWorkspacePage.vue")),
+  users: defineAsyncComponent(() => import("@/pages/platform/UsersPage.vue")),
+  teams: defineAsyncComponent(() => import("@/pages/platform/TeamsPage.vue")),
+  projects: defineAsyncComponent(() => import("@/pages/platform/ProjectsPage.vue")),
+  agents: defineAsyncComponent(() => import("@/pages/platform/AgentsPage.vue")),
+  sessions: defineAsyncComponent(() => import("@/pages/platform/AgentSessionsPage.vue")),
+  integrations: defineAsyncComponent(() => import("@/pages/platform/ProjectAccountsPage.vue")),
+  variables: defineAsyncComponent(() => import("@/pages/platform/ProjectVariablesPage.vue")),
+  dashboard: defineAsyncComponent(() => import("@/pages/dashboard/DashboardPage.vue")),
+  calls: defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  oauth: defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  files: defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  terminal: defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  "browser-managed": defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  "browser-external": defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  analysis: defineAsyncComponent(() => import("@/pages/platform/ResourceBoundaryPage.vue")),
+  settings: defineAsyncComponent(() => import("@/pages/platform/PlatformSettingsPage.vue")),
 }
-const resourcePage:Partial<Record<PlatformPageId,string>>={
-  dashboard:"dashboard",calls:"calls",oauth:"oauth",files:"files",terminal:"terminal",analysis:"analysis",
-  "browser-managed":"browserManaged","browser-external":"browserExternal",
+const labels: Partial<Record<PlatformPageId,string>> = {
+  "browser-managed": "browserManaged", "browser-external": "browserExternal",
 }
-const {t}=useI18n()
-const {theme,sidebarCollapsed}=useUiPreferences()
-const routePage=ref("home")
-const activePage=computed<PlatformPageId>(()=>validPlatformPage(routePage.value)?routePage.value:"home")
-const title=computed(()=>t(`platform.navigation.${resourcePage[activePage.value]??activePage.value}`))
-const screen=computed(()=>pages[activePage.value])
-const verified=computed(()=>projectContext.state.user?.active===true&&
+const { t }=useI18n()
+/** Compile-time DEV gate. This branch is unreachable in production bundles. */
+const localDesignPreview = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get("ui-preview") === "1"
+const routePage=ref<PlatformPageId>("home")
+const verified=computed(()=>projectContext.state.user?.active===true &&
   ["choose-project","project","team","operator"].includes(projectContext.state.scope))
-const missingTransport=computed(()=>platformPort.value===null)
-// Explicit nonprivileged preview, isolated from authenticated PlatformPort.
-// Anonymous /panel/ opens the nonprivileged module workspace, not an auth wall.
-const modulePreview=ref(true)
-const publicWorkspaceLabel=computed(()=>String(t("platform.navigation.mcp")))
-const publicAccessLabel=computed(()=>String(t("panelAccess.title")))
-const loading=ref(true)
+const activePage=computed<PlatformPageId>(()=>verified.value&&validPlatformPage(routePage.value)?routePage.value:"home")
+const title=computed(()=>t(`platform.navigation.${labels[activePage.value]??activePage.value}`))
+const screen=computed(()=>pages[activePage.value])
+const busy=ref(false)
 const unavailable=ref(false)
-/** Never infer DB schema version/head from unauthenticated health/ENV. */
-const serviceUpgradingPossible=ref(false)
-const submitting=ref(false)
 const error=ref("")
-const mobileNavOpen=ref(false)
-const isMobile=ref(false)
-let mobileQuery:MediaQueryList|null=null
-function syncMobile(event:MediaQueryListEvent|MediaQueryList):void {
-  isMobile.value=event.matches
-  if(!event.matches)mobileNavOpen.value=false
-}
-const mobileNavPanel=ref<HTMLElement|null>(null)
-/** Separate one-use links of the SAME mode must never reuse a prior form. */
-const publicLinkError=ref(false)
-let authGeneration=0
-let authAbort:AbortController|null=null
+let generation=0
+let controller:AbortController|null=null
 let unsubscribeCredential:(()=>void)|undefined
 
-/** Expire the entire verified User/Team/Project identity, never a cached username. */
-function expireAuth():void {
+function clearAuth():void {
+  ++generation
+  controller?.abort()
+  controller=null
   browserTelemetry.clear()
-  ++authGeneration
-  authAbort?.abort()
-  authAbort=null
   projectContext.clear()
-  loading.value=false
-  submitting.value=false
-  unavailable.value=false
-  serviceUpgradingPossible.value=false
+  busy.value=false
 }
-/** Single-use credentials do not survive a URL/history navigation. */
-function readOneUseLink():void {
-  // The previous native-password invitation/reset flow is RETIRED from the
-  // browser. Never render its form, log its token or forward it to the IdP.
-  // Account onboarding needs the published Control Panel API contract.
-  const url=new URL(location.href)
-  const hasLegacyCode=url.searchParams.has("invite")||url.searchParams.has("reset")
-  if(!hasLegacyCode)return
-  url.searchParams.delete("invite")
-  url.searchParams.delete("reset")
-  history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`)
-  publicLinkError.value=true
-}
-function readHash():void {
+function syncHash():void {
   const [root,child]=location.hash.slice(1).split("/")
-  // /panel/ and #platform/mcp are discoverable without a user session.
-  // Explicit #platform/home remains the account-access route.
-  const candidate=root==="platform"?(child||"mcp"):"mcp"
-  if(!validPlatformPage(candidate)){
-    const fallback=verified.value?"home":"mcp"
-    history.replaceState(null,"",`${location.pathname}${location.search}#platform/${fallback}`)
-    routePage.value=fallback
-  }else routePage.value=candidate
-  if(!verified.value)modulePreview.value=routePage.value==="mcp"
-  mobileNavOpen.value=false
-}
-function showPublicRoute(page:"mcp"|"home"):void {
-  window.location.hash=`platform/${page}`
-  readHash()
-}
-function onHistory():void {
-  readOneUseLink()
-  readHash()
+  // All application surfaces are protected. An anonymous hash is not a role.
+  if(root==="platform"&&child&&verified.value&&validPlatformPage(child)){
+    routePage.value=child
+  }else{
+    routePage.value="home"
+    if(location.hash!=="#platform/home"){
+      history.replaceState(null,"",`${location.pathname}${location.search}#platform/home`)
+    }
+  }
   browserTelemetry.navigation(activePage.value)
 }
-function ensureRoute():void {
-  if(!validPlatformPage(routePage.value)){
-    history.replaceState(null,"",`${location.pathname}${location.search}#platform/home`)
-    routePage.value="home"
-  }
-}
-async function restore():Promise<void>{
-  const generation=++authGeneration
-  authAbort?.abort()
-  const controller=new AbortController()
-  authAbort=controller
-  loading.value=true
+async function restore():Promise<void> {
+  const current=++generation
+  controller?.abort()
+  const request=new AbortController()
+  controller=request
   unavailable.value=false
-  serviceUpgradingPossible.value=false
   error.value=""
+  if(!platformPort.value) {
+    // No unverified Rauthy User can activate protected Platform views.
+    projectContext.clear()
+    browserTelemetry.lifecycle("blocked")
+    controller=null
+    syncHash()
+    return
+  }
+  busy.value=true
   const port=platformPort.value
   try {
-    if(!port){
-      projectContext.clear()
-      browserTelemetry.lifecycle("blocked")
-      return
-    }
-    const projection=await port.auth.restore(controller.signal)
-    if(generation!==authGeneration||controller.signal.aborted||port!==platformPort.value)return
-    if(projection){
-      projectContext.installServerProjection(projection)
-      if(!projection.user.active){
-        // Suspended/disabled Identity is explicit revocation. Purge the local
-        // memory-only bearer and command state; never call BFF owners or
-        // report a successful authenticated login under that principal.
-        port.auth.invalidate?.()
-        error.value=String(t("platform.suspendedNotice"))
-        return
-      }
-      await refreshBffOwnerBoundary()
-    }else{
+    const projection=await port.auth.restore(request.signal)
+    if(current!==generation||request.signal.aborted||port!==platformPort.value)return
+    if(!projection||!projection.user.active){
       port.auth.invalidate?.()
       projectContext.clear()
-    }
-    if(generation!==authGeneration||controller.signal.aborted||port!==platformPort.value)return
-    browserTelemetry.lifecycle("ok")
-    ensureRoute()
-  }catch(cause){
-    if(generation!==authGeneration||controller.signal.aborted)return
-    const issue=normalizeUiError(cause)
-    browserTelemetry.error("app","authentication")
-    if(issue.kind==="unauthorized"){
-      // An authenticated 401 is not schema upgrading or a valid User.
-      // Clear the browser memory credential and show normal sign-in only.
-      port?.auth.invalidate?.()
-      projectContext.clear()
-      error.value=String(t("platform.authSessionExpired"))
-      unavailable.value=false
+      if(projection&&!projection.user.active)error.value=String(t("platform.suspendedNotice"))
       return
     }
-    projectContext.offline()
-    serviceUpgradingPossible.value=issue.message==="serviceUnavailableOrUpgrading"
-    unavailable.value=true
-  }finally{
-    if(generation===authGeneration){loading.value=false;authAbort=null}
+    projectContext.installServerProjection(projection)
+    await refreshBffOwnerBoundary()
+    if(current!==generation||request.signal.aborted)return
+    browserTelemetry.lifecycle("ok")
+    syncHash()
+  }catch(cause){
+    if(current!==generation||request.signal.aborted)return
+    const issue=normalizeUiError(cause)
+    port.auth.invalidate?.()
+    projectContext.clear()
+    error.value=String(t(issue.kind==="unauthorized"?"platform.authSessionExpired":"platform.unverifiedOffline"))
+    unavailable.value=issue.kind!=="unauthorized"
+    browserTelemetry.error("app","authentication")
+  }finally {
+    if(current===generation){busy.value=false;controller=null}
   }
 }
 async function logout():Promise<void>{
-  if(submitting.value)return
-  // Fence any in-flight restore before server revocation. The selected
-  // Project can no longer issue a command while logout is pending.
-  ++authGeneration
-  authAbort?.abort()
-  authAbort=null
-  const adapter=platformPort.value
-  submitting.value=true
+  if(busy.value)return
+  busy.value=true
+  const port=platformPort.value
+  ++generation
+  controller?.abort()
   projectContext.clear()
-  let remoteUncertain=false
-  try {
-    if(adapter)await adapter.auth.logout(new AbortController().signal)
-  }catch{
-    remoteUncertain=true
-  }finally{
-    // Even an unconfirmed remote logout MUST purge local bearer material.
-    browserTelemetry.clear()
-    adapter?.auth.invalidate?.()
-    expireAuth()
-    if(remoteUncertain)error.value=String(t("platform.logoutUncertain"))
+  try{await port?.auth.logout(new AbortController().signal)}
+  catch{error.value=String(t("platform.logoutUncertain"))}
+  finally{
+    port?.auth.invalidate?.()
+    clearAuth()
+    syncHash()
   }
 }
-function observeCredential():void {
+function onCredentialInvalidated():void {
+  clearAuth()
+  syncHash()
+}
+watch(platformPort,()=>{
+  if(localDesignPreview)return
   unsubscribeCredential?.()
-  unsubscribeCredential=platformPort.value?.auth.onCredentialInvalidated?.(expireAuth)
-}
-function closeMobileNav():void { mobileNavOpen.value=false }
-watch(mobileNavOpen,async open=>{
-  await nextTick()
-  if(open){
-    const first=mobileNavPanel.value?.querySelector<HTMLElement>("nav button:not(:disabled)")
-    ;(first??mobileNavPanel.value)?.focus()
-  }else if(window.matchMedia("(max-width: 767px)").matches&&mobileNavPanel.value?.contains(document.activeElement)){
-    document.getElementById("mobile-nav-trigger")?.focus()
+  unsubscribeCredential=undefined
+  clearAuth()
+  if(!platformPort.value){
+    // The independent OIDC BFF page owns public callback/deep-link routing.
+    // An uninstalled legacy PlatformPort must not rewrite its URL.
+    window.removeEventListener("hashchange",syncHash)
+    window.removeEventListener("popstate",syncHash)
+    return
   }
+  window.addEventListener("hashchange",syncHash)
+  window.addEventListener("popstate",syncHash)
+  unsubscribeCredential=platformPort.value.auth.onCredentialInvalidated?.(onCredentialInvalidated)
+  void restore()
 })
-function handleMobileNavKey(event:KeyboardEvent):void {
-  if(!mobileNavOpen.value||window.matchMedia("(min-width: 768px)").matches)return
-  if(event.key==="Escape"){event.preventDefault();closeMobileNav();return}
-  if(event.key!=="Tab"||!mobileNavPanel.value)return
-  const focusable=[...mobileNavPanel.value.querySelectorAll<HTMLElement>(
-    "button:not(:disabled),a[href],select:not(:disabled),[tabindex]:not([tabindex='-1'])",
-  )].filter(item=>item.getClientRects().length>0)
-  const first=focusable[0],last=focusable[focusable.length-1]
-  if(!first||!last){event.preventDefault();mobileNavPanel.value.focus();return}
-  if(event.shiftKey&&(document.activeElement===first||!mobileNavPanel.value.contains(document.activeElement))){
-    event.preventDefault();last.focus()
-  }else if(!event.shiftKey&&(document.activeElement===last||!mobileNavPanel.value.contains(document.activeElement))){
-    event.preventDefault();first.focus()
-  }
-}
-function handleSidebarClick(event:MouseEvent):void {
-  if(mobileNavOpen.value&&event.target instanceof Element&&event.target.closest("nav button"))closeMobileNav()
-}
-watch(platformPort,()=>{modulePreview.value=routePage.value==="mcp";observeCredential();expireAuth();void restore()})
+watch(()=>projectContext.state.revision,()=>{
+  if(!localDesignPreview&&projectContext.state.user?.active)void refreshBffOwnerBoundary()
+})
 watch(routePage,async()=>{
-  // SPA hash-route navigation must move keyboard/screen-reader focus from
-  // the old menu into the new page heading after the lazy view changes.
   await nextTick()
   document.getElementById("briareus-page-title")?.focus()
 })
-// Every explicit Team/Project switch invalidates prior owner revisions. Only
-// the authenticated BFF can restore owner readiness, never the UI cache.
-watch(()=>projectContext.state.revision,()=>{if(projectContext.state.user?.active)void refreshBffOwnerBoundary()})
-watch([verified,routePage,()=>projectContext.state.revision],()=>{if(verified.value)ensureRoute()})
 onMounted(()=>{
-  mobileQuery=window.matchMedia("(max-width: 767px)")
-  syncMobile(mobileQuery)
-  mobileQuery.addEventListener("change",syncMobile)
-  observeCredential()
-  onHistory()
-  window.addEventListener("hashchange",onHistory)
-  window.addEventListener("popstate",onHistory)
-  window.addEventListener("keydown",handleMobileNavKey)
+  if(localDesignPreview||!platformPort.value)return
+  unsubscribeCredential=platformPort.value.auth.onCredentialInvalidated?.(onCredentialInvalidated)
+  window.addEventListener("hashchange",syncHash)
+  window.addEventListener("popstate",syncHash)
+  syncHash()
   void restore()
 })
 onBeforeUnmount(()=>{
-  mobileQuery?.removeEventListener("change",syncMobile)
-  mobileQuery=null
-  ++authGeneration
-  authAbort?.abort()
-  // Unsub FIRST, then revoke all browser-memory bearer material when this
-  // authenticated shell is disposed (including route-owner replacement/HMR).
+  if(localDesignPreview)return
+  clearAuth()
   unsubscribeCredential?.()
   platformPort.value?.auth.invalidate?.()
-  window.removeEventListener("hashchange",onHistory)
-  window.removeEventListener("popstate",onHistory)
-  window.removeEventListener("keydown",handleMobileNavKey)
-  projectContext.clear()
+  window.removeEventListener("hashchange",syncHash)
+  window.removeEventListener("popstate",syncHash)
 })
 </script>
+
 <template>
   <ToastHost />
-  <div v-if="loading" role="status" class="grid min-h-screen place-items-center text-sm text-muted-foreground">{{t('app.loading')}}</div>
-  <div v-else-if="modulePreview && !verified" class="min-h-screen bg-background px-3 py-5 text-foreground sm:px-6 sm:py-9">
-    <header class="mx-auto mb-4 flex w-full max-w-[1440px] flex-wrap items-center justify-between gap-3" aria-label="Briareus">
-      <div class="flex min-w-0 items-center gap-3">
-        <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-base font-black text-primary-foreground" aria-hidden="true">B</span>
-        <div class="min-w-0">
-          <p class="font-semibold tracking-tight">Briareus Control Panel</p>
-          <p class="text-xs text-muted-foreground">{{publicWorkspaceLabel}}</p>
-        </div>
-      </div>
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <PublicIdentityStatus />
-        <a href="/" class="inline-flex min-h-11 items-center rounded-lg px-3 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">{{t('app.publicWebsite')}}</a>
-        <Button variant="default" size="sm" @click="showPublicRoute('home')">{{publicAccessLabel}}</Button>
-      </div>
-    </header>
-    <ModuleWorkspacePage preview @close="showPublicRoute('home')" />
-  </div>
-  <div v-else-if="missingTransport" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
-    <div class="w-full">
-      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
-      <!-- Transitional Identity login stays inside the scoped Control Panel BFF; no project grants are inferred. -->
-      <ControlPanelAccessPage @preview="showPublicRoute('mcp')" />
+  <LocalDesignPreview v-if="localDesignPreview" />
+  <OidcPanelPage v-else-if="!verified"/>
+  <ControlPanelShell v-else :page="activePage" :heading="title" :authenticated="verified" :busy="busy" @logout="logout">
+    <div v-if="error" role="alert" class="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{{error}}</div>
+    <Card v-if="unavailable && verified" class="max-w-lg">
+      <CardHeader><CardTitle>{{t('platform.unverifiedOffline')}}</CardTitle></CardHeader>
+      <CardContent><Button variant="outline" :disabled="busy" @click="restore">{{t('common.retry')}}</Button></CardContent>
+    </Card>
+    <ControlPanelAccessPage v-else-if="!verified" />
+    <div v-else class="min-w-0">
+      <OperationProgress :active-page="activePage" />
+      <component :is="screen" :key="`${projectContext.state.revision}:${activePage}`" />
     </div>
-  </div>
-  <div v-else-if="unavailable" class="grid min-h-screen place-items-center p-6">
-    <section class="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm" role="alert">
-      <h1 class="text-lg font-semibold">{{t('platform.brand')}}</h1>
-      <p class="mt-2 text-sm text-muted-foreground">{{t(serviceUpgradingPossible?'platform.serviceUnavailableOrUpgrading':'platform.unverifiedOffline')}}</p>
-      <Button class="mt-5" @click="restore">{{t('common.retry')}}</Button>
-      <p class="mt-4"><a href="/" class="text-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80">{{t('app.publicWebsite')}}</a></p>
-    </section>
-  </div>
-  <div v-else-if="!verified" class="first-user-stage grid min-h-screen place-items-center px-4 py-6 sm:p-8">
-    <div class="w-full">
-      <p v-if="projectContext.state.scope==='suspended'" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('platform.suspendedNotice')}}</p>
-      <p v-if="publicLinkError" class="mx-auto mb-4 max-w-[1100px] rounded-xl border border-destructive/30 p-4 text-sm text-destructive" role="alert">{{t('panelAccess.legacyLinkUnavailable')}}</p>
-      <ControlPanelAccessPage @preview="showPublicRoute('mcp')" />
-    </div>
-  </div>
-  <div v-else class="min-h-screen bg-background text-foreground md:grid" :class="sidebarCollapsed?'md:grid-cols-[68px_minmax(0,1fr)]':'md:grid-cols-[240px_minmax(0,1fr)]'">
-    <button v-if="mobileNavOpen" class="fixed inset-0 z-30 bg-black/40 md:hidden" :aria-label="t('platform.closeMenu')" tabindex="-1" @click="closeMobileNav" />
-    <aside ref="mobileNavPanel" tabindex="-1" :inert="isMobile&&!mobileNavOpen" :aria-hidden="isMobile&&!mobileNavOpen?'true':undefined" :role="mobileNavOpen?'dialog':undefined" :aria-modal="mobileNavOpen?'true':undefined" :aria-label="t('platform.navigation.title')" @click="handleSidebarClick"
-      class="fixed inset-y-0 left-0 z-40 h-screen w-60 overflow-y-auto border-r border-border bg-sidebar p-3 transition-transform md:sticky md:top-0 md:w-auto md:translate-x-0"
-      :class="mobileNavOpen?'translate-x-0':'-translate-x-full'">
-      <div class="mb-5 flex h-10 items-center justify-between">
-        <div v-if="!sidebarCollapsed||mobileNavOpen" class="truncate px-2 font-semibold tracking-tight">{{t('platform.brand')}}</div>
-        <Button variant="ghost" size="icon" class="hidden md:inline-flex" :aria-label="t('platform.toggleSidebar')" @click="sidebarCollapsed=!sidebarCollapsed"><PanelLeftOpen v-if="sidebarCollapsed" class="size-4"/><PanelLeftClose v-else class="size-4"/></Button>
-        <Button variant="ghost" size="icon" class="md:hidden" :aria-label="t('platform.closeMenu')" @click="closeMobileNav"><X class="size-4"/></Button>
-      </div>
-      <PlatformNav :collapsed="sidebarCollapsed&&!mobileNavOpen" :active-page="activePage" />
-    </aside>
-    <main class="min-w-0">
-      <header class="sticky top-0 z-20 flex min-h-14 flex-wrap items-center gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur sm:px-6">
-        <Button id="mobile-nav-trigger" variant="ghost" size="icon" class="md:hidden" :aria-label="t('platform.openMenu')" :aria-expanded="mobileNavOpen" @click="mobileNavOpen=true"><Menu class="size-4"/></Button>
-        <h1 id="briareus-page-title" tabindex="-1" class="min-w-0 flex-1 truncate text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">{{title}}</h1>
-        <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-          <a href="/" target="_blank" rel="noopener noreferrer" class="hidden text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground sm:inline" :title="t('app.publicWebsite')">{{t('app.publicWebsite')}} ↗</a>
-          <ContextSwitcher />
-          <ScopedRealtimeStatus />
-          <span class="hidden max-w-32 truncate text-xs text-muted-foreground lg:inline">{{projectContext.coreOwnerReady()?projectContext.state.user?.label:t('platform.ownerBoundaryState.unknown')}}</span>
-          <Button variant="ghost" size="icon" :aria-label="t('settings.theme')" @click="theme=theme==='dark'?'light':'dark'"><Sun v-if="theme==='dark'" class="size-4"/><Moon v-else class="size-4"/></Button>
-          <Button variant="outline" size="sm" :disabled="submitting" @click="logout">{{t('app.signOut')}}</Button>
-        </div>
-      </header>
-      <div class="mx-auto w-full max-w-[1600px] p-3 sm:p-6">
-        <OperationProgress :active-page="activePage" />
-        <component :is="screen" :key="`${projectContext.state.revision}:${activePage}`" v-bind="resourcePage[activePage]?{resource:resourcePage[activePage]}:{}" />
-      </div>
-    </main>
-  </div>
+  </ControlPanelShell>
 </template>

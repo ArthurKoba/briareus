@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import Request
 
+from authorization._action_audiences import HAND_EFFECT_AUDIENCES
 from authorization._decision_api import (
     DecisionAuthenticationRequired,
     DecisionAuthorityUnavailable,
@@ -27,7 +28,7 @@ from authorization._rauthy_jwks import (
     RauthyKeysUnavailable,
     RauthyTokenRejected,
 )
-from authorization._service_identity import ACTION_AUDIENCES
+from authorization._rauthy_membership_contract import VerifiedProjectMembership
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,16 +39,7 @@ class VerifiedDecisionPeer:
     source_audience: str
     target_audience: str
     expires_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class VerifiedProjectMembership:
-    """Current Platform-owned Rauthy subject to internal User mapping."""
-
-    rauthy_subject: str
-    actor_uuid: UUID
-    project_uuid: UUID
-    expires_at: datetime
+    attested_effect_key: str | None = None
 
 
 class TrustedDecisionPeerResolver(Protocol):
@@ -58,6 +50,7 @@ class CurrentProjectMembershipResolver(Protocol):
     async def current_member(
         self,
         *,
+        rauthy_issuer: str,
         rauthy_subject: str,
         project_uuid: UUID,
     ) -> VerifiedProjectMembership: ...
@@ -105,25 +98,29 @@ class RauthyDecisionAttestor:
             or peer.target_audience != "briareus:access"
             or peer.expires_at.tzinfo is None
             or peer.expires_at <= now
+            or peer.attested_effect_key != command.effect_key()
             or (command.action == "mcp.connect" and peer.consumer != "gateway")
             or (command.action == "mcp.connect" and peer.source_audience != "gateway")
             or (
                 command.action != "mcp.connect"
                 and (
                     peer.consumer != "hand"
-                    or peer.source_audience == "gateway"
-                    or peer.source_audience not in ACTION_AUDIENCES.get(command.action, frozenset())
+                    or peer.source_audience != command.hand
+                    or peer.source_audience
+                    not in HAND_EFFECT_AUDIENCES.get(command.action, frozenset())
                 )
             )
         ):
             raise DecisionScopeDenied("verified service audience cannot perform action")
 
         membership = await self._membership.current_member(
+            rauthy_issuer=signed.issuer,
             rauthy_subject=signed.subject,
             project_uuid=command.project_uuid,
         )
         if (
             not isinstance(membership, VerifiedProjectMembership)
+            or membership.rauthy_issuer != signed.issuer
             or membership.rauthy_subject != signed.subject
             or membership.project_uuid != command.project_uuid
             or membership.actor_uuid.version != 4
@@ -142,4 +139,5 @@ class RauthyDecisionAttestor:
             authority="rauthy",
             verified_peer_audience=peer.target_audience,
             proof_expires_at=expires_at,
+            attested_effect_key=peer.attested_effect_key,
         )

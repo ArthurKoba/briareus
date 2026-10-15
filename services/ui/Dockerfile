@@ -3,6 +3,7 @@ WORKDIR /app
 COPY services/ui/package.json services/ui/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY services/ui/components.json services/ui/index.html services/ui/tsconfig.json services/ui/vite.config.ts ./
+COPY services/ui/local-http-proxy.ts ./
 COPY services/ui/src ./src
 COPY services/ui/public ./public
 RUN bun run build

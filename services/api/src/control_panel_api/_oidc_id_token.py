@@ -60,30 +60,12 @@ def _trusted_jwks_location(issuer: str, uri: str) -> bool:
     )
 
 
-async def verify_rauthy_id_token(
-    token: SecretStr,
-    *,
-    expected_nonce: str,
-    issuer: str,
-    client_id: str,
-    jwks_uri: str,
-    client: httpx.AsyncClient,
-) -> VerifiedOidcIdentity:
-    """Require signed identity, exact client audience, nonce and bounded TTL.
-
-    The calling BFF must atomically consume an approved state/PKCE transaction
-    and later resolve an enabled Platform User/member. Neither this signature
-    alone nor the returned subject authorizes any Briareus service operation.
-    """
-    raw = token.get_secret_value()
-    if (
-        not 80 <= len(raw) <= 8192
-        or not isinstance(expected_nonce, str)
-        or not 32 <= len(expected_nonce) <= 128
-        or not client_id
-        or not _trusted_jwks_location(issuer, jwks_uri)
-    ):
-        raise OidcIdentityRejected("OIDC ID token or trusted issuer proof missing")
+async def _verified_provider_key(
+    raw: str, *, issuer: str, jwks_uri: str, client: httpx.AsyncClient
+) -> jwt.PyJWK:
+    """Resolve a pinned provider signer for either token purpose, never a grant."""
+    if not 80 <= len(raw) <= 8192 or not _trusted_jwks_location(issuer, jwks_uri):
+        raise OidcIdentityRejected("provider token or trusted issuer proof missing")
     try:
         header = jwt.get_unverified_header(raw)
         kid = header.get("kid")
@@ -131,11 +113,40 @@ async def verify_rauthy_id_token(
     except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise OidcIdentityKeysUnavailable("issuer signing keys unavailable") from exc
 
+    return jwk
+
+
+async def verify_rauthy_id_token(
+    token: SecretStr,
+    *,
+    expected_nonce: str,
+    issuer: str,
+    client_id: str,
+    jwks_uri: str,
+    client: httpx.AsyncClient,
+) -> VerifiedOidcIdentity:
+    """Require signed identity, exact client audience, nonce and bounded TTL.
+
+    The calling BFF must atomically consume an approved state/PKCE transaction
+    and later resolve an enabled Platform User/member. Neither this signature
+    alone nor the returned subject authorizes any Briareus service operation.
+    """
+    raw = token.get_secret_value()
+    if (
+        not 80 <= len(raw) <= 8192
+        or not isinstance(expected_nonce, str)
+        or not 32 <= len(expected_nonce) <= 128
+        or not client_id
+        or not _trusted_jwks_location(issuer, jwks_uri)
+    ):
+        raise OidcIdentityRejected("OIDC ID token or trusted issuer proof missing")
+    jwk = await _verified_provider_key(raw, issuer=issuer, jwks_uri=jwks_uri, client=client)
+
     try:
         claims = jwt.decode(
             raw,
             jwk.key,
-            algorithms=[alg],
+            algorithms=[jwk.algorithm_name],
             issuer=issuer,
             audience=client_id,
             leeway=0,

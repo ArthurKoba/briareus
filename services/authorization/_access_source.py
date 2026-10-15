@@ -16,6 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from authorization._access_cedar import permits_current_project_grant
 from authorization._idempotency import CommandOutcome, IdempotentCommandExecutor
 from authorization._platform_persistence import OutboxRow, SecurityAuditRow
+from authorization._resource_scope import (
+    TrustedResourceOwnerPort,
+    matches_current_owner,
+    normalized_resource_grants,
+)
 from authorization._session_persistence import ProjectAgentSessionRow, SessionApprovalRow
 from common.owner_contracts import (
     CurrentOwnerAuthorityPort,
@@ -56,12 +61,14 @@ class AccessSourceService:
         *,
         encryption_key: SecretStr,
         current_owners: CurrentOwnerAuthorityPort,
+        resource_owner: TrustedResourceOwnerPort | None = None,
     ) -> None:
         if db.engine.url.database != "briareus_access":
             raise RuntimeError("Access cannot use another owner database")
         if current_owners is None:
             raise RuntimeError("online owner authority cannot be omitted")
         self.current_owners = current_owners
+        self.resource_owner = resource_owner
         self.db = db
         self.authority = authority
         self.commands = IdempotentCommandExecutor(db, encryption_key.get_secret_value())
@@ -230,6 +237,7 @@ class AccessSourceService:
         *,
         grants: list[str],
         seconds: int,
+        resource_grants: list[dict[str, object]] | None = None,
     ) -> CommandOutcome:
         if (
             request.operation != "session.request_elevation"
@@ -238,7 +246,17 @@ class AccessSourceService:
             or not set(grants) <= _ALLOWED
         ):
             raise InvalidInput("invalid elevated operation or TTL/grant scope")
-        require_signed_payload(request, {"grants": sorted(set(grants)), "seconds": seconds})
+        try:
+            resources = normalized_resource_grants(
+                resource_grants if resource_grants is not None else [],
+                allowed_actions=set(grants),
+            )
+        except ValueError as exc:
+            raise InvalidInput("invalid scoped resource request") from exc
+        signed_payload: dict[str, object] = {"grants": sorted(set(grants)), "seconds": seconds}
+        if resource_grants is not None:
+            signed_payload["resources"] = resources
+        require_signed_payload(request, signed_payload)
 
         async def checked(tx: AsyncSession) -> None:
             await self._verify(tx, request, proofs, existing=True)
@@ -252,7 +270,7 @@ class AccessSourceService:
                 session_uuid=base.session_uuid,
                 project_id=base.project_id,
                 requested_by_user_id=request.caller_user_id,
-                requested_grants={"operations": sorted(set(grants))},
+                requested_grants={"operations": sorted(set(grants)), "resources": resources},
                 requested_expires_at=datetime.now(UTC) + timedelta(seconds=seconds),
                 status="pending",
                 version=1,
@@ -272,6 +290,7 @@ class AccessSourceService:
                 "uuid": str(request.session_uuid),
                 "grants": sorted(set(grants)),
                 "seconds": seconds,
+                "resources": resources,
                 "payload_sha256": request.payload_sha256,
             },
             command=command,
@@ -350,6 +369,25 @@ class AccessSourceService:
                 # Broader access needs a new request and verified approver scope.
                 if not set(final) <= set(initial):
                     raise AccessDenied("approved grants exceed original request")
+                try:
+                    requested_resources = normalized_resource_grants(
+                        approval.requested_grants.get("resources", []),
+                        allowed_actions=set(initial),
+                    )
+                except ValueError as exc:
+                    raise AccessDenied("stored scoped resource request invalid") from exc
+                resources = [item for item in requested_resources if item["action"] in final]
+                if resources:
+                    if self.resource_owner is None:
+                        raise AccessDenied("trusted resource owner proof unavailable")
+                    for item in resources:
+                        proof = self.resource_owner.verify_current_scope(
+                            project_uuid=request.project_id, scope=item
+                        )
+                        if not matches_current_owner(
+                            proof, project_uuid=request.project_id, scope=item
+                        ):
+                            raise AccessDenied("resource is not currently owned by Project")
                 from uuid import uuid4
 
                 issued = uuid4()
@@ -360,7 +398,7 @@ class AccessSourceService:
                     is_elevated=True,
                     elevation_policy="fixed",
                     label=base.label,
-                    grants={"operations": final},
+                    grants={"operations": final, "resources": resources},
                     status="active",
                     version=1,
                     created_at=now,

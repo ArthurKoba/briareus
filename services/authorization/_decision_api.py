@@ -14,10 +14,17 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from authorization._access_cedar import permits_current_project_grant
+from authorization._resource_scope import (
+    EffectResource,
+    HandName,
+    resource_key,
+    validate_effect_scope,
+    validate_project_resource_scope,
+)
 from authorization._session_persistence import ProjectAgentSessionRow
 from common.platform_db import PlatformDatabase
 
@@ -45,7 +52,32 @@ class DecisionCommand(BaseModel):
     project_uuid: UUID
     agent_session_uuid: UUID
     action: str = Field(min_length=1, max_length=128)
-    expected_grant_revision: int = Field(ge=1)
+    expected_grant_revision: int = Field(strict=True, ge=1, le=2**63 - 1)
+    hand: HandName | None = None
+    tool: str | None = Field(default=None, min_length=1, max_length=128)
+    resource: EffectResource | None = None
+
+    @model_validator(mode="after")
+    def effect_boundary(self) -> DecisionCommand:
+        if self.action == "mcp.connect":
+            if any(value is not None for value in (self.hand, self.tool, self.resource)):
+                raise ValueError("Gateway coarse admission cannot claim an effect resource")
+        elif self.hand is None or self.tool is None or self.resource is None:
+            raise ValueError("Hand effect needs exact hand/tool/resource selection")
+        else:
+            validate_effect_scope(self.hand, self.tool, self.action, self.resource)
+            validate_project_resource_scope(
+                project_uuid=self.project_uuid,
+                hand=self.hand,
+                tool=self.tool,
+                resource=self.resource,
+            )
+        return self
+
+    def effect_key(self) -> str | None:
+        if self.resource is None or self.hand is None or self.tool is None:
+            return None
+        return resource_key(self.hand, self.tool, self.resource)
 
     @field_validator("project_uuid", "agent_session_uuid")
     @classmethod
@@ -66,6 +98,18 @@ class VerifiedDecisionCaller:
     authority: Literal["rauthy"]
     verified_peer_audience: str
     proof_expires_at: datetime
+    attested_effect_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedCurrentGrant:
+    """Current Access result, valid only for the original authenticated request."""
+
+    actor_uuid: UUID
+    project_uuid: UUID
+    agent_session_uuid: UUID
+    grant_revision: int
+    expires_at: datetime
 
 
 class TrustedDecisionAttestor(Protocol):
@@ -82,7 +126,9 @@ class AuthorizationDecisionReader:
             raise ValueError("Authorization decision reader must use its own Access database")
         self._db = database
 
-    async def permits(self, command: DecisionCommand, caller: VerifiedDecisionCaller) -> bool:
+    async def current_grant(
+        self, command: DecisionCommand, caller: VerifiedDecisionCaller
+    ) -> AuthorizedCurrentGrant | None:
         # Project and session must be attested independently, not supplied as
         # authority by a caller-controlled POST body or forwarded user header.
         if (
@@ -96,8 +142,9 @@ class AuthorizationDecisionReader:
             or caller.proof_expires_at <= datetime.now(UTC)
             or (command.action == "mcp.connect" and caller.consumer != "gateway")
             or (command.action != "mcp.connect" and caller.consumer != "hand")
+            or caller.attested_effect_key != command.effect_key()
         ):
-            return False
+            return None
         async with self._db.transaction() as tx:
             row = await tx.scalar(
                 select(ProjectAgentSessionRow).where(
@@ -105,13 +152,36 @@ class AuthorizationDecisionReader:
                     ProjectAgentSessionRow.project_id == command.project_uuid,
                 )
             )
-            return row is not None and permits_current_project_grant(
+            # Owner DB may block while this request's short-lived signed
+            # Rauthy/peer/Project proof expires. No stale proof may Permit.
+            if caller.proof_expires_at <= datetime.now(UTC):
+                return None
+            if row is None or not permits_current_project_grant(
                 row=row,
                 actor_uuid=caller.actor_uuid,
                 project_uuid=command.project_uuid,
                 operation=command.action,
                 expected_version=command.expected_grant_revision,
+                hand=command.hand,
+                tool=command.tool,
+                resource=command.resource,
+            ):
+                return None
+            grant = AuthorizedCurrentGrant(
+                actor_uuid=caller.actor_uuid,
+                project_uuid=row.project_id,
+                agent_session_uuid=row.session_uuid,
+                grant_revision=row.version,
+                expires_at=min(caller.proof_expires_at, row.hard_expires_at),
             )
+        # A transaction exit/commit can also block. Do not return a decision
+        # whose original identity or grant expired while leaving the scope.
+        if grant.expires_at <= datetime.now(UTC):
+            return None
+        return grant
+
+    async def permits(self, command: DecisionCommand, caller: VerifiedDecisionCaller) -> bool:
+        return await self.current_grant(command, caller) is not None
 
 
 class AuthorizationDecisionService:
@@ -144,7 +214,9 @@ def authorization_decision_router(
         active = (
             service
             if service is not None
-            else resolve_service(request) if resolve_service is not None else None
+            else resolve_service(request)
+            if resolve_service is not None
+            else None
         )
         if active is None:
             raise HTTPException(503, detail="authorization identity attestation unavailable")
@@ -165,4 +237,3 @@ def authorization_decision_router(
         return DecisionPermit()
 
     return router
-

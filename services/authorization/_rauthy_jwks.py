@@ -90,7 +90,10 @@ class RauthyJwksVerifier:
                 or (alg != "EdDSA" and kty != "RSA")
                 or entry.get("use") != "sig"
                 or entry.get("key_ops") not in (None, ["verify"])
-                or any(key in entry for key in ("jku", "x5u", "x5c", "x5t"))
+                or any(
+                    key in entry
+                    for key in ("jku", "x5u", "x5c", "x5t", "d", "p", "q", "dp", "dq", "qi", "oth")
+                )
             ):
                 raise RauthyKeysUnavailable("Rauthy trusted JWK metadata rejected")
             try:
@@ -121,15 +124,35 @@ class RauthyJwksVerifier:
                 issuer=self._issuer,
                 audience=self._audience,
                 leeway=0,
-                options={"require": ["iss", "aud", "sub", "exp", "iat"]},
+                options={
+                    "require": ["iss", "aud", "sub", "exp", "iat", "nbf", "typ", "azp", "jti"]
+                },
             )
             sub = claims.get("sub")
-            exp = claims.get("exp")
+            exp, issued, nbf = claims.get("exp"), claims.get("iat"), claims.get("nbf")
+            client, jti = claims.get("azp"), claims.get("jti")
+            audience = claims.get("aud")
+            audiences = [audience] if isinstance(audience, str) else audience
             if (
                 not isinstance(sub, str)
                 or not 1 <= len(sub) <= 256
-                or not isinstance(exp, int)
-                or isinstance(exp, bool)
+                or any(type(value) is not int for value in (exp, issued, nbf))
+                or exp <= issued
+                or nbf >= exp
+                or claims.get("typ") != "Bearer"
+                or claims.get("cnf") is not None
+                or not isinstance(client, str)
+                or not 1 <= len(client) <= 2048
+                or not client.isascii()
+                or any(char.isspace() for char in client)
+                or not isinstance(jti, str)
+                or not 1 <= len(jti) <= 128
+                or not jti.isascii()
+                or any(ord(char) <= 32 or ord(char) >= 127 for char in jti)
+                or not isinstance(audiences, list)
+                or not 1 <= len(audiences) <= 16
+                or any(not isinstance(item, str) or not item for item in audiences)
+                or len(set(audiences)) != len(audiences)
             ):
                 raise RauthyTokenRejected("Rauthy signed subject invalid")
             return VerifiedRauthySubject(

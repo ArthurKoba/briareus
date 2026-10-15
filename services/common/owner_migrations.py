@@ -68,8 +68,8 @@ def _ddl_source(owner: OwnerName) -> tuple[str, ...]:
 _APPROVED_BASELINE_HASHES: dict[OwnerName, str] = {
     "identity": "ee13ba6b4266a325be4f5860e3a321c43662e2409bfcd88f69ccf9969f8466eb",
     "access": "b9db1f587cb5412d7d08616acac58468d910c9a535bc9b7de77a5570a1652b2c",
-    "platform": "0d401830b2b1885425ba4f986d72d65b6674c4471d45258b78917c88fae382ad",
-    "resources": "9759e8b4288d70df60a9b1f21d8db7b8847a26a8d4b7b6733f59e7dd272f4d8f",
+    "platform": "9207a0eba1c49298b866120c22396ac8f59a0a1066d347b66c3c9a46ef7c99f9",
+    "resources": "640be5cf251efb8947d2495520d410cbdc8f78adc4ab8052356d0dfbd1456aea",
     "files": "395244365a0bd125869329b31554e285d8313f3f8253bd6596006c73421a1679",
     "runtime": "acc05a7994ad166610ad02b4c189f7c776df53a4a922bd75fa12ed64d7b46b75",
     "reverse": "7876512ca2e5b8a47ba7f1dccd13ede9a58378fea4133de400e8e9ff884fe517",
@@ -79,14 +79,13 @@ _APPROVED_BASELINE_HASHES: dict[OwnerName, str] = {
 # six owner-local multi-phase UUID migration steps are new successors, never
 # rewrites/stamps of any old history. Access and ingest need no ledger change.
 _APPROVED_INTERMEDIATE_SIGNATURES: dict[str, str] = {
-    "platform_0002": "88c00bda99826e83ce432675a1c4231f7f047e0c68571dc849e180132d997005",
     "runtime_0002": "27d61748555c275ca1a09c29b5faba52343cdb85624b9825778661372b7c9136",
 }
 _REVIEWED_VERSIONS: dict[OwnerName, tuple[str, ...]] = {
     "identity": ("identity_0001", "identity_0002"),
     "access": ("access_0001",),
-    "platform": ("platform_0001", "platform_0002", "platform_0003"),
-    "resources": ("resources_0001", "resources_0002"),
+    "platform": ("platform_0001",),
+    "resources": ("resources_0001",),
     "files": ("files_0001", "files_0002"),
     "runtime": ("runtime_0001", "runtime_0002", "runtime_0003"),
     "reverse": ("reverse_0001", "reverse_0002"),
@@ -105,7 +104,20 @@ def _accepted_versions(owner: OwnerName) -> frozenset[str]:
 def owner_config(owner: OwnerName) -> Config:
     package = Path(__file__).resolve().parent / "alembic_owners" / owner
     source = Path(__file__).resolve().parents[2] / "scripts" / "alembic_owners" / owner
-    directory = package if (package / "env.py").is_file() else source
+    # Flat owner-local source is canonical for native local greenfield
+    # acceptance. Installed source-only service images retain the copied
+    # /app/src/common/alembic_owners/<owner>/ history as first priority.
+    local_owner = {
+        "platform": Path(__file__).resolve().parents[2] / "services/platform/migrations",
+        "resources": Path(__file__).resolve().parents[2] / "services/resources/migrations",
+    }.get(owner)
+    directory = (
+        package
+        if (package / "env.py").is_file()
+        else local_owner
+        if local_owner is not None and (local_owner / "env.py").is_file()
+        else source
+    )
     if not (directory / "env.py").is_file():
         raise OwnerSchemaRejected("owner migration history missing from installed image")
     cfg = Config()
@@ -284,8 +296,7 @@ def _verify(conn: Connection, settings: OwnerDatabaseSettings) -> int:
             or len(expected_uniques) != len(observed_uniques)
             or {columns for columns, _ in expected_uniques} != set(observed_by_columns)
             or any(
-                explicit_name is not None
-                and observed_by_columns[columns] != explicit_name
+                explicit_name is not None and observed_by_columns[columns] != explicit_name
                 for columns, explicit_name in expected_uniques
             )
         ):

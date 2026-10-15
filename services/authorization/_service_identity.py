@@ -29,6 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from authorization._action_audiences import ACTION_AUDIENCES, ALLOWED_AUDIENCES
 from common.platform_errors import AccessDenied, AuthenticationRequired, Conflict, InvalidInput
 from common.platform_ids import AgentSessionUuid, PlatformProjectId, TeamId, UserId
 from common.settings import ProcessSettings
@@ -51,30 +52,6 @@ if TYPE_CHECKING:
 
 AUTHORIZATION_AUDIENCE = "platform-authorization"
 DELEGATION_ISSUER = "briareus-authorization"
-ALLOWED_AUDIENCES = frozenset(
-    {
-        "gateway",
-        "files",
-        "terminal",
-        "web",
-        "reverse",
-        "svc",
-        "infrastructure",
-    }
-)
-# Audience and operation MUST be checked as a pair. A signed Files caller
-# cannot request Terminal execution merely because its human has that grant.
-ACTION_AUDIENCES: dict[str, frozenset[str]] = {
-    "files.read": frozenset({"files"}),
-    "files.write": frozenset({"files"}),
-    "project.metadata.read": frozenset({"gateway"}),
-    "terminal.execute": frozenset({"terminal"}),
-    "web.access": frozenset({"web"}),
-    "analysis.import": frozenset({"reverse"}),
-    "agents.manage": frozenset({"gateway"}),
-    "integrations.use": frozenset({"svc", "infrastructure"}),
-    "variables.use": frozenset({"svc", "infrastructure"}),
-}
 SERVICE_LIFETIME = timedelta(seconds=30)
 DELEGATION_LIFETIME = timedelta(seconds=45)
 

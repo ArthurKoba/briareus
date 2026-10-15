@@ -27,7 +27,7 @@ class CedarOperation:
     project_uuid: UUID
     action: str
     resource_type: str
-    resource_uuid: UUID
+    resource_uuid: UUID | str
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +38,7 @@ class CurrentGrant:
     agent_session_uuid: UUID
     project_uuid: UUID
     action: str
-    resource_uuid: UUID | None
+    resource_uuid: UUID | str | None
     active: bool
     expires_at: datetime
     version: int

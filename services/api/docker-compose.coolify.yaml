@@ -1,11 +1,12 @@
 x-watch-path-coolify:
   - "services/api/**"
+  - "services/external/**"
 
 services:
-  briareus-admin-api:
+  briareus-control-panel-api:
     extends:
       file: docker-compose.yaml
-      service: briareus-admin-api
+      service: briareus-control-panel-api
     environment:
       TZ: "${TZ:-UTC}"
       OIDC_ISSUER: "${OIDC_ISSUER:-}"

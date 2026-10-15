@@ -26,6 +26,8 @@ from common.models import JsonObject, JsonValue
 from common.runtime_policy_contracts import TerminalRuntimePolicy
 from common.settings import TerminalSettings
 
+from ._offline_executor import OfflineExecutorUnavailable, require_offline_executor
+
 logger = logging.getLogger(__name__)
 
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -330,6 +332,13 @@ class TerminalManager:
         except (AdminApiClientError, ValueError):
             return TerminalRuntimePolicy()
 
+    @staticmethod
+    def _require_offline_executor() -> None:
+        try:
+            require_offline_executor()
+        except OfflineExecutorUnavailable as exc:
+            raise TerminalError(str(exc)) from exc
+
     def _environment(self, overrides: dict[str, str] | None) -> dict[str, str]:
         env = {
             "HOME": str(self.home),
@@ -357,6 +366,10 @@ class TerminalManager:
     ) -> JsonObject:
         if not command.strip():
             raise TerminalError("command is required")
+        # A networked trusted controller must never reach workspace policy,
+        # admin endpoints, PTY allocation or host process creation for an
+        # untrusted command. The actual worker must be isolated already.
+        self._require_offline_executor()
         workspace_id = self._workspace_id(workspace_id)
         workdir = self.resolve_cwd(workspace_id, cwd)
         requested_limit = max_output_bytes or self.settings.max_exec_output_bytes
@@ -630,6 +643,10 @@ class TerminalManager:
     ) -> JsonObject:
         if not command.strip():
             raise TerminalError("command is required")
+        # A networked trusted controller must never reach workspace policy,
+        # admin endpoints, PTY allocation or host process creation for an
+        # untrusted command. The actual worker must be isolated already.
+        self._require_offline_executor()
         workspace_id = self._workspace_id(workspace_id)
         workdir = self.resolve_cwd(workspace_id, cwd)
         policy = self._runtime_policy()

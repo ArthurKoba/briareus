@@ -1,6 +1,7 @@
 /**
  * Exact READ-ONLY SOURCE shape from independently accepted Backend A11
- * `services/admin-api/src/presentation/owner_bff_contract.py`.
+ * historical pre-Control-Panel `services/admin-api/src/presentation/owner_bff_contract.py`
+ * (ARCHIVED provenance only, not an active upstream or public route).
  * The accepted A11 router is PRIVATE/UNMOUNTED; this module cannot fetch,
  * authenticate, mint grants or turn owner-local COMMITTED into BFF success.
  * Backend A12 is changing signatures; defer public wire installation.

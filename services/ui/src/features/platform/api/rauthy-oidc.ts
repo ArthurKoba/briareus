@@ -1,4 +1,5 @@
-/** Same-origin BFF-only Rauthy sign-in; never stores OAuth tokens or secrets. */
+import {CONTROL_PANEL_AUTH_API} from "@/shared/config/control-panel-api"
+/** Same-origin, server-owned Rauthy code+PKCE session; no browser OAuth tokens. */
 export type RauthyPanelIdentity = {
   authenticated: true
   authority: "rauthy"
@@ -10,80 +11,96 @@ export type RauthyPanelIdentity = {
   permissions: []
 }
 
+export type RauthyFailure =
+  | "provider_unavailable"
+  | "session_unavailable"
+  | "forbidden"
+  | "invalid_response"
+  | "network"
+
 export type RauthyPanelState =
-  | { kind: "unavailable" }
+  | { kind: "unavailable"; reason: RauthyFailure }
   | { kind: "signed_out" }
   | { kind: "signed_in"; identity: RauthyPanelIdentity }
 
-const CONFIG = "/api/auth/oidc/config"
-const SESSION = "/api/auth/oidc/session"
-const LOGOUT = "/api/auth/oidc/logout"
+export type RauthyLogoutResult =
+  | { kind: "revoked" }
+  | { kind: "forbidden" | "unavailable" | "uncertain" }
 
-function isVerifiedIdentity(value: unknown): value is RauthyPanelIdentity {
-  if (typeof value !== "object" || value === null) return false
-  const item = value as Record<string, unknown>
-  return item.authenticated === true
-    && item.authority === "rauthy"
-    && typeof item.subject === "string"
-    && item.subject.length > 0
-    && typeof item.issuer === "string"
-    && item.issuer.startsWith("https://")
-    && typeof item.client_id === "string"
-    && item.client_id.length > 0
-    && typeof item.expires_at === "string"
-    && item.platform_membership_verified === false
-    && Array.isArray(item.permissions)
-    && item.permissions.length === 0
+const CONFIG = CONTROL_PANEL_AUTH_API+"/config"
+const SESSION = CONTROL_PANEL_AUTH_API+"/session"
+const LOGOUT = CONTROL_PANEL_AUTH_API+"/logout"
+
+interface BrowserConfiguration { issuer: string; client_id: string }
+function object(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+function validConfiguration(value: unknown): BrowserConfiguration | null {
+  const data=object(value)
+  if(!data||typeof data.issuer!=="string"||typeof data.client_id!=="string"||
+    data.client_id.trim().length===0)return null
+  try {
+    const url=new URL(data.issuer)
+    if(url.protocol!=="https:"||url.username||url.password||url.search||url.hash)return null
+  } catch {return null}
+  return {issuer:data.issuer,client_id:data.client_id}
+}
+function verifiedIdentity(value: unknown, trusted: BrowserConfiguration): RauthyPanelIdentity | null {
+  const item=object(value)
+  if(!item||item.authenticated!==true||item.authority!=="rauthy"||
+    typeof item.subject!=="string"||item.subject.length===0||
+    item.issuer!==trusted.issuer||item.client_id!==trusted.client_id||
+    typeof item.expires_at!=="string"||
+    !/(?:Z|[+-][0-2][0-9]:[0-5][0-9])$/.test(item.expires_at)||
+    !Number.isFinite(Date.parse(item.expires_at))||
+    Date.parse(item.expires_at)<=Date.now()||
+    item.platform_membership_verified!==false||
+    !Array.isArray(item.permissions)||item.permissions.length!==0)return null
+  return {
+    authenticated:true,authority:"rauthy",subject:item.subject,
+    issuer:item.issuer,client_id:item.client_id,expires_at:item.expires_at,
+    platform_membership_verified:false,permissions:[],
+  }
 }
 
-/** Config 200 is not enough: session 401 demonstrates mounted OIDC BFF routes. */
+/** 200 config is only OIDC discovery, 401 session is signed-out, never a User grant. */
 export async function readRauthyPanelState(signal: AbortSignal): Promise<RauthyPanelState> {
-  const request = {
-    method: "GET",
-    signal,
-    credentials: "same-origin" as const,
-    mode: "same-origin" as const,
-    redirect: "error" as const,
-    referrerPolicy: "no-referrer" as const,
-    cache: "no-store" as const,
-    headers: { Accept: "application/json" },
+  const request: RequestInit={
+    method:"GET",signal,credentials:"same-origin",mode:"same-origin",
+    redirect:"error",referrerPolicy:"no-referrer",cache:"no-store",
+    headers:{Accept:"application/json"},
   }
   try {
-    const config = await fetch(CONFIG, request)
-    if (!config.ok) return { kind: "unavailable" }
-    const metadata: unknown = await config.json()
-    if (typeof metadata !== "object" || metadata === null) return { kind: "unavailable" }
-    const fields = metadata as Record<string, unknown>
-    if (typeof fields.issuer !== "string" || typeof fields.client_id !== "string"
-      || fields.issuer.length < 12 || fields.client_id.length === 0) {
-      return { kind: "unavailable" }
+    // The browser session is the only identity proof. Configuration does not
+    // imply logged-in state, and a malformed 200 must never become a principal.
+    const session=await fetch(SESSION,request)
+    if(session.status===403)return {kind:"unavailable",reason:"forbidden"}
+    if(session.status!==200&&session.status!==401){
+      return {kind:"unavailable",reason:"session_unavailable"}
     }
-    const response = await fetch(SESSION, request)
-    if (response.status === 401) return { kind: "signed_out" }
-    if (!response.ok) return { kind: "unavailable" }
-    const identity: unknown = await response.json()
-    return isVerifiedIdentity(identity)
-      ? { kind: "signed_in", identity }
-      : { kind: "unavailable" }
-  } catch {
-    return { kind: "unavailable" }
-  }
+    const config=await fetch(CONFIG,request)
+    if(!config.ok)return {kind:"unavailable",reason:"provider_unavailable"}
+    const metadata=validConfiguration(await config.json())
+    if(!metadata)return {kind:"unavailable",reason:"invalid_response"}
+    if(session.status===401)return {kind:"signed_out"}
+    const identity=verifiedIdentity(await session.json(),metadata)
+    return identity?{kind:"signed_in",identity}:{kind:"unavailable",reason:"invalid_response"}
+  }catch{return {kind:"unavailable",reason:"network"}}
 }
 
-/** Confirmation requires 204 from private Valkey session revocation. */
-export async function signOutRauthyPanel(signal: AbortSignal): Promise<boolean> {
+/** Only a server 204 is proof that private Valkey session deletion committed. */
+export async function signOutRauthyPanel(signal: AbortSignal): Promise<RauthyLogoutResult> {
   try {
-    const response = await fetch(LOGOUT, {
-      method: "POST",
-      signal,
-      credentials: "same-origin",
-      mode: "same-origin",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-      cache: "no-store",
+    const response=await fetch(LOGOUT,{
+      method:"POST",signal,credentials:"same-origin",mode:"same-origin",
+      redirect:"error",referrerPolicy:"no-referrer",cache:"no-store",
+      headers:{Accept:"application/json"},
     })
-    return response.status === 204
-  } catch {
-    return false
-  }
+    if(response.status===204)return {kind:"revoked"}
+    if(response.status===403)return {kind:"forbidden"}
+    if(response.status===503)return {kind:"unavailable"}
+    return {kind:"uncertain"}
+  }catch{return {kind:"uncertain"}}
 }
