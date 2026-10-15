@@ -168,6 +168,7 @@ def _api_declared_length(request: Request, *, rauthy: bool) -> bytes | None:
         or not value.isascii()
         or not value.isdecimal()
         or len(value) > 19
+        or (len(value) > 1 and value.startswith("0"))
         or int(value) > 2**63 - 1
         or request.headers.getlist("transfer-encoding")
     ):

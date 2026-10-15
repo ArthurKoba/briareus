@@ -111,6 +111,11 @@ async def main() -> None:
         ([(b"content-type", b"application/json; charset=latin1")], "MCP_CONTENT_TYPE_INVALID", 0),
         ([*good, (b"content-length", b"44")], "MCP_CONTENT_LENGTH_INVALID", 0),
         (
+            [(b"content-type", b"application/json"), (b"content-length", b"0" + good[1][1])],
+            "MCP_CONTENT_LENGTH_INVALID",
+            0,
+        ),
+        (
             [(b"content-type", b"application/json"), (b"content-length", b"abc")],
             "MCP_CONTENT_LENGTH_INVALID",
             0,

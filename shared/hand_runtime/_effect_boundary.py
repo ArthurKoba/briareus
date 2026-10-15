@@ -83,7 +83,12 @@ def _header_preflight(scope: Scope) -> tuple[int | None, tuple[str, int] | None]
     declared: int | None = None
     if lengths:
         raw = lengths[0]
-        if not 1 <= len(raw) <= 8 or not raw.isascii() or not raw.isdigit():
+        if (
+            not 1 <= len(raw) <= 8
+            or not raw.isascii()
+            or not raw.isdigit()
+            or (len(raw) > 1 and raw.startswith(b"0"))
+        ):
             return None, ("MCP_CONTENT_LENGTH_INVALID", 400)
         declared = int(raw)
         if declared > _MAX_REQUEST_BYTES:

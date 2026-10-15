@@ -267,7 +267,11 @@ class EffectAuthorizationMiddleware(Middleware):
             raise ToolError("MCP_AUTHORIZATION_UNAVAILABLE")
         # No resource-owner I/O before signed caller verification. Invalid
         # context/arguments, owner failures and timeout all fail closed.
-        original_bearer, _request = self._verified_request()
+        original_bearer, original_request = self._verified_request()
+        # Refuse malformed/ambiguous caller selectors BEFORE even non-effect
+        # resource-owner resolution. A valid JWT is not license to probe an
+        # owner with a forged Project or revision.
+        original_selectors = self._request_selectors(original_request)
         try:
             incoming = _bounded_json_arguments(context.message.arguments or {})
             effect = await asyncio.wait_for(
@@ -286,34 +290,51 @@ class EffectAuthorizationMiddleware(Middleware):
             validated_arguments = _bounded_json_arguments(effect.validated_arguments)
         except Exception as exc:
             raise ToolError("MCP_RESOURCE_SCOPE_UNAVAILABLE") from exc
-        if self._verified_request()[0] != original_bearer:
+        bearer, current_request = self._verified_request()
+        if bearer != original_bearer:
             raise ToolError("MCP_IDENTITY_UNVERIFIED")
-        await self._check_current_permit(scope=scope)
+        if self._request_selectors(current_request) != original_selectors:
+            raise ToolError("MCP_CONTEXT_CHANGED")
+        await self._check_current_permit(scope=scope, expected_selectors=original_selectors)
         # Owner/PDP awaits cannot renew or replace the original caller.
         # An expired bearer may not begin an effect merely because a
         # decision requested before expiry eventually returned allowed.
-        if self._verified_request()[0] != original_bearer:
+        bearer, current_request = self._verified_request()
+        if bearer != original_bearer:
             raise ToolError("MCP_IDENTITY_UNVERIFIED")
+        if self._request_selectors(current_request) != original_selectors:
+            raise ToolError("MCP_CONTEXT_CHANGED")
         verified_message = context.message.model_copy(
             update={"arguments": validated_arguments}, deep=True
         )
         return await call_next(context.copy(message=verified_message))
 
-    async def _check_current_permit(self, *, scope: dict[str, object]) -> None:
-        bearer, request = self._verified_request()
+    @classmethod
+    def _request_selectors(cls, request: Request) -> tuple[UUID, UUID, int]:
+        """Canonical untrusted selectors; no owner I/O or claim of authority."""
         try:
-            project_uuid = self._uuid_selector(request.headers.getlist("x-briareus-project-uuid"))
-            session_uuid = self._uuid_selector(
+            project_uuid = cls._uuid_selector(request.headers.getlist("x-briareus-project-uuid"))
+            session_uuid = cls._uuid_selector(
                 request.headers.getlist("x-briareus-agent-session-uuid")
             )
             revisions = request.headers.getlist("x-briareus-grant-revision")
             if len(revisions) != 1 or not revisions[0].isascii() or not revisions[0].isdecimal():
                 raise ValueError("missing or invalid revision")
             revision = int(revisions[0])
-            if not 1 <= revision <= 2**63 - 1:
-                raise ValueError("revision outside range")
+            if not 1 <= revision <= 2**63 - 1 or str(revision) != revisions[0]:
+                raise ValueError("revision outside canonical range")
         except (ValueError, OverflowError) as exc:
             raise ToolError("MCP_CONTEXT_INVALID") from exc
+        return project_uuid, session_uuid, revision
+
+    async def _check_current_permit(
+        self, *, scope: dict[str, object], expected_selectors: tuple[UUID, UUID, int]
+    ) -> None:
+        bearer, request = self._verified_request()
+        selectors = self._request_selectors(request)
+        if selectors != expected_selectors:
+            raise ToolError("MCP_CONTEXT_CHANGED")
+        project_uuid, session_uuid, revision = selectors
         body = {
             "project_uuid": str(project_uuid),
             "agent_session_uuid": str(session_uuid),
@@ -409,6 +430,6 @@ class EffectAuthorizationMiddleware(Middleware):
         if len(values) != 1 or not 1 <= len(values[0]) <= 64:
             raise ValueError("exactly one UUID required")
         result = UUID(values[0])
-        if result.version != 4 or str(result) != values[0].lower():
+        if result.version != 4 or str(result) != values[0]:
             raise ValueError("canonical UUIDv4 required")
         return result

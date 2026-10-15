@@ -115,9 +115,14 @@ that key as a caller-provided header. No business resolver is registered yet.
 Deny-by-default middleware is installed even without an OAuth verifier so
 an accidentally added tool cannot bypass the PEP in diagnostic-only mode.
 SDK-verified signed identity and a matching bearer-only HTTP request are checked
-BEFORE any resource resolver runs, then rechecked immediately before contacting
-the private Authorization service. Resource resolvers must perform only bounded
-owner verification, not the protected effect itself.
+BEFORE any resource resolver runs. Canonical lowercase UUIDv4 Project and
+AgentSession selectors and an unpadded positive grant revision must also
+pass **before any owner I/O**, not only after it. Bearer and original selector
+values are checked again after owner resolution and after the private Cedar
+reply, so a grant-revision/Project replacement during either await cannot
+start the protected tool. The private body and effect resource remain fixed.
+Resource resolvers must perform only bounded owner verification, not the
+protected effect itself.
 
 A future tool registration must provide an immutable server-side
 `ToolEffectBinding(action, kind, resolve)`; action and kind cannot be chosen by
@@ -196,6 +201,12 @@ from the actual Hand execution arguments and independently verified by its
 trusted peer before any historical effect is registered. Until then all
 216 legacy declarations are **source only**, their invocation remains
 denied/unregistered and the service stays not-ready for business operations.
+
+Gateway, Control Panel API forwarding and the direct Hand ASGI MCP
+boundary now require a canonical single decimal Content-Length where
+present: leading zeros and ambiguous framing are rejected before
+normalization or private Cedar calls, in agreement with the Backend
+Authorization private request parser.
 
 The outer ASGI request preflight caps each MCP JSON body at 1 MiB, 1024
 body events, and eight seconds for the complete body read. It accepts only

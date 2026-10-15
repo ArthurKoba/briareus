@@ -79,9 +79,9 @@ def admission_error(code: str, status: int) -> JSONResponse:
 
 def _single_header(request: Request, name: str) -> str:
     values = request.headers.getlist(name)
-    if len(values) != 1 or not values[0].strip() or len(values[0]) > 128:
+    if len(values) != 1 or not values[0] or len(values[0]) > 128 or values[0].strip() != values[0]:
         raise McpAdmissionRejected("MCP_CONTEXT_INVALID", 400)
-    return values[0].strip()
+    return values[0]
 
 
 def parse_connection_admission(request: Request) -> ConnectionAdmission:
@@ -116,8 +116,10 @@ def parse_connection_admission(request: Request) -> ConnectionAdmission:
     ):
         raise McpAdmissionRejected("MCP_BEARER_REQUIRED", 401)
     try:
-        project_uuid = UUID(_single_header(request, "x-briareus-project-uuid"))
-        agent_session_uuid = UUID(_single_header(request, "x-briareus-agent-session-uuid"))
+        project_text = _single_header(request, "x-briareus-project-uuid")
+        session_text = _single_header(request, "x-briareus-agent-session-uuid")
+        project_uuid = UUID(project_text)
+        agent_session_uuid = UUID(session_text)
         raw_revision = _single_header(request, "x-briareus-grant-revision")
         if not raw_revision.isascii() or not raw_revision.isdecimal():
             raise ValueError("non-decimal grant revision")
@@ -126,8 +128,11 @@ def parse_connection_admission(request: Request) -> ConnectionAdmission:
         raise McpAdmissionRejected("MCP_CONTEXT_INVALID", 400) from exc
     if (
         project_uuid.version != 4
+        or str(project_uuid) != project_text
         or agent_session_uuid.version != 4
+        or str(agent_session_uuid) != session_text
         or not 1 <= revision <= 2**63 - 1
+        or str(revision) != raw_revision
     ):
         raise McpAdmissionRejected("MCP_CONTEXT_INVALID", 400)
     return ConnectionAdmission(hand, bearer, project_uuid, agent_session_uuid, revision)

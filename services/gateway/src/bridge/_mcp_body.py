@@ -54,7 +54,12 @@ async def read_mcp_body(request: Request) -> bytes:
         raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
     if lengths:
         value = lengths[0]
-        if not value.isascii() or not value.isdecimal() or len(value) > 8:
+        if (
+            not value.isascii()
+            or not value.isdecimal()
+            or len(value) > 8
+            or (len(value) > 1 and value.startswith("0"))
+        ):
             raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
         declared_length = int(value)
         if declared_length > _MAX_BYTES:

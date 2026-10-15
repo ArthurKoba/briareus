@@ -57,6 +57,7 @@ async def main() -> None:
 
     for headers, error, reads in (
         ([(b"content-length", b"1")], "MCP_CONTENT_LENGTH_INVALID", 1),
+        ([(b"content-length", b"0" + str(len(_BODY)).encode())], "MCP_CONTENT_LENGTH_INVALID", 0),
         ([(b"content-length", b"100")], "MCP_CONTENT_LENGTH_INVALID", 1),
         ([correct, correct], "MCP_CONTENT_LENGTH_INVALID", 0),
         ([(b"content-length", b"1048577")], "MCP_BODY_TOO_LARGE", 0),

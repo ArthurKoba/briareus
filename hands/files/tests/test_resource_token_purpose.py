@@ -83,7 +83,12 @@ async def main() -> None:
                 "type": "http",
                 "method": "POST",
                 "path": "/mcp",
-                "headers": [(b"authorization", ("Bearer " + token).encode())],
+                "headers": [
+                    (b"authorization", ("Bearer " + token).encode()),
+                    (b"x-briareus-project-uuid", b"11111111-1111-4111-8111-111111111111"),
+                    (b"x-briareus-agent-session-uuid", b"22222222-2222-4222-8222-222222222222"),
+                    (b"x-briareus-grant-revision", b"1"),
+                ],
             }
         )
         before = len(visits)
@@ -103,6 +108,51 @@ async def main() -> None:
                 raise AssertionError("effect executed without actual authority")
         assert len(visits) == before + (0 if update else 1)
 
+    # Even a valid SDK-verified actor must not contact an owner with
+    # noncanonical Project/AgentSession/revision selectors.
+    original_token = jwt.encode(base, key, algorithm="RS256")
+    original_verified = await verifier.verify_token(original_token)
+    assert original_verified is not None
+    for bad_name, bad_value in (
+        (b"x-briareus-project-uuid", b"11111111-1111-4111-8111-11111111111A"),
+        (b"x-briareus-agent-session-uuid", b"22222222-2222-4222-8222-22222222222A"),
+        (b"x-briareus-grant-revision", b"01"),
+        (b"x-briareus-grant-revision", b" 1"),
+    ):
+        headers = [
+            (b"authorization", ("Bearer " + original_token).encode()),
+            (b"x-briareus-project-uuid", b"11111111-1111-4111-8111-111111111111"),
+            (b"x-briareus-agent-session-uuid", b"22222222-2222-4222-8222-222222222222"),
+            (b"x-briareus-grant-revision", b"1"),
+        ]
+        malformed = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/mcp",
+                "headers": [
+                    (name, bad_value if name == bad_name else value) for name, value in headers
+                ],
+            }
+        )
+        before = len(visits)
+        with (
+            patch("hand_runtime._effect_auth.get_access_token", return_value=original_verified),
+            patch("hand_runtime._effect_auth.get_http_request", return_value=malformed),
+        ):
+            try:
+                await middleware.on_call_tool(
+                    SimpleNamespace(
+                        message=CallToolRequestParams(name="read_file", arguments={"path": "file"})
+                    ),
+                    effect,
+                )
+            except ToolError as exc:
+                assert str(exc) == "MCP_CONTEXT_INVALID", (bad_name, str(exc))
+            else:
+                raise AssertionError("malformed resource selector reached owner resolver")
+        assert len(visits) == before, bad_name
+
     # A synthetic positive reply is used only to exercise the waiting
     # boundary. It is never sent to a running Hand or used to read a file.
     class Context(SimpleNamespace):
@@ -119,6 +169,7 @@ async def main() -> None:
         alternate = await verifier.verify_token(alternate_raw)
         active = [original, raw]
         clock = [float(now)]
+        revision = [b"1"]
         calls: list[str] = []
 
         class PendingDecision:
@@ -127,6 +178,8 @@ async def main() -> None:
                     clock[0] = now + 61
                 elif mode == "rebound_during_reply":
                     active[:] = [alternate, alternate_raw]
+                elif mode == "rebound_revision_during_reply":
+                    revision[0] = b"2"
                 return PrivateDecisionReply(200, b'{"allowed":true}')
 
         async def fixture_only_effect(_context: object) -> str:
@@ -143,7 +196,7 @@ async def main() -> None:
                         (b"authorization", ("Bearer " + active[1]).encode()),
                         (b"x-briareus-project-uuid", b"11111111-1111-4111-8111-111111111111"),
                         (b"x-briareus-agent-session-uuid", b"22222222-2222-4222-8222-222222222222"),
-                        (b"x-briareus-grant-revision", b"1"),
+                        (b"x-briareus-grant-revision", revision[0]),
                     ],
                 }
             )
@@ -168,12 +221,22 @@ async def main() -> None:
                     fixture_only_effect,
                 )
             except ToolError as exc:
-                assert mode != "unchanged" and str(exc) == "MCP_IDENTITY_UNVERIFIED"
+                expected = (
+                    "MCP_CONTEXT_CHANGED"
+                    if mode == "rebound_revision_during_reply"
+                    else "MCP_IDENTITY_UNVERIFIED"
+                )
+                assert mode != "unchanged" and str(exc) == expected, (mode, str(exc))
             else:
                 assert mode == "unchanged" and result == "fixture"
         assert len(calls) == (1 if mode == "unchanged" else 0)
 
-    for mode in ("unchanged", "expired_during_reply", "rebound_during_reply"):
+    for mode in (
+        "unchanged",
+        "expired_during_reply",
+        "rebound_during_reply",
+        "rebound_revision_during_reply",
+    ):
         await decision_case(mode)
     print("TOKEN_EXPIRY_OR_REBIND_DURING_PDP_REPLY_DENIES_BEFORE_EFFECT_PASS")
     for field in ("exp", "iat", "nbf"):

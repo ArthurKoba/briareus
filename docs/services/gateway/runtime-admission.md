@@ -15,6 +15,11 @@ can manufacture this service identity.
 The ingress requires byte-for-byte canonical `/hands/HAND/mcp` raw URL
 and an empty query string before the private peer is contacted. Percent-
 encoded aliases and synthetic URI parameters are not alternate resources.
+Gateway accepts only lowercase canonical UUIDv4 Project/AgentSession
+selectors and the exact positive decimal grant revision (no padding or
+surrounding whitespace). It refuses noncanonical values before private
+Authorization or Hand forwarding; it never normalizes an ambiguous
+header into an apparently verified selector.
 
 The default build_app() has no such port. After parsing/validating the
 Bearer and selectors, protected admission returns HTTP 503 with no Bearer sent
@@ -25,7 +30,8 @@ maximum 1 MiB body, 1024 raw ASGI body events (including empty chunks),
 eight-second total input deadline, only UTF-8 JSON objects with unique
 keys at every depth, finite JSON numbers and valid Unicode scalar values.
 Duplicate or conflicting Content-Length/Transfer-Encoding framing, a mismatched
-declared body length, unwanted Content-Encoding, malformed JSON and batches are
+declared body length, noncanonical decimal Content-Length (including leading
+zeros), unwanted Content-Encoding, malformed JSON and batches are
 rejected before the PDP. The direct Hand FastMCP boundary independently checks
 these HTTP framing invariants, without treating a well-framed request as a grant.
 Rejected requests cannot forward the body, bearer or selectors to the Hand.
