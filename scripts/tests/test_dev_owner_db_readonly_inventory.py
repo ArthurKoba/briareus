@@ -74,5 +74,38 @@ class ScopedDevOwnerInventoryContractTests(unittest.TestCase):
                     inventory._connection_contract(owner)
 
 
+class _FakeReadonlyTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, _type: object, _value: object, _tb: object) -> None:
+        return None
+
+
+class _ForeignOwnedDbConnection:
+    def transaction(self, *, isolation: str, readonly: bool) -> _FakeReadonlyTransaction:
+        assert isolation == "repeatable_read" and readonly is True
+        return _FakeReadonlyTransaction()
+
+    async def fetchrow(self, query: str) -> dict[str, str]:
+        assert "current_database()" in query and "current_user" in query
+        return {"db": "briareus_platform", "role": "briareus_fixture"}
+
+    async def fetchval(self, query: str) -> str:
+        assert "pg_get_userbyid(datdba)" in query
+        return "unrelated_postgres_role"
+
+    async def fetch(self, _query: str) -> None:
+        raise AssertionError("foreign owner must reject before any table enumeration")
+
+
+class ReadonlySqlOwnerProofTests(unittest.IsolatedAsyncioTestCase):
+    async def test_foreign_owned_database_denied_before_any_table_content(self) -> None:
+        with self.assertRaises(ValueError):
+            await inventory.inspect_connection(
+                _ForeignOwnedDbConnection(), "platform", "briareus_fixture"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

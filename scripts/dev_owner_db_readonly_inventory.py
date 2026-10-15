@@ -40,6 +40,11 @@ async def inspect_connection(
         )
         if identity is None or identity["db"] != database or identity["role"] != expected_principal:
             raise ValueError("unexpected PostgreSQL database/principal")
+        database_owner = await connection.fetchval(
+            "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=current_database()"
+        )
+        if database_owner != expected_principal:
+            raise ValueError("owner logical database has a foreign PostgreSQL owner")
         has_version = await connection.fetchval(
             "SELECT to_regclass('public.alembic_version') IS NOT NULL"
         )

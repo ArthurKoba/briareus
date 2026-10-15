@@ -100,16 +100,18 @@ The complementary `scripts/dev_owner_db_readonly_inventory.py --owner platform`
 **future approved per-application execution**, not public HTTP access. It
 uses only the application's existing `POSTGRES_HOST/PORT/DB/USER/PASSWORD`
 contract; requires exact `briareus-postgres:5432` and its single approved
-logical DB, and verifies `current_database()`/`current_user` before
-collecting only Alembic version and exact per-table **counts**, never row
-contents, User IDs, file paths, tokens or credentials. A bounded
+logical DB, and verifies `current_database()`/`current_user` **and** current PostgreSQL
+logical database ownership (`pg_get_userbyid(datdba)`) before collecting only
+Alembic version and exact per-table **counts**, never row contents, User
+IDs, file paths, tokens or credentials. A bounded
 `REPEATABLE READ READ ONLY` transaction and PostgreSQL timeouts prevent
 schema/data mutations. Catalog anomalies and unavailable queries fail
 closed. Every result contains `approved_for_reset=false`: knowing the row
 counts cannot establish permission, backup recoverability, Project roots or
-Rauthy state. The six real isolated PostgreSQL18.6 scenarios and six offline
-unit tests passed, including wrong owner/role, old/multiple revision denial
-and an actual server rejection of INSERT inside a read-only transaction.
+Rauthy state. Seven real isolated PostgreSQL18.6 scenarios and seven offline unit
+tests passed, including foreign-owned logical DB denial, wrong owner/role,
+old/multiple revision rejection and a real server refusing an INSERT inside
+the read-only transaction.
 The connected present observability source does **not** supply SQL execution,
 so this test is **not** a claim that real Dev owner tables were inventoried.
 Rauthy `briareus_rauthy`, Users/first admin, issuer/client keys, shared
