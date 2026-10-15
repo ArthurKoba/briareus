@@ -77,7 +77,12 @@ one-use challenge, has no password, provider cookie, CSRF, private bearer or
 Cedar role, and is cancellable. Its isolated browser test validates actual
 SHA-256 work at 1440/390px. It is **not called by Control Panel** and
 satisfying PoW is neither Rauthy authentication nor Platform ownership.
-No public challenge is fetched ahead of actual first-factor submission. Disabled credential placeholders have no
+No public challenge is fetched ahead of actual first-factor submission.
+Prelogin GET capabilities and cancellation-error JSON are bounded to 4KiB;
+unknown media, oversized 200/503 replies and interrupted streams cannot
+promote an Init or claim that cancellation was confirmed. An AbortSignal
+terminates a pending response read without waiting for the network peer.
+Disabled credential placeholders have no
 Vue-bound username/password state or password-manager autocomplete; while a
 native Init is pending, UI repeat submission is disabled until its server-
 reported TTL expires. A native Init response with unexpected fields is rejected.
@@ -264,7 +269,11 @@ session has no Files resource scope. The list may be capped at 50 sessions;
 absence is not evidence of revocation or deletion. Losing Project permissions,
 changed Project ownership/version, expired server proof or an aborted read
 clears stale scope. Individual Files-session rows expire independently:
-one elapsed row must not remove an unrelated still-current read-only row. This screen
+one elapsed row must not remove an unrelated still-current read-only row.
+When the wall clock is rolled backward after the source snapshot, the
+monotonic earliest-expiry timer still retires that exact elapsed row. A
+clock rollback can never restore its display or imply renewed Files access.
+This screen
 never passes those opaque resource selectors to a Hand or claims Cedar Permit.
 Backend now defines a **source-only** `POST /api/v1/files/read` facade with
 bounded input `{project_uuid,agent_session_uuid,expected_grant_revision,

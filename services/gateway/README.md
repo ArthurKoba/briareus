@@ -4,16 +4,21 @@ Owner: Runtime. This folder contains its ASGI source, uv dependency lock,
 Dockerfile, Docker build ignore, and both Compose inputs. It never imports
 private Control Panel, Identity, Authorization, or Hand implementation source.
 
-The one public origin is `https://briareus.koba-nexus.ru`. Public landing and
-Panel static resources are fetched from `briareus-admin-ui:8080` and all
-`/api/*` is forwarded unchanged to `briareus-admin-api:8000`. The fixed
-public `/auth/v1/*` namespace is transparently proxied to
-`briareus-rauthy:8080` without rewriting the issuer, method, path, query,
-body, cookies or return status. Gateway sets canonical HTTPS forwarding
-headers itself and ignores caller-supplied forwarding claims. Rauthy owns
-OAuth/OIDC login and tokens; Backend owns Panel API permissions. Unapproved root `/.well-known/*`, `/oauth/*` and unknown `/hands/*`
-paths remain unavailable. Exact allowlisted `/hands/<hand>/mcp` POST paths
-are handled by the coarse-admission gate below, never a blanket proxy.
+The single public origin is `https://briareus.koba-nexus.ru`. Public
+landing and Panel static resources come from
+`briareus-control-panel-ui:8080`; canonical application `/api/v1/*`
+requests are forwarded without changing their URL to
+`briareus-control-panel-api:8000`. The historical registered OAuth callback
+`GET /api/auth/oidc/callback` is an exact additional exception; other
+unversioned API routes, private Core APIs and encoded aliases are closed.
+The public `/auth/v1/*` routes use fixed `briareus-rauthy:8080` upstream
+with source-verified administrative route/method exclusions. Gateway constructs
+canonical Host and provider HTTPS forwarding metadata independently, never
+from browser-supplied forwarding assertions. Rauthy owns OAuth/OIDC identity,
+Backend owns Panel API permissions. Unapproved `/.well-known/*`, `/oauth/*`
+and unknown `/hands/*` paths remain unavailable. Exact allowlisted
+`/hands/<hand>/mcp` POST paths require separate coarse admission, not a
+blanket proxy.
 
 ## Fail-closed MCP connection admission (source, not live Permit acceptance)
 
@@ -41,7 +46,10 @@ Absent bearer -> 401; absent/malformed selectors -> 400; upstream decision
 Permit the receiving Hand MUST verify token audience, signed service trust,
 current AgentSession grant and each tool/effect itself; Gateway Permit is not
 an execution grant. Protected Tools remain unregistered until those invariants
-are accepted. Unapproved browser cookies are rejected. Fixed Hand routing
+are accepted. Unapproved browser cookies are rejected. Gateway and direct Hand
+HTTP independently reject ambiguous Content-Length/Transfer-Encoding and
+unsupported body encodings before contacting Cedar or FastMCP; declared length
+must equal the bytes received. Fixed Hand routing
 preserves protocol-version metadata and streams MCP HTTP (including SSE and
 notification 202) without Control Panel API in the data plane. Public Origin
 and Host spoof protection still applies. No token or request body is logged.
@@ -60,18 +68,20 @@ Auto Deploy and container identity. After this directory is merged, set:
 
 - Base directory: `/services/gateway`
 - Docker Compose location: `/docker-compose.coolify.yaml`
-- Watch Paths: `services/gateway/**`
+- Watch Paths: `services/gateway/**` and `services/external/**` (the
+  current owner-mandated External dependency watch)
 
 The build context remains repository root, but the Dockerfile copies only
 this service folder. Native application imports do not require monorepo
 runtime source overlays. The TCP healthcheck proves an accepting listener,
 not Backend API readiness or authenticated product success.
 
-Rollback (only if this cutover fails): restore the previous Gateway-only
-Base directory `/deploy/gateway`, Compose location
-`/docker-compose.coolify.yaml`, and prior exact 26 Watch Paths from its
-known-good Coolify release, then redeploy only Gateway. Do not touch Panel,
-Backend, Hands, secrets or volumes.
+Rollback requires the exact last known-good Gateway-only release SHA and
+the independently captured Development Application configuration. Do not
+blindly restore historical `/deploy/gateway` or an obsolete Watch Path list:
+they are not evidence of the current saved Coolify settings. Verify that the
+target image still matches the current Backend API and provider routing before
+any scoped rollback. Do not touch Panel, Core, Hands, secrets or volumes.
 
 ### Native login stays in Briareus Control Panel
 

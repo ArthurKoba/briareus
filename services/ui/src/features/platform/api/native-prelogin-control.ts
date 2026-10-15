@@ -18,9 +18,51 @@ function shape(value:Record<string,unknown>,expected:readonly string[]):boolean{
   return Object.keys(value).length===expected.length&&
     Object.keys(value).every(key=>expected.includes(key))
 }
-async function serverError(response:Response):Promise<string>{
+/** Exact protocol replies are tiny. Never run unbounded response.json()
+ * against a public prelogin endpoint or let a stalled response body keep
+ * the entry screen busy after its AbortSignal expires.
+ */
+async function boundedNativeJson(reply:Response,signal:AbortSignal):Promise<unknown>{
+  const media=reply.headers.get("content-type")?.split(";",1)[0].trim()
+  if(media!=="application/json")throw Error("unexpected native JSON media")
+  const ceiling=4096,size=reply.headers.get("content-length")
+  if(size!==null&&(!/^\d{1,6}$/.test(size)||Number(size)>ceiling))throw Error("native reply too large")
+  if(signal.aborted||!reply.body)throw Error("native reply cancelled or missing")
+  const reader=reply.body.getReader()
+  const chunks:Uint8Array[]=[],partsMax=ceiling
+  let total=0,abortRead:((reason:Error)=>void)|null=null
+  const interruption=new Promise<never>((_resolve,reject)=>{abortRead=reject})
+  const onAbort=():void=>{
+    abortRead?.(new Error("native reply cancelled"))
+    try{void reader.cancel().catch(()=>{})}catch{/* already closed */}
+  }
+  signal.addEventListener("abort",onAbort,{once:true})
   try{
-    const payload=object(await response.json()),detail=object(payload?.error)
+    if(signal.aborted)throw Error("native reply cancelled")
+    while(true){
+      const next=await Promise.race([reader.read(),interruption])
+      if(next.done)break
+      total+=next.value.byteLength
+      if(total>partsMax)throw Error("native reply too large")
+      chunks.push(next.value)
+      if(signal.aborted)throw Error("native reply cancelled")
+    }
+  }catch(error){
+    try{void reader.cancel().catch(()=>{})}catch{/* already closed */}
+    throw error
+  }finally{
+    signal.removeEventListener("abort",onAbort)
+    reader.releaseLock()
+  }
+  if(signal.aborted)throw Error("native reply cancelled")
+  const bytes=new Uint8Array(total)
+  let offset=0
+  for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength}
+  return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes)) as unknown
+}
+async function serverError(response:Response,signal:AbortSignal):Promise<string>{
+  try{
+    const payload=object(await boundedNativeJson(response,signal)),detail=object(payload?.error)
     const code=detail?.code
     return typeof code==="string"&&/^[A-Z][A-Z_]{0,63}$/.test(code)?code:"NATIVE_UNAVAILABLE"
   }catch{return "NATIVE_UNAVAILABLE"}
@@ -37,8 +79,12 @@ export async function checkNativePrelogin(signal:AbortSignal):Promise<NativePrel
       headers:{Accept:"application/json"},
     })
     if(signal.aborted)return {kind:"unavailable",code:"NATIVE_CAPABILITIES_CANCELLED"}
-    if(response.status!==200)return {kind:response.status===403?"forbidden":"unavailable",code:await serverError(response)}
-    const body=object(await response.json())
+    if(response.status!==200){
+      const code=await serverError(response,signal)
+      if(signal.aborted)return {kind:"unavailable",code:"NATIVE_CAPABILITIES_CANCELLED"}
+      return {kind:response.status===403?"forbidden":"unavailable",code}
+    }
+    const body=object(await boundedNativeJson(response,signal))
     if(!body||!shape(body,["protocol","first_factor","pow","cancel","continuations"])||
       body.protocol!=="rauthy-native-v1"||body.first_factor!=="password"||
       body.pow!=="client-solved"||body.cancel!==true||
@@ -62,6 +108,8 @@ export async function cancelNativePrelogin(signal:AbortSignal):Promise<NativeCan
     })
     if(signal.aborted)return {kind:"unavailable",code:"NATIVE_CANCEL_UNCERTAIN"}
     if(response.status===204)return {kind:"cancelled"}
-    return {kind:response.status===403?"forbidden":"unavailable",code:await serverError(response)}
+    const code=await serverError(response,signal)
+    if(signal.aborted)return {kind:"unavailable",code:"NATIVE_CANCEL_UNCERTAIN"}
+    return {kind:response.status===403?"forbidden":"unavailable",code}
   }catch{return {kind:"unavailable",code:"NATIVE_CANCEL_UNCERTAIN"}}
 }

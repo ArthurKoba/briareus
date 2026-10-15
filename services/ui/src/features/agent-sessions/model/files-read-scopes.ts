@@ -15,8 +15,9 @@ export function filesReadScopes(
 ):FilesReadScopeSummary[]{
   const found:FilesReadScopeSummary[]=[],seen=new Set<string>()
   for(const record of records){
+    const deadline=Date.parse(record.hard_expires_at)
     if(record.project_uuid!==project||record.status!=="active"||
-      Date.parse(record.hard_expires_at)<=now||!record.operations.includes("files.read"))continue
+      !Number.isFinite(deadline)||deadline<=now||!record.operations.includes("files.read"))continue
     for(const scope of record.resources){
       if(scope.hand!=="files"||scope.tool!=="read_file"||
         scope.action!=="files.read"||scope.resource.kind!=="workspace_path")continue

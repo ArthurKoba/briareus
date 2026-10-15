@@ -43,6 +43,64 @@ def _finite_json_float(value: str) -> float:
     return number
 
 
+def _header_preflight(scope: Scope) -> tuple[int | None, tuple[str, int] | None]:
+    """Enforce unambiguous HTTP framing before reading a direct Hand request.
+
+    ASGI servers usually reject invalid Content-Length/Transfer-Encoding pairs,
+    but a Hand may also be reached by a private proxy or a direct test client.
+    Do not rely on a particular server normalizing these security boundaries.
+    """
+    watched = {
+        b"content-type": [],
+        b"content-length": [],
+        b"transfer-encoding": [],
+        b"content-encoding": [],
+    }
+    for name, value in scope.get("headers", []):
+        if not isinstance(name, bytes) or not isinstance(value, bytes):
+            return None, ("MCP_HTTP_HEADERS_INVALID", 400)
+        if b"\x00" in value or b"\r" in value or b"\n" in value:
+            return None, ("MCP_HTTP_HEADERS_INVALID", 400)
+        if name.lower() in watched:
+            watched[name.lower()].append(value)
+
+    content_types = watched[b"content-type"]
+    if len(content_types) != 1:
+        return None, ("MCP_CONTENT_TYPE_INVALID", 415)
+    try:
+        content_type = content_types[0].decode("ascii").casefold()
+    except UnicodeDecodeError:
+        return None, ("MCP_CONTENT_TYPE_INVALID", 415)
+    media_type, separator, params = content_type.partition(";")
+    if media_type.strip() != "application/json" or (
+        separator and params.strip() != "charset=utf-8"
+    ):
+        return None, ("MCP_CONTENT_TYPE_INVALID", 415)
+
+    lengths = watched[b"content-length"]
+    if len(lengths) > 1:
+        return None, ("MCP_CONTENT_LENGTH_INVALID", 400)
+    declared: int | None = None
+    if lengths:
+        raw = lengths[0]
+        if not 1 <= len(raw) <= 8 or not raw.isascii() or not raw.isdigit():
+            return None, ("MCP_CONTENT_LENGTH_INVALID", 400)
+        declared = int(raw)
+        if declared > _MAX_REQUEST_BYTES:
+            return None, ("MCP_BODY_TOO_LARGE", 413)
+
+    transfers = watched[b"transfer-encoding"]
+    if len(transfers) > 1 or (
+        transfers and (transfers[0].strip().lower() != b"chunked" or lengths)
+    ):
+        return None, ("MCP_TRANSFER_ENCODING_INVALID", 400)
+
+    encodings = watched[b"content-encoding"]
+    if len(encodings) > 1 or (encodings and encodings[0].strip().lower() != b"identity"):
+        return None, ("MCP_CONTENT_ENCODING_INVALID", 415)
+    return declared, None
+
+
 class EffectBoundary:
     """Preserve exact SDK lifespan/HostOrigin middleware and request bytes."""
 
@@ -53,8 +111,11 @@ class EffectBoundary:
         if scope["type"] != "http" or scope.get("path") != "/mcp" or scope.get("method") != "POST":
             await self._app(scope, receive, send)
             return
+        declared_length, rejection = _header_preflight(scope)
+        if rejection is not None:
+            await self._deny(scope, receive, send, None, *rejection)
+            return
         buffer = bytearray()
-        rejection: tuple[str, int] | None = None
         try:
             # Bound total wall time, not only each receive() await: otherwise
             # a slow or empty-chunk sender can occupy an ASGI task indefinitely.
@@ -80,6 +141,8 @@ class EffectBoundary:
                     rejection = ("MCP_BODY_TOO_FRAGMENTED", 413)
         except TimeoutError:
             rejection = ("MCP_BODY_READ_TIMEOUT", 408)
+        if rejection is None and declared_length is not None and len(buffer) != declared_length:
+            rejection = ("MCP_CONTENT_LENGTH_INVALID", 400)
         # Send the rejection OUTSIDE the read timeout; a slow ASGI send
         # must not trigger a second response after the first one started.
         if rejection is not None:

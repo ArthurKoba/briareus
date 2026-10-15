@@ -1,4 +1,4 @@
-"""Briareus single-origin thin Gateway; all /api auth belongs to Admin API."""
+"""Briareus single-origin Gateway; Panel authentication belongs to Control Panel API."""
 
 from __future__ import annotations
 

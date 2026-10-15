@@ -41,6 +41,50 @@ describe("Backend native prelogin capability and explicit cancellation",()=>{
     expect(await checkNativePrelogin(new AbortController().signal)).toEqual({kind:"unavailable",code:"NATIVE_DISABLED"})
     expect(count).toBe(1)
   })
+  it("refuses huge or non-JSON native capabilities without allocating Init",async()=>{
+    let calls=0
+    for(const reply of [
+      new Response(JSON.stringify({...supported,noise:"x".repeat(100_000)}),
+        {status:200,headers:{"Content-Type":"application/json"}}),
+      new Response(JSON.stringify(supported),
+        {status:200,headers:{"Content-Type":"text/html"}}),
+      new Response(JSON.stringify(supported),
+        {status:200,headers:{"Content-Type":"application/json","Content-Length":"5000"}}),
+    ]){
+      globalThis.fetch=async()=>{calls++;return reply}
+      expect((await checkNativePrelogin(new AbortController().signal)).kind).toBe("unavailable")
+    }
+    expect(calls).toBe(3)
+  })
+  it("bounds malformed or oversized native error JSON before decoding it",async()=>{
+    globalThis.fetch=async()=>new Response("x".repeat(100_000),{
+      status:503,headers:{"Content-Type":"application/json"},
+    })
+    expect(await checkNativePrelogin(new AbortController().signal))
+      .toEqual({kind:"unavailable",code:"NATIVE_UNAVAILABLE"})
+  })
+  it("interrupts a stalled capabilities body without accidentally accepting a 200",async()=>{
+    let cancelled=0
+    const reply=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(reply,{status:200,headers:{"Content-Type":"application/json"}})
+    const pending=checkNativePrelogin(request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),250))])
+    expect(result).toEqual({kind:"unavailable",code:"NATIVE_CAPABILITIES_UNAVAILABLE"})
+    expect(cancelled).toBe(1)
+  })
+  it("returns uncertain cleanup if a native cancellation error body stalls then aborts",async()=>{
+    let cancelled=0
+    const reply=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(reply,{status:503,headers:{"Content-Type":"application/json"}})
+    const pending=cancelNativePrelogin(request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),250))])
+    expect(result).toEqual({kind:"unavailable",code:"NATIVE_CANCEL_UNCERTAIN"})
+    expect(cancelled).toBe(1)
+  })
   it("sends only an exact empty JSON POST on explicit native cancellation",async()=>{
     let path="",options:RequestInit={}
     globalThis.fetch=async(input,init)=>{path=String(input);options=init??{};return new Response(null,{status:204})}

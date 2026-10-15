@@ -87,9 +87,13 @@ watch(()=>[props.projectId,props.identity.issuer,props.identity.subject,
 watch(proofCurrent,yes=>{if(!yes){cancel();state.value="expired"}},{flush:"sync"})
 watch(scopesCurrent,yes=>{
   if(!yes&&scopes.value.length){
-    // Keep still-current sessions visible: one expiring scope is not
-    // evidence that every other session has expired or been revoked.
-    scopes.value=retainUnexpiredFilesReadScopes(scopes.value)
+    // A monotonic expiry can fire after the wall clock was rolled back.
+    // Do not use Date.now() alone: the just-expired earliest owner row must
+    // stay expired even if its displayed absolute deadline looks future.
+    const cutoff=Math.max(Date.now(),Date.parse(earliest.value??""))
+    scopes.value=retainUnexpiredFilesReadScopes(scopes.value,cutoff)
+    // Other still-current rows are independent owner snapshots, never
+    // permits; private Files Hand/Cedar recheck every protected read.
     if(!scopes.value.length){cancel();state.value="expired"}
   }
 },{flush:"sync"})

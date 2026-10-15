@@ -49,13 +49,15 @@ def _finite_float(value: str) -> float:
 async def read_mcp_body(request: Request) -> bytes:
     """Validate bounded UTF-8 JSON object and return original octets intact."""
     lengths = request.headers.getlist("content-length")
+    declared_length: int | None = None
     if len(lengths) > 1:
         raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
     if lengths:
         value = lengths[0]
         if not value.isascii() or not value.isdecimal() or len(value) > 8:
             raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
-        if int(value) > _MAX_BYTES:
+        declared_length = int(value)
+        if declared_length > _MAX_BYTES:
             raise McpBodyRejected("MCP_BODY_TOO_LARGE", 413)
     # A proxy must never reinterpret conflicting framing on behalf of MCP.
     encodings = request.headers.getlist("transfer-encoding")
@@ -91,6 +93,11 @@ async def read_mcp_body(request: Request) -> bytes:
                 raise McpBodyRejected("MCP_BODY_TOO_FRAGMENTED", 413)
     except TimeoutError as exc:
         raise McpBodyRejected("MCP_BODY_READ_TIMEOUT", 408) from exc
+
+    # Even if an outer HTTP stack accepted inconsistent framing, a
+    # different length must never trigger a private Cedar connection call.
+    if declared_length is not None and len(payload) != declared_length:
+        raise McpBodyRejected("MCP_CONTENT_LENGTH_INVALID", 400)
 
     try:
         data = json.loads(

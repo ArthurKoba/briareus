@@ -1,7 +1,7 @@
 # Gateway coarse MCP admission — local private transport stage
 
 Gateway remains the thin public /hands/HAND/mcp router, retaining /,
-/panel/, /api/* and public Rauthy OIDC paths. It never becomes a policy,
+/panel/, canonical /api/v1/*, the registered OAuth callback, and allowed Rauthy paths. It never becomes a policy,
 Cedar, token issuer or Control Panel management service.
 
 The source-stage TrustedGatewayDecisionPort is the only permitted path for
@@ -21,8 +21,10 @@ strict bounded MCP transport preflight BEFORE calling Authorization:
 maximum 1 MiB body, 1024 raw ASGI body events (including empty chunks),
 eight-second total input deadline, only UTF-8 JSON objects with unique
 keys at every depth, finite JSON numbers and valid Unicode scalar values.
-Duplicate or conflicting Content-Length/Transfer-Encoding framing, unwanted
-Content-Encoding, malformed JSON and batches are rejected before the PDP.
+Duplicate or conflicting Content-Length/Transfer-Encoding framing, a mismatched
+declared body length, unwanted Content-Encoding, malformed JSON and batches are
+rejected before the PDP. The direct Hand FastMCP boundary independently checks
+these HTTP framing invariants, without treating a well-framed request as a grant.
 Rejected requests cannot forward the body, bearer or selectors to the Hand.
 Accepted request bytes are passed unchanged after current coarse Permit; the
 actual Hand separately validates and authorizes each protected effect.
@@ -85,8 +87,9 @@ Experimental public root-relative SvelteKit /_app/immutable/* and
 required for native Panel auth. Prior LOCAL real-asset results are
 historical compatibility evidence, NOT a product acceptance gate.
 
-Gateway forwards exact /api/* method, body, browser cookie and
-same-origin Origin to the fixed Control Panel API owner; it never
+Gateway forwards only canonical public /api/v1/* (and the exact legacy
+provider callback) method, body, browser cookie and same-origin Origin to the
+fixed Control Panel API owner; it never
 mints a User, role, OAuth code or Cedar permission. It strips ALL
 client-controlled X-Forwarded-* metadata, including previously
 unfiltered X-Forwarded-User, before private forwarding. Rauthy Admin
