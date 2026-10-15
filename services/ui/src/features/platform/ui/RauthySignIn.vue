@@ -57,31 +57,31 @@ function acceptState(next:LoginViewState):void {
   }
 }
 const labels = computed(() => locale.value === "ru" ? {
-  title: "Вход в Briareus",
-  checking: "Проверяем подключение авторизации…",
-  unavailable: "Вход временно недоступен. Требуется подключение OAuth-клиента и серверной сессии.",
-  ready: "Вход выполняется только в Briareus Control Panel. Сеанс Rauthy проверяется сервером, без хранения паролей и токенов в UI.",
-  signedIn: "Учётная запись подтверждена",
-  scope: "Права на Projects, Teams и управление MCP ещё не проверены Platform Control.",
-  logout: "Завершить сеанс Briareus",
-  logoutError: "Не удалось подтвердить отзыв сеанса. Его статус неизвестен — повторите проверку.",
-  forbidden: "Доступ запрещён сервером. Проверьте параметры сеанса.",
-  ended: "Сеанс завершён или отозван. Войдите снова.",
-  revokedFailure: "Сервер не подтвердил завершение сеанса; действие могло не выполниться.",
-  refresh: "Проверить подключение",
+  title: "Вход в Control Panel",
+  checking: "Проверяем сеанс…",
+  unavailable: "Не удалось проверить сеанс.",
+  ready: "Вы не вошли. Вход пока недоступен.",
+  signedIn: "Сеанс подтверждён.",
+  scope: "Проверяем доступ к проектам.",
+  logout: "Выйти",
+  logoutError: "Выход не подтверждён. Проверьте сеанс ещё раз.",
+  forbidden: "Доступ не подтверждён.",
+  ended: "Сеанс завершён.",
+  revokedFailure: "Не удалось подтвердить выход.",
+  refresh: "Проверить сеанс",
 } : {
-  title: "Sign in to Briareus",
-  checking: "Checking identity-provider connection…",
-  unavailable: "Sign-in is temporarily unavailable. The OAuth client or server session is not ready.",
-  ready: "Sign-in takes place inside Briareus Control Panel. The backend verifies Rauthy identity; the UI stores no passwords or tokens.",
-  signedIn: "Account identity verified",
-  scope: "Projects, Teams and MCP management privileges have not yet been verified by Platform Control.",
-  logout: "End Briareus session",
-  logoutError: "Session revocation was not confirmed; its status is unknown.",
-  forbidden: "Access denied by the server. Verify your session.",
-  ended: "Session ended or was revoked. Please sign in again.",
-  revokedFailure: "Server did not confirm session revocation; the operation may not have completed.",
-  refresh: "Check connection",
+  title: "Control Panel sign-in",
+  checking: "Checking session…",
+  unavailable: "Unable to verify the session.",
+  ready: "You are signed out. Sign-in is not available yet.",
+  signedIn: "Session verified.",
+  scope: "Checking Project access.",
+  logout: "Sign out",
+  logoutError: "Sign-out was not confirmed. Check your session again.",
+  forbidden: "Access was not verified.",
+  ended: "Session ended.",
+  revokedFailure: "Unable to confirm sign-out.",
+  refresh: "Check session",
 })
 
 async function refresh(): Promise<void> {
@@ -165,32 +165,28 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="mt-5 rounded-xl border border-border bg-card p-4 sm:p-5" aria-labelledby="rauthy-sign-in-title">
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <h2 id="rauthy-sign-in-title" class="text-sm font-semibold text-foreground">{{ labels.title }}</h2>
-      <button
-        v-if="state.kind==='unavailable'"
-        type="button"
-        class="rounded-md px-2 py-1 text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        @click="refresh"
-      >{{ labels.refresh }}</button>
+  <section class="rounded-2xl border border-border bg-card p-5 sm:p-7"
+    aria-labelledby="rauthy-sign-in-title">
+    <h1 id="rauthy-sign-in-title" class="text-xl font-semibold text-foreground">{{labels.title}}</h1>
+    <p v-if="state.kind==='checking'" role="status" class="mt-4 text-sm text-muted-foreground">{{labels.checking}}</p>
+    <div v-else-if="state.kind==='signed_in'" class="mt-4 space-y-4">
+      <p role="status" class="text-sm font-medium">{{labels.signedIn}}</p>
+      <p class="text-sm text-muted-foreground">{{labels.scope}}</p>
+      <button type="button"
+        class="min-h-11 w-full rounded-lg border border-border px-4 text-sm font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+        :disabled="busy" @click="logout">{{labels.logout}}</button>
     </div>
-    <p v-if="state.kind==='checking'" class="mt-2 text-sm text-muted-foreground" role="status">{{ labels.checking }}</p>
-    <p v-else-if="state.kind==='unavailable'" class="mt-2 text-sm leading-6 text-muted-foreground" role="status">{{ state.reason==="forbidden"?labels.forbidden:labels.unavailable }}</p>
-    <div v-else-if="state.kind==='signed_in'" class="mt-3 space-y-3" role="status">
-      <p class="text-sm font-medium text-foreground">{{ labels.signedIn }}</p>
-      <p class="text-sm leading-6 text-muted-foreground">{{ labels.scope }}</p>
-      <button
-        type="button"
-        class="min-h-11 w-full rounded-lg border border-border px-4 text-sm font-semibold hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
-        :disabled="busy"
-        @click="logout"
-      >{{ labels.logout }}</button>
+    <div v-else class="mt-4 space-y-4">
+      <p role="status" class="text-sm text-muted-foreground">
+        {{state.kind==='unavailable'?(state.reason==='forbidden'?labels.forbidden:labels.unavailable):
+          ended?labels.ended:labels.ready}}
+      </p>
+      <button type="button"
+        class="min-h-11 w-full rounded-lg border border-border px-4 text-sm font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+        :disabled="busy" @click="refresh">{{labels.refresh}}</button>
     </div>
-    <div v-else class="mt-3 space-y-3">
-      <p v-if="ended" class="text-sm leading-6 text-foreground" role="status">{{ labels.ended }}</p>
-      <p v-else class="text-sm leading-6 text-muted-foreground">{{ labels.ready }}</p>
-    </div>
-    <p v-if="error" class="mt-3 text-sm text-destructive" role="alert">{{ logoutFailure==="forbidden"?labels.forbidden:logoutFailure==="unavailable"?labels.revokedFailure:labels.logoutError }}</p>
+    <p v-if="error" role="alert" class="mt-3 text-sm text-destructive">
+      {{logoutFailure==="forbidden"?labels.forbidden:logoutFailure==="unavailable"?labels.revokedFailure:labels.logoutError}}
+    </p>
   </section>
 </template>

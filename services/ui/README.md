@@ -49,52 +49,25 @@ route. Current Rauthy OIDC session is checked read-only, with stable
 in-place loader/status UI. The earlier custom Identity client/form has been
 removed from this Frontend source.
 
-**Current native sign-in boundary:** owner decision #536 supersedes the
-hosted Rauthy login page. Briareus owns the sign-in UI and must add its
-own MFA continuation once Backend supports it; Rauthy remains the sole
-credential, OTP and token authority. The
-Frontend uses the actual Backend POST `/api/v1/auth/start` (201,
-`first_factor_required`) via the same HTTPS Control Panel origin, only when
-the user explicitly checks preparation. Backend now exposes `GET /api/v1/auth/capabilities` and the locally
-implemented `/api/v1/auth/first-factor` and `/api/v1/auth/cancel`.
-Only the **exact capabilities GET** is consumed before each UI Init; it must
-report the supported `rauthy-native-v1` first-factor/PoW/cancel shape. The UI
-can explicitly cancel a pending Init, and requires HTTP204 to claim a confirmed
-cancel. A request timeout is not cleanup success. The Backend POST
-`/api/v1/auth/pow` reserves a one-use challenge; the UI still MUST NOT
-consume it before a verified credential+official sPoW worker can submit the
-first factor. The credential form remains disabled, since its integration is
-not accepted. These are unauthenticated precredential steps. The UI never
-renders a PoW challenge as a User identity or stores a provider token/CSRF;
-it shows unavailable when the exact native capability is absent or invalid.
-Although Backend exposes the first-factor API, the UI's credential submit,
-MFA and signed-session continuation remain disabled pending independent
-end-to-end acceptance. The official upstream Rauthy 0.37.1 browser solver
-(sPoW 0.7.0, fixed SHA-256 and Apache-2.0 license) is now vendored under
-`features/platform/vendor/spow` and runs only inside
-`features/platform/model/rauthy-pow.worker.ts`. It accepts a bounded public
-one-use challenge, has no password, provider cookie, CSRF, private bearer or
-Cedar role, and is cancellable. Its isolated browser test validates actual
-SHA-256 work at 1440/390px. It is **not called by Control Panel** and
-satisfying PoW is neither Rauthy authentication nor Platform ownership.
-No public challenge is fetched ahead of actual first-factor submission.
-Prelogin GET capabilities and cancellation-error JSON are bounded to 4KiB;
-unknown media, oversized 200/503 replies and interrupted streams cannot
-promote an Init or claim that cancellation was confirmed. An AbortSignal
-terminates a pending response read without waiting for the network peer.
-Disabled credential placeholders have no
-Vue-bound username/password state or password-manager autocomplete; while a
-native Init is pending, UI repeat submission is disabled until its server-
-reported TTL expires. A native Init response with unexpected fields is rejected.
-No browser redirect to Rauthy's hosted login UI is an accepted sign-in path. The former PKCE callback remains private
-Backend plumbing, not an external login UI.
-Native Init lifetime is measured from request start, not extended by a delayed
-response. Monotonic round-trip time also counts when the wall clock pauses.
-Cancelled or already-expired replies cannot publish a prepared state.
-The page clears a completed preparation on identity changes, shows expiry
-explicitly, and rechecks both wall-clock and monotonic deadlines on return to
-the foreground; no background retry or premature PoW request is added.
+**Current sign-in UI:** the user requested removal of the speculative
+"Prepare sign-in" (Init/Cancel) controls, verbose Rauthy diagnostics and
+nonworking username/password form. Production now shows one compact login
+status with an optional read-only **Check session** action, and server-owned
+logout only when a signed browser session actually exists. There are no
+browser Init, PoW or first-factor POSTs on the sign-in screen, and no hosted
+provider redirect or guest fallback. The existing Backend native prelogin
+clients and the pinned, isolated upstream sPoW worker remain source-only,
+not mounted in the product UI pending genuine password/MFA/PKCE acceptance.
 
+The current Backend `GET /api/v1/auth/session` deliberately returns HTTP401
+`{ "detail": "OIDC browser session required" }` when no valid Secure
+HttpOnly `__Host-briareus_oidc_session` cookie exists. For an anonymous
+browser this is `signed_out`, **not** a Platform error or a grant. A 401
+*after* independently confirmed completed authentication must be diagnosed
+in Backend/Gateway session issuance and cookie forwarding; Frontend never
+substitutes a manufactured identity, cookie or local login success. Only
+HTTP200 with a valid bound Rauthy response advances provider identity;
+Platform User/Project still needs independent current BFF membership.
 
 The login status panel follows RauthySignIn's existing state event.
 When the parent OidcPanelPage supplies a freshly checked Rauthy

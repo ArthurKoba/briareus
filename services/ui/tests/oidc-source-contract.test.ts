@@ -44,6 +44,20 @@ describe("Rauthy provider session and independent Platform proof",()=>{
     expect(result.kind).toBe("signed_in")
     expect(observed).toEqual(["/api/v1/auth/session","/api/v1/auth/config"])
   })
+  it("maps Backend's anonymous 401 detail response to signed_out, never an authorized identity",async()=>{
+    const observed:string[]=[],methods:string[]=[]
+    globalThis.fetch=async(url,options)=>{
+      observed.push(String(url));methods.push(options?.method??"GET")
+      if(String(url).endsWith("/session"))return new Response(
+        JSON.stringify({detail:"OIDC browser session required"}),
+        {status:401,headers:{"Content-Type":"application/json"}},
+      )
+      return new Response(JSON.stringify({issuer,client_id:"briareus-control-panel"}),{status:200})
+    }
+    expect(await readRauthyPanelState(new AbortController().signal)).toEqual({kind:"signed_out"})
+    expect(observed).toEqual(["/api/v1/auth/session","/api/v1/auth/config"])
+    expect(methods).toEqual(["GET","GET"])
+  })
   it("fails closed on wrong issuer or nonempty unverified permissions",async()=>{
     for(const invalid of [{...identity(),issuer:"https://other.invalid"},{
       ...identity(),permissions:["admin"]}]){
