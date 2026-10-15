@@ -1,33 +1,57 @@
--- Idempotent five logical databases inside the existing PostgreSQL cluster.
+-- Idempotent four active logical databases inside existing PostgreSQL.
 -- POSTGRES_USER is the owner; no additional logins, passwords or role DDL.
 -- Domain schema DDL belongs to each owner service's Alembic startup.
--- Existing PGDATA, briareus_dev and Valkey are preserved.
+-- Existing PGDATA, legacy databases and Valkey are preserved without DDL.
 \set QUIET on
 SET log_statement = 'none';
+-- Rauthy is authoritative identity state: its disappearance from an already
+-- populated Briareus cluster is an incident, NOT permission to manufacture
+-- a fresh empty provider database and silently lose existing Users/clients.
+-- Only a first installation with NO known Briareus databases may create it.
+-- This check runs BEFORE any owner CREATE DATABASE from the list below.
+SELECT (
+    EXISTS (SELECT 1 FROM pg_database WHERE datname = 'briareus_rauthy')
+    OR NOT EXISTS (
+        SELECT 1 FROM pg_database
+        WHERE datname IN (
+            'briareus_access', 'briareus_platform', 'briareus_resources',
+            'briareus_files', 'briareus_runtime', 'briareus_reverse',
+            'briareus_ingest', 'briareus_identity', 'briareus_dev'
+        )
+    )
+) AS provider_bootstrap_safe
+\gset
+\if :provider_bootstrap_safe
+\else
+\echo 'briareus bootstrap: protected Rauthy DB missing in existing cluster; restore provider state before retry'
+DO $$ BEGIN RAISE EXCEPTION 'protected Rauthy database missing on existing cluster' USING ERRCODE='P0001'; END $$;
+\endif
 SELECT format(
  'CREATE DATABASE %I OWNER %I TEMPLATE template0 ENCODING %L',
  wanted.dbname, current_user, 'UTF8'
 )
 FROM (VALUES
- ('briareus_identity'), ('briareus_access'),
- ('briareus_platform'), ('briareus_resources'),
- ('briareus_rauthy')
+ ('briareus_access'), ('briareus_platform'),
+ ('briareus_resources'), ('briareus_rauthy')
 ) AS wanted(dbname)
 LEFT JOIN pg_database db ON db.datname = wanted.dbname
 WHERE db.oid IS NULL
+-- Create the protected provider first: an interrupted *fresh* installation
+-- must not leave only domain DBs and trip the missing-provider guard on retry.
+-- Existing populated clusters still pass that guard before any CREATE.
+ORDER BY (wanted.dbname = 'briareus_rauthy') DESC, wanted.dbname
 \gexec
 -- Never silently adopt a database already owned by an unrelated principal.
-SELECT count(*) = 5 AND bool_and(pg_get_userbyid(datdba) = current_user)
+SELECT count(*) = 4 AND bool_and(pg_get_userbyid(datdba) = current_user)
  AS owner_databases_ready
 FROM pg_database
 WHERE datname IN (
- 'briareus_identity', 'briareus_access',
- 'briareus_platform', 'briareus_resources',
- 'briareus_rauthy'
+ 'briareus_access', 'briareus_platform',
+ 'briareus_resources', 'briareus_rauthy'
 )
 \gset
 \if :owner_databases_ready
 \else
-\echo 'briareus bootstrap: five databases missing or wrong owner'
+\echo 'briareus bootstrap: four active databases missing or wrong owner'
 DO $$ BEGIN RAISE EXCEPTION 'briareus database bootstrap incomplete' USING ERRCODE='P0001'; END $$;
 \endif

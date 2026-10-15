@@ -3,7 +3,7 @@ x-watch-path-coolify:
 
 # Briareus third-party data dependencies: ONE Coolify Application, THREE
 # vendor containers. No application module lives in this release unit.
-# This release unit is independent of Admin/Gateway/Authorization/MCP domains.
+# This unit is independent of Control Panel API, Gateway, Authorization and MCP.
 # Preserve briareus-* service/DNS names; only per-app data volume keys are concise.
 services:
   briareus-postgres:
@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      POSTGRES_DB: "${POSTGRES_DB:-briareus_dev}"
+      POSTGRES_DB: "postgres"
       POSTGRES_USER: "${POSTGRES_USER:-briareus}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
       TZ: "${TZ:-UTC}"
@@ -25,7 +25,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
+      test: ["CMD", "/usr/local/bin/briareus-provider-db-health"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -49,6 +49,8 @@ services:
         aliases: ["briareus-valkey"]
     volumes:
       - valkey-data:/data
+    # Panel sessions and one-use reservations must not disappear under
+    # cache pressure. Refuse new allocations rather than silently evict keys.
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -57,7 +59,7 @@ services:
           ""|*[!0-9a-f]*) echo "invalid Valkey credential format" >&2; exit 78 ;;
         esac
         [ "$$(printf %s "$$VALKEY_PASSWORD" | wc -c)" -eq 64 ] || exit 78
-        printf 'save ""\nappendonly yes\nrequirepass %s\nmaxmemory 128mb\nmaxmemory-policy allkeys-lru\n' "$$VALKEY_PASSWORD" > /tmp/valkey.conf
+        printf 'save ""\nappendonly yes\nrequirepass %s\nmaxmemory 128mb\nmaxmemory-policy noeviction\n' "$$VALKEY_PASSWORD" > /tmp/valkey.conf
         exec valkey-server /tmp/valkey.conf
     tmpfs:
       - /tmp:size=8m,mode=1777
@@ -111,6 +113,14 @@ services:
       RP_NAME: Briareus
       LOCAL_TEST: "false"
       SWAGGER_UI_PUBLIC: "false"
+      # Explicit closed enrollment: account invitations are created by
+      # Rauthy operators / scoped upstream management REST, not public signup.
+      OPEN_USER_REG: "false"
+      USER_REG_OPEN_REDIRECT: "false"
+      # Neither broad client registration nor arbitrary CIMD lookups are
+      # enabled. MCP resources need approved per-client allowed_resources.
+      ENABLE_DYN_CLIENT_REG: "false"
+      ENABLE_EPHEMERAL_CLIENTS: "false"
     volumes:
       - rauthy-data:/app/data
     expose:

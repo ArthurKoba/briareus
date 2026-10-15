@@ -6,27 +6,29 @@
     "environment": "naibrku1omovvmw5o0bcnp5c",
     "repository": "KobaProduction/briareus"
   },
-  "release_policy": "One Git revision and one aggregated CI gate for all target modules. Do not apply partial Coolify mutations or deploy until all target manifests, source and real rollout prerequisites are accepted. Never change offscope applications, secrets or volumes.",
+  "release_policy": "One Git revision and one aggregated CI gate for all target modules. Do not apply partial Coolify mutations or deploy until all target manifests, source and real rollout prerequisites are accepted. Never change offscope applications, secrets or volumes. One Git revision does not serialize separate Coolify auto-deploy jobs; validate dependency convergence and rollback before publication.",
   "candidates": [
     {
-      "slug": "admin-api",
+      "slug": "control-panel-api",
       "uuid": "rf5gaooeijfzyiizgaw9kznr",
       "folder": "services/api",
       "base_directory": "/services/api",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
-        "services/api/**"
+        "services/api/**",
+        "services/external/**"
       ],
       "toolchain": "python"
     },
     {
-      "slug": "admin-ui",
+      "slug": "control-panel-ui",
       "uuid": "pxv5fbwcogun3va4vygnejd4",
       "folder": "services/ui",
       "base_directory": "/services/ui",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
-        "services/ui/**"
+        "services/ui/**",
+        "services/external/**"
       ],
       "toolchain": "bun"
     },
@@ -38,7 +40,8 @@
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
         "services/authorization/**",
-        "services/common/**"
+        "services/common/**",
+        "services/external/**"
       ],
       "toolchain": "python"
     },
@@ -60,6 +63,7 @@
       "base_directory": "/services/gateway",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "services/gateway/**"
       ],
       "toolchain": "python"
@@ -71,6 +75,7 @@
       "base_directory": "/hands/files",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "hands/files/**",
         "shared/hand_runtime/**"
       ],
@@ -83,6 +88,7 @@
       "base_directory": "/hands/terminal",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "hands/terminal/**",
         "shared/hand_runtime/**"
       ],
@@ -95,6 +101,7 @@
       "base_directory": "/hands/web",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "hands/web/**",
         "shared/hand_runtime/**"
       ],
@@ -107,6 +114,7 @@
       "base_directory": "/hands/reverse",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "hands/reverse/**",
         "shared/hand_runtime/**"
       ],
@@ -119,6 +127,7 @@
       "base_directory": "/hands/infrastructure",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "hands/infrastructure/**",
         "shared/hand_runtime/**"
       ],
@@ -131,6 +140,7 @@
       "base_directory": "/hands/svc",
       "compose_location": "/docker-compose.coolify.yaml",
       "watch_paths": [
+        "services/external/**",
         "hands/svc/**",
         "shared/hand_runtime/**"
       ],
@@ -145,7 +155,8 @@
       "watch_paths": [
         "services/platform/**",
         "services/common/**",
-        "shared/build/**"
+        "shared/build/**",
+        "services/external/**"
       ],
       "toolchain": "python"
     },
@@ -158,7 +169,8 @@
       "watch_paths": [
         "services/resources/**",
         "services/common/**",
-        "shared/build/**"
+        "shared/build/**",
+        "services/external/**"
       ],
       "toolchain": "python"
     }

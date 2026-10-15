@@ -8,7 +8,7 @@ services:
       file: docker-compose.yaml
       service: briareus-postgres
     environment:
-      POSTGRES_DB: "${POSTGRES_DB:-briareus_dev}"
+      POSTGRES_DB: "postgres"
       POSTGRES_USER: "${POSTGRES_USER:-briareus}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
       TZ: "${TZ:-UTC}"
@@ -34,6 +34,12 @@ services:
       TRUSTED_PROXIES: "${RAUTHY_TRUSTED_PROXIES:?}"
       # Operator override for existing Rauthy admin MFA gate; default stays enforced.
       ADMIN_FORCE_MFA: "${ADMIN_FORCE_MFA:-true}"
+      # Keep the vendor security boundary explicit in the Coolify-parsed
+      # adapter as well as the portable Compose source.
+      OPEN_USER_REG: "false"
+      USER_REG_OPEN_REDIRECT: "false"
+      ENABLE_DYN_CLIENT_REG: "false"
+      ENABLE_EPHEMERAL_CLIENTS: "false"
 
 # Explicit empty maps survive Coolify's Compose normalization.
 volumes:

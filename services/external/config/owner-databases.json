@@ -1,17 +1,10 @@
 {
-  "schema": "briareus-domain-databases-v1",
+  "schema": "briareus-domain-databases-v2",
   "physical_postgres_dns": "briareus-postgres",
   "network": "briareus-net",
   "legacy_database_do_not_migrate": "briareus_dev",
   "provisioning_status": "automatic_on_data_start_pending_live_observation",
   "initial": [
-    {
-      "owner": "identity",
-      "module": "identity",
-      "database": "briareus_identity",
-      "role_env": "POSTGRES_USER",
-      "secret_env": "POSTGRES_PASSWORD"
-    },
     {
       "owner": "access",
       "module": "authorization",
@@ -63,5 +56,12 @@
     "no_public_C2_until_trust_review": true,
     "no_bulk_MCP_events_in_oltp": true
   },
-  "role_model": "shared_existing_postgres_principal_five_logical_databases"
+  "role_model": "shared_existing_postgres_principal_four_active_logical_databases",
+  "excluded_legacy_databases_do_not_touch_automatically": [
+    "briareus_identity",
+    "briareus_dev"
+  ],
+  "protected_provider_databases": [
+    "briareus_rauthy"
+  ]
 }

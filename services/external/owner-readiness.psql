@@ -1,0 +1,30 @@
+-- Read-only Briareus Development PostgreSQL database inventory.
+-- Only through the approved External Services Application operator terminal.
+-- Never run automatically; no DDL, data reads, credential access or reset.
+\set QUIET on
+\pset pager off
+SELECT
+    t.dbname AS database_name,
+    t.classification,
+    db.oid IS NOT NULL AS db_exists,
+    COALESCE(pg_get_userbyid(db.datdba) = current_user, false) AS owned_by_current_role,
+    COALESCE(stat.numbackends, 0) AS active_connections
+FROM (VALUES
+    ('briareus_rauthy', 'PROTECTED_PROVIDER_DO_NOT_RESET'),
+    ('briareus_access', 'ACCESS_OWNER'),
+    ('briareus_platform', 'PLATFORM_OWNER'),
+    ('briareus_resources', 'RESOURCES_OWNER'),
+    ('briareus_files', 'OPTIONAL_FILES_OWNER'),
+    ('briareus_runtime', 'OPTIONAL_RUNTIME_OWNER'),
+    ('briareus_reverse', 'OPTIONAL_REVERSE_OWNER'),
+    ('briareus_ingest', 'OPTIONAL_INGEST_OWNER'),
+    ('briareus_identity', 'LEGACY_CANDIDATE_NO_AUTODROP'),
+    ('briareus_dev', 'LEGACY_CANDIDATE_NO_AUTODROP')
+) AS t(dbname, classification)
+LEFT JOIN pg_database db ON db.datname = t.dbname
+LEFT JOIN pg_stat_database stat ON stat.datid = db.oid
+ORDER BY CASE t.classification
+    WHEN 'PROTECTED_PROVIDER_DO_NOT_RESET' THEN 0
+    WHEN 'LEGACY_CANDIDATE_NO_AUTODROP' THEN 2
+    ELSE 1
+END, t.dbname;

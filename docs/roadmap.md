@@ -43,3 +43,26 @@ terminology without modifying or duplicating the Ghidra implementation.
 ## Upstream-first MCP refactor
 
 The provider/runtime architecture is being re-evaluated around an upstream-first MCP model: Koba owns account routing, authorization, policy, audit and workspace glue, while maintained official/native MCP servers should own provider-domain semantics. See [`docs/refactoring/mcp-upstream-roadmap.md`](refactoring/mcp-upstream-roadmap.md) for the audit, provider decisions and phased migration plan.
+
+## Future architecture — Node Agent and distributed Workspace (deferred)
+
+**Owner decision, 15 October 2026:** stay on a single existing node for
+Briareus MVP; do not make a distributed scheduler, remote Node Agent or nested
+container runtime a prerequisite for the current User → Project → Cedar →
+protected Files Hand development acceptance. The future architecture and
+acceptance outline are tracked in [#544](https://github.com/KobaProduction/briareus/issues/544).
+
+After MVP, evaluate a user-space Node Agent that registers a node, advertises
+available compute, and places Workspace-associated Files, Terminal and **local
+Git** over the same owner-controlled filesystem. GitHub/GitLab provider APIs
+stay independent. Investigate shared Git objects/linked worktrees and measured
+cache cleanup before assuming branch count is the main disk cost.
+
+Second-stage options are authenticated private RPC to remote nodes, per-Node/
+Project/Hand CPU, memory, PID, disk and network policies, and isolated
+containerized MCP execution. Rootless or nested Docker/DinD is a candidate,
+**not** a selected implementation or a security boundary: privileged DinD and
+host Docker socket access must never be assumed to isolate an untrusted Hand.
+First prove one local Node Agent/Workspace, then an explicit manually placed
+remote Workspace; defer automatic migration/failover until real ownership,
+revocation, data durability and OS sandbox acceptance are defined.

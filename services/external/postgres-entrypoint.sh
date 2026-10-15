@@ -1,5 +1,5 @@
 #!/bin/sh
-# Bootstrap five independent databases in the EXISTING Data PostgreSQL service.
+# Bootstrap four active independent databases in the EXISTING Data PostgreSQL service.
 # The upstream entrypoint remains responsible for pg_initdb and normal PGDATA.
 set -eu
 if [ "${1:-postgres}" != "postgres" ]; then
@@ -7,8 +7,9 @@ if [ "${1:-postgres}" != "postgres" ]; then
 fi
 : "${POSTGRES_USER:?}"
 : "${POSTGRES_PASSWORD:?}"
-ready_file=/run/briareus-owner-databases-ready
-rm -f "$ready_file"
+owner_ready_file=/run/briareus-owner-databases-ready
+provider_ready_file=/run/briareus-rauthy-db-ready
+rm -f "$owner_ready_file" "$provider_ready_file"
 child=
 stop_server() {
     if [ -n "$child" ]; then
@@ -31,21 +32,35 @@ while [ "$i" -lt 90 ]; do
         # argv or echo it. The owner credentials below are consumed exclusively
         # by psql's \getenv and safely quoted with :'variable'.
         export PGPASSWORD="$POSTGRES_PASSWORD"
-        if ! psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 \
+        # Reconcile the four logical database *names/owners* only. Real
+        # service schema migrations belong to their own independent owners.
+        if psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 \
             -U "$POSTGRES_USER" -d postgres \
             -f /usr/local/share/briareus/owner-bootstrap.psql >/dev/null; then
-            # Domain bootstrap is NOT PostgreSQL's own lifecycle. Missing
-            # protected scoped references must fail closed for owner services,
-            # but must never terminate the already-running physical database.
-            # The READY marker stays absent; no owner migrations run here.
-            unset PGPASSWORD
-            echo 'briareus owner bootstrap: blocked (scoped DB role/credential refs invalid or unavailable); PostgreSQL stays running; owner DB readiness UNVERIFIED' >&2
-            wait "$child"
-            exit $?
+            owners_reconciled=true
+        else
+            owners_reconciled=false
+            echo 'briareus domain DB reconciliation failed; PostgreSQL remains running; owner services must fail closed' >&2
+        fi
+        # Do NOT make the IdP depend on unrelated Platform/Access/Resources
+        # database health: a single owner's failure must not block Rauthy.
+        # This query proves only the provider DB exists with the scoped owner,
+        # not that Rauthy's own startup/schema/users are healthy.
+        provider_owned=$(psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 \
+            -U "$POSTGRES_USER" -d postgres \
+            -c "SELECT count(*) = 1 AND bool_and(pg_get_userbyid(datdba) = current_user) FROM pg_database WHERE datname = 'briareus_rauthy'" 2>/dev/null) || provider_owned=f
+        if [ "$provider_owned" = t ]; then
+            touch "$provider_ready_file"
+            if [ "$owners_reconciled" = true ]; then
+                touch "$owner_ready_file"
+                echo 'briareus owner bootstrap: all four logical databases and existing owner verified'
+            else
+                echo 'briareus owner bootstrap: provider DB prerequisite ready; unrelated owner DB reconciliation UNVERIFIED' >&2
+            fi
+        else
+            echo 'briareus owner bootstrap: protected provider DB prerequisite UNVERIFIED; Rauthy must not start' >&2
         fi
         unset PGPASSWORD
-        touch "$ready_file"
-        echo 'briareus owner bootstrap: five databases and restricted roles verified'
         wait "$child"
         exit $?
     fi

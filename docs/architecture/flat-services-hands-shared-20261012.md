@@ -38,6 +38,49 @@ uses its own logical database and a separate durable volume. The latest
 owner instruction allows removing the unused legacy `deploy/data/**` source
 during migration; do not delete data volumes or inspect plaintext secrets.
 
+**Newer owner overrides (14 October 2026):** Control Panel implements its OWN human sign-in/MFA/recovery UI and Control Panel API brokers Rauthy session/challenge/OIDC; no browser redirect to Rauthy/Gateway-hosted login ([#536](https://github.com/KobaProduction/briareus/issues/536#issuecomment-6176839823)). Every existing Coolify service/Hand additionally watches the broad directory `services/external/**` alongside its module and any imported shared paths. These changes do not convert this source target into a verified Development cutover.
+
+## Core infrastructure and future Node execution boundary (owner 2026-10-15)
+
+**MVP physical placement: one existing host, existing allowed Coolify applications.**
+This is a logical trust/dependency split, not an instruction to introduce
+multi-node, DinD, rootless child agents, new database services or new app UUIDs.
+The future multi-node plan is [#544](https://github.com/KobaProduction/briareus/issues/544);
+current single-host architecture and release coordination are tracked in
+[#536](https://github.com/KobaProduction/briareus/issues/536#issuecomment-6186302840).
+
+- **Core / infrastructure control plane:** upstream Rauthy, the existing
+  PostgreSQL and Valkey dependencies, Platform (verified User, Team, Project),
+  Authorization (Cedar, AgentSession, grants/revoke), Resources, and the
+  separately deployed Control Panel API/UI. Each durable business owner
+  controls *its own* database migrations and protects its owner API. Rauthy
+  alone stores human credentials/MFA and signs identity/resource tokens.
+- **Node / execution plane:** Gateway transport/coarse admission, independently
+  isolated Files, Terminal, Web/Browser and other Hands. Gateway logically
+  belongs to execution placement when Node Agent arrives, but its public
+  route/DNS is unchanged in MVP. Neither Gateway nor Hands receives human
+  passwords, direct owner Postgres access, an upstream privileged Rauthy API
+  key, or authority to declare Platform membership/Cedar grants. A Hand's
+  start/liveness may precede Core readiness; *every protected effect* remains
+  unavailable until real trusted identity, Project, original MCP resource
+  audience, fresh Access/Cedar decision and peer/root mapping are confirmed.
+  This is a **logical boundary**, not current physical network isolation:
+  the approved single-host stack still shares the `briareus-net` transport.
+  Separate network-level Node/Core trust must be proved before moving Hands.
+- **Future Workspace placement:** Files, Terminal and local Git operate in one
+  owner-scoped filesystem on a chosen node. Do not add hardwired multi-node
+  scheduling, global IPC, forced service colocation or host Docker socket
+  access now. Rootless/nested containers need later isolation acceptance.
+
+**Human first operator is a single *identity*, not a globally reused secret.**
+The Briareus operator links a verified Rauthy issuer/subject to current
+Platform operator authority; equality of email or the presence of
+`rauthy_admin` is insufficient alone. Never reuse human/admin passwords for
+PostgreSQL, Alembic, Valkey or private API keys. Rauthy v0.37.1 itself owns
+empty-provider initial admin bootstrap; user-facing login, MFA and recovery
+remain native Control Panel UI through its authenticated BFF. No password
+is extracted from startup logs by other services.
+
 ## Data plane is independent from management plane
 
 ```text
@@ -50,7 +93,7 @@ User browser ---> Gateway /api/* ---> API (management BFF) ---> service-owned AP
 User browser ---> Gateway /panel/ ---> UI (management frontend)
 ```
 
-- **`services/api` and `services/ui` are purely management/control-plane tools**. Users can configure Identity users/groups, Team/Project membership, Authorization grants and approvals, Resources and Hands through authenticated **owner** APIs. **Neither API nor UI is a dependency of live MCP requests**. Stopping/rebuilding/removing either may stop management functions, but must not interrupt already running Gateway, Authorization, Hands or execution sessions.
+- **`services/api` and `services/ui` are purely management/control-plane tools**. Users can configure Rauthy identities, Team/Project membership, Authorization grants and approvals, Resources and Hands through authenticated **owner** APIs. UI presents its own sign-in/MFA/recovery flow, while API manages the upstream Rauthy challenge/session and verified User/Project; neither displays or redirects the browser to upstream hosted login. **Neither API nor UI is a dependency of live MCP requests**. Stopping/rebuilding/removing either may stop management functions, but must not interrupt already running Gateway, Authorization, Hands or execution sessions.
 - **`services/external` Rauthy** is the OAuth/OIDC authority: user/service identity, credentials, sessions and JWKS. Gateways/Hands validate required OAuth token identity, audience, expiry and signature with cached trusted provider metadata; the API does not mint its own JWT.
 - **`services/authorization`** owns policy and grants; Cedar is a Rust-backed policy evaluator embedded in this service, not another required process. This service reads only its own durable access state from the existing PostgreSQL server, uses real authenticated source-owner APIs for external facts, and may use Valkey for cache/invalidation. It does not call management API to decide.
 - **`services/gateway` is the ingress PEP**: it calls Authorization directly for connection/session/coarse MCP admission when required, never via API/UI. It performs transport/routing/streams and does **not** own policies, SQL, approvals or User/Project business data. Per-tool/effect Authorization is enforced again by the actual **Hand PEP**, which sees the real arguments and current grant; a successful Gateway admission is not a blanket permission to execute every tool. This additional Gateway admission check is the owner's new routing choice and supersedes the earlier 'Gateway never asks Authorization' wording, without turning Gateway into the PDP.
@@ -59,9 +102,9 @@ User browser ---> Gateway /panel/ ---> UI (management frontend)
 ## Deploy and Watch migration
 
 - For an internal module, use Coolify **Base Directory** `/services/<service>`; for a Hand, `/hands/<hand>`; **Compose location** `/docker-compose.coolify.yaml`. The service's source `build.context` must still resolve to the actual repository root when its Dockerfile `COPY`s under that root; use relative paths derived from the manifest's real folder depth.
-- Coolify **Watch Paths** are repository-relative, exactly `services/<service>/**` or `hands/<hand>/**` plus only imported shared subtrees. A change to API must **not** redeploy Gateway, UI, Authorization or Hands; docs-only changes must not trigger builds. No generated per-file import graph. Do not create one Compose project containing API+Gateway+Authorization+Hands; it would couple restarts and deploys.
+- Coolify **Watch Paths** are repository-relative and directory-wide: `services/<service>/**` or `hands/<hand>/**`, **always `services/external/**`** and any imported shared subtrees. External Services updates deliberately trigger each module by owner decision; an API-only change must **not** redeploy Gateway, UI, Authorization or Hands, and docs-only changes must not trigger builds. Do not narrow to individual file lists or generate a per-file import graph. Do not create one Compose project containing API+Gateway+Authorization+Hands; it would couple restarts and deploys.
 - Keep the **existing approved 14 Dev Coolify Application UUIDs**, current DNS aliases, public routes and durable state until each cutover succeeds. The old `deploy/<module>` and legacy sources are rollback-only *until proven equivalent*, then retired. Never delete already-used DBs/volumes, move passwords into Git, inspect other Coolify projects/environments, or create a Rauthy Application UUID without explicit allowlisting.
-- API specifically preserves legacy `briareus-admin-api` Docker service key/alias during the first transition, while its source moves to `services/api/` and its displayed app name becomes Control Panel API. The user-facing path remains `/api/*` (not `/control-panel/api/*`). Rauthy integration replaces legacy auth endpoints **only after** a genuine issuer and user authentication flow have been verified.
+- **Canonical release names** are Docker service/DNS aliases `briareus-control-panel-api:8000` and `briareus-control-panel-ui:8080`, matching their independently owned Compose sources. Gateway must target these exact names in the same coordinated release; it must not retain obsolete `briareus-admin-api/ui` addresses (see the current unresolved Runtime source mismatch in [#536](https://github.com/KobaProduction/briareus/issues/536#issuecomment-6180034198)). The browser paths remain `/api/*` and `/panel/`. Do not claim active Dev routing or signed Rauthy login acceptance solely from these names; keep existing live state until the integration cutover is proven.
 
 ## Ownership and acceptance
 

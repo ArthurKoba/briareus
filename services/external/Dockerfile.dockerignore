@@ -3,3 +3,5 @@
 !services/external/
 !services/external/postgres-entrypoint.sh
 !services/external/owner-bootstrap.psql
+!services/external/owner-readiness.psql
+!services/external/provider-db-health.sh

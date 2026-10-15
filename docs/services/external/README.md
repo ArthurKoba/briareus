@@ -155,6 +155,6 @@ set `ADMIN_FORCE_MFA=false` in the **existing External Services Application**
 variable, not in Team/Project/Environment Shared Secrets. Apply only with
 that application's approved Compose release. Do not change PostgreSQL,
 Valkey, volumes, encryption keys, bootstrap credentials, or OAuth settings.
-The Rauthy container must start with the new ENV for the admin UI to stop
+The Rauthy container must start with the new ENV for the Rauthy operator UI to stop
 requiring enrollment. Restore `true` once a passkey is enrolled; disabling
 this gate leaves the administrator dependent on password-only authentication.

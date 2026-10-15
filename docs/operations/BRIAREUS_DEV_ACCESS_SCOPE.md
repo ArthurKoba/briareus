@@ -11,10 +11,10 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 - Canonical Git repository: **KobaProduction/briareus** (`https://github.com/KobaProduction/briareus`). The former `ArthurKoba/briareus` URL is historical and redirects; a redirect is not evidence that Coolify Git application settings or GitHub App installations have been migrated.
 - Known allowed development Applications:
 
-| Slug | Name | UUID |
+| Logical service | Coolify application name | UUID |
 | --- | --- | --- |
-| admin-api | Admin API | rf5gaooeijfzyiizgaw9kznr |
-| admin-ui | Admin UI | pxv5fbwcogun3va4vygnejd4 |
+| control-panel-api | Control Panel API | rf5gaooeijfzyiizgaw9kznr |
+| control-panel-ui | Control Panel UI | pxv5fbwcogun3va4vygnejd4 |
 | authorization | Authorization | 95podguiawtnf2tvlemvk3ef |
 | data | External Services | pdx35bwnh9tjeopx30jslrb9 |
 | files | Files | oeoerknk5tmjc3imqxljciga |
@@ -27,6 +27,14 @@ BINDING owner policy, 2026-10-12. Applies to Backend, Frontend, Runtime, Deploym
 | svc | SVC | 0tsnkigy4fanthoywmatouig |
 | terminal | Terminal | f2pguiu8qwlljggbfhmnim6z |
 | web | Web | 1czkj4zvjrsaganivglrdvpy |
+
+The two Control Panel application names, canonical Git repository,
+and service Base directories `/services/api` and `/services/ui` were
+verified on 2026-10-14 by exact-UUID, read-only Development application
+queries. The left column is a **logical Briareus service identifier**, not a
+claim about an internal Coolify URL slug. Existing UUIDs are unchanged;
+no replacement applications are authorized. Historical source registries may
+still contain retired names and must not be used to recreate applications.
 
 
 **Owner-authorized replacement:** the former Authorization UUID `kx1dpuamhtrlkbo4dg7tzanj` was deleted; the owner explicitly authorized recreation in this same Briareus Development scope on 2026-10-12. The new Authorization UUID `95podguiawtnf2tvlemvk3ef` was originally observed from the **former** `ArthurKoba/briareus`, branch `main`, Base `/services/authorization`, Compose `/docker-compose.coolify.yaml`, using the existing `tambov` / `briareus-net`. The old UUID is no longer approved. The new resource has not yet passed Compose/runtime acceptance.
