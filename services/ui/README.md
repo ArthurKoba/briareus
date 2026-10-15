@@ -25,6 +25,18 @@ The only exception is the **private OAuth return endpoint**
 `GET /api/auth/oidc/callback`, pinned to Rauthy's existing registered
 redirect URI and not called by the Frontend. Changing that callback requires
 an independently coordinated Backend/Deployment OAuth client update.
+Production `src/app/App.vue` now mounts exactly **one** login and Platform
+composition, `OidcPanelPage`, instead of branching into the unreachable legacy
+`PlatformPort` UI. The full verified User/Project workspace still requires
+current BFF owner proof. That main workspace loads as an asynchronous JS
+module; the initial static shell shows a localized, noninteractive status
+until it is available. If the module asset fails during a Development
+rollout, a bounded read-only error screen offers an **explicit reload**;
+missing JS does not open a guest, old Identity or hosted-Rauthy path, and
+there is no background retry of POST/authentication commands. Only an explicitly DEV-built source can load the
+isolated local design preview; the production entry has no guest/legacy
+Identity fallback or hosted-provider login action.
+
 The default `/panel/` screen is now the **Briareus sign-in form inside
 the permanent Control Panel sidebar/header**. Anonymous navigation does not
 open a guest MCP preview; direct protected hashes return to the sign-in
@@ -137,7 +149,10 @@ same owner-bound DTO validation as the inventory. It clears old content on
 failed refresh, permission change, expired proof or a mismatched response.
 Revoke uses the version from this exact-session GET, independent approver
 proof and a canonical idempotency UUID, then confirms the exact session again.
-A capped list, missing endpoint or absent row never proves that revoke succeeded.
+A capped list, missing endpoint or absent row never proves that revoke succeeded. On passive deadline expiry, only the
+elapsed active row is hidden from that owner's current snapshot; unaffected
+sessions and historical records remain visible. This is presentation only,
+not a browser-authored expiration/revocation decision.
 A known canonical session UUID can be opened independently of the capped list.
 Only HTTP404 with `AGENT_SESSION_NOT_FOUND` means a scoped missing/hidden
 record; a generic missing route remains unavailable. After an ambiguous revoke
@@ -426,11 +441,15 @@ Catalog, session lists, approvals and creation share a small local proof-lifetim
 primitive. It cancels expired presentation even with unchanged parent props,
 checks the deadline on foreground recovery, and cannot extend it when the wall
 clock moves backward. It is a UI invalidation guard, not a server permission.
-Session/approval lists also expire an actionable snapshot at its earliest
-record deadline. Pending confirmation dialogs close and a fresh list is
-required, without writing an expired/rejected status to the owner. In-flight
-commands keep their own reconciliation lifecycle instead of being aborted
-merely because another listed record's deadline elapsed.
+The session and approval inventories now age individual actionable records:
+one elapsed AgentSession or pending approval is removed from its current
+presentation snapshot and any matching open confirmation is closed, while
+unrelated still-current entries and owner-returned resolved history remain.
+When every actionable record has elapsed the list becomes stale until a
+fresh owner read. No browser expiration is converted into a server status,
+permit or command receipt. In-flight commands keep their own exact-source
+reconciliation lifecycle rather than being aborted solely because another
+listed record's deadline elapsed.
 The exact-session inspector uses the same guard for Project access and for
 an active session's own expiry. When the latter elapses, the snapshot is
 hidden as stale; only a fresh owner read can display the current terminal

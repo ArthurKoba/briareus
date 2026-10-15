@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { AlertCircle, CheckCircle2, Clock, RefreshCw, ShieldCheck } from "lucide-vue-next"
-import { readProjectApprovals, resolveCurrentApproval, approvalStillCurrentForActor } from "@/features/approvals"
+import { readProjectApprovals, resolveCurrentApproval, approvalStillCurrentForActor, pruneElapsedApprovalRows } from "@/features/approvals"
 import { useProofLifetime } from "@/shared/lib/use-proof-lifetime"
 import { SessionInspector } from "@/features/agent-sessions"
 import type { ApprovalAction, ApprovalRecord } from "@/features/approvals/types"
@@ -242,7 +242,22 @@ watch(()=>props.proofExpiresAt,value=>{
 watch(proofCurrent,current=>{if(!current){reset();state.value="expired"}},{flush:"sync"})
 watch([snapshotCurrent,mutating,state],()=>{
   if(!mutating.value&&state.value==="ready"&&snapshotExpiry.value&&!snapshotCurrent.value){
-    reset();state.value="stale"
+    // Age only the fired pending decision(s). A retired request MUST NOT
+    // clear other unexpired approvals or historical owner records.
+    // The monotonic snapshot deadline remains irrevocable on clock rollback.
+    const cutoff=Math.max(Date.now(),Date.parse(snapshotExpiry.value))
+    const aged=pruneElapsedApprovalRows(records.value,cutoff)
+    records.value=aged.items
+    if(confirmation.value&&!aged.items.some(row=>
+      row.id===confirmation.value?.item.id&&
+      row.version===confirmation.value?.item.version)){
+      confirmation.value=null
+    }
+    if(reviewedId.value&&!aged.items.some(row=>row.id===reviewedId.value))reviewedId.value=null
+    if(issued.value&&!aged.items.some(row=>
+      row.status==="approved"&&row.issued_session_uuid===issued.value))issued.value=null
+    error.value="";observation.value=aged.items.length?labels.value.snapshotStale:""
+    state.value=aged.items.length?"ready":"stale"
   }
 },{flush:"sync"})
 onMounted(()=>{void refresh()})

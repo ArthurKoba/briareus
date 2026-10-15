@@ -12,3 +12,4 @@ export type { SessionOpenRecovery, PendingSessionOpen } from "./model/open-recov
 export { openVerifiedNormalSession } from "./model/open-verified"
 export {filesReadScopes,retainUnexpiredFilesReadScopes} from "./model/files-read-scopes"
 export type {FilesReadScopeSummary} from "./model/files-read-scopes"
+export {pruneElapsedSessionRows} from "./model/prune-current-snapshot"

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { AlertCircle, Clock, RefreshCw } from "lucide-vue-next"
 import {
-  listCurrentSessions, isCurrentSessionId, revokeVerifiedSession, SessionInspector, type CurrentAgentSession,
+  listCurrentSessions, isCurrentSessionId, revokeVerifiedSession, SessionInspector, pruneElapsedSessionRows, type CurrentAgentSession,
 } from "@/features/agent-sessions"
 import { useProofLifetime } from "@/shared/lib/use-proof-lifetime"
 import { Badge } from "@/shared/ui/badge"
@@ -244,8 +244,22 @@ watch(()=>props.proofExpiresAt,value=>{
 watch(proofCurrent,current=>{if(!current){reset();status.value="denied";error.value=msg.value.proofExpired}},{flush:"sync"})
 watch([snapshotCurrent,busy,status],()=>{
   if(!busy.value&&status.value==="ready"&&snapshotExpiry.value&&!snapshotCurrent.value){
-    cancel();items.value=[];confirmation.value=null
-    status.value="stale";refreshing.value=false;error.value="";info.value=""
+    // useProofLifetime is monotonic: the clock can move backwards after an
+    // expiry. At least the fired earliest deadline must remain irreversible.
+    const cutoff=Math.max(Date.now(),Date.parse(snapshotExpiry.value))
+    const aged=pruneElapsedSessionRows(items.value,cutoff)
+    cancel()
+    items.value=aged.items
+    if(confirmation.value&&!aged.items.some(row=>
+      row.session_uuid===confirmation.value?.session_uuid&&
+      row.revision===confirmation.value?.revision&&row.status==="active")){
+      confirmation.value=null
+    }
+    refreshing.value=false;error.value=""
+    // Other sessions are still valid *snapshots*, not fresh Cedar permits.
+    // Do not duplicate the stale banner when no rows remain.
+    info.value=aged.items.length?msg.value.stale:""
+    status.value=aged.items.length?"ready":"stale"
   }
 },{flush:"sync"})
 onMounted(()=>{void refresh()})
