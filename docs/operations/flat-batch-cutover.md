@@ -28,6 +28,22 @@ a host-native Vite build alone can pass while the actual Docker build context
 is missing that file. This early source check is **not** Vue typecheck or an
 actual built-image acceptance; those remain the owning Frontend/CI job.
 
+## Public native-login observation (read-only, no credentials)
+
+After a compatible Backend + Runtime + Frontend Development publish, run
+`python3 scripts/probe_dev_native_auth.py`. It performs **only pinned public
+GET** requests on `https://briareus.koba-nexus.ru` with normal TLS, strict
+non-redirecting transport, bounded JSON/HTML responses and no cookies,
+password, bearer, CSRF, secrets, session-creation or user login. It requires
+`/panel/` HTML, the actual `/api/v1/auth/capabilities` Rauthy-native-v1 DTO,
+the obsolete `/api/auth/native/capabilities` path closed, exact issuer
+discovery, and private provider Admin REST denied by Gateway. It reports a
+failed check for the current deployed old UI/API state; a `200` hosted Rauthy
+page or a live Gateway says NOTHING about human login readiness. Even all
+flags green do not prove the native password/MFA form, Project identity,
+AgentSession/Cedar grant or protected Files action: those require separate
+actual signed browser/owner/MCP acceptance in the same public Dev.
+
 ## Actual Development settings are a separate acceptance gate
 
 The source manifest records **desired** Compose, Base Directory and module +

@@ -148,7 +148,12 @@ def bun_image_config_errors(folder: str, path: Path, dockerfile: str) -> list[st
     return errors
 
 
-def saved_coolify_errors(snapshot: object, plan: dict[str, object]) -> list[str]:
+def saved_coolify_errors(
+    snapshot: object,
+    plan: dict[str, object],
+    *,
+    targets: frozenset[str] | None = None,
+) -> list[str]:
     """Validate a bounded, read-only exact-UUID Dev snapshot, never query Coolify.
 
     Saved Coolify Watch Paths are runtime state, NOT the same thing as Git
@@ -230,9 +235,12 @@ def saved_coolify_errors(snapshot: object, plan: dict[str, object]) -> list[str]
     errors: list[str] = [
         slug + ": approved Dev Application metadata unverified (exact UUID)"
         for slug, _ in sorted(missing)
+        if targets is None or slug in targets
     ]
     for item in plan["candidates"]:
         slug = item["slug"]
+        if targets is not None and slug not in targets:
+            continue
         app = actual.get((slug, item["uuid"]))
         if app is None:
             continue
@@ -271,7 +279,13 @@ def _unique_snapshot_fields(pairs: list[tuple[str, object]]) -> dict[str, object
     return item
 
 
-def run(*, compose: bool, uv_locks: bool, coolify_snapshot: Path | None = None) -> int:
+def run(
+    *,
+    compose: bool,
+    uv_locks: bool,
+    coolify_snapshot: Path | None = None,
+    targets: frozenset[str] | None = None,
+) -> int:
     plan = json.loads(MANIFEST.read_text())
     errors: list[str] = []
     expected = {
@@ -293,7 +307,15 @@ def run(*, compose: bool, uv_locks: bool, coolify_snapshot: Path | None = None) 
     # Each tuple is (slug, uuid); prevents relabeling unrelated application IDs.
     if {(v["slug"], v["uuid"]) for v in planned} != scope_uuids:
         errors.append("manifest UUID/slug pairs differ from the approved Dev allowlist")
-    errors.extend(control_panel_upstream_errors())
+    accepted_targets = {item["slug"] for item in candidates}
+    if targets is not None and (not targets or not targets.issubset(accepted_targets)):
+        errors.append("target gate accepts only named approved candidate modules")
+        for error in errors:
+            print("ERROR", error, file=sys.stderr)
+        print("BATCH_SOURCE_GATE FAIL", f"errors={len(errors)}")
+        return 1
+    if targets is None or "gateway" in targets:
+        errors.extend(control_panel_upstream_errors())
     if coolify_snapshot is not None:
         snapshot_errors: list[str] = []
         try:
@@ -305,16 +327,22 @@ def run(*, compose: bool, uv_locks: bool, coolify_snapshot: Path | None = None) 
         except (OSError, ValueError, json.JSONDecodeError):
             snapshot_errors.append("Coolify snapshot: unreadable or invalid JSON metadata")
         else:
-            snapshot_errors.extend(saved_coolify_errors(snapshot, plan))
+            snapshot_errors.extend(saved_coolify_errors(snapshot, plan, targets=targets))
         errors.extend(snapshot_errors)
         print(
             "COOLIFY_SAVED_CONFIG_GATE",
             "PASS" if not snapshot_errors else "FAIL",
             f"errors={len(snapshot_errors)}",
         )
-    print(f"Flat migration source candidates={len(candidates)}, held={len(held)}")
+    if targets is None:
+        print(f"Flat migration source candidates={len(candidates)}, held={len(held)}")
+    else:
+        print(f"Development target-only source candidates={len(targets)}, held=0")
+        print("PARTIAL_DEV_MODULE_GATE: not a 13-app or Product acceptance")
     for unit in candidates:
         slug, folder = unit["slug"], unit["folder"]
+        if targets is not None and slug not in targets:
+            continue
         prefix = f"{slug}: "
         path = ROOT / folder
         required = ("Dockerfile", "docker-compose.yaml", "docker-compose.coolify.yaml")
@@ -410,12 +438,13 @@ def run(*, compose: bool, uv_locks: bool, coolify_snapshot: Path | None = None) 
                     + (result.stderr or result.stdout)[-500:]
                 )
         print("CHECKED", slug, folder)
-    for item in held:
-        if item.get("action", "").find("preserve") < 0:
-            errors.append(
-                item["slug"] + ": held application must preserve its existing configuration"
-            )
-        print("HELD", item["slug"], item["reason"])
+    if targets is None:
+        for item in held:
+            if item.get("action", "").find("preserve") < 0:
+                errors.append(
+                    item["slug"] + ": held application must preserve its existing configuration"
+                )
+            print("HELD", item["slug"], item["reason"])
     for error in errors:
         print("ERROR", error, file=sys.stderr)
     print("BATCH_SOURCE_GATE", "PASS" if not errors else "FAIL", f"errors={len(errors)}")
@@ -435,7 +464,18 @@ if __name__ == "__main__":
         type=Path,
         help="optional read-only exact-UUID saved app metadata (fresh <= 1 hour)",
     )
+    parser.add_argument(
+        "--target",
+        action="append",
+        default=[],
+        help="repeatable candidate slug for independent Development module checks",
+    )
     args = parser.parse_args()
     raise SystemExit(
-        run(compose=args.compose, uv_locks=args.uv_locks, coolify_snapshot=args.coolify_snapshot)
+        run(
+            compose=args.compose,
+            uv_locks=args.uv_locks,
+            coolify_snapshot=args.coolify_snapshot,
+            targets=frozenset(args.target) if args.target else None,
+        )
     )
