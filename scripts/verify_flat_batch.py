@@ -285,6 +285,7 @@ def run(
     uv_locks: bool,
     coolify_snapshot: Path | None = None,
     targets: frozenset[str] | None = None,
+    previous_deployed_owners: tuple[str, ...] = (),
 ) -> int:
     plan = json.loads(MANIFEST.read_text())
     errors: list[str] = []
@@ -316,6 +317,48 @@ def run(
         return 1
     if targets is None or "gateway" in targets:
         errors.extend(control_panel_upstream_errors())
+    if previous_deployed_owners:
+        # Source transition check needs actual last-shipped SHA per owner, not
+        # current Git branch base; a prior Dev may have installed later schema.
+        # This is never a read of the real public.alembic_version table.
+        from check_owner_schema_compat import inspect_owner
+
+        proposed = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=12,
+        )
+        if proposed.returncode or not re.fullmatch(r"[0-9a-f]{40}", proposed.stdout.strip()):
+            errors.append("owner migration gate: candidate Git revision unavailable")
+        else:
+            for item in previous_deployed_owners:
+                owner, sep, previous = item.partition("=")
+                if not sep or owner not in {"platform", "resources", "authorization"}:
+                    errors.append("owner migration gate: invalid scoped owner=SHA binding")
+                    continue
+                if targets is not None and owner not in targets:
+                    errors.append(owner + ": previous SHA specified for an unselected owner")
+                    continue
+                try:
+                    assessed = inspect_owner(
+                        ROOT,
+                        owner=owner,
+                        previous=previous,
+                        candidate=proposed.stdout.strip(),
+                    )
+                except (ValueError, OSError, subprocess.SubprocessError):
+                    errors.append(owner + ": owner schema history metadata unavailable")
+                    continue
+                status = assessed["state"]
+                print("OWNER_MIGRATION_SOURCE_GATE", owner, status)
+                if status != "SOURCE_COMPATIBLE":
+                    errors.append(
+                        owner
+                        + ": prior deployed migration history is "
+                        + ("incompatible" if status == "SOURCE_INCOMPATIBLE" else "unverified")
+                    )
     if coolify_snapshot is not None:
         snapshot_errors: list[str] = []
         try:
@@ -470,6 +513,13 @@ if __name__ == "__main__":
         default=[],
         help="repeatable candidate slug for independent Development module checks",
     )
+    parser.add_argument(
+        "--previous-deployed-owner",
+        action="append",
+        default=[],
+        metavar="OWNER=SHA",
+        help="fail-closed schema history comparison with last deployed Dev SHA",
+    )
     args = parser.parse_args()
     raise SystemExit(
         run(
@@ -477,5 +527,6 @@ if __name__ == "__main__":
             uv_locks=args.uv_locks,
             coolify_snapshot=args.coolify_snapshot,
             targets=frozenset(args.target) if args.target else None,
+            previous_deployed_owners=tuple(args.previous_deployed_owner),
         )
     )

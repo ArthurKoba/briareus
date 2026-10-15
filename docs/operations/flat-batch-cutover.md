@@ -72,6 +72,43 @@ that users can authenticate or a Files AgentSession may execute. Any missing
 approved UUID, unapproved ENV key, unsigned resource grant or unreviewed
 intermediate deployment blocks live activation, even if source CI passes.
 
+## Previously deployed owner schema compatibility — required before owner cutover
+
+A source-green Compose/uv-lock check cannot establish the schema head in an
+**already populated** Dev owner database. The prior actual Coolify Application
+may have applied a later Alembic revision than the candidate image ships.
+For the **affected** Platform/Resources/Authorization owner, obtain the last
+finished, exact 40-character SHA from the approved Application's scoped
+Coolify deployment history, then run:
+
+```bash
+python3 scripts/verify_flat_batch.py --target platform \
+  --previous-deployed-owner platform=<exact-previous-deployment-SHA>
+```
+
+The optional source gate parses both pinned, reviewed owner revision graphs
+and their effective Dockerfile COPY histories, without reading database
+credentials or changing any schema. It fails on removal of a previously
+reviewed revision, rewriting an already shipped migration, truncating the
+forward history or failing to read the previous packaged image source. For
+Resources use `--target resources` and `resources=<SHA>`; Authorization uses
+`--target authorization` and `authorization=<SHA>` (registry owner `access`).
+`SOURCE_COMPATIBLE` is **not** a database or data-migration acceptance:
+confirm the *actual* deployed owner database's `public.alembic_version` under
+its own scoped, read-only SQL role, compare the installed schema and preserve
+a recovery point before any additive change. If old packaged source cannot
+be reconstructed, the tool reports **UNVERIFIED**, not "safe". Never use
+`alembic stamp`, a reset, baseline rewrite or drop/recreate to force a PASS.
+
+Concrete 15 October 2026 incident: Platform's last pre-preview deployed
+source shipped `platform_0001→0002→0003`, while the new image rewrote `0001`
+and retained only that head. Real SigNoz Dev errors for both Platform and
+Resources say `phase=alembic_upgrade category=migration_state_unverified
+exception=OwnerSchemaRejected`, so the affected services are not healthy
+until Backend supplies a source-reviewed additive migration or a separately
+scoped approved data recovery route. The exact persisted `alembic_version`
+values have not been read, and the source-only check must not invent them.
+
 ## Startup and restart contract — staged, not globally atomic
 
 The first MVP is one host but **not one Compose project**. Existing External
