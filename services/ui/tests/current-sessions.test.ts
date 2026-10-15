@@ -111,6 +111,15 @@ describe("server-current scoped AgentSession list and revoke",()=>{
     globalThis.fetch=async()=>new Response(JSON.stringify({error:{code:"REVISION_CONFLICT"}}),{status:409})
     expect((await revokeCurrentSession(item,new AbortController().signal)).kind).toBe("conflict")
   })
+  it("never confirms revoke from an overbroad status receipt with secret/Permit fields",async()=>{
+    const row=parseCurrentSession(active(),project,actor,true)!
+    for(const extra of [{access_token:"forged"},{Permit:true}]){
+      globalThis.fetch=async()=>new Response(JSON.stringify({
+        session_uuid:session,project_uuid:project,status:"revoked",revision:5,...extra,
+      }),{status:200})
+      expect((await revokeCurrentSession(row,new AbortController().signal)).kind).toBe("uncertain")
+    }
+  })
   it("does not replay ambiguous POST after a lost connection",async()=>{
     let calls=0
     globalThis.fetch=async()=>{calls++;throw new TypeError("connection")}
@@ -220,6 +229,24 @@ describe("Files scope rows expire independently",()=>{
     expect(retainUnexpiredFilesReadScopes(list,now+1500)).toEqual([newer])
     expect(retainUnexpiredFilesReadScopes(list,now+60001)).toEqual([])
     expect(list).toEqual([older,newer])
+  })
+})
+
+describe("exact owner session projections",()=>{
+  it("rejects an overbroad session DTO rather than silently accepting unknown authority fields",()=>{
+    const raw=active()
+    expect(parseCurrentSession({...raw,access_token:"forged"},project,actor,true)).toBeNull()
+    expect(parseCurrentSession({...raw,permissions:["files.read"]},project,actor,true)).toBeNull()
+    expect(parseCurrentSession({...raw,allowed_actions:[...raw.allowed_actions],debug_hint:1},project,actor,true)).toBeNull()
+  })
+  it("rejects overbroad inventory metadata even when every session entry is valid",async()=>{
+    const original=globalThis.fetch
+    try{
+      globalThis.fetch=async()=>new Response(JSON.stringify({
+        items:[active()],permissions:["approve_agent_session"],
+      }),{status:200})
+      expect((await listCurrentSessions(project,actor,true,new AbortController().signal)).kind).toBe("invalid")
+    }finally{globalThis.fetch=original}
   })
 })
 

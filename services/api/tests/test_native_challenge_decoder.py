@@ -15,6 +15,8 @@ from control_panel_api._rauthy_native_protocol import (
     NativeProviderProtocolUnavailable,
     PrivateNativeLoginStep,
     interpret_native_authorize,
+    interpret_native_otp_finish,
+    interpret_native_otp_start,
 )
 
 _STATE = "S" * 48
@@ -109,6 +111,11 @@ class NativeChallengeDecoderTests(unittest.TestCase):
                 self.assertEqual(step.state, expected)
                 if expected == "webauthn_pending":
                     self.assertEqual(step.expires_at, int(_CLOCK.timestamp()) + 120)
+                if expected == "otp_pending":
+                    self.assertEqual(step.private_otp_ids[0].get_secret_value(), "id1")
+                    self.assertNotIn("id1", repr(step))
+                else:
+                    self.assertEqual(step.private_otp_ids, ())
                 self.assertIsNotNone(step.secret)
                 self.assertFalse(hasattr(step, "authenticated"))
 
@@ -141,6 +148,130 @@ class NativeChallengeDecoderTests(unittest.TestCase):
                 self.assertRaises(NativeProviderProtocolUnavailable),
             ):
                 classify(200, body=data)
+
+    def test_exact_upstream_otp_start_is_secret_server_only(self) -> None:
+        # Reviewed against upstream Rauthy v0.37.1:
+        # src/api/src/users.rs post_otp_auth_start_login and
+        # src/api_types/src/users.rs OtpAuthStartResponse.
+        deadline = int((_CLOCK + timedelta(minutes=5)).timestamp())
+        secret = "K" * 48
+        result = interpret_native_otp_start(
+            status_code=200,
+            content_type="application/json",
+            body=json.dumps({"code": secret, "exp": deadline}).encode(),
+            now=_CLOCK,
+        )
+        self.assertEqual(result.expires_at, deadline)
+        self.assertEqual(result.secret.get_secret_value(), secret)
+        self.assertNotIn(secret, repr(result))
+        self.assertFalse(hasattr(result, "authenticated"))
+        for code, mime, raw in (
+            (201, "application/json", json.dumps({"code": secret, "exp": deadline}).encode()),
+            (200, "text/plain", json.dumps({"code": secret, "exp": deadline}).encode()),
+            (200, "application/json", json.dumps({"code": "K" * 47, "exp": deadline}).encode()),
+            (200, "application/json", json.dumps({"code": secret, "exp": True}).encode()),
+            (
+                200,
+                "application/json",
+                json.dumps({"code": secret, "exp": deadline + 3600}).encode(),
+            ),
+            (200, "application/json", json.dumps({"code": secret, "exp": deadline - 600}).encode()),
+            (
+                200,
+                "application/json",
+                json.dumps({"code": secret, "exp": deadline, "user_id": "foreign"}).encode(),
+            ),
+            (
+                200,
+                "application/json",
+                b'{"code":"'
+                + secret.encode()
+                + b'","code":"'
+                + secret.encode()
+                + b'","exp":'
+                + str(deadline).encode()
+                + b"}",
+            ),
+            (200, "application/json", b'{"code":"' + secret.encode() + b'","exp":NaN}'),
+        ):
+            with (
+                self.subTest(status=code, content_type=mime, body=raw[:50]),
+                self.assertRaises(NativeProviderProtocolUnavailable),
+            ):
+                interpret_native_otp_start(
+                    status_code=code, content_type=mime, body=raw, now=_CLOCK
+                )
+
+    def test_upstream_otp_finish_requires_exact_json_location_and_signed_code_exchange(
+        self,
+    ) -> None:
+        # Rauthy v0.37.1 OtpAdditionalData::Login responds with 202,
+        # Location AND JSON {loc}; this is only a pending OAuth callback.
+        location = (
+            _LOCAL_CALLBACK
+            + "?code="
+            + _CODE
+            + "&state="
+            + _STATE
+            + "&iss="
+            + quote(_LOCAL_ISSUER, safe="")
+        )
+
+        def finish(
+            status: int, body: bytes, location_header: str | None = location, **extra: str
+        ) -> PrivateNativeLoginStep:
+            headers = {"Content-Type": "application/json", **extra}
+            if location_header is not None:
+                headers["Location"] = location_header
+            return interpret_native_otp_finish(
+                status_code=status,
+                headers=headers,
+                body=body,
+                expected_callback=_LOCAL_CALLBACK,
+                expected_state=_STATE,
+                expected_issuer=_LOCAL_ISSUER,
+                now=_CLOCK,
+            )
+
+        accepted = finish(202, json.dumps({"loc": location}).encode())
+        self.assertEqual(accepted.state, "oauth_callback_pending")
+        self.assertIsNotNone(accepted.secret)
+        self.assertNotIn(_CODE, repr(accepted))
+        self.assertFalse(hasattr(accepted, "authenticated"))
+        self.assertEqual(
+            finish(206, json.dumps({"tos_await_code": "T" * 48}).encode()).state,
+            "tos_pending",
+        )
+        self.assertEqual(finish(205, b"").state, "account_update_required")
+        for status, raw, location_header, extra in (
+            (202, json.dumps({"loc": location}).encode(), None, {}),
+            (202, json.dumps({"loc": "https://foreign.invalid/"}).encode(), location, {}),
+            (202, json.dumps({"loc": location, "user_id": "foreign"}).encode(), location, {}),
+            (
+                202,
+                b'{"loc":"' + location.encode() + b'","loc":"' + location.encode() + b'"}',
+                location,
+                {},
+            ),
+            (202, json.dumps({"loc": location}).encode(), location + "&state=changed", {}),
+            (
+                202,
+                json.dumps({"loc": location}).encode(),
+                location,
+                {"content-type": "application/json"},
+            ),
+            (
+                206,
+                json.dumps({"tos_await_code": "T" * 48}).encode(),
+                location,
+                {"content-type": "application/unknown"},
+            ),
+        ):
+            with (
+                self.subTest(status=status, data=raw[:50]),
+                self.assertRaises(NativeProviderProtocolUnavailable),
+            ):
+                finish(status, raw, location_header, **extra)
 
     def test_rate_limit_requires_bounded_provider_timestamp(self) -> None:
         result = classify(

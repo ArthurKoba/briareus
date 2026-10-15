@@ -166,7 +166,13 @@ is unavailable.
 No optimistic success, invented grant revision or client-made permit exists.
 Session and approval responses also validate the six exact Runtime Hand
 action/resource-kind pairings and deny forged, duplicate or incomplete
-elevated effects. The live owner adapters still require independent
+elevated effects. The management BFF client now additionally rejects
+**unexpected fields** in successful current AgentSession and Approval records
+and inventory envelopes, or unexpected properties on a newly opened normal
+session receipt. This follows the exact Backend `_oidc_approvals.py` owner
+projection and prevents silently accepting overbroad `permissions`, private
+`access_token` or undeclared grant attributes; an invalid list cannot retain
+stale actionable entries. No field is treated as a Cedar Permit. The live owner adapters still require independent
 acceptance and source-backed resource picker DTOs before elevation requests. Reserved Files
 `project-path-v1:<Project UUIDv4>:<path fingerprint>` selectors must belong to
 the selected Project on every session/approval/elevation read or write.

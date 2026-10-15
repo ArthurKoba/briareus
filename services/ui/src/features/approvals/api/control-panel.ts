@@ -43,6 +43,19 @@ const ALLOWED_OPERATIONS=new Set([
 function record(value:unknown):Record<string,unknown>|null{
   return value!==null&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:null
 }
+/** Strict public projection of Backend's owner approval snapshot. Unknown
+ * authority/secret fields make the entire result invalid, never a Permit.
+ */
+const APPROVAL_FIELDS=[
+  "id","project_uuid","agent_session_uuid","requested_by_user_uuid",
+  "status","version","requested_operations","requested_resources",
+  "requested_expires_at","resolved_by_user_uuid","issued_session_uuid",
+  "allowed_actions",
+] as const
+function exactFields(data:Record<string,unknown>,fields:readonly string[]):boolean{
+  return Object.keys(data).length===fields.length&&
+    fields.every(field=>Object.prototype.hasOwnProperty.call(data,field))
+}
 function uuid(value:unknown):value is string{return typeof value==="string"&&UUID4.test(value)}
 function freshIso(value:unknown):value is string{
   return typeof value==="string"&&
@@ -50,7 +63,7 @@ function freshIso(value:unknown):value is string{
 }
 export function parseApproval(value:unknown,projectUuid:string):ApprovalRecord|null{
   const r=record(value)
-  if(!r||!uuid(r.id)||r.project_uuid!==projectUuid||!uuid(r.agent_session_uuid)||
+  if(!r||!exactFields(r,APPROVAL_FIELDS)||!uuid(r.id)||r.project_uuid!==projectUuid||!uuid(r.agent_session_uuid)||
     !uuid(r.requested_by_user_uuid)||!["pending","approved","rejected"].includes(String(r.status))||
     !Number.isSafeInteger(r.version)||(r.version as number)<1||
     !freshIso(r.requested_expires_at)||
@@ -138,7 +151,7 @@ export async function readProjectApprovals(projectUuid:string,signal:AbortSignal
     }
     const body=record(await readBoundedJsonResponse(response,signal,6_291_456))
     if(signal.aborted)return {kind:"unavailable",code:"APPROVAL_READ_CANCELLED"}
-    if(!body||!Array.isArray(body.items)||body.items.length>50)return {kind:"invalid",code:"APPROVAL_DTO_INVALID"}
+    if(!body||!exactFields(body,["items"])||!Array.isArray(body.items)||body.items.length>50)return {kind:"invalid",code:"APPROVAL_DTO_INVALID"}
     const ids=new Set<string>(),items:ApprovalRecord[]=[]
     for(const raw of body.items){
       const row=parseApproval(raw,projectUuid)

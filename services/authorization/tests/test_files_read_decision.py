@@ -245,6 +245,7 @@ class FilesReadDecisionTests(unittest.IsolatedAsyncioTestCase):
                 ],
                 422,
             ),
+            (good, [("Content-Type", "application/json"), ("Content-Length", "0001")], 422),
             (b"{", [("Content-Type", "application/json"), ("Content-Length", "1")], 422),
         )
         async with AsyncClient(
@@ -263,6 +264,37 @@ class FilesReadDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.replay.used), 0)
         self.assertEqual(len(self.db.queries), 0)
         self.assertEqual(self.resource.calls, 0)
+
+    async def test_duplicate_files_decision_json_never_consumes_peer_replay(self) -> None:
+        raw = json.dumps(self.command.model_dump(mode="json"), separators=(",", ":")).encode()
+        variants = (
+            raw.replace(b'"phase":', b'"phase":"before_read","phase":'),
+            raw.replace(b'"resource":{', b'"resource":{"kind":"workspace_path","kind":'),
+            raw.replace(
+                b'"expected_grant_revision":',
+                b'"expected_grant_revision":100,"expected_grant_revision":',
+            ),
+            raw.replace(b'"max_bytes":4096', b'"max_bytes":NaN'),
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=self.app), base_url="http://local-access-owner"
+        ) as client:
+            for body in variants:
+                self.assertNotEqual(raw, body)
+                reply = await client.post(
+                    _PATH,
+                    content=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + self.token(),
+                    },
+                )
+                self.assertEqual(reply.status_code, 422, reply.text)
+                self.assertEqual(reply.headers["cache-control"], "no-store")
+                self.assertNotIn("allowed", reply.text)
+        self.assertFalse(self.db.queries)
+        self.assertEqual(self.resource.calls, 0)
+        self.assertFalse(self.replay.used)
 
     async def test_stalled_files_decision_cannot_return_uncached_permit(self) -> None:
         async def delayed_attestor(_request: Request, _command: object) -> object:

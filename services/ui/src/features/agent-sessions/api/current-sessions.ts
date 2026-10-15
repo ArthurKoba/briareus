@@ -47,6 +47,19 @@ function obj(value:unknown):Record<string,unknown>|null{
   return value!==null&&typeof value==="object"&&!Array.isArray(value)
     ?value as Record<string,unknown>:null
 }
+/** Backend _oidc_approvals.py CurrentSessionSnapshot public projection.
+ * Reject unknown fields such as authority/credentials instead of silently
+ * discarding an overbroad or changed management response.
+ */
+const SESSION_FIELDS=[
+  "session_uuid","project_uuid","created_by_user_uuid","revision",
+  "status","is_elevated","elevation_policy","hard_expires_at",
+  "operations","resources","allowed_actions",
+] as const
+function exactFields(data:Record<string,unknown>,fields:readonly string[]):boolean{
+  return Object.keys(data).length===fields.length&&
+    fields.every(field=>Object.prototype.hasOwnProperty.call(data,field))
+}
 export function isCurrentSessionId(value:unknown):value is string{return typeof value==="string"&&UUID4.test(value)}
 const uuid=isCurrentSessionId
 function validTime(value:unknown):value is string{
@@ -60,7 +73,7 @@ export function parseCurrentSession(
   now=Date.now(),
 ):CurrentAgentSession|null {
   const v=obj(value)
-  if(!v||!uuid(v.session_uuid)||v.project_uuid!==projectUuid||
+  if(!v||!exactFields(v,SESSION_FIELDS)||!uuid(v.session_uuid)||v.project_uuid!==projectUuid||
     !uuid(v.created_by_user_uuid)||
     (!canApprove&&v.created_by_user_uuid!==actorUuid)||
     !Number.isSafeInteger(v.revision)||(v.revision as number)<1||
@@ -143,7 +156,7 @@ export async function listCurrentSessions(
     }
     const data=obj(await readBoundedJsonResponse(response,signal,6_291_456))
     if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_LIST_CANCELLED"}
-    if(!data||!Array.isArray(data.items)||data.items.length>MAX_ITEMS)
+    if(!data||!exactFields(data,["items"])||!Array.isArray(data.items)||data.items.length>MAX_ITEMS)
       return {kind:"invalid",code:"AGENT_SESSION_DTO_INVALID"}
     const seen=new Set<string>(),items:CurrentAgentSession[]=[]
     for(const row of data.items){
@@ -196,8 +209,8 @@ export async function revokeCurrentSession(
     }
     const result=obj(await readBoundedJsonResponse(response,signal,16_384))
     if(signal.aborted)return {kind:"uncertain",code:"REVOKE_RESULT_UNCERTAIN"}
-    if(!result||result.session_uuid!==id||
-      result.project_uuid!==project||result.status!=="revoked"||
+    if(!result||!exactFields(result,["session_uuid","project_uuid","status","revision"])||
+      result.session_uuid!==id||result.project_uuid!==project||result.status!=="revoked"||
       !Number.isSafeInteger(result.revision)||
       (result.revision as number)<=revision)return {kind:"uncertain",code:"REVOKE_RESULT_UNVERIFIED"}
     return {kind:"confirmed",session_uuid:id,

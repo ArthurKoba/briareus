@@ -30,7 +30,11 @@ function object(value:unknown):Record<string,unknown>|null{
 }
 export function parseNormalSession(value:unknown,project:string,policy:ElevationPolicy,now=Date.now()):NormalSession|null{
   const r=object(value)
-  if(!r||typeof r.session_uuid!=="string"||!UUID4.test(r.session_uuid)||
+  if(!r||Object.keys(r).length!==9||![
+      "session_uuid","project_uuid","revision","status","is_elevated",
+      "elevation_policy","hard_expires_at","operations","resources",
+    ].every(key=>Object.prototype.hasOwnProperty.call(r,key))||
+    typeof r.session_uuid!=="string"||!UUID4.test(r.session_uuid)||
     r.project_uuid!==project||r.revision!==1||r.status!=="active"||
     r.is_elevated!==false||r.elevation_policy!==policy||
     typeof r.hard_expires_at!=="string"||

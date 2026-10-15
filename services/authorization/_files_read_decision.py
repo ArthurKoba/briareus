@@ -30,6 +30,7 @@ from authorization._decision_api import (
     TrustedDecisionAttestor,
     VerifiedDecisionCaller,
     bounded_private_request,
+    load_authority_json,
 )
 from authorization._resource_scope import (
     EffectResource,
@@ -204,7 +205,7 @@ def files_read_decision_router(
     async def read_decision(request: Request) -> JSONResponse:
         try:
             raw, verified_request = await bounded_private_request(request)
-            command = FilesReadDecisionCommand.model_validate_json(raw)
+            command = FilesReadDecisionCommand.model_validate(load_authority_json(raw))
         except PrivateRequestBodyRejected as exc:
             raise HTTPException(exc.status_code, exc.reason, headers=_HEADERS) from None
         except (ValueError, TypeError):

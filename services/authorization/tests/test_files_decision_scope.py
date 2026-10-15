@@ -357,6 +357,7 @@ class SignedFilesDecisionTests(unittest.IsolatedAsyncioTestCase):
                 ],
                 422,
             ),
+            (valid, [("Content-Type", "application/json"), ("Content-Length", "0001")], 422),
             (b"{", [("Content-Type", "application/json"), ("Content-Length", "1")], 422),
         )
         async with AsyncClient(
@@ -372,6 +373,36 @@ class SignedFilesDecisionTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(response.status_code, expected, response.text)
                     self.assertEqual(response.headers["cache-control"], "no-store")
                     self.assertNotIn("allowed", response.text)
+        self.assertFalse(self.db.queries)
+
+    async def test_ambiguous_signed_decision_json_denied_before_peer_and_cedar(self) -> None:
+        original = json.dumps(self.command.model_dump(mode="json"), separators=(",", ":")).encode()
+        body_parts = (
+            original.replace(
+                b'"project_uuid":',
+                b'"project_uuid":"' + str(self.project).encode() + b'","project_uuid":',
+            ),
+            original.replace(b'"action":', b'"action":"files.read","action":'),
+            original.replace(b'"kind":', b'"kind":"workspace_path","kind":'),
+            original.replace(b'"expected_grant_revision":3', b'"expected_grant_revision":NaN'),
+            original.replace(b'"expected_grant_revision":3', b'"expected_grant_revision":Infinity'),
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=self.app), base_url="http://local-access-owner"
+        ) as client:
+            for raw in body_parts:
+                self.assertNotEqual(original, raw)
+                reply = await client.post(
+                    "/internal/v1/authorization/decide",
+                    content=raw,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + self.token(),
+                    },
+                )
+                self.assertEqual(reply.status_code, 422, reply.text)
+                self.assertEqual(reply.headers["cache-control"], "no-store")
+                self.assertNotIn("allowed", reply.text)
         self.assertFalse(self.db.queries)
 
     async def test_hung_private_peer_decision_returns_uncached_unavailable(self) -> None:

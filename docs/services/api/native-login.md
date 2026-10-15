@@ -184,6 +184,52 @@ This classification correction does not implement a WebAuthn ceremony.
 The upstream PoW worker calls `pow_work_wasm` from its sPoW WASM module;
 Frontend owns bundling a pinned supported solver, not the BFF.
 
+## Reviewed Rauthy v0.37.1 OTP continuation contract — decoder only
+
+The pinned upstream source at `references/rauthy-v0.37.1/` provides exact
+second-factor request/response contracts, independently of a signed Briareus
+User and of the BFF's not-yet-activated MFA continuation. In Rauthy
+`src/api/src/users.rs::post_otp_auth_start_login` and
+`src/api_types/src/users.rs`, a previously authenticated password challenge
+with active OTP methods is followed by `POST /auth/v1/users/otp_start` with
+`{otp_id:<provider registered method>,purpose:{Login:<initial challenge code>}}`.
+A successful 200 returns only `{code:<48 ASCII alphanumeric>,exp:<Unix seconds>}`;
+the provider handles SMS/email/TOTP issuance. For verification,
+`POST /auth/v1/users/otp_finish` consumes `{code:<48-char OTP-session code>,
+otp_code:<provider-required OTP>}`. In upstream
+`src/data/src/entity/one_time_password.rs::OtpAdditionalData::into_response`,
+a completed login can return 202 with **both** Location and JSON `{loc}`;
+ToS/required-account-update remain 206/205 **not authenticated**.
+
+`_rauthy_native_protocol.interpret_native_otp_start/finish` now classifies
+these exact bounded private provider response shapes; both 202 values must
+agree and still pass the SAME strict callback URL, code, state and issuer
+validation as the original first-factor decoder. OTP method IDs, login
+challenge/session codes and OTP-start results remain `SecretStr` **server-only**
+values. The initial OTP ID list is retained in a masked private DTO instead
+of copied to a browser object. Malformed, duplicate, non-JSON, expired,
+foreign-origin or differing callback claims fail before any code exchange.
+Only an independent fully signed code/PKCE/nonce/resource verification can
+create a Briareus browser session. Source parser tests prove only these
+shapes: no genuine user, provider session or second factor was authenticated.
+
+**Deliberately NOT activated:** `POST /api/v1/auth/first-factor` still ends a
+pending OTP challenge with uncached HTTP409 and retires the original claim;
+capabilities still advertise no supported continuations. Activating the
+provider OTP code directly without a reviewed **atomic Valkey MFA stage** is
+unsafe: it would lose original state/PKCE/CSRF and provider cookies, permit
+racing `cancel`/`otp_finish`, or deliver an authenticated browser cookie after
+its claim was already cancelled. A complete next implementation must capture
+and verify any provider `Set-Cookie` rotation after the first factor, escrow
+private OTP method IDs/codes and original provider/PKCE proof with the
+original expiration, atomically consume OTP start and finish exactly once,
+retain cancellation linkage through exchange, and recheck original expiry
+before and after signed code redemption. It must not silently fall back to a
+hosted provider or return an OTP code to the browser. ToS/WebAuthn/recovery
+need independent validated state machines before their capability flags can
+become true. No public endpoint, token or credential path is enabled by this
+private parser preparation.
+
 ## Atomic Valkey lifecycle and cancellation
 
 The existing native-init key now transitions `init -> claimed -> complete`.

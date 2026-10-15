@@ -21,6 +21,7 @@ from sqlalchemy import select
 from starlette.requests import ClientDisconnect
 
 from authorization._access_cedar import permits_current_project_grant
+from authorization._rauthy_jwks import load_authority_json
 from authorization._resource_scope import (
     EffectResource,
     HandName,
@@ -61,6 +62,7 @@ async def bounded_private_request(request: Request) -> tuple[bytes, Request]:
         or not 1 <= len(sizes[0]) <= 4
         or not sizes[0].isascii()
         or not sizes[0].isdecimal()
+        or sizes[0].startswith("0")
     ):
         raise PrivateRequestBodyRejected(422, "ambiguous private Access request framing")
     count = int(sizes[0])
@@ -283,7 +285,10 @@ def authorization_decision_router(
         # BEFORE any identity, peer, length or digest checks.
         try:
             raw, verified_request = await bounded_private_request(request)
-            command = DecisionCommand.model_validate_json(raw)
+            # The transport signs exact bytes; rejecting ambiguous nested
+            # JSON ensures no other parser can grant based on a different
+            # interpretation of the very same attested body.
+            command = DecisionCommand.model_validate(load_authority_json(raw))
         except PrivateRequestBodyRejected as exc:
             raise HTTPException(exc.status_code, detail=exc.reason, headers=_NO_STORE) from None
         except (ValueError, TypeError):

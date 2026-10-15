@@ -37,6 +37,19 @@ _CODE = re.compile(r"[A-Za-z0-9_-]{16,256}\Z", flags=re.ASCII)
 _STATE = re.compile(r"[A-Za-z0-9_-]{16,256}\Z", flags=re.ASCII)
 
 
+@dataclass(frozen=True, slots=True)
+class PrivateNativeOtpStart:
+    """Private provider-issued OTP challenge, not a browser/MFA credential.
+
+    Rauthy /users/otp_start creates a fresh 48-alphanumeric one-time code.
+    A future BFF continuation must escrow this code and the original
+    provider session/PKCE state in protected Valkey, never return it in UI.
+    """
+
+    secret: SecretStr
+    expires_at: int
+
+
 class NativeProviderProtocolUnavailable(Exception):
     """Unexpected upstream status/response cannot grant a user session."""
 
@@ -261,6 +274,10 @@ class PrivateNativeLoginStep:
     # OAuth authorization code, MFA and ToS code are provider-sensitive.
     secret: SecretStr | None = None
     challenge_kinds: tuple[Literal["email", "phone", "time"], ...] = ()
+    # OTP provider IDs never appear in browser JSON. A future continuation
+    # may choose a bounded public INDEX but must resolve the original secret
+    # OTP ID from server-only escrow before calling /users/otp_start.
+    private_otp_ids: tuple[SecretStr, ...] = ()
     retry_not_before: int | None = None
     expires_at: int | None = None
 
@@ -397,6 +414,7 @@ def interpret_native_authorize(
                     "otp_pending",
                     SecretStr(otp.code),
                     tuple(item.otp_kind for item in otp.active_otps),
+                    tuple(SecretStr(item.otp_id) for item in otp.active_otps),
                 )
             webauthn = _WebauthnChallenge.model_validate(challenge)
             if not _valid_code(webauthn.code):
@@ -433,3 +451,93 @@ def interpret_native_authorize(
     if status_code in (400, 403):
         return PrivateNativeLoginStep("request_rejected")
     raise NativeProviderProtocolUnavailable("unknown Rauthy login response; no session allowed")
+
+
+def interpret_native_otp_start(
+    *, status_code: int, content_type: str, body: bytes, now: datetime | None = None
+) -> PrivateNativeOtpStart:
+    """Review Rauthy v0.37.1 POST /users/otp_start, no BFF activation.
+
+    This is a private provider reply only; do not return its code to browser.
+    Caller must independently bind the upstream request to the original
+    protected Rauthy session, `MfaPurpose::Login` code and selected OTP ID.
+    """
+    clock = datetime.now(UTC) if now is None else now
+    if (
+        not isinstance(clock, datetime)
+        or clock.tzinfo is None
+        or status_code != 200
+        or not isinstance(content_type, str)
+        or content_type.split(";", 1)[0].lower() != "application/json"
+    ):
+        raise NativeProviderProtocolUnavailable("OTP start not accepted by Rauthy")
+    parsed = _bounded_json(body)
+    if (
+        not isinstance(parsed, dict)
+        or set(parsed) != {"code", "exp"}
+        or not isinstance(parsed["code"], str)
+        or re.fullmatch(r"[A-Za-z0-9]{48}", parsed["code"], re.ASCII) is None
+        or type(parsed["exp"]) is not int
+        or not int(clock.timestamp()) < parsed["exp"] <= int(clock.timestamp()) + 900
+    ):
+        raise NativeProviderProtocolUnavailable("untrusted Rauthy OTP start challenge")
+    return PrivateNativeOtpStart(SecretStr(parsed["code"]), parsed["exp"])
+
+
+def interpret_native_otp_finish(
+    *,
+    status_code: int,
+    headers: Mapping[str, str],
+    body: bytes,
+    expected_callback: str,
+    expected_state: str,
+    expected_issuer: str,
+    now: datetime | None = None,
+) -> PrivateNativeLoginStep:
+    """Review exact Rauthy /users/otp_finish Login and pending ToS states.
+
+    Source v0.37.1 OtpAdditionalData::Login returns 202 with *both* Location
+    and JSON {loc}; its callback is checked by the SAME code/state/issuer
+    verifier as first-factor. The response still is NOT signed authentication.
+    Only a subsequent existing OIDC code+PKCE/Userinfo exchange can create a
+    private Briareus browser session. No public MFA endpoint is activated.
+    """
+    if status_code == 202:
+        if _single_header(headers, "content-type") not in {
+            "application/json",
+            "application/json; charset=utf-8",
+        }:
+            raise NativeProviderProtocolUnavailable("Rauthy OTP finish media type rejected")
+        parsed = _bounded_json(body)
+        location = _single_header(headers, "location")
+        if (
+            not isinstance(parsed, dict)
+            or set(parsed) != {"loc"}
+            or not isinstance(parsed["loc"], str)
+            or not isinstance(location, str)
+            or parsed["loc"] != location
+        ):
+            raise NativeProviderProtocolUnavailable("Rauthy OTP finish redirect disagreement")
+        return interpret_native_authorize(
+            status_code=202,
+            headers={"Location": location},
+            body=b"",
+            expected_callback=expected_callback,
+            expected_state=expected_state,
+            expected_issuer=expected_issuer,
+            now=now,
+        )
+    if status_code == 206 and _single_header(headers, "content-type") not in {
+        "application/json",
+        "application/json; charset=utf-8",
+    }:
+        raise NativeProviderProtocolUnavailable("Rauthy OTP ToS media type rejected")
+    return interpret_native_authorize(
+        status_code=status_code,
+        headers=headers,
+        body=body,
+        expected_callback=expected_callback,
+        expected_state=expected_state,
+        expected_issuer=expected_issuer,
+        now=now,
+    )

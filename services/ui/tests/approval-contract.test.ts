@@ -124,6 +124,19 @@ describe("committed approval receipt invariants",()=>{
   })
 })
 
+describe("exact owner approval projection",()=>{
+  it("does not accept unexpected credential or implicit-grant properties on a request",()=>{
+    expect(parseApproval({...item(),access_token:"forged"},project)).toBeNull()
+    expect(parseApproval({...item(),resolved_grant:{permit:true}},project)).toBeNull()
+  })
+  it("rejects extra owner list metadata rather than treating it as approval rights",async()=>{
+    globalThis.fetch=async()=>new Response(JSON.stringify({
+      items:[item()],permissions:["approve_agent_session"],
+    }),{status:200})
+    expect((await readProjectApprovals(project,new AbortController().signal)).kind).toBe("invalid")
+  })
+})
+
 describe("bounded approval inventory and post-commit uncertainty",()=>{
   it("rejects oversized owner list before parsing any approval rights",async()=>{
     globalThis.fetch=async()=>new Response(JSON.stringify({
