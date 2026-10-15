@@ -1,17 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, defineAsyncComponent, defineComponent, h, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue"
 import { useI18n } from "vue-i18n"
 import { AlertTriangle, ArrowRight, Loader2, RefreshCw, ShieldCheck } from "lucide-vue-next"
 import { ControlPanelShell } from "@/widgets/control-panel"
 import { providerStateChanged } from "@/features/platform"
 import { createSessionOpenRecovery, sessionOpenOwnerKey } from "@/features/agent-sessions"
-import { DashboardOverview } from "@/widgets/dashboard"
-import { OidcProjectWorkspace } from "@/widgets/platform-context"
-import { CatalogWorkspace } from "@/widgets/catalog"
 import ProjectScopeSelector from "@/features/platform/ui/ProjectScopeSelector.vue"
 import ControlPanelAccessPage from "@/pages/platform/ControlPanelAccessPage.vue"
-import ModuleWorkspacePage from "@/pages/modules/ModuleWorkspacePage.vue"
-import PlatformSettingsPage from "@/pages/platform/PlatformSettingsPage.vue"
 import { OIDC_PRESENTATION_PAGES, resolveOidcView, countPresentableAgentSessionProjects, preferredAgentSessionProjectId, reconcileAgentSessionProjectId } from "@/features/platform/model/oidc-view-routing"
 import { readRauthyPanelState, signOutRauthyPanel, type RauthyPanelIdentity, type RauthyPanelState } from "@/features/platform/api/rauthy-oidc"
 import { readPlatformContext, readProjectContext, isPlatformProjectId, type VerifiedPlatformContext } from "@/features/platform/api/platform-current"
@@ -21,6 +16,33 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Skeleton } from "@/shared/ui/skeleton"
+import ProtectedSectionLoadState from "@/pages/platform/ProtectedSectionLoadState.vue"
+import {boundedLifetime,type BoundedLifetime} from "@/shared/lib/bounded-lifetime"
+
+/** Protected screens have NO reason to load during anonymous Rauthy
+ * sign-in. Vue mounts them only when activeContext is an unexpired BFF
+ * User+Project proof; code-splitting is presentation, NOT authorization.
+ *
+ * Missing/stale Dev chunks show a read-only retry, never a guessed owner.
+ */
+const ProtectedSectionLoadError=defineComponent({
+  name:"ProtectedSectionLoadError",
+  setup:()=>()=>h(ProtectedSectionLoadState,{failed:true}),
+})
+function protectedPage(loader:()=>Promise<{default:Component}>){
+  return defineAsyncComponent({
+    loader,
+    delay:200,
+    timeout:12000,
+    loadingComponent:ProtectedSectionLoadState,
+    errorComponent:ProtectedSectionLoadError,
+  })
+}
+const OidcProjectWorkspace=protectedPage(()=>import("@/widgets/platform-context/ui/OidcProjectWorkspace.vue"))
+const CatalogWorkspace=protectedPage(()=>import("@/widgets/catalog/ui/CatalogWorkspace.vue"))
+const ModuleWorkspacePage=protectedPage(()=>import("@/pages/modules/ModuleWorkspacePage.vue"))
+const DashboardOverview=protectedPage(()=>import("@/widgets/dashboard/ui/DashboardOverview.vue"))
+const PlatformSettingsPage=protectedPage(()=>import("@/pages/platform/PlatformSettingsPage.vue"))
 
 /** First-class Rauthy cookie+PKCE application entry. Fresh, server-bound
  * Platform proof opens the panel layout, NOT a privileged PlatformPort.
@@ -43,6 +65,10 @@ const refreshing=ref(false)
 const loggingOut=ref(false)
 const error=ref("")
 const now=ref(Date.now())
+// Presentation-only bounded lifetimes from independently verified BFF facts.
+// A wall-clock rollback cannot stretch an already acquired owner lease.
+const userLease=shallowRef<BoundedLifetime|null>(null)
+const projectLease=shallowRef<BoundedLifetime|null>(null)
 let controller:AbortController|null=null
 let deadline:ReturnType<typeof setTimeout>|null=null
 let nextRefresh:ReturnType<typeof setTimeout>|null=null
@@ -52,7 +78,9 @@ const activeContext=computed(()=>{
   const proof=membership.value, user=identity.value
   return state.value==="verified"&&proof&&user&&
     proof.rauthy.subject===user.subject&&proof.rauthy.issuer===user.issuer&&
-    Date.parse(proof.expires_at)>now.value&&Date.parse(user.expires_at)>now.value
+    Date.parse(proof.expires_at)>now.value&&Date.parse(user.expires_at)>now.value&&
+    (projectLease.value?.remainingMilliseconds()??0)>0&&
+    (userLease.value?.remainingMilliseconds()??0)>0
     ? proof:null
 })
 const activePage=computed<PlatformPageId>(()=>resolveOidcView("#platform/"+route.value,!!activeContext.value))
@@ -118,6 +146,7 @@ function cancelRequests():void{
   if(nextRefresh!==null){clearTimeout(nextRefresh);nextRefresh=null}
 }
 function hideAccess():void {
+  projectLease.value=null;userLease.value=null
   identity.value=null
   membership.value=null
   selectedProjectId.value=null
@@ -186,6 +215,11 @@ async function refresh():Promise<void>{
       :await readProjectContext(session.identity,targetProject,request.signal)
     if(run!==revision.value||request.signal.aborted)return
     if(current.kind==="verified"){
+      const nextProjectLease=boundedLifetime(Date.parse(current.context.expires_at))
+      const nextUserLease=boundedLifetime(Date.parse(session.identity.expires_at))
+      if(!(nextProjectLease.remainingMilliseconds()>0&&nextUserLease.remainingMilliseconds()>0)){
+        hideAccess();state.value="unavailable";return
+      }
       sessionOpenRecovery.retainOwner(sessionOpenOwnerKey(
         session.identity.issuer,session.identity.subject,session.identity.client_id,current.context.user.id,
       ))
@@ -195,6 +229,7 @@ async function refresh():Promise<void>{
       selectedProjectId.value=reconcileAgentSessionProjectId(
         samePrincipal?selectedProjectId.value:null,current.context.projects,
       )
+      userLease.value=nextUserLease;projectLease.value=nextProjectLease
       identity.value=session.identity
       membership.value=current.context
       now.value=Date.now()

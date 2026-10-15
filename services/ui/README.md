@@ -33,7 +33,12 @@ module; the initial static shell shows a localized, noninteractive status
 until it is available. If the module asset fails during a Development
 rollout, a bounded read-only error screen offers an **explicit reload**;
 missing JS does not open a guest, old Identity or hosted-Rauthy path, and
-there is no background retry of POST/authentication commands. Only an explicitly DEV-built source can load the
+there is no background retry of POST/authentication commands. Protected
+AgentSession, Catalog, MCP module, Dashboard and Settings bundles are also
+lazy-loaded **only when the parent has a current BFF User+Project proof**;
+they provide their own noninteractive pending/failed states and manual reload.
+A missing protected-section script is a presentation failure, never an
+authorization fallback. Only an explicitly DEV-built source can load the
 isolated local design preview; the production entry has no guest/legacy
 Identity fallback or hosted-provider login action.
 
@@ -266,7 +271,10 @@ bounded input `{project_uuid,agent_session_uuid,expected_grant_revision,
 path,max_bytes}` and owner-verified `{path,size_bytes,sha256,content_base64}`
 output. The typed Frontend client exists in
 `features/files-preview/api/files-content.ts`, but is **not exported to or
-invoked by the product UI**. It requires one exact current session, an owner-
+invoked by the product UI**. The reader streams at most 384KiB of success
+JSON, caps error JSON at 4KiB and cancels stalled body reads promptly upon
+AbortSignal; oversized/error replies never enter unbounded `response.json()`.
+It requires one exact current session, an owner-
 supplied canonical Project-relative path matching a current
 `files.read/read_file/workspace_path` selector, and it caps raw response bytes
 before verifying SHA-256. A digest-only selector cannot be reversed to a path
@@ -438,9 +446,14 @@ same-scope proof renewal, and close when the record, identity or permission is
 no longer present. A filter miss is distinct from an empty source response.
 
 Catalog, session lists, approvals and creation share a small local proof-lifetime
-primitive. It cancels expired presentation even with unchanged parent props,
-checks the deadline on foreground recovery, and cannot extend it when the wall
-clock moves backward. It is a UI invalidation guard, not a server permission.
+primitive. The **parent Controller** additionally binds the current Rauthy
+identity and User/Project owner proof to independent monotonic lifetimes, so
+a wall-clock rollback cannot extend protected navigation/commands while an
+asynchronous BFF renewal is stalled. Fresh owner reads acquire new bounded
+leases; losing or changing identity clears both immediately. This guard
+cancels expired presentation even with unchanged parent props, checks the
+foreground deadline and never turns a local clock observation into Cedar
+Permit. It is a UI invalidation guard, not a server permission.
 The session and approval inventories now age individual actionable records:
 one elapsed AgentSession or pending approval is removed from its current
 presentation snapshot and any matching open confirmation is closed, while

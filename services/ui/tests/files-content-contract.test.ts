@@ -92,6 +92,39 @@ describe("versioned source-only Files content BFF client",()=>{
     globalThis.fetch=async()=>new Response("X".repeat(400_000),{status:200})
     expect((await readVerifiedFilesContent(source(),path,8192,new AbortController().signal)).kind).not.toBe("ready")
   })
+  it("bounds untrusted error bodies instead of invoking unbounded response.json",async()=>{
+    globalThis.fetch=async()=>new Response("X".repeat(250_000),{
+      status:503,headers:{"Content-Type":"application/json"},
+    })
+    expect(await readVerifiedFilesContent(source(),path,8192,new AbortController().signal))
+      .toEqual({kind:"unavailable",code:"FILES_READ_UNAVAILABLE"})
+  })
+  it("interrupts a stalled success stream on abort without showing partial bytes",async()=>{
+    let cancelled=0
+    const waiting=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(waiting,{status:200,headers:{"Content-Type":"application/json"}})
+    const pending=readVerifiedFilesContent(source(),path,8192,request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([
+      pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),400)),
+    ])
+    expect(result).toEqual({kind:"cancelled",code:"FILES_READ_CANCELLED"})
+    expect(cancelled).toBe(1)
+  })
+  it("interrupts a stalled server-error stream without falling back to an active row",async()=>{
+    let cancelled=0
+    const waiting=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(waiting,{status:503,headers:{"Content-Type":"application/json"}})
+    const pending=readVerifiedFilesContent(source(),path,8192,request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([
+      pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),400)),
+    ])
+    expect(result).toEqual({kind:"cancelled",code:"FILES_READ_CANCELLED"})
+    expect(cancelled).toBe(1)
+  })
   it("does not display a late success after cancellation, or fetch after preflight cancellation",async()=>{
     const stopped=AbortSignal.abort()
     let calls=0
