@@ -148,6 +148,88 @@ def bun_image_config_errors(folder: str, path: Path, dockerfile: str) -> list[st
     return errors
 
 
+def owner_image_migration_errors(
+    folder: str, path: Path, dockerfile: str, *, source_root: Path | None = None
+) -> list[str]:
+    """Fail closed if a service image omits reviewed Alembic history.
+
+    Git source and owner_config() alone do not prove that Docker COPY and
+    a restrictive Dockerfile.dockerignore include all migration revisions.
+    """
+    owner_by_folder = {
+        "services/authorization": "access",
+        "services/platform": "platform",
+        "services/resources": "resources",
+    }
+    owner = owner_by_folder.get(folder)
+    if owner is None:
+        return []
+    root = ROOT if source_root is None else source_root
+    try:
+        tree = ast.parse((root / "services/common/owner_migrations.py").read_text())
+        mapping = None
+        for node in tree.body:
+            if (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "_REVIEWED_VERSIONS"
+            ):
+                mapping = ast.literal_eval(node.value)
+                break
+        chain = mapping.get(owner) if isinstance(mapping, dict) else None
+        if not (isinstance(chain, tuple) and chain and all(isinstance(x, str) for x in chain)):
+            raise ValueError("invalid reviewed owner graph")
+    except (OSError, TypeError, ValueError, SyntaxError, MemoryError):
+        return [folder + ": reviewed owner migration graph missing or invalid"]
+    entries: dict[str, tuple[str, str | None]] = {}
+    try:
+        for filename in sorted((path / "migrations/versions").glob("*.py")):
+            if filename.name == "__init__.py":
+                continue
+            values: dict[str, object] = {}
+            for node in ast.parse(filename.read_text()).body:
+                if (
+                    isinstance(node, ast.Assign)
+                    and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and node.targets[0].id in {"revision", "down_revision"}
+                ):
+                    values[node.targets[0].id] = ast.literal_eval(node.value)
+            revision, predecessor = values.get("revision"), values.get("down_revision")
+            if (
+                not isinstance(revision, str)
+                or not (predecessor is None or isinstance(predecessor, str))
+                or revision in entries
+            ):
+                raise ValueError("invalid source Alembic revision")
+            entries[revision] = (filename.name, predecessor)
+    except (OSError, SyntaxError, TypeError, ValueError, MemoryError):
+        return [folder + ": owner migration source cannot be parsed safely"]
+    errors: list[str] = []
+    if set(entries) != set(chain):
+        errors.append(folder + ": shipped migration files differ from reviewed graph")
+    ignore = path / "Dockerfile.dockerignore"
+    ignore_lines = (
+        [line.strip() for line in ignore.read_text().splitlines()] if ignore.is_file() else []
+    )
+    for index, revision in enumerate(chain):
+        if revision not in entries:
+            continue
+        filename, actual_parent = entries[revision]
+        if actual_parent != (chain[index - 1] if index else None):
+            errors.append(folder + ": owner history has unexpected ancestor")
+        src = f"{folder}/migrations/versions/{filename}"
+        dst = f"/app/src/common/alembic_owners/{owner}/versions/{filename}"
+        if (
+            len(re.findall(rf"(?m)^COPY\s+{re.escape(src)}\s+{re.escape(dst)}\s*$", dockerfile))
+            != 1
+        ):
+            errors.append(folder + ": Dockerfile missing migration " + filename)
+        if "**" in ignore_lines and f"!{src}" not in ignore_lines:
+            errors.append(folder + ": Docker build context excludes migration " + filename)
+    return errors
+
+
 def saved_coolify_errors(
     snapshot: object,
     plan: dict[str, object],
@@ -404,6 +486,7 @@ def run(
         dockerfile = (path / "Dockerfile").read_text()
         errors.extend(startup_boundary_errors(folder, portable))
         errors.extend(bun_image_config_errors(folder, path, dockerfile))
+        errors.extend(owner_image_migration_errors(folder, path, dockerfile))
         try:
             actual = watch_paths(manifest)
             if actual != unit["watch_paths"]:

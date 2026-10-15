@@ -88,7 +88,16 @@ python3 scripts/verify_flat_batch.py --target platform \
 
 The optional source gate parses both pinned, reviewed owner revision graphs
 and their effective Dockerfile COPY histories, without reading database
-credentials or changing any schema. It fails on removal of a previously
+credentials or changing any schema. **The ordinary “--target” source gate also
+checks each reviewed Platform/Resources/Authorization migration against its
+actual owner Dockerfile COPY and restrictive Dockerfile.dockerignore allowlist.**
+A migration available in the local Git source but absent from the installed
+image would fail during the owner lifespan on an otherwise healthy PostgreSQL;
+this gate intentionally blocks such a deployment before rebuilding. It
+independently verifies the revision predecessor graph, not the live database.
+For newly added revisions, the owning Backend agent must update its migration
+module, reviewed head, Dockerfile and Dockerfile.dockerignore *together*.
+ It fails on removal of a previously
 reviewed revision, rewriting an already shipped migration, truncating the
 forward history or failing to read the previous packaged image source. For
 Resources use `--target resources` and `resources=<SHA>`; Authorization uses
