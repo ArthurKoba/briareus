@@ -8,6 +8,7 @@ import hashlib
 import json
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import jwt
@@ -16,8 +17,10 @@ from control_panel_api._oidc_browser import (
     _SID_COOKIE,
     _TX_COOKIE,
     OidcBrowserSessionStore,
+    OidcSessionStoreUnavailable,
     oidc_browser_router,
 )
+from control_panel_api._oidc_id_token import VerifiedOidcIdentity
 from control_panel_api._oidc_native_start import native_login_start_router
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
@@ -149,6 +152,45 @@ class ResourceBindingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.public.aclose()
         await self.http.aclose()
+
+    async def test_session_anonymous_stale_store_and_realm_fail_closed_without_cache(self) -> None:
+        def confirm(reply: Response, status: int, code: str) -> None:
+            self.assertEqual(reply.status_code, status, reply.text)
+            self.assertEqual(reply.json(), {"error": {"code": code}})
+            self.assertEqual(reply.headers["cache-control"], "no-store")
+            self.assertEqual(reply.headers["pragma"], "no-cache")
+            self.assertNotIn("subject", reply.text)
+            self.assertNotIn("access_token", reply.text)
+
+        missing = await self.public.get("/api/v1/auth/session")
+        confirm(missing, 401, "OIDC_SESSION_REQUIRED")
+        self.assertNotIn("set-cookie", missing.headers)
+        self.public.cookies.set(_SID_COOKIE, "A" * 64)
+        expired = await self.public.get("/api/v1/auth/session")
+        confirm(expired, 401, "OIDC_SESSION_EXPIRED")
+        with patch.object(self.store, "get_session", side_effect=OidcSessionStoreUnavailable):
+            unavailable = await self.public.get("/api/v1/auth/session")
+        confirm(unavailable, 503, "OIDC_SESSION_STORE_UNAVAILABLE")
+        # A stale but valid protected ticket from another OAuth client is
+        # revoked in Valkey and its browser cookie is explicitly cleared.
+        ticket, _age = await self.store.create_session(
+            VerifiedOidcIdentity(
+                _ISSUER,
+                _SUBJECT,
+                "former-unapproved-client",
+                datetime.now(UTC) + timedelta(seconds=90),
+            )
+        )
+        self.public.cookies.set(_SID_COOKIE, ticket)
+        wrong_realm = await self.public.get("/api/v1/auth/session")
+        confirm(wrong_realm, 401, "OIDC_SESSION_REALM_MISMATCH")
+        self.assertIn("set-cookie", wrong_realm.headers)
+        self.assertIsNone(await self.store.get_session(ticket))
+        self.public.cookies.clear()
+        bad_host = await self.public.get(
+            "/api/v1/auth/session", headers={"Host": "foreign.invalid"}
+        )
+        confirm(bad_host, 403, "OIDC_BROWSER_HOST_MISMATCH")
 
     async def start(self) -> dict[str, list[str]]:
         response = await self.public.get("/api/v1/auth/authorize")

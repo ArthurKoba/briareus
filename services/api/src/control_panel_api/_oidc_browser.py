@@ -627,6 +627,12 @@ def oidc_browser_router(
 
     router = APIRouter()
 
+    def session_failure(status: int, code: str) -> JSONResponse:
+        # A rejected/expired identity response must never be cached as a
+        # durable browser auth state. Canonical errors are safe for both the
+        # Client and Gateway (no raw cookies, opaque tickets or IdP details).
+        return JSONResponse({"error": {"code": code}}, status_code=status, headers=_NO_STORE)
+
     @router.get(AUTH_API_PREFIX + "/authorize")
     async def start(request: Request) -> Response:
         enforce_test_host(request)
@@ -704,17 +710,18 @@ def oidc_browser_router(
 
     @router.get(AUTH_API_PREFIX + "/session")
     async def current_session(request: Request) -> Response:
-        enforce_test_host(request)
+        if expected_host is not None and request.headers.getlist("host") != [expected_host]:
+            return session_failure(403, "OIDC_BROWSER_HOST_MISMATCH")
         cookies = _strict_browser_cookies(request)
         sid = cookies.get(_SID_COOKIE, "") if cookies is not None else ""
         if _TOKEN.fullmatch(sid) is None:
-            raise HTTPException(401, detail="OIDC browser session required")
+            return session_failure(401, "OIDC_SESSION_REQUIRED")
         try:
             identity = await sessions.get_session(sid)
-        except OidcSessionStoreUnavailable as exc:
-            raise HTTPException(503, detail="OIDC session store unavailable") from exc
+        except OidcSessionStoreUnavailable:
+            return session_failure(503, "OIDC_SESSION_STORE_UNAVAILABLE")
         if identity is None:
-            raise HTTPException(401, detail="OIDC browser session expired")
+            return session_failure(401, "OIDC_SESSION_EXPIRED")
         # An opaque Valkey ticket from an older issuer/client deployment
         # is NOT authenticated for the newly configured Rauthy realm.
         if (
@@ -725,13 +732,9 @@ def oidc_browser_router(
             # an issuer/client rollback must not reactivate the old session.
             try:
                 await sessions.delete_session(sid)
-            except OidcSessionStoreUnavailable as exc:
-                raise HTTPException(503, detail="OIDC stale ticket could not be revoked") from exc
-            response = JSONResponse(
-                {"detail": "OIDC browser realm no longer current"},
-                status_code=401,
-                headers=_NO_STORE,
-            )
+            except OidcSessionStoreUnavailable:
+                return session_failure(503, "OIDC_STALE_SESSION_REVOCATION_UNAVAILABLE")
+            response = session_failure(401, "OIDC_SESSION_REALM_MISMATCH")
             _clear(response, _SID_COOKIE)
             return response
         # Rauthy identity alone never grants Platform or MCP permissions.

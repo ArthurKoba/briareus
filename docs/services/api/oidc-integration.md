@@ -673,6 +673,28 @@ fence applies only to explicitly injected disposable local provider;
 the canonical public existing Dev paths retain their original
 configured Host/Origin and session semantics.
 
+### Public /api/v1/auth/session: anonymous is 401, never cache identity denial
+
+`GET /api/v1/auth/session` with no valid host-only HttpOnly session cookie
+correctly returns HTTP 401, not a logged-in User or an Authorization grant.
+Every GET /session outcome now supplies `Cache-Control: no-store` and
+`Pragma: no-cache`; failures use the same strict `{"error":{"code":"..."}}`
+shape as current Project/Access endpoints, not FastAPI's free-text `detail`.
+The explicit codes include `OIDC_SESSION_REQUIRED` (401, absent/ambiguous
+browser handle), `OIDC_SESSION_EXPIRED` (401, expired/revoked ticket),
+`OIDC_SESSION_REALM_MISMATCH` (401, stale ticket removed and host-only cookie
+cleared), `OIDC_SESSION_STORE_UNAVAILABLE` (503, no proven Valkey read),
+`OIDC_STALE_SESSION_REVOCATION_UNAVAILABLE` (503, failed stale-ticket removal)
+and `OIDC_BROWSER_HOST_MISMATCH` (403 for fixed disposable-local Host).
+No opaque session ticket, access bearer, Userinfo or upstream token is echoed.
+
+A cookie-less public Dev 401 is expected **anonymous** behavior, and cannot
+prove or disprove post-login success. A 401 **after a completed authentic
+Rauthy first-factor/code+PKCE flow** requires independent evidence that the
+BFF issued the real signed `__Host-briareus_oidc_session` and that Gateway
+retained the same secure Host/Cookie transport, Valkey TTL and realm. This
+source change does not enable a password/MFA flow or fake a signed-in session.
+
 ### Opaque browser session realm pinning across configuration changes
 
 A Valkey browser ticket may outlive a deployment that changes OIDC issuer
