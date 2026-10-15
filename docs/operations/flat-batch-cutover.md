@@ -33,15 +33,22 @@ After a compatible Backend + Runtime + Frontend Development publish, run
 `python3 scripts/probe_dev_native_auth.py`. It performs **only pinned public
 GET** requests on `https://briareus.koba-nexus.ru` with normal TLS, strict
 non-redirecting transport, bounded JSON/HTML responses and no cookies,
-password, bearer, CSRF, secrets, session-creation or user login. It requires
-`/panel/` HTML, the actual `/api/v1/auth/capabilities` Rauthy-native-v1 DTO,
-the obsolete `/api/auth/native/capabilities` path closed, exact issuer
-discovery, and private provider Admin REST denied by Gateway. It reports a
-failed check for the current deployed old UI/API state; a `200` hosted Rauthy
-page or a live Gateway says NOTHING about human login readiness. Even all
-flags green do not prove the native password/MFA form, Project identity,
-AgentSession/Cedar grant or protected Files action: those require separate
-actual signed browser/owner/MCP acceptance in the same public Dev.
+password, bearer, CSRF, secrets, session-creation or user login. Eight fixed
+GETs verify six strict safety predicates: `/panel/` HTML, the real
+`/api/v1/auth/capabilities` Rauthy-native-v1 DTO, **anonymous**
+`/api/v1/auth/session` exactly HTTP401 `OIDC_SESSION_REQUIRED` with
+`no-store`/`no-cache` and no Set-Cookie, obsolete
+`/api/auth/native/capabilities` closed, exact issuer discovery, and **all
+three** privileged upstream Rauthy REST paths (`/auth/v1/users`,
+`/auth/v1/users/attr`, `/auth/v1/clients`) denied by Gateway with 404.
+Redirects are never followed or treated as authentication. No raw response
+body, opaque ticket, cookie value or secret is printed. Seven offline
+positive/negative tests cover old-text 401, missing cache guards, anonymous
+Set-Cookie, redirects and individual provider admin-route exposure.
+Even all predicates green do **not** prove a real password/MFA form, Project
+identity, AgentSession/Cedar grant or protected Files effect; those require
+separate signed browser/owner/MCP acceptance. Passing with a disabled native
+first factor is explicitly possible and must not be called login acceptance.
 
 ## Actual Development settings are a separate acceptance gate
 
