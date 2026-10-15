@@ -6,7 +6,7 @@
     "environment": "naibrku1omovvmw5o0bcnp5c",
     "repository": "KobaProduction/briareus"
   },
-  "release_policy": "One Git revision and one aggregated CI gate for all target modules. Do not apply partial Coolify mutations or deploy until all target manifests, source and real rollout prerequisites are accepted. Never change offscope applications, secrets or volumes. One Git revision does not serialize separate Coolify auto-deploy jobs; validate dependency convergence and rollback before publication.",
+  "release_policy": "Briareus main is the Development integration branch: publish independently tested owner modules directly when GitHub permissions allow, no mandatory per-change PR/CI. Verify exact approved application UUID, Compose build, saved Watch Paths and actual Dev behavior; keep full-system acceptance separate. Three backend owner databases may adopt a fresh 20261015 epoch only after exact scoped Development data/reset and recovery evidence; protect Rauthy, PGDATA, Valkey, Files roots and all offscope data. Never infer database reset from a source test.",
   "candidates": [
     {
       "slug": "control-panel-api",

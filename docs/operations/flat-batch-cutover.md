@@ -1,10 +1,7 @@
-# Briareus flat-layout: one batch, one CI gate
+# Briareus Development: independently verified module releases and core recovery
 
 The selected owner layout is the repository-root `services/`, `hands/` and
-`shared/`. This release plan replaces incremental per-service path edits as the
-**coordination unit**, but never turns the 13 candidate Coolify applications
-into one Compose stack. Each application retains its existing UUID, current
-service DNS, volume authority and isolated deployment lifecycle.
+`shared/`. Under the 15 October owner decision ([#536](https://github.com/KobaProduction/briareus/issues/536)), `main` is the live **Development** branch. Publish independently tested owner modules directly when repository protections actually allow ordinary Git push; a PR or manual CI run is not mandatory for each Dev iteration. Maintain the 13 separate Coolify application lifecycles, one held Identity, exact UUIDs, current DNS/volume/secret authority and real consumer checks. Complete MCP/product acceptance remains a separate, later milestone; Production is not authorized.
 
 ## Source of truth
 
@@ -13,7 +10,9 @@ UUID exactly once: 13 target modules and 1 explicitly held Legacy Identity app.
 The target Base Directory and native Watch Paths are the exact Git/Compose
 contract; the Compose location is `/docker-compose.coolify.yaml` for every
 candidate. No global watch paths. When a new shared module is truly consumed,
-update only those actual consumers in the same batch PR/CI revision.
+update its real consumers through their owner commits, and reconcile Coolify's
+persisted Watch Paths for the affected approved apps. The owner-required broad
+`services/external/**` dependency remains mandatory for every active module.
 
 `python3 scripts/verify_flat_batch.py --uv-locks --compose` validates the
 **entire candidate batch**; the CI `docker` job runs it on every PR. One
@@ -72,11 +71,52 @@ that users can authenticate or a Files AgentSession may execute. Any missing
 approved UUID, unapproved ENV key, unsigned resource grant or unreviewed
 intermediate deployment blocks live activation, even if source CI passes.
 
-## Previously deployed owner schema compatibility — required before owner cutover
+## Owner-approved greenfield Development data epoch — currently held
 
-A source-green Compose/uv-lock check cannot establish the schema head in an
-**already populated** Dev owner database. The prior actual Coolify Application
-may have applied a later Alembic revision than the candidate image ships.
+Backend's explicitly owner-selected fresh revision epoch `dac5a24` is for
+**three logical service-owned databases only**: Access (`briareus_access`,
+Authorization), Platform (`briareus_platform`) and Resources
+(`briareus_resources`). The new `access_20261015_0001`,
+`platform_20261015_0001` and `resources_20261015_0001` revisions
+**intentionally reject a previously populated owner database**; this is not
+an in-place upgrade. The old additive graph analysis remains valid evidence
+for the previous design, but it is NOT the approved new source release path.
+
+Read-only `python3 scripts/dev_owner_rebaseline_preflight.py --backend-sha
+<exact-committed-backend-SHA>` checks the fixed Dev allowlist, actual Git
+Compose database mapping, one-revision source epoch, exact owner Dockerfile
+COPY and restrictive build-context allowlists. It only reports
+`SOURCE_CONTRACT_OK_LIVE_RESET_BLOCKED` when that static mapping matches;
+its process **never** connects to PostgreSQL, Coolify or another service,
+and **never** authorizes a reset. A source-PASS is deliberately returned with
+exit code 2 (runtime facts absent), not a usable reset token.
+
+Before touching Dev, obtain from the **authorized exact-container/owner DBA
+surface** the current catalog/one-owner `public.alembic_version`, logical
+DB identity/role, row and active-grant inventory, Files Project-root mapping,
+operator-verified recoverable owner-only snapshots and exact restore procedure.
+Rauthy `briareus_rauthy`, Users/first admin, issuer/client keys, shared
+PostgreSQL PGDATA/Valkey volumes and Files root bytes/mounts are **not** reset
+targets. Legacy `briareus_identity`, `briareus_dev`, deferred Files/Runtime/
+Reverse DBs and any other project/environment remain outside scope. Stage
+isolated owner service stop/migration/restart with Gateway and Hands continuing
+to deny protected effects; verify fresh signed User→Project→Cedar before
+reenabling product actions. No `alembic stamp`, global cluster drop, schema
+fallback or automatic re-enrollment from matching email is permitted.
+
+The current connected Observability surface is read-only. Until a scoped
+Coolify/owner SQL execution capability and rollback evidence are available,
+this physical Dev reset remains BLOCKED even though exact committed Backend
+`dac5a24` passed actual isolated PostgreSQL18.6 empty-install, repeat-start,
+and old-epoch rejection tests. Do not fake its completion with a dry run.
+
+## Previously deployed owner schema compatibility — when retaining existing data
+
+For an **in-place upgrade that retains owner data**, a source-green
+Compose/uv-lock check cannot establish the schema head in an already populated
+Development database. Its prior application may have executed later Alembic
+revisions than the candidate source. This section is NOT a substitute for the
+separately approved disposable greenfield reset preflight above.
 For the **affected** Platform/Resources/Authorization owner, obtain the last
 finished, exact 40-character SHA from the approved Application's scoped
 Coolify deployment history, then run:
