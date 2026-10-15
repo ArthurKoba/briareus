@@ -21,6 +21,9 @@ from typing import Literal
 _OWNER_TO_REGISTRY = {"platform": "platform", "resources": "resources", "authorization": "access"}
 _SHA = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
 _PACKAGE = re.compile(r"COPY\s+services/([a-z-]+)/migrations/versions/([A-Za-z0-9_]+\.py)\b")
+_LEGACY_RESOURCES = re.compile(
+    r"COPY\s+scripts/alembic_owners/resources/versions/([A-Za-z0-9_]+\.py)\b"
+)
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -60,6 +63,39 @@ def _packaged(source: str | None, owner: str) -> tuple[str, ...] | None:
     return tuple(name for name_owner, name in _PACKAGE.findall(source) if name_owner == owner)
 
 
+def _previous_resources_layout(root: Path, revision: str) -> bool:
+    """Accept only the exact legacy Resources Docker layout in its Dev registry.
+
+    The former approved Resources application used deploy/resources and copied
+    scripts/alembic_owners/resources into /app/src/common/alembic_owners.
+    A missing current services/resources directory is not proof it lacked
+    migration scripts; this checked historical layout is NOT a DB acceptance.
+    """
+    manifest = _read(root, revision, "deploy/APPLICATIONS.json")
+    if manifest is None:
+        return False
+    try:
+        decoded = json.loads(manifest)
+        if decoded.get("environment") != "development":
+            return False
+        apps = decoded.get("applications")
+        if not isinstance(apps, list):
+            return False
+        matches = [
+            item
+            for item in apps
+            if isinstance(item, dict)
+            and item.get("name") == "Resource Catalog"
+            and item.get("module") == "resources"
+            and item.get("base_directory") == "/deploy/resources"
+            and item.get("dockerfile") == "deploy/resources/Dockerfile"
+            and item.get("docker_compose_location") == "/docker-compose.coolify.yaml"
+        ]
+        return len(matches) == 1
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def inspect_owner(root: Path, *, owner: str, previous: str, candidate: str) -> dict[str, object]:
     if owner not in _OWNER_TO_REGISTRY:
         raise ValueError("unknown, non-allowlisted owner")
@@ -74,8 +110,22 @@ def inspect_owner(root: Path, *, owner: str, previous: str, candidate: str) -> d
     prior_chain = _history(previous_source, _OWNER_TO_REGISTRY[owner])
     current_chain = _history(candidate_source, _OWNER_TO_REGISTRY[owner])
     previous_docker = _read(root, previous, f"services/{owner}/Dockerfile")
+    # Last approved Resources release predated the flat service folder. Only
+    # recognize its source if the exact historical Dev registry confirms the
+    # old deployment layout AND the previous Dockerfile actually exists.
+    legacy_resources = (
+        owner == "resources"
+        and previous_docker is None
+        and _previous_resources_layout(root, previous)
+    )
+    if legacy_resources:
+        previous_docker = _read(root, previous, "deploy/resources/Dockerfile")
     candidate_docker = _read(root, candidate, f"services/{owner}/Dockerfile")
-    previous_package = _packaged(previous_docker, owner)
+    previous_package = (
+        tuple(_LEGACY_RESOURCES.findall(previous_docker))
+        if legacy_resources and previous_docker is not None
+        else _packaged(previous_docker, owner)
+    )
     current_package = _packaged(candidate_docker, owner)
     issues: list[str] = []
     status: Literal["SOURCE_COMPATIBLE", "SOURCE_INCOMPATIBLE", "UNVERIFIED"]
@@ -96,9 +146,14 @@ def inspect_owner(root: Path, *, owner: str, previous: str, candidate: str) -> d
         if current_chain[: len(prior_chain)] != prior_chain:
             issues.append("candidate_revision_chain_is_not_forward_extension")
         for relative in old_actual_packaged:
-            filename = f"services/{owner}/migrations/versions/{relative}"
-            before = _read(root, previous, filename)
-            after = _read(root, candidate, filename)
+            old_path = (
+                f"scripts/alembic_owners/resources/versions/{relative}"
+                if legacy_resources
+                else f"services/{owner}/migrations/versions/{relative}"
+            )
+            new_path = f"services/{owner}/migrations/versions/{relative}"
+            before = _read(root, previous, old_path)
+            after = _read(root, candidate, new_path)
             if after is None:
                 issues.append("previously_packaged_migration_removed:" + relative)
             elif before is None or before != after:
@@ -116,6 +171,7 @@ def inspect_owner(root: Path, *, owner: str, previous: str, candidate: str) -> d
         "previous_reviewed_versions": list(prior_chain or ()),
         "candidate_reviewed_versions": list(current_chain or ()),
         "previous_image_migrations": list(previous_package or ()),
+        "historical_resources_layout_verified": legacy_resources,
         "candidate_image_migrations": list(current_package or ()),
         "state": status,
         "findings": sorted(set(issues)),

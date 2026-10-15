@@ -106,8 +106,19 @@ Resources use `--target resources` and `resources=<SHA>`; Authorization uses
 confirm the *actual* deployed owner database's `public.alembic_version` under
 its own scoped, read-only SQL role, compare the installed schema and preserve
 a recovery point before any additive change. If old packaged source cannot
-be reconstructed, the tool reports **UNVERIFIED**, not "safe". Never use
-`alembic stamp`, a reset, baseline rewrite or drop/recreate to force a PASS.
+be reconstructed, the tool reports **UNVERIFIED**, not "safe". The last
+previously deployed Resources commit predates the flat tree: its reviewed
+`deploy/APPLICATIONS.json` selects `/deploy/resources/Dockerfile`, which
+actually COPYs `scripts/alembic_owners/resources/versions/0001` and `0002`.
+The checker supports **only this explicitly source-verified Dev layout** as
+an alternative historic source path; it compares both frozen migration files
+byte-for-byte with the new service-local version. A missing/contradictory
+historic registry stays UNVERIFIED, never treated as an empty database.
+The matching SQL source means image completeness is the next release gate:
+new Dockerfile COPY **and** restrictive Dockerfile.dockerignore must include
+every reviewed revision. None of this reads the actual deployed DB ledger.
+Never use `alembic stamp`, a reset, baseline rewrite or drop/recreate to
+force a PASS.
 
 Concrete 15 October 2026 incident: Platform's last pre-preview deployed
 source shipped `platform_0001→0002→0003`, while the new image rewrote `0001`
