@@ -28,6 +28,30 @@ The prior named volume `briareus-files-v1` is **not deleted or migrated**.
 This safety shell intentionally does not mount it or start an untrusted
 executor; reattachment requires independently validated sandbox isolation.
 
+## Private MCP read selector staging (untrusted, not mounted)
+
+`hands/files/src/files_hand/_mcp_request.py` prepares the next protected
+`read_file` call's **untrusted command selectors** from the actual private
+`/mcp` Request, rejecting raw URI aliases or query-provided identity. It
+accepts one Bearer-syntax header, canonical Project and AgentSession UUIDv4,
+one positive canonical grant revision, and the existing `FilesReadArguments`
+path/byte-budget contract. It rejects caller
+cookies, duplicate/ambiguous selectors, client-supplied actor/root/operation
+fields and unsafe paths. The Hand itself mints a fresh UUIDv4 operation
+identifier for each attempt; repeated Project+path selectors have the same
+canonical resource identity but different command fingerprints.
+
+This helper deliberately does **not** validate a Rauthy JWT, resolve a User,
+produce current Project ownership, authenticate an Authorization peer or
+read any file. A syntactically staged `NativeFilesReadRequest` remains
+untrusted, including when Gateway supplied canonical headers. It is NOT
+registered as a FastMCP `read_file` tool. Activation still requires the
+SDK-verified per-Hand resource audience, an independently authenticated
+private Access/Cedar channel and current owner mapping/root adapter. The
+source test `hands/files/tests/test_mcp_staged_read.py` confirms both
+strict selector rejection and that staged commands cannot read bytes
+through the default unmounted authority.
+
 ## Prepared bounded read consumer (not a public MCP tool)
 
 `hands/files/src/files_hand/_read_adapter.py` supplies the private

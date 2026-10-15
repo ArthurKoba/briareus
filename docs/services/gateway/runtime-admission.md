@@ -12,6 +12,9 @@ Authorization owner. Gateway serializes only bounded Project UUIDv4,
 AgentSession UUIDv4, action mcp.connect and grant revision into exact JSON
 bytes. Neither the caller's Bearer, a private DNS name nor an HTTP header
 can manufacture this service identity.
+The ingress requires byte-for-byte canonical `/hands/HAND/mcp` raw URL
+and an empty query string before the private peer is contacted. Percent-
+encoded aliases and synthetic URI parameters are not alternate resources.
 
 The default build_app() has no such port. After parsing/validating the
 Bearer and selectors, protected admission returns HTTP 503 with no Bearer sent

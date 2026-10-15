@@ -108,7 +108,17 @@ class EffectBoundary:
         self._app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope.get("path") != "/mcp" or scope.get("method") != "POST":
+        if scope["type"] != "http" or scope.get("path") != "/mcp":
+            await self._app(scope, receive, send)
+            return
+        if scope.get("raw_path") != b"/mcp" or scope.get("query_string", b"") != b"":
+            # The Hand must re-enforce the canonical MCP resource URI even
+            # when reached directly, independently of the public Gateway.
+            await self._deny(scope, receive, send, None, "MCP_RESOURCE_PATH_INVALID", 404)
+            return
+        if scope.get("method") != "POST":
+            # MCP DELETE may manage a transport session but never carries
+            # a JSON-RPC business effect; the canonical URI still applies.
             await self._app(scope, receive, send)
             return
         declared_length, rejection = _header_preflight(scope)

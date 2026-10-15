@@ -87,8 +87,18 @@ def _single_header(request: Request, name: str) -> str:
 def parse_connection_admission(request: Request) -> ConnectionAdmission:
     """Parse strictly bounded, *untrusted* selectors for the real PDP."""
     hand = request.url.path.removeprefix("/hands/").removesuffix("/mcp")
-    if hand not in _HAND_TARGETS or request.url.path != f"/hands/{hand}/mcp":
+    canonical = f"/hands/{hand}/mcp"
+    if (
+        hand not in _HAND_TARGETS
+        or request.url.path != canonical
+        or request.scope.get("raw_path") != canonical.encode("ascii")
+    ):
+        # A path normalized from percent-encoding, dot segments or duplicate
+        # separators is NOT the exact public MCP resource URI. Reject it
+        # before consulting Authorization or passing a bearer to a Hand.
         raise McpAdmissionRejected("MCP_MODULE_UNKNOWN", 404)
+    if request.scope.get("query_string", b"") != b"":
+        raise McpAdmissionRejected("MCP_CONTEXT_INVALID", 400)
     if request.method != "POST":
         raise McpAdmissionRejected("MCP_METHOD_UNSUPPORTED", 405)
     if request.headers.getlist("cookie"):

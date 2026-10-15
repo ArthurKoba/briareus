@@ -17,6 +17,9 @@ async def _exercise(
     *,
     body: bytes = _BODY,
     chunks: tuple[bytes, ...] | None = None,
+    raw_path: bytes = b"/mcp",
+    query: bytes = b"",
+    method: str = "POST",
 ) -> tuple[int, str | None, int, bytes, int]:
     received = 0
     downstream: list[bytes] = []
@@ -53,10 +56,10 @@ async def _exercise(
             "type": "http",
             "asgi": {"version": "3.0", "spec_version": "2.3"},
             "http_version": "1.1",
-            "method": "POST",
+            "method": method,
             "path": "/mcp",
-            "raw_path": b"/mcp",
-            "query_string": b"",
+            "raw_path": raw_path,
+            "query_string": query,
             "scheme": "http",
             "headers": [(b"host", b"briareus-files:8000"), *extra_headers],
         },
@@ -82,6 +85,23 @@ async def main() -> None:
         good, chunks=(_BODY[:10], b"", _BODY[10:])
     )
     assert (status, error, calls, payload, read_events) == (202, None, 1, _BODY, 3)
+
+    for raw_path, query in ((b"/%6dcp", b""), (b"/mcp", b"forged=actor")):
+        status, error, calls, payload, events = await _exercise(
+            good, raw_path=raw_path, query=query
+        )
+        assert (status, error, calls, payload, events) == (
+            404,
+            "MCP_RESOURCE_PATH_INVALID",
+            0,
+            b"",
+            0,
+        )
+
+    status, error, calls, payload, events = await _exercise(
+        good, raw_path=b"/%6dcp", method="DELETE"
+    )
+    assert (status, error, calls, payload, events) == (404, "MCP_RESOURCE_PATH_INVALID", 0, b"", 0)
 
     for headers, expected, expected_read in (
         ([(b"content-length", str(len(_BODY)).encode())], "MCP_CONTENT_TYPE_INVALID", 0),
