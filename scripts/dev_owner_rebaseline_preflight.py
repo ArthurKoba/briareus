@@ -185,7 +185,7 @@ def inspect(ref: str, *, repo: Path = ROOT) -> dict[str, object]:
             "owner-authorized Files root mappings until independently reconciled",
         ],
         "runtime_preconditions_unverified": [
-            "current SQL owner database names and public.alembic_version for all three owner DBs",
+            "current scoped owner inspector: database, role, Alembic version and row counts",
             "actual owner rows, sessions, approvals and Project/Files root mapping inventory",
             "recoverable owner-only DB snapshots and verified restore; provider protected",
             "approved exact Coolify app stop/restart capability plus dependency-deny plan",

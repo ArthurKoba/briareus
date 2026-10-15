@@ -95,6 +95,23 @@ Before touching Dev, obtain from the **authorized exact-container/owner DBA
 surface** the current catalog/one-owner `public.alembic_version`, logical
 DB identity/role, row and active-grant inventory, Files Project-root mapping,
 operator-verified recoverable owner-only snapshots and exact restore procedure.
+The complementary `scripts/dev_owner_db_readonly_inventory.py --owner platform`
+(and separately `--owner access`, `--owner resources`) is prepared for
+**future approved per-application execution**, not public HTTP access. It
+uses only the application's existing `POSTGRES_HOST/PORT/DB/USER/PASSWORD`
+contract; requires exact `briareus-postgres:5432` and its single approved
+logical DB, and verifies `current_database()`/`current_user` before
+collecting only Alembic version and exact per-table **counts**, never row
+contents, User IDs, file paths, tokens or credentials. A bounded
+`REPEATABLE READ READ ONLY` transaction and PostgreSQL timeouts prevent
+schema/data mutations. Catalog anomalies and unavailable queries fail
+closed. Every result contains `approved_for_reset=false`: knowing the row
+counts cannot establish permission, backup recoverability, Project roots or
+Rauthy state. The six real isolated PostgreSQL18.6 scenarios and six offline
+unit tests passed, including wrong owner/role, old/multiple revision denial
+and an actual server rejection of INSERT inside a read-only transaction.
+The connected present observability source does **not** supply SQL execution,
+so this test is **not** a claim that real Dev owner tables were inventoried.
 Rauthy `briareus_rauthy`, Users/first admin, issuer/client keys, shared
 PostgreSQL PGDATA/Valkey volumes and Files root bytes/mounts are **not** reset
 targets. Legacy `briareus_identity`, `briareus_dev`, deferred Files/Runtime/
