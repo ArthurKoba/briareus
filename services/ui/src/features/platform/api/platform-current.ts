@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse,readBoundedErrorCode} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_AUTH_API} from "@/shared/config/control-panel-api"
 import type { RauthyPanelIdentity } from "@/features/platform/api/rauthy-oidc"
 
@@ -89,12 +90,6 @@ function validate(value:unknown, identity:RauthyPanelIdentity):VerifiedPlatformC
     user:{id:user.id as string,role:user.role as "user"|"operator",enabled:true},
     teams,projects,expires_at:v.expires_at}
 }
-async function errorCode(response:Response):Promise<string>{
-  try {
-    const data=obj(await response.json()),error=obj(data?.error)
-    return typeof error?.code==="string"&&error.code.length<=128?error.code:"UNAVAILABLE"
-  }catch{return "UNAVAILABLE"}
-}
 async function readContext(
   identity:RauthyPanelIdentity,
   signal:AbortSignal,
@@ -110,17 +105,18 @@ async function readContext(
     })
     if(signal.aborted)return {kind:"unavailable",code:"PLATFORM_READ_CANCELLED"}
     if(response.status===200){
-      const proof=validate(await response.json() as unknown,identity)
+      const proof=validate(await readBoundedJsonResponse(response,signal,262_144),identity)
       if(signal.aborted)return {kind:"unavailable",code:"PLATFORM_READ_CANCELLED"}
       if(!proof||projectUuid!==undefined&&(proof.projects.length!==1||
         proof.projects[0]?.id!==projectUuid||proof.teams.length>1))return {kind:"invalid_response"}
       return {kind:"verified",context:proof}
     }
-    const code=await errorCode(response)
+    const code=await readBoundedErrorCode(response,signal)
+    if(signal.aborted)return {kind:"unavailable",code:"PLATFORM_READ_CANCELLED"}
     if(response.status===401)return {kind:code==="OIDC_SESSION_EXPIRED"?"expired":"signed_out"}
     if(response.status===403)return {kind:code==="PLATFORM_MEMBERSHIP_NOT_CURRENT"?"not_current":"denied"}
     return {kind:"unavailable",code}
-  }catch{return {kind:"unavailable",code:"NETWORK_UNAVAILABLE"}}
+  }catch{return {kind:"unavailable",code:signal.aborted?"PLATFORM_READ_CANCELLED":"NETWORK_UNAVAILABLE"}}
 }
 
 /** Bounded navigation inventory; never a substitute for an exact Project

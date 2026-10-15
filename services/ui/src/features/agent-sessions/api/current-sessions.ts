@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse,readBoundedErrorCode} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_API_V1} from "@/shared/config/control-panel-api"
 /** Source-only peer Backend contract:
  * services/api/src/control_panel_api/_oidc_approvals.py (LOCAL, not released).
@@ -90,12 +91,6 @@ export function parseCurrentSession(
     resources,allowed_actions:[...v.allowed_actions] as ("revoke")[],
   }
 }
-async function errorCode(response:Response):Promise<string>{
-  try{
-    const body=obj(await response.json()),error=obj(body?.error)
-    return typeof error?.code==="string"&&error.code.length<=128?error.code:"UNKNOWN"
-  }catch{return "UNKNOWN"}
-}
 function fail(status:number,code:string):Exclude<SessionInventory,{kind:"ready"}>{
   return {kind:status===401?"unauthorized":status===403?"forbidden":
     status===409?"conflict":status===422?"invalid":"unavailable",code}
@@ -119,15 +114,16 @@ export async function readCurrentSession(
       "?project_uuid="+projectUuid,readRequest(signal))
     if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_READ_CANCELLED"}
     if(response.status!==200){
-      const code=await errorCode(response)
+      const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+      if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_READ_CANCELLED"}
       if(response.status===404&&code==="AGENT_SESSION_NOT_FOUND")return {kind:"not_found",code}
       return fail(response.status,code)
     }
-    const item=parseCurrentSession(await response.json(),projectUuid,actorUuid,canApprove)
+    const item=parseCurrentSession(await readBoundedJsonResponse(response,signal,131_072),projectUuid,actorUuid,canApprove)
     if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_READ_CANCELLED"}
     if(!item||item.session_uuid!==sessionUuid)return {kind:"invalid",code:"AGENT_SESSION_DTO_INVALID"}
     return {kind:"ready",item}
-  }catch{return {kind:"unavailable",code:"AGENT_SESSION_READ_UNAVAILABLE"}}
+  }catch{return {kind:"unavailable",code:signal.aborted?"AGENT_SESSION_READ_CANCELLED":"AGENT_SESSION_READ_UNAVAILABLE"}}
 }
 export async function listCurrentSessions(
   projectUuid:string,
@@ -140,8 +136,12 @@ export async function listCurrentSessions(
   try{
     const response=await fetch(CONTROL_PANEL_API_V1+"/agent-sessions?project_uuid="+projectUuid,readRequest(signal))
     if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_LIST_CANCELLED"}
-    if(response.status!==200)return fail(response.status,await errorCode(response))
-    const data=obj(await response.json())
+    if(response.status!==200){
+      const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+      if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_LIST_CANCELLED"}
+      return fail(response.status,code)
+    }
+    const data=obj(await readBoundedJsonResponse(response,signal,6_291_456))
     if(signal.aborted)return {kind:"unavailable",code:"AGENT_SESSION_LIST_CANCELLED"}
     if(!data||!Array.isArray(data.items)||data.items.length>MAX_ITEMS)
       return {kind:"invalid",code:"AGENT_SESSION_DTO_INVALID"}
@@ -189,10 +189,12 @@ export async function revokeCurrentSession(
     })
     if(signal.aborted)return {kind:"uncertain",code:"REVOKE_RESULT_UNCERTAIN"}
     if(response.status!==200){
-      const result=fail(response.status,await errorCode(response))
+      const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+      if(signal.aborted)return {kind:"uncertain",code:"REVOKE_RESULT_UNCERTAIN"}
+      const result=fail(response.status,code)
       return {kind:result.kind,code:result.code}
     }
-    const result=obj(await response.json())
+    const result=obj(await readBoundedJsonResponse(response,signal,16_384))
     if(signal.aborted)return {kind:"uncertain",code:"REVOKE_RESULT_UNCERTAIN"}
     if(!result||result.session_uuid!==id||
       result.project_uuid!==project||result.status!=="revoked"||

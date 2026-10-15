@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
 from authorization._decision_api import DecisionAuthorityUnavailable, DecisionScopeDenied
+from authorization._rauthy_jwks import load_authority_json
 from authorization._rauthy_membership_contract import VerifiedProjectMembership
 
 _MAX_BODY = 4096
@@ -140,7 +141,7 @@ class PlatformCurrentProjectResolver:
         ):
             raise DecisionAuthorityUnavailable("current Platform membership proof unavailable")
         try:
-            current = _CurrentMember.model_validate_json(response.body)
+            current = _CurrentMember.model_validate(load_authority_json(response.body))
         except (ValueError, ValidationError):
             raise DecisionAuthorityUnavailable("Platform owner response invalid") from None
         now = datetime.now(UTC)

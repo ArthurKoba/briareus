@@ -7,17 +7,22 @@ no test token, file operation, live User or privileged service is published.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import unittest
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.request import HTTPSHandler, ProxyHandler
 from uuid import UUID, uuid4
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from sqlalchemy.sql import Select
 from test_panel_session_detail import ReadOnlySQLFixture, future, session_row
 
@@ -25,12 +30,24 @@ from authorization._access_cedar import permits_current_project_grant
 from authorization._decision_api import (
     AuthorizationDecisionReader,
     AuthorizationDecisionService,
+    DecisionAuthorityUnavailable,
     DecisionCommand,
+    DecisionScopeDenied,
     authorization_decision_router,
+)
+from authorization._platform_current_project import (
+    PlatformCurrentProjectResolver,
+    VerifiedPlatformMembershipDelegation,
+    VerifiedPlatformMembershipResponse,
 )
 from authorization._rauthy_access_commands import RequestElevationCommand
 from authorization._rauthy_decision_attestor import RauthyDecisionAttestor, VerifiedDecisionPeer
-from authorization._rauthy_jwks import RauthyJwksVerifier
+from authorization._rauthy_issuer_keys import _read_json_https
+from authorization._rauthy_jwks import (
+    RauthyJwksVerifier,
+    RauthyKeysUnavailable,
+    load_authority_json,
+)
 from authorization._rauthy_membership_contract import VerifiedProjectMembership
 from authorization._resource_scope import (
     EffectResource,
@@ -206,7 +223,7 @@ class CurrentPrivateSources:
             "hand", "files", "briareus:access", future(15), command.effect_key()
         )
         self.member = VerifiedProjectMembership(
-            issuer, "test-subject-from-ephemeral-issuer", actor, command.project_uuid, future(15)
+            issuer, "S" * 24, actor, command.project_uuid, future(15)
         )
 
     async def verify_peer(self, request: Request) -> VerifiedDecisionPeer:
@@ -303,6 +320,82 @@ class SignedFilesDecisionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.json(), {"allowed": True})
             return response.status_code
 
+    async def test_private_access_decision_framing_bounded_before_any_signed_peer(self) -> None:
+        valid = json.dumps(self.command.model_dump(mode="json"), separators=(",", ":")).encode()
+        bad_requests = (
+            (
+                valid + b"x" * 10_000,
+                [("Content-Type", "application/json"), ("Content-Length", "2")],
+                413,
+            ),
+            (valid, [("Content-Type", "application/json"), ("Content-Length", "9000")], 413),
+            (valid, [("Content-Type", "application/json"), ("Content-Length", "2")], 422),
+            (
+                valid,
+                [
+                    ("Content-Type", "application/json"),
+                    ("Content-Length", str(len(valid))),
+                    ("Transfer-Encoding", "chunked"),
+                ],
+                422,
+            ),
+            (
+                valid,
+                [
+                    ("Content-Type", "application/json"),
+                    ("Content-Length", str(len(valid))),
+                    ("Content-Encoding", "gzip"),
+                ],
+                422,
+            ),
+            (
+                valid,
+                [
+                    ("Content-Type", "application/json"),
+                    ("Content-Length", str(len(valid))),
+                    ("Content-Length", str(len(valid))),
+                ],
+                422,
+            ),
+            (b"{", [("Content-Type", "application/json"), ("Content-Length", "1")], 422),
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=self.app), base_url="http://local-access-owner"
+        ) as client:
+            for body, headers, expected in bad_requests:
+                with self.subTest(expected=expected, body_size=len(body), headers=headers):
+                    response = await client.post(
+                        "/internal/v1/authorization/decide",
+                        content=body,
+                        headers=[*headers, ("Authorization", "Bearer " + self.token())],
+                    )
+                    self.assertEqual(response.status_code, expected, response.text)
+                    self.assertEqual(response.headers["cache-control"], "no-store")
+                    self.assertNotIn("allowed", response.text)
+        self.assertFalse(self.db.queries)
+
+    async def test_hung_private_peer_decision_returns_uncached_unavailable(self) -> None:
+        async def stalled_verify(_request: Request) -> VerifiedDecisionPeer:
+            await asyncio.sleep(0.09)
+            return self.sources.peer
+
+        with (
+            patch.object(self.sources, "verify_peer", side_effect=stalled_verify),
+            patch("authorization._decision_api._DECISION_AUTH_TIMEOUT_SECONDS", 0.025),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=self.app), base_url="http://local-access-owner"
+            ) as client:
+                result = await client.post(
+                    "/internal/v1/authorization/decide",
+                    json=self.command.model_dump(mode="json"),
+                    headers={"Authorization": "Bearer " + self.token()},
+                )
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(result.headers["cache-control"], "no-store")
+        self.assertNotIn("allowed", result.text)
+        self.assertFalse(self.db.queries)
+
     async def test_signed_resource_audience_exact_peer_owner_and_revoke(self) -> None:
         bearer = self.token()
         self.assertEqual(await self.request_decision(bearer), 200)
@@ -318,6 +411,9 @@ class SignedFilesDecisionTests(unittest.IsolatedAsyncioTestCase):
             self.token(aud=self.client_id),
             self.token(iss="https://foreign-issuer.invalid/"),
             self.token(exp=int(time.time()) - 1),
+            self.token(sub="short-provider-sub"),
+            self.token(sub="Q" * 25),
+            self.token(sub="S" * 23),
         ):
             self.assertEqual(await self.request_decision(token), 401)
         self.assertFalse(self.db.queries)
@@ -363,6 +459,160 @@ class SignedFilesDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.sources.member = replace(self.sources.member, project_uuid=uuid4())
         self.assertEqual(await self.request_decision(bearer), 403)
         self.assertFalse(self.db.queries)
+
+
+class ExactPrivatePlatformProofTests(unittest.IsolatedAsyncioTestCase):
+    """Independently attested Platform owner replies cannot use ambiguous JSON.
+
+    These are in-process trust-boundary fixtures. No real peer, signed issuer,
+    Platform PostgreSQL data or Briareus/Cedar permission is created.
+    """
+
+    def setUp(self) -> None:
+        self.issuer = "https://source-fixture.invalid/auth/v1/"
+        self.subject = "S" * 24
+        self.project = uuid4()
+        self.actor = uuid4()
+        self.deadline = datetime.now(UTC) + timedelta(seconds=16)
+        self.owner = {
+            "issuer": self.issuer,
+            "subject": self.subject,
+            "actor_uuid": str(self.actor),
+            "project_uuid": str(self.project),
+            "expires_at": self.deadline.isoformat(),
+        }
+
+    async def test_private_exact_project_refuses_duplicate_owner_scope(self) -> None:
+        class FakePeer:
+            def __init__(self, outer: ExactPrivatePlatformProofTests) -> None:
+                self.outer = outer
+                self.raw = json.dumps(outer.owner, separators=(",", ":")).encode()
+                self.calls = 0
+
+            async def signed_member_delegation(
+                self, *, issuer: str, subject: str, project_uuid: UUID
+            ) -> VerifiedPlatformMembershipDelegation:
+                assert (issuer, subject, project_uuid) == (
+                    self.outer.issuer,
+                    self.outer.subject,
+                    self.outer.project,
+                )
+                return VerifiedPlatformMembershipDelegation(
+                    SecretStr("synthetic-private-peer-only-" + "X" * 48),
+                    issuer,
+                    subject,
+                    project_uuid,
+                    "briareus:platform",
+                    self.outer.deadline,
+                )
+
+            async def query_project_member(
+                self, *, bearer: SecretStr, body: bytes
+            ) -> VerifiedPlatformMembershipResponse:
+                assert bearer.get_secret_value().startswith("synthetic-private")
+                assert json.loads(body)["project_uuid"] == str(self.outer.project)
+                self.calls += 1
+                return VerifiedPlatformMembershipResponse(200, "application/json", self.raw)
+
+        peer = FakePeer(self)
+        reader = PlatformCurrentProjectResolver(trusted_peer=peer)
+
+        async def run() -> object:
+            return await reader.current_member(
+                rauthy_issuer=self.issuer,
+                rauthy_subject=self.subject,
+                project_uuid=self.project,
+            )
+
+        baseline = await run()
+        self.assertEqual(baseline.actor_uuid, self.actor)
+        self.assertEqual(baseline.project_uuid, self.project)
+        raw = peer.raw
+        for malformed in (
+            raw.replace(
+                b'"actor_uuid":', b'"actor_uuid":"' + str(self.actor).encode() + b'","actor_uuid":'
+            ),
+            raw.replace(
+                b'"project_uuid":',
+                b'"project_uuid":"' + str(self.project).encode() + b'","project_uuid":',
+            ),
+            raw.replace(b'"issuer":', b'"issuer":"' + self.issuer.encode() + b'","issuer":'),
+            raw.replace(b'"expires_at":', b'"expires_at":NaN,"expires_at":'),
+            raw.replace(b'"expires_at":"', b'"expires_at":Infinity,"expires_at_unused":"'),
+        ):
+            with self.subTest(malformed=malformed[:150]):
+                peer.raw = malformed
+                with self.assertRaises(DecisionAuthorityUnavailable):
+                    await run()
+        self.assertEqual(peer.calls, 6)
+        peer.raw = json.dumps({**self.owner, "project_uuid": str(uuid4())}).encode()
+        with self.assertRaises(DecisionScopeDenied):
+            await run()
+
+
+class PublicIssuerMetadataBoundaryTests(unittest.TestCase):
+    def test_strict_nested_owner_json_never_prefers_duplicate_fields(self) -> None:
+        self.assertEqual(
+            load_authority_json(b'{"jwks":{"keys":[{"kid":"valid"}]}}'),
+            {"jwks": {"keys": [{"kid": "valid"}]}},
+        )
+        for data in (
+            b'{"issuer":"one","issuer":"two"}',
+            b'{"jwks":{"keys":[{"kid":"one","kid":"two"}]}}',
+            b'{"values":[NaN]}',
+            b'{"value":Infinity}',
+            b'{"value":-Infinity}',
+            b"\xff",
+        ):
+            with self.subTest(raw=data), self.assertRaises(ValueError):
+                load_authority_json(data)
+
+    def test_ca_https_discovery_never_inherits_process_proxy_or_ambiguous_jwks(self) -> None:
+        class ResponseFixture:
+            status = 200
+            headers = SimpleNamespace(get_content_type=lambda: "application/json")
+
+            def __init__(self, payload: bytes) -> None:
+                self.payload = payload
+
+            def __enter__(self) -> ResponseFixture:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self, size: int) -> bytes:
+                return self.payload[:size]
+
+        class PrivateOpener:
+            def __init__(self, target: PublicIssuerMetadataBoundaryTests) -> None:
+                self.test = target
+
+            def open(self, request: object, *, timeout: float) -> ResponseFixture:
+                self.test.assertEqual(timeout, 5.0)
+                self.test.assertEqual(
+                    request.full_url, "https://source-fixture.invalid/auth/v1/oidc/certs"
+                )
+                return ResponseFixture(self.test.payload)
+
+        self.payload = b'{"keys":[{"kid":"fixture"}]}'
+        handler_calls: list[tuple[object, ...]] = []
+
+        def build_fake(*handlers: object) -> PrivateOpener:
+            handler_calls.append(handlers)
+            self.assertTrue(any(isinstance(h, ProxyHandler) and not h.proxies for h in handlers))
+            self.assertTrue(any(isinstance(h, HTTPSHandler) for h in handlers))
+            return PrivateOpener(self)
+
+        with patch("authorization._rauthy_issuer_keys.build_opener", side_effect=build_fake):
+            data = _read_json_https(
+                "https://source-fixture.invalid/auth/v1/oidc/certs", max_bytes=512
+            )
+            self.assertEqual(data["keys"], [{"kid": "fixture"}])
+            self.payload = b'{"keys":[{"kid":"original","kid":"replaced"}]}'
+            with self.assertRaises(RauthyKeysUnavailable):
+                _read_json_https("https://source-fixture.invalid/auth/v1/oidc/certs", max_bytes=512)
+        self.assertEqual(len(handler_calls), 2)
 
 
 if __name__ == "__main__":

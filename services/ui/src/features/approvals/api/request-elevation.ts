@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_API_V1} from "@/shared/config/control-panel-api"
 import { parseApproval, type ApprovalRecord } from "./control-panel"
 import { parseHandEffectScopes, hasCompleteHandScopeCoverage, type HandEffectScope } from "@/shared/lib/hand-effect-scope"
@@ -64,7 +65,7 @@ export async function requestSessionElevation(
         response.status===409?"conflict":response.status===422?"invalid":"uncertain"
       return {kind,code:"ELEVATION_HTTP_"+response.status}
     }
-    const row=parseApproval(await response.json(),project)
+    const row=parseApproval(await readBoundedJsonResponse(response,signal,131_072),project)
     if(signal.aborted)return {kind:"uncertain",code:"ELEVATION_OUTCOME_UNCERTAIN"}
     if(!row||row.id!==operation||row.agent_session_uuid!==session||row.requested_by_user_uuid!==actorUuid||
       row.status!=="pending"||row.version!==1||row.allowed_actions.length!==0||

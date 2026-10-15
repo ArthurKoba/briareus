@@ -222,3 +222,40 @@ describe("Files scope rows expire independently",()=>{
     expect(list).toEqual([older,newer])
   })
 })
+
+describe("bounded AgentSession inventory and lookup cancellation",()=>{
+  it("rejects giant source lists before JSON parsing rather than displaying rows",async()=>{
+    globalThis.fetch=async()=>new Response(JSON.stringify({
+      items:[active()],
+    }),{status:200,headers:{"Content-Length":"9000000"}})
+    expect((await listCurrentSessions(project,actor,true,new AbortController().signal)).kind)
+      .toBe("unavailable")
+  })
+  it("does not infer semantic not-found after a stalled 404 response was cancelled",async()=>{
+    const {readCurrentSession}=await import('../src/features/agent-sessions/api/current-sessions')
+    let cancelled=0
+    const waiting=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(waiting,{status:404})
+    const pending=readCurrentSession(project,session,actor,true,request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),300))])
+    expect(result).toEqual({kind:"unavailable",code:"AGENT_SESSION_READ_CANCELLED"})
+    expect(cancelled).toBe(1)
+  })
+})
+
+describe("individual bounded AgentSession stream cancellation",()=>{
+  it("distinguishes cancellation from Backend unavailability on a stalled successful point read",async()=>{
+    const {readCurrentSession}=await import('../src/features/agent-sessions/api/current-sessions')
+    let cancelled=0
+    const waiting=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(waiting,{status:200})
+    const pending=readCurrentSession(project,session,actor,true,request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),300))])
+    expect(result).toEqual({kind:"unavailable",code:"AGENT_SESSION_READ_CANCELLED"})
+    expect(cancelled).toBe(1)
+  })
+})

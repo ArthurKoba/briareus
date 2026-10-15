@@ -7,16 +7,19 @@ from an unverified bearer header, request URL or a public JWT claim.
 from __future__ import annotations
 
 import asyncio
-import json
 import ssl
 from collections.abc import Callable
 from time import monotonic
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
-from authorization._rauthy_jwks import RauthyJwksVerifier, RauthyKeysUnavailable
+from authorization._rauthy_jwks import (
+    RauthyJwksVerifier,
+    RauthyKeysUnavailable,
+    load_authority_json,
+)
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -26,7 +29,11 @@ class _NoRedirect(HTTPRedirectHandler):
 
 def _read_json_https(url: str, *, max_bytes: int) -> dict[str, object]:
     # Uses platform CA verification and does not forward headers/cookies/tokens.
-    client = build_opener(_NoRedirect(), HTTPSHandler(context=ssl.create_default_context()))
+    # An OS/browser HTTPS proxy is not part of the reviewed Rauthy issuer
+    # trust boundary. Disable environment proxy routing for JWKS discovery.
+    client = build_opener(
+        ProxyHandler({}), _NoRedirect(), HTTPSHandler(context=ssl.create_default_context())
+    )
     request = Request(url, headers={"Accept": "application/json"}, method="GET")
     try:
         with client.open(request, timeout=5.0) as response:
@@ -41,7 +48,7 @@ def _read_json_https(url: str, *, max_bytes: int) -> dict[str, object]:
     if len(payload) > max_bytes:
         raise RauthyKeysUnavailable("Rauthy issuer response exceeded byte limit")
     try:
-        content: Any = json.loads(payload)
+        content: Any = load_authority_json(payload)
     except (ValueError, UnicodeError) as exc:
         raise RauthyKeysUnavailable("Rauthy issuer returned invalid JSON") from exc
     if not isinstance(content, dict):

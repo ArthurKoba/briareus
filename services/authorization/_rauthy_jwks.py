@@ -7,6 +7,8 @@ discovery by the future trusted attestor, never from a token URL/header.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +38,34 @@ class VerifiedRauthySubject:
 # Explicitly limited to algorithms present in verified Rauthy Development JWKS.
 # Never derive an allowed algorithm from an untrusted JWT header alone.
 _ALLOWED_ALGORITHMS = frozenset({"EdDSA", "RS256", "RS384", "RS512"})
+_RAUTHY_USER_SUBJECT = re.compile(r"[A-Za-z0-9]{24}\Z", re.ASCII)
+
+
+def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("private authority response has duplicate field")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite(_value: str) -> object:
+    raise ValueError("nonfinite number in private authority response")
+
+
+def load_authority_json(body: bytes) -> object:
+    """Parse bytes with one value per key at *every* JSON object depth.
+
+    Callers already cap response lengths; no arbitrary URL/transport is
+    selected by this utility and no IAM/User/Permit result is manufactured.
+    """
+    if not isinstance(body, bytes):
+        raise ValueError("expected bounded response bytes")
+    try:
+        return json.loads(body, object_pairs_hook=_unique_fields, parse_constant=_reject_nonfinite)
+    except (ValueError, UnicodeError, RecursionError):
+        raise ValueError("invalid private authority JSON") from None
 
 
 class RauthyJwksVerifier:
@@ -135,7 +165,7 @@ class RauthyJwksVerifier:
             audiences = [audience] if isinstance(audience, str) else audience
             if (
                 not isinstance(sub, str)
-                or not 1 <= len(sub) <= 256
+                or _RAUTHY_USER_SUBJECT.fullmatch(sub) is None
                 or any(type(value) is not int for value in (exp, issued, nbf))
                 or exp <= issued
                 or nbf >= exp

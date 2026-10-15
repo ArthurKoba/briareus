@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse,readBoundedErrorCode} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_API_V1} from "@/shared/config/control-panel-api"
 /** LOCAL Backend source contract: _oidc_catalog.py GET /api/v1/catalog.
  * Exact nonsecret Resource owner metadata; credentials/variables values never
@@ -75,14 +76,6 @@ export function parseCatalogMetadata(
   }
   return result
 }
-async function responseCode(response:Response):Promise<string>{
-  try{
-    const body:unknown=await response.json()
-    if(isObject(body)&&isObject(body.error)&&typeof body.error.code==="string"&&body.error.code.length<=128)
-      return body.error.code
-  }catch{/* preserve error as unavailable without details */}
-  return "UNKNOWN"
-}
 export async function readCurrentCatalog(
   project:string,
   kind:CatalogKind,
@@ -101,14 +94,15 @@ export async function readCurrentCatalog(
     )
     if(signal.aborted)return {kind:"unavailable",code:"CATALOG_READ_CANCELLED"}
     if(response.status!==200){
-      const code=await responseCode(response)
+      const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+      if(signal.aborted)return {kind:"unavailable",code:"CATALOG_READ_CANCELLED"}
       return {kind:response.status===401?"unauthorized":
         response.status===403?"forbidden":
         response.status===422?"invalid":"unavailable",code}
     }
-    const value:unknown=await response.json()
+    const value:unknown=await readBoundedJsonResponse(response,signal,65_536)
     if(signal.aborted)return {kind:"unavailable",code:"CATALOG_READ_CANCELLED"}
     const items=parseCatalogMetadata(value,project,kind,context)
     return items?{kind:"ready",items}:{kind:"invalid",code:"CATALOG_DTO_INVALID"}
-  }catch{return {kind:"unavailable",code:"CATALOG_NETWORK_UNAVAILABLE"}}
+  }catch{return {kind:"unavailable",code:signal.aborted?"CATALOG_READ_CANCELLED":"CATALOG_NETWORK_UNAVAILABLE"}}
 }

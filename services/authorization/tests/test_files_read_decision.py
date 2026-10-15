@@ -8,6 +8,7 @@ Nothing is mounted in the running stack; no real User or filesystem is read.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import secrets
@@ -212,6 +213,72 @@ class FilesReadDecisionTests(unittest.IsolatedAsyncioTestCase):
                 json=body,
                 headers={"Authorization": "Bearer " + (token or self.token())},
             )
+
+    async def test_preparse_files_framing_denies_before_replay_and_owner(self) -> None:
+        # Synthetic ingress fixture is disabled here to ensure its test-only
+        # request.body() cannot accidentally prebuffer the data under test.
+        self.install_transport_proof = False
+        good = json.dumps(self.command.model_dump(mode="json"), separators=(",", ":")).encode()
+        samples = (
+            (
+                good + b"x" * 9000,
+                [("Content-Type", "application/json"), ("Content-Length", "2")],
+                413,
+            ),
+            (good, [("Content-Type", "application/json"), ("Content-Length", "9999")], 413),
+            (good, [("Content-Type", "application/json"), ("Content-Length", "2")], 422),
+            (
+                good,
+                [
+                    ("Content-Type", "application/json"),
+                    ("Content-Length", str(len(good))),
+                    ("Transfer-Encoding", "chunked"),
+                ],
+                422,
+            ),
+            (
+                good,
+                [
+                    ("Content-Type", "application/json"),
+                    ("Content-Length", str(len(good))),
+                    ("Content-Encoding", "gzip"),
+                ],
+                422,
+            ),
+            (b"{", [("Content-Type", "application/json"), ("Content-Length", "1")], 422),
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=self.app), base_url="http://local-access-owner"
+        ) as client:
+            for body, headers, expected in samples:
+                with self.subTest(expected=expected, size=len(body)):
+                    response = await client.post(
+                        _PATH,
+                        content=body,
+                        headers=[*headers, ("Authorization", "Bearer " + self.token())],
+                    )
+                    self.assertEqual(response.status_code, expected, response.text)
+                    self.assertEqual(response.headers["cache-control"], "no-store")
+                    self.assertNotIn("allowed", response.text)
+        self.assertEqual(len(self.replay.used), 0)
+        self.assertEqual(len(self.db.queries), 0)
+        self.assertEqual(self.resource.calls, 0)
+
+    async def test_stalled_files_decision_cannot_return_uncached_permit(self) -> None:
+        async def delayed_attestor(_request: Request, _command: object) -> object:
+            await asyncio.sleep(0.09)
+            raise AssertionError("timed-out attestor reached a positive result")
+
+        with (
+            patch.object(self.service._attestor, "verify", side_effect=delayed_attestor),
+            patch("authorization._files_read_decision._DECISION_AUTH_TIMEOUT_SECONDS", 0.025),
+        ):
+            result = await self.decide()
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(result.headers["cache-control"], "no-store")
+        self.assertNotIn("allowed", result.text)
+        self.assertFalse(self.db.queries)
+        self.assertEqual(self.resource.calls, 0)
 
     async def test_both_phases_recheck_current_sources_without_legacy_identity(
         self,

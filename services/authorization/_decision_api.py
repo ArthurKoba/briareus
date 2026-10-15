@@ -7,6 +7,7 @@ Without it, the route is mounted but unavailable and cannot grant access.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,8 +15,10 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
+from starlette.requests import ClientDisconnect
 
 from authorization._access_cedar import permits_current_project_grant
 from authorization._resource_scope import (
@@ -27,6 +30,71 @@ from authorization._resource_scope import (
 )
 from authorization._session_persistence import ProjectAgentSessionRow
 from common.platform_db import PlatformDatabase
+
+_NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+
+_MAX_BYTES = 8192
+_DECISION_AUTH_TIMEOUT_SECONDS = 12.0
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateRequestBodyRejected(Exception):
+    status_code: int
+    reason: str
+
+
+async def bounded_private_request(request: Request) -> tuple[bytes, Request]:
+    """Read at most 8192 real ASGI bytes in one bounded 5s receive window.
+
+    A client's Content-Length is never proof of what bytes were actually
+    delivered. Missing/duplicated/mismatched lengths, Transfer-Encoding and
+    Content-Encoding are invalid private API framing. All body data is
+    discarded before any caller identity, Platform/DB, Cedar or replay IO.
+    """
+    headers = request.headers
+    sizes = headers.getlist("content-length")
+    if (
+        headers.getlist("content-type") != ["application/json"]
+        or headers.getlist("transfer-encoding")
+        or headers.getlist("content-encoding")
+        or len(sizes) != 1
+        or not 1 <= len(sizes[0]) <= 4
+        or not sizes[0].isascii()
+        or not sizes[0].isdecimal()
+    ):
+        raise PrivateRequestBodyRejected(422, "ambiguous private Access request framing")
+    count = int(sizes[0])
+    if count > _MAX_BYTES:
+        raise PrivateRequestBodyRejected(413, "private Access request too large")
+    body = bytearray()
+    try:
+        async with asyncio.timeout(5):
+            async for part in request.stream():
+                if len(part) > _MAX_BYTES - len(body):
+                    raise PrivateRequestBodyRejected(413, "private Access request too large")
+                body.extend(part)
+    except (TimeoutError, RuntimeError, ClientDisconnect):
+        raise PrivateRequestBodyRejected(422, "private Access body unavailable") from None
+    if not body or len(body) != count:
+        raise PrivateRequestBodyRejected(422, "private Access body/length mismatch")
+
+    raw = bytes(body)
+    delivered = False
+
+    async def replay_original_receive() -> dict[str, object]:
+        nonlocal delivered
+        if delivered:
+            # Do not fabricate a client disconnect merely because the body
+            # was replayed once. A real server's receive channel remains the
+            # authority for disconnects while the response is being written.
+            return await request.receive()
+        delivered = True
+        return {"type": "http.request", "body": raw, "more_body": False}
+
+    # The transport-authenticated resolver hashes attested_request.body().
+    # An independently recreated Request avoids manipulating Starlette
+    # private _body while keeping real scope-injected trusted peer facts.
+    return raw, Request(request.scope, receive=replay_original_receive)
 
 
 class DecisionAuthenticationRequired(Exception):
@@ -210,7 +278,18 @@ def authorization_decision_router(
     router = APIRouter(prefix="/internal/v1/authorization", tags=["authorization-private"])
 
     @router.post("/decide", include_in_schema=False)
-    async def decide(command: DecisionCommand, request: Request) -> DecisionPermit:
+    async def decide(request: Request) -> JSONResponse:
+        # No FastAPI body-model parameter: it would buffer untrusted bytes
+        # BEFORE any identity, peer, length or digest checks.
+        try:
+            raw, verified_request = await bounded_private_request(request)
+            command = DecisionCommand.model_validate_json(raw)
+        except PrivateRequestBodyRejected as exc:
+            raise HTTPException(exc.status_code, detail=exc.reason, headers=_NO_STORE) from None
+        except (ValueError, TypeError):
+            raise HTTPException(
+                422, detail="invalid bounded decision body", headers=_NO_STORE
+            ) from None
         active = (
             service
             if service is not None
@@ -219,21 +298,28 @@ def authorization_decision_router(
             else None
         )
         if active is None:
-            raise HTTPException(503, detail="authorization identity attestation unavailable")
+            raise HTTPException(
+                503, detail="authorization identity attestation unavailable", headers=_NO_STORE
+            )
         try:
-            allowed = await active.permits(request, command)
+            async with asyncio.timeout(_DECISION_AUTH_TIMEOUT_SECONDS):
+                allowed = await active.permits(verified_request, command)
         except DecisionAuthenticationRequired:
-            raise HTTPException(401, detail="authorization caller not authenticated") from None
+            raise HTTPException(
+                401, detail="authorization caller not authenticated", headers=_NO_STORE
+            ) from None
         except DecisionScopeDenied:
-            raise HTTPException(403, detail="authorization denied") from None
+            raise HTTPException(403, detail="authorization denied", headers=_NO_STORE) from None
         except DecisionAuthorityUnavailable:
-            raise HTTPException(503, detail="authorization authority unavailable") from None
+            raise HTTPException(
+                503, detail="authorization authority unavailable", headers=_NO_STORE
+            ) from None
         except Exception:
-            # No grace grants or fallback to management state, unsigned headers,
-            # a cached JWT, or the caller-supplied expected revision.
-            raise HTTPException(503, detail="authorization authority unavailable") from None
+            raise HTTPException(
+                503, detail="authorization authority unavailable", headers=_NO_STORE
+            ) from None
         if not allowed:
-            raise HTTPException(403, detail="authorization denied")
-        return DecisionPermit()
+            raise HTTPException(403, detail="authorization denied", headers=_NO_STORE)
+        return JSONResponse(DecisionPermit().model_dump(), headers=_NO_STORE)
 
     return router

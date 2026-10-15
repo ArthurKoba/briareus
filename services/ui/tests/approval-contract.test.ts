@@ -123,3 +123,24 @@ describe("committed approval receipt invariants",()=>{
     expect((await resolveProjectApproval(selected,'approve',new AbortController().signal)).kind).toBe('uncertain')
   })
 })
+
+describe("bounded approval inventory and post-commit uncertainty",()=>{
+  it("rejects oversized owner list before parsing any approval rights",async()=>{
+    globalThis.fetch=async()=>new Response(JSON.stringify({
+      items:[item()],
+    }),{status:200,headers:{"Content-Length":"9000000"}})
+    expect((await readProjectApprovals(project,new AbortController().signal)).kind).toBe("unavailable")
+  })
+  it("does not accept a delayed, cancelled approval response as a committed decision",async()=>{
+    const selected=parseApproval(item(),project)!
+    const request=new AbortController()
+    let cancelled=0
+    const waiting=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    globalThis.fetch=async()=>new Response(waiting,{status:200})
+    const pending=resolveProjectApproval(selected,"approve",request.signal)
+    setTimeout(()=>request.abort(),20)
+    const outcome=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),300))])
+    expect(outcome).toEqual({kind:"uncertain",code:"APPROVAL_RESULT_UNCERTAIN"})
+    expect(cancelled).toBe(1)
+  })
+})

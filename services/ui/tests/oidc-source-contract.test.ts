@@ -55,8 +55,8 @@ describe("Rauthy provider session and independent Platform proof",()=>{
       return new Response(JSON.stringify({issuer,client_id:"briareus-control-panel"}),{status:200})
     }
     expect(await readRauthyPanelState(new AbortController().signal)).toEqual({kind:"signed_out"})
-    expect(observed).toEqual(["/api/v1/auth/session","/api/v1/auth/config"])
-    expect(methods).toEqual(["GET","GET"])
+    expect(observed).toEqual(["/api/v1/auth/session"])
+    expect(methods).toEqual(["GET"])
   })
   it("fails closed on wrong issuer or nonempty unverified permissions",async()=>{
     for(const invalid of [{...identity(),issuer:"https://other.invalid"},{
@@ -162,5 +162,56 @@ describe("exact Project owner context",()=>{
     const request=new AbortController()
     globalThis.fetch=async()=>{request.abort();return new Response(JSON.stringify(proof()),{status:200})}
     expect((await readProjectContext(identity(),project,request.signal)).kind).toBe('unavailable')
+  })
+})
+
+describe("bounded auth owner transport and late reply cancellation",()=>{
+  it("never promotes an oversized signed Rauthy session or Project owner proof",async()=>{
+    const oversized={...identity(),extra:"Z".repeat(90_000)}
+    globalThis.fetch=async url=>new Response(JSON.stringify(
+      String(url).endsWith("/session")?oversized:{issuer,client_id:"briareus-control-panel"}
+    ),{status:200})
+    expect((await readRauthyPanelState(new AbortController().signal)).kind).toBe("unavailable")
+    const hugePlatform={...proof(),noise:"N".repeat(270_000)}
+    globalThis.fetch=async()=>new Response(JSON.stringify(hugePlatform),{status:200})
+    expect((await readPlatformContext(identity(),new AbortController().signal)).kind).toBe("unavailable")
+  })
+  it("cancels a stalled signed session body even when fetch itself returned 200",async()=>{
+    let cancelled=0
+    const body=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async url=>String(url).endsWith("/session")
+      ?new Response(body,{status:200})
+      :new Response(JSON.stringify({issuer,client_id:"briareus-control-panel"}),{status:200})
+    const pending=readRauthyPanelState(request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),300))])
+    expect(result).toEqual({kind:"unavailable",reason:"network"})
+    expect(cancelled).toBe(1)
+  })
+  it("a late HTTP204 after AbortSignal cannot confirm a logout",async()=>{
+    const request=new AbortController()
+    let posts=0
+    globalThis.fetch=async()=>{
+      posts++;request.abort();return new Response(null,{status:204})
+    }
+    expect(await signOutRauthyPanel(request.signal)).toEqual({kind:"uncertain"})
+    expect(posts).toBe(1)
+    expect(await signOutRauthyPanel(AbortSignal.abort())).toEqual({kind:"unavailable"})
+    expect(posts).toBe(1)
+  })
+  it("limits untrusted JSON before parsing and distinguishes invalid UTF-8",async()=>{
+    const {readBoundedJsonResponse,readBoundedErrorCode}=await import("../src/shared/lib/bounded-json-response")
+    const request=new AbortController()
+    const huge=new Response(JSON.stringify({error:{code:"DONT_SHOW"},noise:"X".repeat(15_000)}),{
+      status:503,headers:{"Content-Type":"application/json"},
+    })
+    expect(await readBoundedErrorCode(huge,request.signal,"UNKNOWN")).toBe("UNKNOWN")
+    await expect(readBoundedJsonResponse(new Response("{}",{
+      status:200,headers:{"Content-Length":"9999999"},
+    }),request.signal,8192)).rejects.toThrow()
+    await expect(readBoundedJsonResponse(new Response(new Uint8Array([0xff]),{
+      status:200,
+    }),request.signal,8192)).rejects.toThrow()
   })
 })

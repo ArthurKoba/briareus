@@ -8,6 +8,7 @@ retaining its own root/FD incarnation, path confinement and byte limits.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -18,14 +19,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from authorization._decision_api import (
+    _DECISION_AUTH_TIMEOUT_SECONDS,
     AuthorizationDecisionReader,
     AuthorizedCurrentGrant,
     DecisionAuthenticationRequired,
     DecisionAuthorityUnavailable,
     DecisionCommand,
     DecisionScopeDenied,
+    PrivateRequestBodyRejected,
     TrustedDecisionAttestor,
     VerifiedDecisionCaller,
+    bounded_private_request,
 )
 from authorization._resource_scope import (
     EffectResource,
@@ -197,12 +201,20 @@ def files_read_decision_router(
     router = APIRouter(prefix="/internal/v1/authorization", tags=["access-private"])
 
     @router.post("/files/read-decision", include_in_schema=False)
-    async def read_decision(command: FilesReadDecisionCommand, request: Request) -> JSONResponse:
+    async def read_decision(request: Request) -> JSONResponse:
+        try:
+            raw, verified_request = await bounded_private_request(request)
+            command = FilesReadDecisionCommand.model_validate_json(raw)
+        except PrivateRequestBodyRejected as exc:
+            raise HTTPException(exc.status_code, exc.reason, headers=_HEADERS) from None
+        except (ValueError, TypeError):
+            raise HTTPException(422, "invalid bounded Files decision", headers=_HEADERS) from None
         active = resolve_service()
         if active is None:
             raise HTTPException(503, "Files read authority unavailable", headers=_HEADERS)
         try:
-            result = await active.decide(request, command)
+            async with asyncio.timeout(_DECISION_AUTH_TIMEOUT_SECONDS):
+                result = await active.decide(verified_request, command)
         except DecisionAuthenticationRequired:
             raise HTTPException(
                 401, "Files read caller not authenticated", headers=_HEADERS

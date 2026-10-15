@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse,readBoundedErrorCode} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_AUTH_API} from "@/shared/config/control-panel-api"
 /** Backend native Rauthy transaction Init, not login or authorization.
  * The one-use PoW endpoint is intentionally NOT called here: there is no
@@ -19,14 +20,6 @@ const REQUEST:RequestInit={
 function isObject(value:unknown):value is Record<string,unknown>{
   return typeof value==="object"&&value!==null&&!Array.isArray(value)
 }
-async function errorCode(response:Response):Promise<string>{
-  try{
-    const value=await response.json() as unknown
-    const details=isObject(value)?value.error:null
-    return isObject(details)&&typeof details.code==="string"&&
-      /^[A-Z][A-Z_]{0,63}$/.test(details.code)?details.code:"NATIVE_UNAVAILABLE"
-  }catch{return "NATIVE_UNAVAILABLE"}
-}
 /** Explicitly user-triggered same-origin, credential-free Init only.
  * Caller restricts invocation to a secure HTTPS browser context.
  */
@@ -36,10 +29,12 @@ export async function prepareNativeRauthyLogin(signal:AbortSignal):Promise<Nativ
   try{
     const begin=await fetch(CONTROL_PANEL_AUTH_API+"/start",{...REQUEST,signal})
     if(signal.aborted)return {kind:"unavailable",code:"NATIVE_PREPARATION_CANCELLED"}
-    if(begin.status!==201)return {
-      kind:begin.status===403?"forbidden":"unavailable",code:await errorCode(begin),
+    if(begin.status!==201){
+      const code=await readBoundedErrorCode(begin,signal,"NATIVE_UNAVAILABLE")
+      if(signal.aborted)return {kind:"unavailable",code:"NATIVE_PREPARATION_CANCELLED"}
+      return {kind:begin.status===403?"forbidden":"unavailable",code}
     }
-    const init=await begin.json() as unknown
+    const init=await readBoundedJsonResponse(begin,signal,4096)
     if(!isObject(init)||Object.keys(init).length!==3||
       Object.keys(init).some(key=>!["stage","authenticated","expires_in"].includes(key))||
       init.authenticated!==false||init.stage!=="first_factor_required"||
@@ -55,6 +50,6 @@ export async function prepareNativeRauthyLogin(signal:AbortSignal):Promise<Nativ
     if(!Number.isFinite(elapsed)||elapsed<0||Date.now()>=expiresAt||Date.now()<startedAt)return {kind:"expired",code:"NATIVE_PREPARATION_EXPIRED"}
     return {kind:"prepared",expiresIn:init.expires_in,expiresAt}
   }catch{
-    return {kind:"unavailable",code:"NATIVE_NETWORK_UNAVAILABLE"}
+    return {kind:"unavailable",code:signal.aborted?"NATIVE_PREPARATION_CANCELLED":"NATIVE_NETWORK_UNAVAILABLE"}
   }
 }

@@ -42,8 +42,9 @@ authorization fallback. Only an explicitly DEV-built source can load the
 isolated local design preview; the production entry has no guest/legacy
 Identity fallback or hosted-provider login action.
 
-The default `/panel/` screen is now the **Briareus sign-in form inside
-the permanent Control Panel sidebar/header**. Anonymous navigation does not
+The default `/panel/` screen is now the **compact Briareus session-status
+card inside the permanent Control Panel sidebar/header**. No password or
+native-preparation form is presented before real first-factor acceptance. Anonymous navigation does not
 open a guest MCP preview; direct protected hashes return to the sign-in
 route. Current Rauthy OIDC session is checked read-only, with stable
 in-place loader/status UI. The earlier custom Identity client/form has been
@@ -59,15 +60,19 @@ provider redirect or guest fallback. The existing Backend native prelogin
 clients and the pinned, isolated upstream sPoW worker remain source-only,
 not mounted in the product UI pending genuine password/MFA/PKCE acceptance.
 
-The current Backend `GET /api/v1/auth/session` deliberately returns HTTP401
-`{ "detail": "OIDC browser session required" }` when no valid Secure
-HttpOnly `__Host-briareus_oidc_session` cookie exists. For an anonymous
-browser this is `signed_out`, **not** a Platform error or a grant. A 401
-*after* independently confirmed completed authentication must be diagnosed
-in Backend/Gateway session issuance and cookie forwarding; Frontend never
-substitutes a manufactured identity, cookie or local login success. Only
-HTTP200 with a valid bound Rauthy response advances provider identity;
-Platform User/Project still needs independent current BFF membership.
+Backend `GET /api/v1/auth/session` returns HTTP401 when no valid Secure
+HttpOnly `__Host-briareus_oidc_session` cookie exists. Earlier published Dev
+returned `{"detail":"OIDC browser session required"}`; current Backend
+source now returns canonical `{"error":{"code":"OIDC_SESSION_REQUIRED"}}`
+with `Cache-Control:no-store`. The UI safely treats EITHER HTTP401 as
+`signed_out`, without decoding the unauthenticated body or making a redundant
+provider `/config` request. A 401 after independently confirmed completed
+authentication still requires Backend/Gateway session issuance and cookie
+forwarding diagnosis. Frontend never substitutes a manufactured identity or
+principal. Only HTTP200 with exact bound Rauthy session AND valid provider
+configuration can advance identity; Platform User/Project remains a separate
+BFF check. A late HTTP204 logout arriving after cancellation is an uncertain
+result, not confirmed revocation.
 
 The login status panel follows RauthySignIn's existing state event.
 When the parent OidcPanelPage supplies a freshly checked Rauthy
@@ -81,6 +86,20 @@ sign-in screen cannot display a stale `signed_in` state. The UI must never
 submit credentials through the retired Identity route, use OAuth ROPC,
 invent a Rauthy login endpoint, or store passwords/tokens in JS storage.
 Backend+Deployment own the actual native first-factor/MFA session-completion contract.
+
+All browser-facing authenticated Control Panel API clients now decode JSON
+through a shared **bounded, cancel-aware stream** instead of unrestricted
+`response.json()`: signed Rauthy session/config 8KiB, Project owner proof
+256KiB, Catalog list 64KiB, bounded AgentSession/approval inventories 6MiB
+(Backend permits up to 50 rows, 32 resources per row and 512 Unicode
+characters per selector),
+small management-command receipts 16–128KiB and error bodies 4KiB. Source DTO
+shape, Project/actor, revisions and expiry remain checked independently.
+Oversized, aborted, incomplete or malformed replies never turn into identity,
+current owner permissions, confirmed approval/revocation or file bytes.
+Aborting a stalled 200 or 503 body cancels its reader without waiting for
+the remote proxy. This is a transport limit, not a new Cedar policy.
+
 
 A child component echoing the same provider snapshot is not a new auth event.
 A real logout or changed identity invalidates older owner reads before their

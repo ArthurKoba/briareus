@@ -106,3 +106,23 @@ describe("native Init monotonic lifetime",()=>{
     }finally{globalThis.fetch=original;monotonic.mockRestore();wall.mockRestore()}
   })
 })
+
+describe("bounded source-only native Init replies",()=>{
+  it("does not accept an oversized HTTP201 as a prepared login or request a PoW",async()=>{
+    await scopeTest([apiReply(201,{
+      stage:"first_factor_required",authenticated:false,expires_in:120,
+      noise:"Z".repeat(25_000),
+    })],async requests=>{
+      expect((await prepareNativeRauthyLogin(new AbortController().signal)).kind).toBe("unavailable")
+      expect(requests.map(row=>row.path)).toEqual(["/api/v1/auth/start"])
+    })
+  })
+  it("does not decode a giant HTTP503 body into a retry instruction",async()=>{
+    await scopeTest([apiReply(503,{error:{code:"NATIVE_UNAVAILABLE"},padding:"Y".repeat(15_000)})],
+      async requests=>{
+        expect(await prepareNativeRauthyLogin(new AbortController().signal))
+          .toEqual({kind:"unavailable",code:"NATIVE_UNAVAILABLE"})
+        expect(requests).toHaveLength(1)
+      })
+  })
+})

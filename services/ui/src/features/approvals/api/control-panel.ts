@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse,readBoundedErrorCode} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_API_V1} from "@/shared/config/control-panel-api"
 import {
   parseHandEffectScopes, hasCompleteHandScopeCoverage, type HandEffectScope,
@@ -120,12 +121,6 @@ function transport(signal:AbortSignal):RequestInit{
   return {signal,credentials:"same-origin",mode:"same-origin",redirect:"error",
     referrerPolicy:"no-referrer",cache:"no-store",headers:{Accept:"application/json"}}
 }
-async function serverCode(response:Response):Promise<string>{
-  try{
-    const body=record(await response.json()),error=record(body?.error)
-    return typeof error?.code==="string"&&error.code.length<=128?error.code:"UNKNOWN"
-  }catch{return "UNKNOWN"}
-}
 function failure(status:number,code:string):Exclude<ApprovalResult,{kind:"ready"}>{
   return {kind:status===401?"unauthorized":status===403?"forbidden":status===409?"conflict":
     status===422?"invalid":"unavailable",code}
@@ -136,8 +131,12 @@ export async function readProjectApprovals(projectUuid:string,signal:AbortSignal
   try{
     const response=await fetch(CONTROL_PANEL_API_V1+"/approvals?project_uuid="+encodeURIComponent(projectUuid),transport(signal))
     if(signal.aborted)return {kind:"unavailable",code:"APPROVAL_READ_CANCELLED"}
-    if(response.status!==200)return failure(response.status,await serverCode(response))
-    const body=record(await response.json())
+    if(response.status!==200){
+      const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+      if(signal.aborted)return {kind:"unavailable",code:"APPROVAL_READ_CANCELLED"}
+      return failure(response.status,code)
+    }
+    const body=record(await readBoundedJsonResponse(response,signal,6_291_456))
     if(signal.aborted)return {kind:"unavailable",code:"APPROVAL_READ_CANCELLED"}
     if(!body||!Array.isArray(body.items)||body.items.length>50)return {kind:"invalid",code:"APPROVAL_DTO_INVALID"}
     const ids=new Set<string>(),items:ApprovalRecord[]=[]
@@ -147,8 +146,9 @@ export async function readProjectApprovals(projectUuid:string,signal:AbortSignal
       ids.add(row.id)
       items.push(row)
     }
+    if(signal.aborted)return {kind:"unavailable",code:"APPROVAL_READ_CANCELLED"}
     return {kind:"ready",items}
-  }catch{return {kind:"unavailable",code:"APPROVAL_NETWORK_UNAVAILABLE"}}
+  }catch{return {kind:"unavailable",code:signal.aborted?"APPROVAL_READ_CANCELLED":"APPROVAL_NETWORK_UNAVAILABLE"}}
 }
 /** The server owns the write and its idempotency. No UI optimistic approval. */
 export async function resolveProjectApproval(
@@ -175,10 +175,12 @@ export async function resolveProjectApproval(
     })
     if(signal.aborted)return {kind:"uncertain",code:"APPROVAL_RESULT_UNCERTAIN"}
     if(response.status!==200){
-      const fail=failure(response.status,await serverCode(response))
+      const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+      if(signal.aborted)return {kind:"uncertain",code:"APPROVAL_RESULT_UNCERTAIN"}
+      const fail=failure(response.status,code)
       return {kind:fail.kind,code:fail.code}
     }
-    const row=parseApproval(await response.json(),item.project_uuid)
+    const row=parseApproval(await readBoundedJsonResponse(response,signal,131_072),item.project_uuid)
     if(signal.aborted)return {kind:"uncertain",code:"APPROVAL_RESULT_UNCERTAIN"}
     if(!row||row.id!==item.id||row.version!==item.version+1||
       !sameRequestedEffect(row,item)||

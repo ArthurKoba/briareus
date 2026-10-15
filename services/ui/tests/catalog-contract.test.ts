@@ -105,3 +105,29 @@ describe("Catalog cancellation and list boundary",()=>{
     expect(parseCatalogMetadata({items:[...items,{...row(),resource_uuid:user}]},project,'integration',context())).toBeNull()
   })
 })
+
+describe("bounded Catalog HTTP read",()=>{
+  it("will not parse oversized metadata or oversized 503 error into visible entries",async()=>{
+    globalThis.fetch=async()=>new Response(JSON.stringify({
+      items:[],noise:"x".repeat(90_000),
+    }),{status:200})
+    expect((await readCurrentCatalog(project,"integration",context(),new AbortController().signal)).kind)
+      .toBe("unavailable")
+    globalThis.fetch=async()=>new Response(JSON.stringify({
+      error:{code:"CATALOG_OWNER_UNAVAILABLE"},noise:"x".repeat(14_000),
+    }),{status:503})
+    const unavailable=await readCurrentCatalog(project,"integration",context(),new AbortController().signal)
+    expect(unavailable).toEqual({kind:"unavailable",code:"UNKNOWN"})
+  })
+  it("interrupts a delayed successful response before parsing a current Project",async()=>{
+    let cancelled=0
+    const waiting=new ReadableStream<Uint8Array>({cancel(){cancelled++}})
+    const request=new AbortController()
+    globalThis.fetch=async()=>new Response(waiting,{status:200})
+    const pending=readCurrentCatalog(project,"integration",context(),request.signal)
+    setTimeout(()=>request.abort(),20)
+    const result=await Promise.race([pending,new Promise<"hung">(resolve=>setTimeout(()=>resolve("hung"),300))])
+    expect(result).toEqual({kind:"unavailable",code:"CATALOG_READ_CANCELLED"})
+    expect(cancelled).toBe(1)
+  })
+})

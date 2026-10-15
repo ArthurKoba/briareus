@@ -1,3 +1,4 @@
+import {readBoundedJsonResponse,readBoundedErrorCode} from "@/shared/lib/bounded-json-response"
 import {CONTROL_PANEL_API_V1} from "@/shared/config/control-panel-api"
 import {boundedLifetime,type BoundedLifetime} from "@/shared/lib/bounded-lifetime"
 
@@ -44,12 +45,6 @@ export function parseNormalSession(value:unknown,project:string,policy:Elevation
     is_elevated:false,elevation_policy:policy,hard_expires_at:r.hard_expires_at,
     operations:["files.read","project.metadata.read"],resources:[],
   }
-}
-async function errorCode(response:Response):Promise<string>{
-  try{
-    const value=object(await response.json()), error=object(value?.error)
-    return typeof error?.code==="string"&&error.code.length<=128?error.code:"UNKNOWN"
-  }catch{return "UNKNOWN"}
 }
 /** An immutable request intent, kept in memory until its outcome is known.
  * Replays reuse these exact serialized bytes and the original operation UUID.
@@ -102,11 +97,12 @@ export async function executeNormalSessionOpen(
     })
     if(signal.aborted)return {kind:"uncertain",code:"SESSION_OPEN_OUTCOME_UNCERTAIN"}
     if(response.status===201){
-      const record=parseNormalSession(await response.json(),project,policy)
+      const record=parseNormalSession(await readBoundedJsonResponse(response,signal,16_384),project,policy)
       if(signal.aborted)return {kind:"uncertain",code:"SESSION_OPEN_OUTCOME_UNCERTAIN"}
       return record?{kind:"created",session:record}:{kind:"uncertain",code:"SESSION_RESULT_NOT_VERIFIED"}
     }
-    const code=await errorCode(response)
+    const code=await readBoundedErrorCode(response,signal,"UNKNOWN")
+    if(signal.aborted)return {kind:"uncertain",code:"SESSION_OPEN_OUTCOME_UNCERTAIN"}
     return {kind:response.status===401?"unauthorized":response.status===403?"forbidden":
       response.status===409?"conflict":response.status===422?"invalid":"uncertain",code}
   }catch{return {kind:"uncertain",code:"SESSION_OPEN_OUTCOME_UNCERTAIN"}}

@@ -225,3 +225,26 @@ describe("monotonic recovery deadline",()=>{
     }finally{monotonic.mockRestore();wall.mockRestore()}
   })
 })
+
+describe("bounded normal AgentSession creation receipt",()=>{
+  it("never accepts a huge HTTP201 as a verified session or replays the POST",async()=>{
+    let posts=0
+    globalThis.fetch=async()=>{
+      posts++
+      return new Response(JSON.stringify({...fixture(),padding:"z".repeat(25_000)}),{status:201})
+    }
+    expect((await openNormalSession(project,"requestable","",new AbortController().signal)).kind)
+      .toBe("uncertain")
+    expect(posts).toBe(1)
+  })
+  it("does not transform an aborted server error into a known final refusal",async()=>{
+    const request=new AbortController()
+    let posts=0
+    globalThis.fetch=async()=>{
+      posts++;request.abort()
+      return new Response(JSON.stringify({error:{code:"DENIED"}}),{status:403})
+    }
+    expect((await openNormalSession(project,"requestable","",request.signal)).kind).toBe("uncertain")
+    expect(posts).toBe(1)
+  })
+})
