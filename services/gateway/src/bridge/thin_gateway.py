@@ -182,11 +182,16 @@ def _upstream_headers(
     headers = _api_headers(request)
     if declared_length is not None:
         headers.append((b"content-length", declared_length))
+    # After SingleOriginGuard has independently checked exactly one
+    # accepted public Host, give the PRIVATE API owner exactly one stable
+    # canonical authority. HTTPX otherwise synthesizes the container DNS
+    # destination Host, which the Backend native credentials BFF correctly
+    # rejects. Never forward client Host / :443 / X-Forwarded assertions.
+    headers.append((b"host", PUBLIC_HOST.encode("ascii")))
     if rauthy:
-        # Canonical claims are fixed service facts, not browser input.
+        # Rauthy owner also requires trusted Gateway external-origin hints.
         headers.extend(
             (
-                (b"host", PUBLIC_HOST.encode("ascii")),
                 (b"x-forwarded-host", PUBLIC_HOST.encode("ascii")),
                 (b"x-forwarded-proto", b"https"),
             )
