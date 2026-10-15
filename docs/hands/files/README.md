@@ -52,6 +52,39 @@ source test `hands/files/tests/test_mcp_staged_read.py` confirms both
 strict selector rejection and that staged commands cannot read bytes
 through the default unmounted authority.
 
+## Explicit owner-injected Files MCP activation (still unmounted)
+
+The private `files_hand/_mcp_activation.py` factory prepares `read_file` for
+the first real signed-resource integration. It is **not imported or called by
+the deployed `files_hand/server.py` entrypoint** and introduces no Compose
+variables, new applications, credential issuers or storage mounts. Every
+trusted port must be injected together by a supervisor: a current owner
+effect resolver with immutable executable arguments, an independently
+authenticated private Cedar decision port, a signed Rauthy Files read
+channel and a current Project-to-Files root mapping port. Configuring an
+audience in ENV without these ports cannot mount any business tool.
+
+The shared `ProtectedHandTools` registrar installs the per-tool middleware
+BEFORE registering tools. Missing Rauthy resource verifier prevents creation
+of an activated instance. For `read_file`, the actual FastMCP middleware
+independently validates the signed resource token and current Cedar action
+`files.read` for the server-owned canonical path. The handler then stages a
+fresh operation UUID from the actual HTTP request and calls
+`UnmountedNativeFilesRead(BoundFilesReadAuthority(...))`, whose original
+caller and Files root are checked again before and after reading. No local
+JSON argument, synthetic Permit or caller header can supply a root FD.
+
+Both optional factory diagnostic output and /health/ready remain
+`owner_ports_injected_unaccepted` / HTTP 503 until real signed provider,
+current Project mapping, complete two-phase Access, and Dev runtime acceptance.
+Failures never expose raw file bytes, private paths, tokens or owner details.
+`test_private_mcp_activation.py` proves with an ephemeral genuine RSA
+signature that unsigned Bearers fail before owner I/O, a signed fixture can
+see the prepared tool without being a real Rauthy User, a missing owner
+fails, and even a **synthetic** positive Cedar reply cannot read without
+the independent Files channel. This does not satisfy product Permit/Deny/
+Revoke acceptance.
+
 ## Prepared bounded read consumer (not a public MCP tool)
 
 `hands/files/src/files_hand/_read_adapter.py` supplies the private

@@ -135,6 +135,29 @@ is not a substitute for actual owner-attested resource identity or executor
 network isolation. No historical business tool is registered by this
 source-only contract.
 
+### Explicit protected-tool composition root (staged, not deployed)
+
+`ProtectedHandTools` permits only a server-owned registration callback,
+immutable `ToolEffectBinding` map and injected trusted private Decision
+port to be supplied together. It requires a separately configured actual
+FastMCP resource JWT verifier; malformed or missing trust refuses factory
+construction. The enforcement middleware is registered before any
+protected tool; an undeclared tool cannot inherit authorization from
+diagnostics. The default six Hand entrypoints supply no protected
+registration and still expose only safe diagnostics.
+
+The Files-specific optional `build_protected_files_app` adds one
+`read_file(path,max_bytes)` only after all four explicit owner ports have
+been supplied by the trusted composition root. It does not construct those
+ports, accept them from MCP/ENV or mount the protected tool in the deployed
+Files service. Both its effect PEP and its independent original
+caller/current-owner, two-phase read authority must pass at runtime.
+Injected-but-unaccepted ports are reported as such with readiness 503, not
+as authorized execution. Local signed RSA fixtures prove the negative
+boundaries, including that a synthetic Cedar Permit cannot substitute
+for a trusted Files channel. Real Rauthy/Cedar/Project owner and Dev read
+remain unaccepted.
+
 ### Independent private Authorization transport (LOCAL source only)
 
 A signed Rauthy Bearer and fixed internal Docker DNS are NOT a trusted
