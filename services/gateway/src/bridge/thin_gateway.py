@@ -41,7 +41,7 @@ _API_UPSTREAM = "http://briareus-control-panel-api:8000"
 _RAUTHY_UPSTREAM = "http://briareus-rauthy:8080"
 _PUBLIC_FILES = frozenset({"/", "/robots.txt", "/sitemap.xml", "/panel/"})
 _PANEL_ASSET = re.compile(
-    r"^/panel/assets/[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:js|css|svg|png|webp|ico|woff2)$"
+    r"^/panel/assets/[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:js|css|svg|png|webp|ico|woff2|wasm)$"
 )
 _STATIC_TYPE = {
     "/": frozenset({"text/html"}),
@@ -57,6 +57,7 @@ _ASSET_TYPES = {
     "webp": frozenset({"image/webp"}),
     "ico": frozenset({"image/x-icon", "image/vnd.microsoft.icon"}),
     "woff2": frozenset({"font/woff2", "application/font-woff"}),
+    "wasm": frozenset({"application/wasm"}),
 }
 _HOP_HEADERS = frozenset(
     {
@@ -295,7 +296,9 @@ class ThinGateway:
         if client is None or self._draining:
             return self._unavailable()
         is_asset = bool(_PANEL_ASSET.fullmatch(path))
-        max_bytes = 2 * 1024 * 1024 if is_asset else 256 * 1024
+        max_bytes = (
+            (65_536 if path.endswith(".wasm") else 2 * 1024 * 1024) if is_asset else 256 * 1024
+        )
         expected = _ASSET_TYPES[path.rsplit(".", 1)[-1]] if is_asset else _STATIC_TYPE[path]
         try:
             await asyncio.wait_for(self._slots.acquire(), timeout=3)
