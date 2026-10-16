@@ -7,12 +7,10 @@ business permissions and authentication remain upstream responsibilities.
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
-from urllib.parse import quote
 
 import httpx
 from starlette.applications import Starlette
@@ -39,26 +37,9 @@ from .single_origin import MCP_ENDPOINTS, PUBLIC_HOST, SingleOriginGuard, unavai
 _PANEL_UPSTREAM = "http://briareus-control-panel-ui:8080"
 _API_UPSTREAM = "http://briareus-control-panel-api:8000"
 _RAUTHY_UPSTREAM = "http://briareus-rauthy:8080"
-_PUBLIC_FILES = frozenset({"/", "/robots.txt", "/sitemap.xml", "/panel/"})
-_PANEL_ASSET = re.compile(
-    r"^/panel/assets/[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:js|css|svg|png|webp|ico|woff2|wasm)$"
-)
-_STATIC_TYPE = {
-    "/": frozenset({"text/html"}),
-    "/panel/": frozenset({"text/html"}),
-    "/robots.txt": frozenset({"text/plain"}),
-    "/sitemap.xml": frozenset({"application/xml", "text/xml"}),
-}
-_ASSET_TYPES = {
-    "js": frozenset({"text/javascript", "application/javascript"}),
-    "css": frozenset({"text/css"}),
-    "svg": frozenset({"image/svg+xml"}),
-    "png": frozenset({"image/png"}),
-    "webp": frozenset({"image/webp"}),
-    "ico": frozenset({"image/x-icon", "image/vnd.microsoft.icon"}),
-    "woff2": frozenset({"font/woff2", "application/font-woff"}),
-    "wasm": frozenset({"application/wasm"}),
-}
+# Routing is defined by the fixed public namespace, not by a Vite
+# asset-extension/MIME registry. Nginx owns every Panel asset and SPA route.
+_PANEL_PUBLIC_FILES = frozenset({"/", "/robots.txt", "/sitemap.xml"})
 _HOP_HEADERS = frozenset(
     {
         "host",
@@ -109,10 +90,6 @@ _ROUTE_TABLE: tuple[RouteSpec, ...] = (
     RouteSpec("/auth/v1", "rauthy"),
     RouteSpec("/auth/v1/{path:path}", "rauthy"),
 )
-
-
-def _media_type(value: str) -> str:
-    return value.split(";", 1)[0].strip().casefold()
 
 
 def _raw_path(request: Request) -> str | None:
@@ -283,79 +260,12 @@ class ThinGateway:
         )
 
     async def static(self, request: Request) -> Response:
-        path = _raw_path(request)
-        if request.method not in {"GET", "HEAD"} or request.scope.get("query_string", b""):
-            return Response(status_code=404)
-        if path == "/panel":
-            return Response(
-                status_code=308, headers={"Location": "/panel/", "Cache-Control": "no-store"}
-            )
-        if path is None or (path not in _PUBLIC_FILES and not _PANEL_ASSET.fullmatch(path)):
-            return Response(status_code=404)
-        client = self._client
-        if client is None or self._draining:
-            return self._unavailable()
-        is_asset = bool(_PANEL_ASSET.fullmatch(path))
-        max_bytes = (
-            (65_536 if path.endswith(".wasm") else 2 * 1024 * 1024) if is_asset else 256 * 1024
-        )
-        expected = _ASSET_TYPES[path.rsplit(".", 1)[-1]] if is_asset else _STATIC_TYPE[path]
-        try:
-            await asyncio.wait_for(self._slots.acquire(), timeout=3)
-        except TimeoutError:
-            return self._unavailable()
-        try:
-            async with asyncio.timeout(8):
-                response = await self._send_upstream(
-                    client,
-                    client.build_request(
-                        request.method,
-                        _PANEL_UPSTREAM + quote(path, safe="/-._~"),
-                        headers={"accept": "*/*", "accept-encoding": "identity"},
-                    ),
-                )
-                try:
-                    if (
-                        response.status_code != 200
-                        or _media_type(response.headers.get("content-type", "")) not in expected
-                    ):
-                        return self._unavailable()
-                    if response.headers.get("content-encoding", "identity").lower() not in {
-                        "",
-                        "identity",
-                    }:
-                        return self._unavailable()
-                    length = response.headers.get("content-length")
-                    if length is not None and not 0 <= int(length) <= max_bytes:
-                        return self._unavailable()
-                    parts: list[bytes] = []
-                    total = 0
-                    async for chunk in response.aiter_raw():
-                        total += len(chunk)
-                        if total > max_bytes:
-                            return self._unavailable()
-                        parts.append(chunk)
-                finally:
-                    await response.aclose()
-            payload = b"".join(parts)
-            if path == "/panel/" and request.method == "GET" and b"noindex" not in payload.lower():
-                return self._unavailable()
-            return Response(
-                content=b"" if request.method == "HEAD" else payload,
-                status_code=200,
-                headers={
-                    "Content-Type": response.headers["content-type"],
-                    "Cache-Control": "no-store" if path == "/panel/" else "public, max-age=60",
-                    "X-Content-Type-Options": "nosniff",
-                    **({"X-Robots-Tag": "noindex, nofollow"} if path == "/panel/" else {}),
-                },
-            )
-        except asyncio.CancelledError:
-            raise
-        except (ValueError, httpx.HTTPError, TimeoutError):
-            return self._unavailable()
-        finally:
-            self._slots.release()
+        """Route the whole bounded Panel namespace to its owning UI server.
+
+        No mime sniff, response-body parsing, WASM/JS/CSS filename allowlist,
+        noindex inspection, or fabricated UI reply belongs in Gateway.
+        """
+        return await self._proxy(request, rauthy=False, panel_ui=True)
 
     async def api(self, request: Request) -> Response:
         """Preserve the Admin API's unmodified public /api/* contract."""
@@ -450,12 +360,30 @@ class ThinGateway:
         ] + [(b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff")]
         return streamed
 
-    async def _proxy(self, request: Request, *, rauthy: bool) -> Response:
+    async def _proxy(self, request: Request, *, rauthy: bool, panel_ui: bool = False) -> Response:
         path = _raw_path(request)
-        prefix = "/auth/v1" if rauthy else "/api"
-        if path is None or (path != prefix and not path.startswith(prefix + "/")):
+        if path is None:
             return Response(status_code=404)
-        if not rauthy:
+        if panel_ui:
+            if path == "/panel":
+                return Response(
+                    status_code=308, headers={"Location": "/panel/", "Cache-Control": "no-store"}
+                )
+            # Prevent path traversal escaping the fixed Panel route. Do not
+            # define frontend URL semantics or inspect file extensions.
+            decoded = request.scope.get("path")
+            if (
+                (path not in _PANEL_PUBLIC_FILES and not path.startswith("/panel/"))
+                or not isinstance(decoded, str)
+                or any(seg in {".", ".."} for seg in decoded.split("/"))
+                or "//" in decoded
+            ):
+                return Response(status_code=404)
+        else:
+            prefix = "/auth/v1" if rauthy else "/api"
+            if path != prefix and not path.startswith(prefix + "/"):
+                return Response(status_code=404)
+        if not rauthy and not panel_ui:
             decoded = request.scope.get("path")
             if retired_auth_path(raw_path=path, decoded_path=decoded, method=request.method):
                 return JSONResponse(
@@ -491,18 +419,25 @@ class ThinGateway:
         # Construct only a fixed private destination; the public Host is never a URL target.
         try:
             raw_url = path + ("?" + query.decode("ascii") if query else "")
-            upstream = _RAUTHY_UPSTREAM if rauthy else _API_UPSTREAM
+            upstream = (
+                _PANEL_UPSTREAM if panel_ui else _RAUTHY_UPSTREAM if rauthy else _API_UPSTREAM
+            )
             target_url = httpx.URL(upstream + raw_url)
-            if (target_url.host, target_url.port) != (
-                ("briareus-rauthy", 8080) if rauthy else ("briareus-control-panel-api", 8000)
-            ):
+            expected_target = (
+                ("briareus-control-panel-ui", 8080)
+                if panel_ui
+                else ("briareus-rauthy", 8080)
+                if rauthy
+                else ("briareus-control-panel-api", 8000)
+            )
+            if (target_url.host, target_url.port) != expected_target:
                 return Response(status_code=400)
         except (UnicodeDecodeError, ValueError, httpx.InvalidURL):
             return Response(status_code=400)
         # The native Backend expects exact Content-Length: 2 for "{}"
         # Init/PoW, but Rauthy must keep its established stream behavior.
         try:
-            declared_length = _api_declared_length(request, rauthy=rauthy)
+            declared_length = _api_declared_length(request, rauthy=rauthy or panel_ui)
         except ValueError:
             return Response(status_code=400)
         client = self._client

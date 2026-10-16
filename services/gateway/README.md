@@ -4,9 +4,15 @@ Owner: Runtime. This folder contains its ASGI source, uv dependency lock,
 Dockerfile, Docker build ignore, and both Compose inputs. It never imports
 private Control Panel, Identity, Authorization, or Hand implementation source.
 
-The single public origin is `https://briareus.koba-nexus.ru`. Public
-landing and Panel static resources come from
-`briareus-control-panel-ui:8080`; canonical application `/api/v1/*`
+The single public origin is `https://briareus.koba-nexus.ru`. The Gateway
+transparently **streams the entire** `/panel/*` prefix (plus public landing
+and `/robots.txt`/`/sitemap.xml`) to fixed `briareus-control-panel-ui:8080`.
+UI/Nginx serves Vite assets including Web Workers, WebAssembly and future
+file extensions: Gateway does not enumerate asset formats, sniff MIME, parse
+UI HTML, buffer assets to inspect them, or fabricate static replies. The
+existing streaming proxy preserves query, method, body, upstream status,
+end-to-end response headers and duplicate Set-Cookie. Off-prefix/private
+routes remain closed. Canonical application `/api/v1/*`
 requests are forwarded without changing their URL to
 `briareus-control-panel-api:8000`. The historical registered OAuth callback
 `GET /api/auth/oidc/callback` is an exact additional exception; other

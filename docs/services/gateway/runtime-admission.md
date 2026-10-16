@@ -1,8 +1,21 @@
 # Gateway coarse MCP admission — local private transport stage
 
-Gateway remains the thin public /hands/HAND/mcp router, retaining /,
-/panel/, canonical /api/v1/*, the registered OAuth callback, and allowed Rauthy paths. It never becomes a policy,
-Cedar, token issuer or Control Panel management service.
+Gateway routes explicit fixed prefixes, not file formats or business DTOs.
+The entire `/panel/*` namespace streams to UI/Nginx without Vite extension
+or MIME registry, HTML inspections or Gateway-created static response state.
+Missing-asset 404, cache-control, content-type and future frontend bundles
+belong to UI. Fixed `/api/v1/*`, Rauthy `/auth/v1/*` and registered Hands
+have separate fixed internal destinations. No arbitrary open proxy exists.
+
+**MCP authority conflict, owner direction 2026-10-16 (#536, comment
+6211237951):** The owner requests trace-and-forward-only Gateway MCP
+routing, while the existing Core/Node architecture and current source
+require private `mcp.connect` authorization at Gateway. This UI transport
+correction does NOT silently remove the existing fail-closed check or grant
+an unauthenticated path into a Hand. Backend/Runtime must reconcile the
+new trust allocation and provide equivalent signed resource admission,
+private Cedar/Hand enforcement, outage denial, migration/rollback and tests
+before changing MCP route admission. The MCP policy transition is OPEN.
 
 The source-stage TrustedGatewayDecisionPort is the only permitted path for
 a protected mcp.connect decision. It must be supplied by a trusted runtime

@@ -17,10 +17,9 @@ _SUPPORTED = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTION
 def _route(path: str) -> tuple[str, str]:
     if path in {"/", "/robots.txt", "/sitemap.xml"}:
         return "landing", "panel-ui"
-    if path in {"/panel", "/panel/"}:
-        return "panel-shell", "panel-ui"
-    if path.startswith("/panel/assets/"):
-        return "panel-asset", "panel-ui"
+    if path == "/panel" or path.startswith("/panel/"):
+        # Constant-cardinality route label; never include SPA path or asset URL.
+        return "panel", "panel-ui"
     if path == "/api" or path.startswith("/api/"):
         return "api", "panel-api"
     if path in MCP_ENDPOINTS.values():
