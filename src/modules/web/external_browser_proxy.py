@@ -149,7 +149,18 @@ class ExternalBrowserProxyRuntime:
         self._tool_count: int | None = None
 
         async def client_factory() -> ProxyClient[StreamableHttpTransport]:
-            client = await self._ensure_client()
+            # Component discovery must never dial an unconnected external MCP.
+            # Otherwise the remote timeout delays listing *internal* Chromium
+            # tools whenever External Browser is enabled but unreachable.
+            client = self._client
+            if (
+                client is None
+                or not client.connected
+                or self._tab_probe_state != "responded"
+            ):
+                raise RuntimeError(
+                    "External Playwright MCP is not connected; use browser_external_connect"
+                )
             return await client.acquire()
 
         self.server: FastMCP[Any] = FastMCPProxy(
