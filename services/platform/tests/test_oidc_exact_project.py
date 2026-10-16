@@ -45,6 +45,13 @@ from projects._oidc_membership_projection import (
     PlatformOidcMembershipProjection,
     PlatformSubjectLinkUnavailable,
 )
+from projects._rauthy_first_operator import (
+    FirstOperatorBootstrap,
+    FirstOperatorBootstrapDenied,
+    FirstOperatorBootstrapUnavailable,
+    VerifiedFirstOperatorApproval,
+)
+from projects._rauthy_user_links import VerifiedRauthyUserStatus
 from pydantic import SecretStr
 from sqlalchemy import create_engine, update
 from sqlalchemy.dialects import postgresql
@@ -211,6 +218,230 @@ class ExactProjectTests(unittest.IsolatedAsyncioTestCase):
         return await self.projection.resolve_project(
             issuer=_ISSUER, subject=_SUBJECT, project_uuid=project or self.target
         )
+
+    async def test_first_operator_rejects_foreign_issuer_and_noncanonical_subject(self) -> None:
+        # The trusted out-of-band signer may be accidentally wired to a
+        # foreign provider, but Briareus can bootstrap only its fixed Rauthy
+        # realm with a source-valid 24-byte alphanumeric subject. Reject the
+        # selector BEFORE even calling privileged Rauthy Users:read.
+        status_calls = [0]
+
+        class NoDatabase:
+            engine = SimpleNamespace(url=SimpleNamespace(database="briareus_platform"))
+
+            def transaction(self) -> None:
+                raise AssertionError("unverified initial operator reached SQL")
+
+        class StatusFixture:
+            async def current_status(
+                self, *, issuer: str, subject: str
+            ) -> VerifiedRauthyUserStatus:
+                status_calls[0] += 1
+                raise AssertionError(f"invalid selector reached Users:read: {issuer},{subject}")
+
+        for issuer, subject in (
+            ("https://foreign.invalid/auth/v1/", _SUBJECT),
+            (_ISSUER, "invalid/subject"),
+            (_ISSUER, "Q" * 25),
+            (_ISSUER, "Q" * 23),
+            (_ISSUER, "\N{FULLWIDTH LATIN CAPITAL LETTER A}" * 24),
+            (_ISSUER, 24),
+        ):
+            with self.subTest(issuer=issuer, subject=subject):
+
+                class OwnerFixture:
+                    def __init__(self, selected_issuer: str, selected_subject: object) -> None:
+                        self.issuer = selected_issuer
+                        self.subject = selected_subject
+
+                    async def verify(self, evidence: object) -> VerifiedFirstOperatorApproval:
+                        assert evidence == "synthetic"
+                        return VerifiedFirstOperatorApproval(
+                            uuid4(),
+                            uuid4(),
+                            self.issuer,
+                            self.subject,
+                            "briareus:platform:first-operator",
+                            True,
+                            True,
+                            uuid4(),
+                            "fixture project",
+                            deadline(),
+                        )
+
+                service = FirstOperatorBootstrap(
+                    database=NoDatabase(),
+                    authority=OwnerFixture(issuer, subject),
+                    rauthy_status=StatusFixture(),
+                )
+                with self.assertRaises(FirstOperatorBootstrapDenied):
+                    await service.enroll_once(signed_evidence="synthetic")
+        self.assertEqual(status_calls, [0])
+        # A dedicated *explicit* local Rauthy sandbox remains a valid source
+        # selector; without a real Users:read result it still cannot enroll.
+        local = FirstOperatorBootstrap(
+            database=NoDatabase(),
+            authority=OwnerFixture("https://localhost:18444/auth/v1/", _SUBJECT),
+            rauthy_status=StatusFixture(),
+        )
+        with self.assertRaises(FirstOperatorBootstrapUnavailable):
+            await local.enroll_once(signed_evidence="synthetic")
+        self.assertEqual(status_calls, [1])
+
+    async def test_first_operator_requires_all_platform_tables_empty(self) -> None:
+        # Synthetic one-time source fixture: any retained command/audit/agent
+        # row must fail even when Rauthy User/Team/Project are empty.
+        class RowFixture:
+            def __init__(self) -> None:
+                self.queried: list[str] = []
+                self.added: list[object] = []
+
+            async def execute(self, _statement: object, _args: object) -> None:
+                return None
+
+            async def scalar(self, query: object) -> int | None:
+                table = query.get_final_froms()[0]
+                self.queried.append(table.fullname)
+                return 1 if table.fullname == "control.audit" else None
+
+            def add(self, value: object) -> None:
+                self.added.append(value)
+
+        class PlatformFixture:
+            engine = SimpleNamespace(url=SimpleNamespace(database="briareus_platform"))
+
+            def __init__(self, tx: RowFixture) -> None:
+                self.tx = tx
+
+            @asynccontextmanager
+            async def transaction(self) -> AsyncIterator[RowFixture]:
+                yield self.tx
+
+        operation, actor, project = uuid4(), uuid4(), uuid4()
+        expiry = datetime.now(UTC) + timedelta(seconds=25)
+
+        class AuthorityFixture:
+            async def verify(self, evidence: object) -> VerifiedFirstOperatorApproval:
+                if evidence != "signed-test-only":
+                    raise ValueError("unsigned")
+                return VerifiedFirstOperatorApproval(
+                    operation,
+                    actor,
+                    _ISSUER,
+                    _SUBJECT,
+                    "briareus:platform:first-operator",
+                    True,
+                    True,
+                    project,
+                    "fixture project",
+                    expiry,
+                )
+
+        class RauthyFixture:
+            async def current_status(
+                self, *, issuer: str, subject: str
+            ) -> VerifiedRauthyUserStatus:
+                return VerifiedRauthyUserStatus(issuer, subject, True, expiry)
+
+        fixture = RowFixture()
+        bootstrap = FirstOperatorBootstrap(
+            database=PlatformFixture(fixture),
+            authority=AuthorityFixture(),
+            rauthy_status=RauthyFixture(),
+        )
+        with self.assertRaises(FirstOperatorBootstrapDenied):
+            await bootstrap.enroll_once(signed_evidence="signed-test-only")
+        self.assertIn("control.audit", fixture.queried)
+        self.assertEqual(fixture.added, [])
+        self.assertEqual(len(set(fixture.queried)), len(fixture.queried))
+
+    async def test_first_operator_commit_timeout_must_not_acknowledge_privilege(self) -> None:
+        # This fixture simulates a normal Platform commit completing AFTER
+        # the original independent proof expires. It cannot un-commit owner
+        # SQL, so it must deny a stale success and require reconciliation.
+        import projects._rauthy_first_operator as first_operator_module
+
+        instant = [datetime.now(UTC)]
+        before = instant[0]
+        expiry = before + timedelta(seconds=18)
+        ids = (uuid4(), uuid4(), uuid4())
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:
+                del tz
+                return instant[0]
+
+        # The patched module validates isinstance(proof.expires_at, datetime)
+        # against the substituted type, so retain a genuine Clock instance.
+        expiry = Clock.fromtimestamp(expiry.timestamp(), UTC)
+
+        class RowFixture:
+            def __init__(self) -> None:
+                self.added: list[object] = []
+                self.flushes = 0
+                self.commit_reached = False
+
+            async def execute(self, _statement: object, _args: object) -> None:
+                return None
+
+            async def scalar(self, _query: object) -> None:
+                return None
+
+            def add(self, value: object) -> None:
+                self.added.append(value)
+
+            async def flush(self) -> None:
+                self.flushes += 1
+
+        class PlatformFixture:
+            engine = SimpleNamespace(url=SimpleNamespace(database="briareus_platform"))
+
+            def __init__(self, tx: RowFixture) -> None:
+                self.tx = tx
+
+            @asynccontextmanager
+            async def transaction(self) -> AsyncIterator[RowFixture]:
+                yield self.tx
+                # Simulated successful COMMIT returns after both leases expire.
+                self.tx.commit_reached = True
+                instant[0] = before + timedelta(seconds=20)
+
+        class AuthorityFixture:
+            async def verify(self, _evidence: object) -> VerifiedFirstOperatorApproval:
+                return VerifiedFirstOperatorApproval(
+                    ids[0],
+                    ids[1],
+                    _ISSUER,
+                    _SUBJECT,
+                    "briareus:platform:first-operator",
+                    True,
+                    True,
+                    ids[2],
+                    "fixture project",
+                    expiry,
+                )
+
+        class RauthyFixture:
+            async def current_status(
+                self, *, issuer: str, subject: str
+            ) -> VerifiedRauthyUserStatus:
+                return VerifiedRauthyUserStatus(issuer, subject, True, expiry)
+
+        tx = RowFixture()
+        bootstrap = FirstOperatorBootstrap(
+            database=PlatformFixture(tx),
+            authority=AuthorityFixture(),
+            rauthy_status=RauthyFixture(),
+        )
+        with (
+            patch.object(first_operator_module, "datetime", Clock),
+            self.assertRaises(FirstOperatorBootstrapUnavailable),
+        ):
+            await bootstrap.enroll_once(signed_evidence="signed-test-only")
+        self.assertTrue(tx.commit_reached)
+        self.assertEqual(tx.flushes, 1)
+        self.assertEqual(len(tx.added), 6)
 
     async def test_exact_sql_succeeds_beyond_inventory_limit_and_is_scoped(self) -> None:
         with self.assertRaises(PlatformSubjectLinkUnavailable):

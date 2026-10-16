@@ -15,6 +15,7 @@ from uuid import UUID
 
 from sqlalchemy import select, text
 
+from common.owner_registry import owner_metadata
 from common.platform_db import PlatformDatabase
 from projects._rauthy_user_links import (
     CurrentRauthyUserLink,
@@ -22,6 +23,7 @@ from projects._rauthy_user_links import (
     TrustedRauthyUserStatusPort,
     VerifiedRauthyUserStatus,
 )
+from projects._rauthy_user_status import _ID, _LOCAL_SANDBOX_ISSUER, _PUBLIC_ISSUER
 
 # Reserved for this owner-local one-time bootstrap; not the Alembic coordinator.
 _BOOTSTRAP_NAMESPACE = 146536
@@ -89,9 +91,9 @@ class FirstOperatorBootstrap:
             or not isinstance(verified.user_uuid, UUID)
             or verified.user_uuid.version != 4
             or verified.audience != "briareus:platform:first-operator"
-            or not verified.rauthy_issuer.startswith("https://")
-            or not 12 <= len(verified.rauthy_issuer) <= 512
-            or not 1 <= len(verified.rauthy_subject) <= 256
+            or verified.rauthy_issuer not in {_PUBLIC_ISSUER, _LOCAL_SANDBOX_ISSUER}
+            or not isinstance(verified.rauthy_subject, str)
+            or _ID.fullmatch(verified.rauthy_subject) is None
             or verified.provider_admin_verified is not True
             or verified.independent_owner_approval is not True
             or not isinstance(verified.bootstrap_project_uuid, UUID)
@@ -131,8 +133,17 @@ class FirstOperatorBootstrap:
         # entering SQL; no outbound requests under the owner transaction lock.
         from projects._control_ledger import OwnerAuditRow, OwnerOutboxRow
         from projects._persistence import ProjectRow
-        from teams._persistence import TeamRow
 
+        # A failed/partial Development reset can leave audit, scopes, agent
+        # identities or command history even when User/Team/Project are empty.
+        # Future Platform-owned tables must not silently bypass this first-
+        # operator guard. This is deliberately ONE-TIME (11 bounded SELECTs
+        # on the current reviewed Platform metadata), never per login.
+        tables = tuple(owner_metadata("platform").sorted_tables)
+        if not tables or not {"control.rauthy_user_links", "projects.projects", "teams.teams"} <= {
+            table.fullname for table in tables
+        }:
+            raise FirstOperatorBootstrapUnavailable("Platform owner schema unavailable")
         try:
             async with self._db.transaction() as tx:
                 # Serialize *all* first-operator attempts, including distinct
@@ -142,23 +153,16 @@ class FirstOperatorBootstrap:
                     text("SELECT pg_advisory_xact_lock(:namespace, :lock_id)"),
                     {"namespace": _BOOTSTRAP_NAMESPACE, "lock_id": _BOOTSTRAP_LOCK},
                 )
-                any_link = await tx.scalar(select(RauthyUserLinkRow.user_id).limit(1))
-                if any_link is not None:
-                    raise FirstOperatorBootstrapDenied("first operator bootstrap already consumed")
-                # A rewritten greenfield 0001 on a partially retained Platform
-                # schema can have Projects without any Rauthy User links.
-                # Creating a "first" operator there would attach a new trust
-                # root to a nonempty owner, hiding incomplete/unsafe cutover.
-                any_project = await tx.scalar(select(ProjectRow.id).limit(1))
-                if any_project is not None:
-                    raise FirstOperatorBootstrapDenied(
-                        "first operator requires empty Platform Project owner"
-                    )
-                any_team = await tx.scalar(select(TeamRow.id).limit(1))
-                if any_team is not None:
-                    raise FirstOperatorBootstrapDenied(
-                        "first operator requires empty Platform Team owner"
-                    )
+                # This must be an entirely new Platform trust root. A
+                # supposedly empty first-operator target with ANY retained
+                # Platform data is not safe to adopt, including agent IDs,
+                # owner audit/outbox and realtime cursors. Never truncate or
+                # repair it in an authentication-sensitive transaction.
+                for table in tables:
+                    if await tx.scalar(select(1).select_from(table).limit(1)) is not None:
+                        raise FirstOperatorBootstrapDenied(
+                            "first operator requires wholly empty Platform owner"
+                        )
                 if verified.expires_at <= datetime.now(UTC) or active.expires_at <= datetime.now(
                     UTC
                 ):
@@ -241,6 +245,15 @@ class FirstOperatorBootstrap:
                     raise FirstOperatorBootstrapDenied(
                         "first operator proof expired during Platform transaction"
                     )
+            # PostgreSQL COMMIT itself is awaited outside the last in-tx
+            # deadline check. If proof expires while commit completes,
+            # the write may ALREADY exist. Never acknowledge stale operator
+            # authority; recovery must inspect current Platform state using
+            # fresh separately signed proof, not retry with a new identity.
+            if min(verified.expires_at, active.expires_at) <= datetime.now(UTC):
+                raise FirstOperatorBootstrapUnavailable(
+                    "first operator outcome indeterminate after proof expiry"
+                )
             return CurrentRauthyUserLink(
                 issuer=verified.rauthy_issuer,
                 subject=verified.rauthy_subject,

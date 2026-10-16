@@ -180,6 +180,13 @@ out-of-band first-operator workflow for an EXISTING Rauthy admin account only
 after independent signed operator authority, fixed audience, exact Rauthy
 issuer/subject and a fresh server-side Users:read status are verified.
 No Rauthy OAuth ID-token group or email automatically issues operator rights.
+The bootstrap handler also enforces the same exact pinned public Rauthy issuer
+as the Platform Users:read adapter (or the separately configured disposable
+localhost:18444 sandbox issuer). The subject must be exactly the provider's
+24-character ASCII-alphanumeric immutable User ID. A foreign signed issuer,
+invalid subject or untrusted local endpoint is denied BEFORE any privileged
+Users:read request or Platform SQL transaction. The issuer is never selected
+from a browser-supplied URL, User email or Rauthy Group.
 
 The independently signed one-time first-operator approval additionally
 names a NEW UUIDv4 personal Project and a bounded canonical Project name.
@@ -195,9 +202,22 @@ BEFORE checking the absence of every User link, then inserts the first
 Rauthy→User operator link AND its approved personal Project, two separate
 audit records and two outbox events ATOMICALLY in briareus_platform.
 This protects the empty-table race under READ COMMITTED and prevents
-an orphaned first operator who cannot own any Project. A subsequent or
-disabled User link permanently blocks this special bootstrap; operator
-recovery requires an independent reviewed proof and cannot use this path.
+an orphaned first operator who cannot own any Project. The same transaction
+now checks **all current Platform-owned ORM tables**, not only the User link,
+Project and Team tables: retained audit/outbox, prior Agent identities,
+commands or realtime scope records after a partially cleared Development
+schema DENY initial trust creation. This does not silently repair leftover
+rows or delete any owner data. A subsequent or disabled User link permanently
+blocks this special bootstrap; operator recovery requires an independent
+reviewed proof and cannot reuse this path.
+
+A second proof-expiry check runs AFTER awaited SQL transaction completion.
+If the independent first-operator approval or Rauthy User-status evidence
+expires while commit is finishing, the request returns unavailable rather
+than falsely acknowledging a current operator grant. The write **may already
+have committed**; the consumer must reconcile through a fresh trusted owner
+read and must not blindly retry with a newly invented operator identity.
+This does not claim distributed atomicity across Rauthy and PostgreSQL.
 
 There is NO public bootstrap HTTP endpoint, hardcoded admin, generated password,
 weak environment switch, or automatic auth fallback. Source-level local tests
@@ -206,6 +226,27 @@ creation, source-projected current Project use_resources/approve_agent_session,
 two audit/outbox events, negative replay and unapproved-origin rejection.
 They do NOT establish a real provider login, actual PostgreSQL atomic commit,
 mTLS attestor/Users:read or Dev acceptance.
+
+**Physical source-only greenfield proof (2026-10-15):** using native disposable
+PostgreSQL 18.6 logical databases and the actual current owner Alembic code,
+a separately mocked signed first-operator authority and mocked Users:read
+active status were injected into the real Platform service. It denied
+unsigned approval, denied retained synthetic control.audit data despite
+empty User/Team/Project, then created exactly one User-link, one personal
+Project, two audit and two outbox rows. It denied a second bootstrap and
+resolved the resulting Project through real owner SQL with use_resources and
+approve_agent_session. A paired separate Access owner DB then used the
+actual Rauthy-actor-bound Access command/SQL transaction and Cedar evaluator
+to open a normal AgentSession once (idempotent replay), allow only baseline
+Project mcp.connect/files.read, deny files.write and foreign Project, and
+deny every formerly permitted operation after revoke. The two owner DBs
+remained separate; no cross-owner FK, shared transaction or mocked Permit
+was inserted. Results: local/backend-greenfield-20261015/
+native-first-operator-result.json and native-platform-access-result.json.
+Both temporary PGDATA directories were removed on process exit. Because
+signing and Rauthy Users:read were synthetic, this proves **Backend SQL and
+Cedar integration only**, not authenticated Dev onboarding or a real signed
+Hand-to-Access Files effect.
 
 ## Private Authorization Project membership lookup
 
