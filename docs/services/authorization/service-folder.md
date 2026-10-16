@@ -1,13 +1,30 @@
 # Authorization independent service-folder transition
 
-**SOURCE staged; new Authorization Dev Coolify application created but not yet running.** All Authorization's image inputs have local ownership in `services/authorization/`: uv lock/manifest, Dockerfile, Compose, migration bytes (copied unchanged from existing accepted `access_0001`) and release provenance writer. The existing `deploy/authorization/` and old source definitions stay in Git for rollback until the new service folder is build- and runtime-verified. Same Compose service `briareus-authorization`, same internal DNS and `briareus_access` PostgreSQL owner schema/volume, `restart: no`, same endpoint/health, no external generated public domain. No migration revision is rewritten. The embedded Cedar decision engine remains independent of Python Control Panel API/UI.
+**SOURCE staged; new Authorization Dev Coolify application created but not yet running.** All Authorization's image inputs have local ownership in `services/authorization/`: uv lock/manifest, Dockerfile, Compose, single fresh migration `access_20261015_0001` compiled from current Access/Cedar AgentSession ORM and release provenance writer. The existing `deploy/authorization/` and old source definitions stay in Git for rollback until the new service folder is build- and runtime-verified. Same Compose service `briareus-authorization`, same internal DNS and `briareus_access` PostgreSQL owner schema/volume, `restart: no`, same endpoint/health, no external generated public domain. Existing prior Access Alembic revisions are intentionally incompatible
+with the new experimental source epoch until a qualified reset of only
+`briareus_access` occurs. Rauthy provider/user/administrative records and
+filesystem roots must be preserved. The embedded Cedar decision engine remains independent of Python Control Panel API/UI.
 
 Coolify required new Base Directory `/services/authorization`, Compose location `/docker-compose.coolify.yaml`, **Watch** `services/authorization/**` plus temporary `services/common/**` while its actually imported owner-runtime helpers are not in thematic `shared/` folders yet. This transitional dependency is explicit, not a request to redeploy on all unrelated service code or a permanent target. Consolidation into narrow root `shared/contracts/` is a separate independently reviewed step; do not break import graph or reintroduce a global wheel. Source contains a package-local frozen migration copy for image closure but Alembic still uses the same `common/alembic_owners/access` destination inside the Authorization image.
 
-Acceptance requires native locked uv environment, Docker build on its exact folder, safely scoped Dev existing Authorization app cutover and real database migration/readiness observation. `/health/live` proves only container process; Authorization protection/grant API is not yet mounted into the public runtime and cannot be claimed accepted from image health alone. Credentials stay existing protected Coolify shared references; do not expose/rotate/reset PostgreSQL or Valkey.
+Acceptance requires native locked uv environment, Docker build on its exact folder, safely scoped Dev existing Authorization app cutover and real database migration/readiness observation. `/health/live` proves only container process; Authorization protection/grant API is not yet mounted into the public runtime and cannot be claimed accepted from image health alone. Credentials stay in existing protected references; never expose/rotate them or reset shared PostgreSQL PGDATA/Valkey/Rauthy data. The new Access baseline separately requires a verified reset of only the disposable `briareus_access` logical database by the Deployment owner.
 
 The Docker image also copies the nested `authorization/access/` source package, not only root Python files. A local isolated-copy/import build check validates that this subpackage and the owner Alembic location survive the exact Docker COPY layout.
 
 ## 2026-10-12 Development application replacement
 
 After the owner explicitly authorized recreating the deleted Authorization application, a new GitHub-App backed Compose Application `95podguiawtnf2tvlemvk3ef` was created in the same approved Briareus MCP Development environment on the existing `tambov` server and `briareus-net`, with branch `main`, Base `/services/authorization` and Compose `/docker-compose.coolify.yaml`. At creation its runtime was `Exited` and the UI required loading the Compose. No new DB server or public FQDN was created. Populate Watch only for this module and the transient `services/common/**` input; satisfy existing protected PostgreSQL/observability ENV references without exposing values; preserve existing `briareus_access` owner database and never disable Auto Deploy.
+
+## Fresh Access owner epoch and authentication-state boundary
+
+`access_20261015_0001` is the complete current Access ORM baseline for its
+independent `briareus_access` logical DB (AgentSessions, approvals, Cedar
+service keys, private assertions, audit/outbox and idempotency). The prior
+`access_0001` identifier cannot be reused or stamped onto a populated DB;
+the newly generated baseline requires an empty owner schema and a separate
+qualified Development reset by Deployment. The source-local Access Alembic
+and historical wheel-input baselines match exactly and carry the same
+reviewed source hash. This reset intentionally discards test AgentSessions
+and approvals, not Rauthy upstream Users or OAuth clients. Any need to
+re-register Authorization service trust keys must be handled using the real
+owner-authorized signing contract, never by manufacturing a Permit.

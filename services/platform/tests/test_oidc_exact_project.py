@@ -7,14 +7,19 @@ these tests. SQLite exercises the ORM query, not PG concurrency/isolation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from control_panel_api._oidc_browser import PanelOidcSession
 from control_panel_api._oidc_membership import platform_membership_router
 from control_panel_api._platform_current_client import (
@@ -47,6 +52,14 @@ from sqlalchemy.engine import Result
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
+from common.owner_migrations import (
+    _NEW_EPOCH_SOURCE_HASHES,
+    OwnerSchemaRejected,
+    _ddl_source,
+    _require_owner_revision_epoch,
+    _upgrade_owner,
+    owner_config,
+)
 from projects._persistence import ProjectRow
 from teams._persistence import TeamMembershipRow, TeamRow
 
@@ -348,3 +361,157 @@ class ExactProjectTests(unittest.IsolatedAsyncioTestCase):
                 headers={"Authorization": "Bearer fixture-peer"},
             )
             self.assertEqual(denied.status_code, 403)
+
+
+class GreenfieldOwnerBaselineTests(unittest.TestCase):
+    """Existing Platform test module checks Backend's fresh epoch contract.
+
+    No real PostgreSQL or provider user records are accessed by these tests.
+    """
+
+    root = Path(__file__).resolve().parents[3]
+
+    def test_platform_current_sql_has_exactly_one_new_epoch_revision(self) -> None:
+        config = owner_config("platform")
+        history = list(ScriptDirectory.from_config(config).walk_revisions())
+        self.assertEqual(len(history), 1)
+        module = history[0].module
+        self.assertEqual(module.revision, "platform_20261015_0001")
+        self.assertIsNone(module.down_revision)
+        current = _ddl_source("platform")
+        self.assertEqual(module._DDL, current)
+        self.assertEqual(
+            module.source_signature,
+            hashlib.sha256("\n--DDL--\n".join(current).encode()).hexdigest(),
+        )
+        self.assertEqual(len(current), 26)
+        self.assertEqual(
+            len(
+                [sql for sql in current if sql.startswith("CREATE TABLE control.rauthy_user_links")]
+            ),
+            1,
+        )
+        self.assertFalse(
+            any(sql.startswith(("DROP", "DELETE", "TRUNCATE", "ALTER")) for sql in current)
+        )
+
+    def test_backend_owner_local_and_packaged_baselines_have_no_old_chain(self) -> None:
+        for owner, directory, name, revision in (
+            ("access", "authorization", "0001_access_baseline.py", "access_20261015_0001"),
+            (
+                "platform",
+                "platform",
+                "0001_platform_baseline.py",
+                "platform_20261015_0001",
+            ),
+            (
+                "resources",
+                "resources",
+                "0001_resources_baseline.py",
+                "resources_20261015_0001",
+            ),
+        ):
+            with self.subTest(owner=owner):
+                local = self.root / "services" / directory / "migrations"
+                packaged = self.root / "scripts/alembic_owners" / owner
+                files_local = {p.name: p for p in (local / "versions").glob("*.py")}
+                files_packaged = {p.name: p for p in (packaged / "versions").glob("*.py")}
+                self.assertEqual(set(files_local), {name})
+                self.assertEqual(set(files_packaged), {name})
+                self.assertEqual(files_local[name].read_bytes(), files_packaged[name].read_bytes())
+                config = Config()
+                config.set_main_option("script_location", str(packaged))
+                source = list(ScriptDirectory.from_config(config).walk_revisions())
+                self.assertEqual([m.revision for m in source], [revision])
+                self.assertIsNone(source[0].down_revision)
+                self.assertEqual(
+                    hashlib.sha256(files_packaged[name].read_bytes()).hexdigest(),
+                    _NEW_EPOCH_SOURCE_HASHES[revision],
+                )
+                # One SQL-only fresh baseline, not an unknown historical ALTER.
+                import ast
+
+                syntax = ast.parse(files_local[name].read_text())
+                ddl = next(
+                    ast.literal_eval(node.value)
+                    for node in syntax.body
+                    if isinstance(node, ast.AnnAssign)
+                    and isinstance(node.target, ast.Name)
+                    and node.target.id == "_DDL"
+                )
+                self.assertTrue(ddl)
+                self.assertTrue(
+                    all(
+                        sql.startswith(
+                            ("CREATE TABLE", "CREATE INDEX", "CREATE UNIQUE INDEX", "CREATE SCHEMA")
+                        )
+                        for sql in ddl
+                    )
+                )
+
+    def test_only_new_epoch_or_completely_empty_owner_database_is_eligible(self) -> None:
+        for owner, old_versions, fresh in (
+            ("access", ("access_0001",), "access_20261015_0001"),
+            (
+                "platform",
+                ("platform_0001", "platform_0002", "platform_0003", "platform_0004"),
+                "platform_20261015_0001",
+            ),
+            ("resources", ("resources_0001", "resources_0002"), "resources_20261015_0001"),
+        ):
+            with self.subTest(owner=owner):
+                _require_owner_revision_epoch(
+                    owner, None, contains_objects=False, present_schemas={"public"}
+                )
+                _require_owner_revision_epoch(
+                    owner, fresh, contains_objects=True, present_schemas={"public"}
+                )
+                for old in old_versions:
+                    with self.subTest(previous=old), self.assertRaises(OwnerSchemaRejected):
+                        _require_owner_revision_epoch(
+                            owner, old, contains_objects=True, present_schemas={"public"}
+                        )
+                for version, objects, schemas in (
+                    (None, True, {"public"}),
+                    (None, False, {"public", "control"}),
+                    (None, False, {"public", "resources"}),
+                ):
+                    with self.assertRaises(OwnerSchemaRejected):
+                        _require_owner_revision_epoch(
+                            owner, version, contains_objects=objects, present_schemas=schemas
+                        )
+
+    def test_greenfield_platform_runs_exact_orm_ddl_in_sequence(self) -> None:
+        module = next(ScriptDirectory.from_config(owner_config("platform")).walk_revisions()).module
+        executed: list[str] = []
+
+        class RecordingBind:
+            def exec_driver_sql(self, statement: str) -> None:
+                executed.append(statement)
+
+        with patch.object(module.op, "get_bind", return_value=RecordingBind()):
+            module.upgrade()
+        self.assertEqual(executed, list(_ddl_source("platform")))
+        with self.assertRaisesRegex(RuntimeError, "No destructive"):
+            module.downgrade()
+
+    def test_old_epoch_is_rejected_before_alembic_upgrade(self) -> None:
+        def deny_old(_conn: object, _settings: object) -> None:
+            _require_owner_revision_epoch(
+                "platform", "platform_0003", contains_objects=True, present_schemas={"public"}
+            )
+
+        with (
+            patch("common.owner_migrations._identity", side_effect=deny_old),
+            patch("common.owner_migrations.command.upgrade") as actual_upgrade,
+            self.assertRaises(OwnerSchemaRejected),
+        ):
+            _upgrade_owner(object(), object(), SimpleNamespace(owner="platform"))
+        actual_upgrade.assert_not_called()
+
+    def test_changed_new_epoch_source_is_rejected(self) -> None:
+        with (
+            patch.dict(_NEW_EPOCH_SOURCE_HASHES, {"platform_20261015_0001": "0" * 64}),
+            self.assertRaisesRegex(OwnerSchemaRejected, "greenfield Alembic source changed"),
+        ):
+            owner_config("platform")

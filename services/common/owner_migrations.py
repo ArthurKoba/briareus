@@ -63,8 +63,12 @@ def _ddl_source(owner: OwnerName) -> tuple[str, ...]:
     return tuple(result)
 
 
-# Baselines are already frozen: adding a Project lifecycle field is a new
-# REVIEWED 0002 revision, never a rewrite of platform_0001.
+# New explicit *greenfield epoch* of current Backend owner schemas.
+# Operator-approved experimental service data reset is separate from this
+# source change. Old historical versions are intentionally NOT accepted as
+# the new revision even when they happen to contain similar tables.
+# Rauthy/provider auth DB and filesystem roots are NOT owner reset targets.
+_GREENFIELD_OWNER_EPOCH: frozenset[OwnerName] = frozenset({"access", "platform", "resources"})
 _APPROVED_BASELINE_HASHES: dict[OwnerName, str] = {
     "identity": "ee13ba6b4266a325be4f5860e3a321c43662e2409bfcd88f69ccf9969f8466eb",
     "access": "b9db1f587cb5412d7d08616acac58468d910c9a535bc9b7de77a5570a1652b2c",
@@ -73,19 +77,25 @@ _APPROVED_BASELINE_HASHES: dict[OwnerName, str] = {
     "files": "395244365a0bd125869329b31554e285d8313f3f8253bd6596006c73421a1679",
     "runtime": "acc05a7994ad166610ad02b4c189f7c776df53a4a922bd75fa12ed64d7b46b75",
     "reverse": "7876512ca2e5b8a47ba7f1dccd13ede9a58378fea4133de400e8e9ff884fe517",
-    "ingest": "88c8db8381bfdf26e72f1aa33bd6915a48ef22b2e48164b14aa9bc80614ce77c",
+    "ingest": "88c8db8381bfdf26e72f1aa33bd6915a48ef22b2e48164b14ce77c",
 }
-# The A11 baseline and pre-A13 additive heads remain IMMUTABLE. The A13
-# six owner-local multi-phase UUID migration steps are new successors, never
-# rewrites/stamps of any old history. Access and ingest need no ledger change.
+# Do not change other owner migration histories without their owner.
 _APPROVED_INTERMEDIATE_SIGNATURES: dict[str, str] = {
     "runtime_0002": "27d61748555c275ca1a09c29b5faba52343cdb85624b9825778661372b7c9136",
 }
+# The selected Backend greenfield revision content is pinned AS A WHOLE, not
+# just by its ORM DDL signature; this prevents a different imperative upgrade
+# with the same nominal head/version from becoming a silent privilege change.
+_NEW_EPOCH_SOURCE_HASHES: dict[str, str] = {
+    "access_20261015_0001": "0a576fe65298b14581e683475166f68c36e6f51be87936b55540d4136e61d7fd",
+    "platform_20261015_0001": "dc41b1d3586713f11b4137c31dd9d08c68efbb40a23a2b6a83f8bc9ab66444b6",
+    "resources_20261015_0001": "cafec8634d35c4eacb1c00c17551b2875f92939654671a4dd18988fd29adf119",
+}
 _REVIEWED_VERSIONS: dict[OwnerName, tuple[str, ...]] = {
     "identity": ("identity_0001", "identity_0002"),
-    "access": ("access_0001",),
-    "platform": ("platform_0001",),
-    "resources": ("resources_0001",),
+    "access": ("access_20261015_0001",),
+    "platform": ("platform_20261015_0001",),
+    "resources": ("resources_20261015_0001",),
     "files": ("files_0001", "files_0002"),
     "runtime": ("runtime_0001", "runtime_0002", "runtime_0003"),
     "reverse": ("reverse_0001", "reverse_0002"),
@@ -104,8 +114,8 @@ def _accepted_versions(owner: OwnerName) -> frozenset[str]:
 def owner_config(owner: OwnerName) -> Config:
     package = Path(__file__).resolve().parent / "alembic_owners" / owner
     source = Path(__file__).resolve().parents[2] / "scripts" / "alembic_owners" / owner
-    # Flat owner-local source is canonical for native local greenfield
-    # acceptance. Installed source-only service images retain the copied
+    # Flat owner-local source is canonical for the three Backend greenfield
+    # databases. Installed source-only owner wheels retain the copied
     # /app/src/common/alembic_owners/<owner>/ history as first priority.
     local_owner = {
         "platform": Path(__file__).resolve().parents[2] / "services/platform/migrations",
@@ -127,7 +137,20 @@ def owner_config(owner: OwnerName) -> Config:
     if graph.get_heads() != [expected]:
         raise OwnerSchemaRejected("unexpected owner Alembic heads or branching")
     revisions = list(graph.walk_revisions(head=expected))
-    if not revisions or revisions[-1].revision != f"{owner}_0001":
+    if owner in _GREENFIELD_OWNER_EPOCH:
+        # A fresh baseline must have exactly the reviewed imperative source,
+        # not just the same ORM/DDL hash or a reused historical Alembic ID.
+        for revision in revisions:
+            expected_source = _NEW_EPOCH_SOURCE_HASHES.get(revision.revision)
+            source_path = getattr(revision.module, "__file__", None)
+            if (
+                expected_source is None
+                or not isinstance(source_path, str)
+                or not source_path.endswith(".py")
+                or hashlib.sha256(Path(source_path).read_bytes()).hexdigest() != expected_source
+            ):
+                raise OwnerSchemaRejected("reviewed greenfield Alembic source changed")
+    if not revisions or revisions[-1].revision != _REVIEWED_VERSIONS[owner][0]:
         raise OwnerSchemaRejected("owner migration baseline missing from reviewed graph")
     if revisions[-1].down_revision is not None:
         raise OwnerSchemaRejected("owner migration graph has a foreign ancestor")
@@ -171,6 +194,29 @@ def _revision(conn: Connection) -> str | None:
     if len(rows) != 1:
         raise OwnerSchemaRejected("invalid owner revision-table cardinality")
     return str(rows[0])
+
+
+def _require_owner_revision_epoch(
+    owner: OwnerName,
+    revision: str | None,
+    *,
+    contains_objects: bool,
+    present_schemas: set[str],
+) -> None:
+    """Only truly empty owner databases can enter the new baseline epoch.
+
+    The externally preserved briareus_rauthy provider DB is NOT in this
+    owner's namespace and cannot be reset or stamped by this function.
+    Old Alembic revisions, even with an identical current ORM DDL shape,
+    are deliberately incompatible with the new greenfield owner epoch.
+    """
+    if revision is None:
+        if contains_objects:
+            raise OwnerSchemaRejected("nonempty unversioned owner database")
+        if owner in _GREENFIELD_OWNER_EPOCH and present_schemas - {"public"}:
+            raise OwnerSchemaRejected("new owner baseline requires empty logical database")
+    elif revision not in _accepted_versions(owner):
+        raise OwnerSchemaRejected("unknown or previous-epoch owner migration version")
 
 
 def _identity(conn: Connection, settings: OwnerDatabaseSettings) -> None:
@@ -220,11 +266,12 @@ def _identity(conn: Connection, settings: OwnerDatabaseSettings) -> None:
         for schema, name, kind in unexpected
     ):
         raise OwnerSchemaRejected("unexpected legacy or cross-owner database object")
-    current = _revision(conn)
-    if current is None and unexpected:
-        raise OwnerSchemaRejected("nonempty unversioned owner database")
-    if current is not None and current not in _accepted_versions(settings.owner):
-        raise OwnerSchemaRejected("unknown or newer owner migration version")
+    _require_owner_revision_epoch(
+        settings.owner,
+        _revision(conn),
+        contains_objects=bool(unexpected),
+        present_schemas=present,
+    )
 
 
 def _verify(conn: Connection, settings: OwnerDatabaseSettings) -> int:

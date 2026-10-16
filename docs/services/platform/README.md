@@ -5,10 +5,13 @@ service is independent from Gateway, Control Panel UI/API and External Services.
 
 - Source: `services/platform/src/` (all own Python packages; root legacy
   `services/projects` modules were copied byte-for-byte for the transition).
-- Service migrations: fresh consolidated Development baseline only;
-  platform_0001 replaces the old four-revision upgrade chain. Requires a
-  target-qualified empty Briareus Platform logical database, NOT an in-place
-  migration from earlier Alembic heads.
+- Service migrations: **one clean reviewed current-schema baseline**
+  `platform_20261015_0001`, generated from the complete current Platform
+  SQLAlchemy metadata (Teams, Projects, Users link, agents, audits, scope
+  events and ledgers). Historical platform_0001→0004 is RETIRED from the
+  candidate source. This new epoch requires a genuinely EMPTY
+  `briareus_platform` logical database before first owner startup.
+  Existing Alembic revisions are not accepted, migrated or stamped.
 - Runtime: Python 3.13, frozen `uv.lock`, `uv run --frozen --no-sync`,
   container `briareus-platform` and DNS alias of the same name, internal port
   8000. Health probe `GET /health/live`, not proof of business authorization.
@@ -90,15 +93,42 @@ use resources but not approve elevated AgentSessions. Actual Rauthy
 session identity and current operator status must be established from
 real trusted upstream/owner ports, not caller headers or supplied UUID.
 
-**Fresh baseline proposed:** platform_0001 includes current Platform
-Team/Project, idempotency, event and operator-enrolled Rauthy User links,
-without retaining historical 0002-0004 upgrade steps. Provider database
-briareus_rauthy is retained to preserve active Rauthy users and OAuth clients.
-The legacy owner schema coordinator deliberately rejects unregistered new
-heads. Existing automatic startup migrations mean deploying this revision
-is **NOT APPROVED** until the owner's existing D4 DBA/backup/rollback
-migration gate is independently cleared. No live database or volume has
-been modified and no automatic role/default permission is enabled.
+**Owner-approved experimental greenfield rebaseline:** The prior legacy
+Platform 0001→0004 chain has been removed from the new source tree; all the
+current Team/Project lifecycle, phased command-idempotency, Rauthy User-link
+and scoped owner tables are part of ONE reviewed `platform_20261015_0001`
+revision. The baseline DDL comes directly from the current Platform ORM,
+not a hand-edited partial bootstrap. A unique epoch/version ID prevents a
+previous Development Alembic 0001/0003/0004 row from masquerading as current.
+The coordinator rejects all prior versions and any nonempty unversioned
+schema or pre-existing Platform namespace before executing fresh DDL.
+
+The source-local and historical scripts/alembic_owners Platform wheel-input
+copies of the single fresh migration are kept byte-identical and source-hash
+pinned. The old revisions remain recoverable from Git history for forensic
+review or rollback, but are NOT accepted as an upgrade path in this new
+experimental Development epoch. Default provider-facing operation does not
+perform any schema reset on its own.
+
+A reset must target ONLY the independently confirmed `briareus_platform`
+logical owner DB through Deployment's exact allowlisted Development scope,
+not the shared PostgreSQL PGDATA volume, external provider database,
+existing Rauthy root/admin users or OAuth keys, Files storage directories or
+root mounts. The existing Platform User/Team/Project mappings WILL be lost
+by the intentional reset. External Rauthy users will still exist but require
+NEW approved trusted Platform enrollment/first-operator bootstrap; no
+automatic User or operator is reconstructed from an arbitrary Rauthy group.
+Dependent Access/Catalog UI features remain unavailable until current owner
+proofs are genuinely rebuilt. Authorization's own database, if separately
+reset, must use its own reviewed new epoch.
+
+**Acceptance boundary:** SOURCE migration graph, current compiled ORM DDL,
+revision uniqueness and fail-closed old-state checks are tested locally.
+This does NOT establish that the actual Development database was reset or
+newly migrated. Deployment owns a verified disposable PostgreSQL rehearsal,
+precise service stop/restart order, qualified per-database reset with recovery
+information and read-only final `alembic_version`/owner schema verification.
+No live Rauthy data, Dev database, roots or volumes were changed by Backend.
 
 The separate `PlatformRauthySuspensionService` requires a new, signed,
 short-lived operator suspension proof tied to the exact existing User ID and

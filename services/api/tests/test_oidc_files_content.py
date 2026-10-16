@@ -7,7 +7,6 @@ private peer, Files root, disk read or mounted MCP operation.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import json
@@ -139,8 +138,9 @@ class FilesFixture:
         if self.mode == "logout_during_read":
             assert self.session_ticket is not None
             await self.store.delete_session(self.session_ticket)
-        if self.mode == "deadline_elapsed":
-            await asyncio.sleep(0.075)
+        if self.mode == "platform_proof_expires_during_read":
+            assert self.platform is not None
+            self.platform.current_expires_at = datetime.now(UTC) - timedelta(seconds=1)
         checked = datetime.now(UTC)
         result = VerifiedPrivateFilesRead(
             operation_uuid=command.operation_uuid,
@@ -351,12 +351,16 @@ class FilesContentTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("content_base64", result.text)
         self.assertEqual(self.owner.called, 1)
 
-    async def test_proof_elapsed_while_owner_waiting_blocks_data_release(self) -> None:
-        self.platform.current_expires_at = datetime.now(UTC) + timedelta(milliseconds=45)
-        self.owner.mode = "deadline_elapsed"
+    async def test_platform_proof_expired_during_owner_read_blocks_data_release(self) -> None:
+        # Clock-dependent 45-ms source leases could expire even BEFORE the
+        # owner was called on loaded CI, producing legitimate 403 rather than
+        # the formerly asserted 503. Change the signed proof deterministically
+        # DURING the fake owner IO, then require a second current-proof read.
+        self.owner.mode = "platform_proof_expires_during_read"
         client = self.client(owner=self.owner)
         response = await self.submit(client)
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.platform.calls, 2)
         self.assertNotIn("content_base64", response.text)
         self.assertEqual(self.owner.called, 1)
 

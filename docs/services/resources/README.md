@@ -5,11 +5,11 @@ service is independent from Gateway, Control Panel UI/API and External Services.
 
 - Source: `services/resources/src/` (all own Python packages; root legacy
   `services/projects` modules were copied byte-for-byte for the transition).
-- Service migrations: **one fresh Development baseline** resources_0001
-  with the current complete Resource Catalog schema. Old resources_0002
-  phase-upgrade history is retired. This is NOT compatible with an old
-  populated Briareus Resources logical database: a separate target-qualified
-  clean reset and subsequent verification are required before release.
+- Service migrations: **single clean current-schema baseline**
+  `resources_20261015_0001`, built from current Resource Catalog ORM tables,
+  indexes and constraints. Historical resources_0001→0002 is RETIRED from
+  the experimental new epoch. A completely empty `briareus_resources`
+  logical database is required; no stamp, partial import or old-data upgrade.
 - Runtime: Python 3.13, frozen `uv.lock`, `uv run --frozen --no-sync`,
   container `briareus-resources` and DNS alias of the same name, internal port
   8000. Health probe `GET /health/live`, not proof of business authorization.
@@ -100,3 +100,32 @@ of any Hand effect or expose a secret. Local source tests with synthetic
 private owner proofs confirm own+Team results and reject foreign Project,
 foreign Team, deleted records, missing service trust and data leakage.
 No live SQL/mTLS/Rauthy/MCP acceptance is claimed.
+
+## Experimental clean Resource Catalog rebaseline
+
+The owner has selected fresh schema initialization instead of dragging
+published legacy migration steps through disposable local/Development data.
+The sole accepted revision is `resources_20261015_0001`. It creates the
+current integration, variable, credential lease, idempotency, audit/outbox
+and external-operation models, including the correct composite original
+UUID/phase uniqueness, directly from reviewed SQLAlchemy source. No old
+`resources_0001`/`resources_0002` is accepted by Alembic owner startup.
+The historical files remain recoverable in Git, not in the fresh image.
+
+The `services/resources/migrations` baseline and the source-backed
+`scripts/alembic_owners/resources` wheel input remain byte-identical.
+A new unique revision ID plus strict identity/schema checks reject
+previously populated or partially cleared Resource owner databases.
+This is NOT a command to clear the Rauthy provider, Rauthy users, Access
+service credentials, original Files roots or shared PostgreSQL PGDATA.
+Only the exact logical `briareus_resources` database may be reset, by
+Deployment within the preapproved experimental environment after verifying
+its ownership and dependent app readiness. Existing Resource Catalog
+records/credentials are intentionally disposable in this reset; filesystem
+roots and raw content are not among the reset targets.
+
+Before a Dev release, run a full fresh PostgreSQL Alembic upgrade into an
+empty disposable logical DB, check current catalog ORM schema and reject
+old Alembic revision, then independently confirm the exact real Dev owner
+DB was cleared and advanced to the selected fresh head. Current Dev state
+and source-only Python checks must not be conflated with those operations.
