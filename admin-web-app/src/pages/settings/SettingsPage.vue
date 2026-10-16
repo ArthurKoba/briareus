@@ -21,6 +21,42 @@ import SectionTabs from "@/shared/ui/SectionTabs.vue"
 
 const { t } = useI18n()
 const section = ref("interface")
+const ghidraWorkers = ref<Array<Record<string, unknown>>>([])
+const ghidraHeaps = reactive<Record<number, number | null>>({})
+const ghidraBusy = ref<number | null>(null)
+const ghidraError = ref("")
+async function loadGhidra(): Promise<void> {
+  ghidraError.value = ""
+  try {
+    const result = await managementApi.analysisWorkers()
+    ghidraWorkers.value = result.workers
+    await Promise.all(result.workers.map(async worker => {
+      const index = Number(worker.worker_index)
+      try { ghidraHeaps[index] = (await managementApi.workerHeap(index)).configured_max_heap_mb }
+      catch { ghidraHeaps[index] = null }
+    }))
+  } catch (caught) { ghidraError.value = caught instanceof Error ? caught.message : String(caught) }
+}
+async function runGhidra(index: number, action: "heap" | "stop" | "start" | "restart"): Promise<void> {
+  if (ghidraBusy.value !== null) return
+  const heap = ghidraHeaps[index]
+  if (action === "heap" && (!Number.isInteger(heap) || heap === null || heap < 128 || heap > 32768)) {
+    ghidraError.value = "JVM heap должен быть от 128 до 32768 MiB"
+    return
+  }
+  if (action === "stop" && !window.confirm(`Принудительно остановить Ghidra worker ${index}? Несохранённая работа может быть потеряна.`)) return
+  ghidraBusy.value = index
+  ghidraError.value = ""
+  try {
+    if (action === "heap") await managementApi.setWorkerHeap(index, heap!)
+    if (action === "stop") await managementApi.hardStopWorker(index)
+    if (action === "start") await managementApi.startWorker(index)
+    if (action === "restart") await managementApi.recoverAnalysisWorker(index)
+    await loadGhidra()
+    notifications.success(String(t("notifications.saved")))
+  } catch (caught) { ghidraError.value = caught instanceof Error ? caught.message : String(caught) }
+  finally { ghidraBusy.value = null }
+}
 const state = ref<SettingsState | null>(null)
 const browserState = ref<BrowserState | null>(null)
 const browserExternalStatus = ref<BrowserExternalStatus | null>(null)
@@ -101,6 +137,7 @@ const form = reactive({
 const sections = computed(() => [
   { id: "interface", label: t("settings.interface"), description: t("settings.interfaceHint") },
   { id: "browser", label: t("settings.browser"), description: t("settings.browserHint") },
+  { id: "ghidra", label: "Ghidra", description: "Управление памятью и JVM-воркерами" },
   { id: "realtime", label: t("settings.realtime"), description: t("settings.realtimeHint") },
   { id: "logging", label: t("settings.logging"), description: t("settings.loggingHint") },
   { id: "mcp", label: t("settings.mcp"), description: t("settings.mcpHint") },
@@ -121,7 +158,7 @@ const densityOptions = computed(() => [
 
 function readHash(): void {
   const [, child] = location.hash.slice(1).split("/")
-  if (["interface", "browser", "realtime", "logging", "mcp"].includes(child ?? "")) section.value = child!
+  if (["interface", "browser", "ghidra", "realtime", "logging", "mcp"].includes(child ?? "")) section.value = child!
 }
 function setSection(value: string): void {
   section.value = value
@@ -283,6 +320,7 @@ onMounted(() => {
     error.value = caught instanceof Error ? caught.message : "Unable to load settings"
   })
   void loadBrowser()
+  void loadGhidra()
 })
 onBeforeUnmount(() => {
   cancelExternalStatusPoll()
@@ -316,6 +354,23 @@ onBeforeUnmount(() => {
         <span><b>{{ t("settings.density") }}</b><small>{{ t("settings.densityHint") }}</small></span>
         <Select v-model:value="uiPreferences.density.value" :options="densityOptions" class="w-44" />
       </label>
+    </section>
+
+    <section v-else-if="section === 'ghidra'" class="settings-card max-w-3xl">
+      <h2>Ghidra — управление воркерами</h2>
+      <p class="text-xs text-muted-foreground">Задаётся максимальный heap JVM (MiB), а не общий RSS или лимит контейнера. Изменение лимита перезапускает выбранный воркер.</p>
+      <p v-if="ghidraError" role="alert" class="text-sm text-destructive">{{ ghidraError }}</p>
+      <div class="py-3"><Button variant="outline" size="sm" @click="loadGhidra">Обновить</Button></div>
+      <div v-for="worker in ghidraWorkers" :key="Number(worker.worker_index)" class="setting-row flex-wrap gap-3">
+        <span><b>Worker {{ worker.worker_index }}</b><small>{{ worker.error || (worker.enabled === false ? 'Отключён' : 'Активен') }} · {{ worker.project_name || 'Нет проекта' }}</small></span>
+        <div class="flex flex-wrap items-center gap-2">
+          <InputNumber v-model:value="ghidraHeaps[Number(worker.worker_index)]" :min="128" :max="32768" :step="64" placeholder="MiB" class="w-32" />
+          <Button size="sm" :disabled="ghidraBusy !== null" @click="runGhidra(Number(worker.worker_index), 'heap')">Применить лимит</Button>
+          <Button variant="outline" size="sm" :disabled="ghidraBusy !== null" @click="runGhidra(Number(worker.worker_index), 'stop')">Hard Stop</Button>
+          <Button variant="outline" size="sm" :disabled="ghidraBusy !== null" @click="runGhidra(Number(worker.worker_index), 'start')">Start</Button>
+          <Button variant="outline" size="sm" :disabled="ghidraBusy !== null" @click="runGhidra(Number(worker.worker_index), 'restart')">Restart</Button>
+        </div>
+      </div>
     </section>
 
     <section v-else-if="section === 'browser'" class="settings-card max-w-3xl">

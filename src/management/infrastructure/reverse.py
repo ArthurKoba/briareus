@@ -210,6 +210,18 @@ class ReverseAdminClient:
             context="reverse worker control",
         )
 
+    async def worker_heap_settings(self, worker_index: int) -> JsonObject:
+        return json_object(await self._call("worker_heap_settings", {"worker_index": worker_index}), context="worker heap settings")
+
+    async def set_worker_heap(self, worker_index: int, heap_mb: int) -> JsonObject:
+        return json_object(await self._call("set_worker_max_heap_mb", {"worker_index": worker_index, "max_heap_mb": heap_mb}), context="worker heap update")
+
+    async def hard_stop_worker(self, worker_index: int) -> JsonObject:
+        return json_object(await self._call("hard_stop_worker", {"worker_index": worker_index}), context="worker hard stop")
+
+    async def start_worker(self, worker_index: int) -> JsonObject:
+        return json_object(await self._call("start_worker", {"worker_index": worker_index}), context="worker start")
+
     async def clear_worker_queue(self, worker_index: int) -> JsonObject:
         return json_object(
             await self._call(

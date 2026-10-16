@@ -151,6 +151,11 @@ class WorkerControlPayload(BaseModel):
     enabled: bool
 
 
+class WorkerHeapPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_heap_mb: int = Field(ge=128, le=32768)
+
+
 class WorkerRecoverPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     timeout_seconds: float = Field(4.0, ge=1.0, le=30.0)
@@ -858,6 +863,44 @@ def build_admin_api_router(
             return await worker_state(available(), worker_index)
         except HTTPException:
             raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.get("/analysis/workers/{worker_index}/heap")
+    async def analysis_worker_heap(worker_index: int, request: Request) -> JsonObject:
+        require_user(request)
+        try:
+            return await available().reverse.worker_heap_settings(worker_index)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.put("/analysis/workers/{worker_index}/heap")
+    async def analysis_worker_set_heap(worker_index: int, payload: WorkerHeapPayload, request: Request) -> JsonObject:
+        service = mutation(request)
+        try:
+            result = await service.reverse.set_worker_heap(worker_index, payload.max_heap_mb)
+            await publish_management_event(service, "analysis.worker.heap_updated", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/analysis/workers/{worker_index}/hard-stop")
+    async def analysis_worker_hard_stop(worker_index: int, request: Request) -> JsonObject:
+        service = mutation(request)
+        try:
+            result = await service.reverse.hard_stop_worker(worker_index)
+            await publish_management_event(service, "analysis.worker.hard_stopped", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/analysis/workers/{worker_index}/start")
+    async def analysis_worker_start(worker_index: int, request: Request) -> JsonObject:
+        service = mutation(request)
+        try:
+            result = await service.reverse.start_worker(worker_index)
+            await publish_management_event(service, "analysis.worker.started", result)
+            return result
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
