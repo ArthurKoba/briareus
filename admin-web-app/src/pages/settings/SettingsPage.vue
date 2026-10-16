@@ -176,6 +176,7 @@ function readHash(): void {
   if (["interface", "browser", "ghidra", "realtime", "logging", "mcp"].includes(child ?? "")) section.value = child!
 }
 function setSection(value: string): void {
+  if (value === "ghidra") void loadGhidra()
   section.value = value
   history.replaceState(null, "", `#settings/${value}`)
 }
@@ -335,7 +336,7 @@ onMounted(() => {
     error.value = caught instanceof Error ? caught.message : "Unable to load settings"
   })
   void loadBrowser()
-  void loadGhidra()
+  if (section.value === "ghidra") void loadGhidra()
 })
 onBeforeUnmount(() => {
   cancelExternalStatusPoll()
