@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import signal
 import shutil
 import tempfile
 import uuid
@@ -374,6 +376,7 @@ class BrowserManager:
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
+                start_new_session=True,
                 env=self._browser_subprocess_environment(),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -474,6 +477,38 @@ class BrowserManager:
             async with self._start_lock:
                 await self._start_locked()
         return await self.status()
+
+    async def hard_stop(self) -> JsonObject:
+        """Immediately kill the Hand-owned Chromium process group, preserving its profile."""
+        async with self._reset_lock:
+            await self._notify_restart()
+            process = self._browser_process
+            playwright = self._playwright
+            self._browser_process = None
+            self._browser = None
+            self._context = None
+            self._playwright = None
+            self._developer_backend_connected = False
+            self._pages.clear()
+            self._page_ids.clear()
+            self._page_labels.clear()
+            self._page_agent_access.clear()
+            async with self._operator_lock:
+                for token in self._operator_pages:
+                    self._operator_pages[token] = ""
+            if process is not None and process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except TimeoutError as exc:
+                    raise BrowserError("Chromium group kill not confirmed") from exc
+            if playwright is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(playwright.stop(), timeout=3.0)
+            return {"stopped": True, "profile_preserved": True}
 
     async def recover_if_broken(self) -> bool:
         process_running = (

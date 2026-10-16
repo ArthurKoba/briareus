@@ -30,6 +30,11 @@ def register_browser_tools(
         """Restart Chromium while preserving profile, cookies, storage and dev extensions."""
         return await browser.restart()
 
+    @mcp.tool(title="Browser hard stop", annotations=write_annotations)
+    async def browser_hard_stop() -> JsonObject:
+        """Force-kill the Hand-owned Chromium process group without deleting its profile."""
+        return await browser.hard_stop()
+
     @mcp.tool(title="Browser pages", annotations=read_annotations)
     async def browser_pages() -> JsonObject:
         """List open browser pages/tabs in the persistent browser context."""
