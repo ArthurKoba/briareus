@@ -7,15 +7,18 @@ Missing-asset 404, cache-control, content-type and future frontend bundles
 belong to UI. Fixed `/api/v1/*`, Rauthy `/auth/v1/*` and registered Hands
 have separate fixed internal destinations. No arbitrary open proxy exists.
 
-**MCP authority conflict, owner direction 2026-10-16 (#536, comment
-6211237951):** The owner requests trace-and-forward-only Gateway MCP
-routing, while the existing Core/Node architecture and current source
-require private `mcp.connect` authorization at Gateway. This UI transport
-correction does NOT silently remove the existing fail-closed check or grant
-an unauthenticated path into a Hand. Backend/Runtime must reconcile the
-new trust allocation and provide equivalent signed resource admission,
-private Cedar/Hand enforcement, outage denial, migration/rollback and tests
-before changing MCP route admission. The MCP policy transition is OPEN.
+**Owner-confirmed MCP division, 16.10.2026:** Gateway remains the MCP
+ingress PEP. It must check real signed resource identity, current connection
+admission **and** generic per-tool preflight through the existing
+Authorization/Cedar owner, not act as a local Cedar policy engine or a
+repository of User grants. Hands apply the exact resource decision through
+one shared Runtime PEP. Full [migration and acceptance plan](mcp-centralized-access-plan-20261016.md)
+defines the required *new* resource-free tool-intent preflight contract,
+its owner and its safe release order. Existing `mcp.connect` fail-closed
+admission is retained until replacement code has actual signed acceptance.
+The earlier "trace-and-forward-only" direction is superseded by this
+later, more precise owner clarification; a superficial Bearer check is
+not sufficient to forward to a Hand.
 
 The source-stage TrustedGatewayDecisionPort is the only permitted path for
 a protected mcp.connect decision. It must be supplied by a trusted runtime
