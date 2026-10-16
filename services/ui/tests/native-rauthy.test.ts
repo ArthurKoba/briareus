@@ -126,3 +126,93 @@ describe("bounded source-only native Init replies",()=>{
       })
   })
 })
+
+import {submitNativePasswordLogin} from "../src/features/platform/api/native-first-factor"
+
+const nativeChallenge=()=>"1:10:"+(Math.floor(Date.now()/1000)+120)+":"+"A".repeat(16)+":"+"B".repeat(43)+":"
+const nativeCapability={protocol:"rauthy-native-v1",first_factor:"password",pow:"client-solved",cancel:true,continuations:[]}
+const nativeInit={stage:"first_factor_required",authenticated:false,expires_in:120}
+const nativeReceipt={stage:"authenticated",authenticated:true,authority:"rauthy",platform_membership_verified:false,permissions:[]}
+
+async function nativeBrowserFixture(replies:Response[],test:(calls:{url:string;init:RequestInit}[])=>Promise<void>):Promise<void>{
+  const oldFetch=globalThis.fetch
+  const oldWindow=Object.getOwnPropertyDescriptor(globalThis,"window")
+  const oldWorker=Object.getOwnPropertyDescriptor(globalThis,"Worker")
+  const calls:{url:string;init:RequestInit}[]=[]
+  let idx=0
+  Object.defineProperty(globalThis,"window",{configurable:true,value:{location:{protocol:"https:"},isSecureContext:true}})
+  Object.defineProperty(globalThis,"Worker",{configurable:true,value:class {
+    onmessage:((event:{data:unknown})=>void)|null=null
+    postMessage(challenge:unknown){queueMicrotask(()=>this.onmessage?.({data:{kind:"solved",work:String(challenge)+"123"}}))}
+    terminate(){}
+  }})
+  globalThis.fetch=async (url,init)=>{
+    calls.push({url:String(url),init:init??{}})
+    return replies[idx++]??apiReply(503,{error:{code:"UNEXPECTED"}})
+  }
+  try{await test(calls)}
+  finally{
+    globalThis.fetch=oldFetch
+    if(oldWindow)Object.defineProperty(globalThis,"window",oldWindow)
+    else Reflect.deleteProperty(globalThis,"window")
+    if(oldWorker)Object.defineProperty(globalThis,"Worker",oldWorker)
+    else Reflect.deleteProperty(globalThis,"Worker")
+  }
+}
+describe("native password sign-in from explicit user action",()=>{
+  it("sends only expected same-origin steps and never treats first factor as a User grant",async()=>{
+    await nativeBrowserFixture([
+      apiReply(200,nativeCapability),apiReply(201,nativeInit),
+      apiReply(200,{challenge:nativeChallenge(),authenticated:false}),
+      apiReply(200,nativeReceipt),
+    ],async calls=>{
+      const outcome=await submitNativePasswordLogin("fixture@example.invalid","fixture-only-password",new AbortController().signal)
+      expect(outcome).toEqual({kind:"session_issued"})
+      expect(calls.map(x=>x.url)).toEqual([
+        "/api/v1/auth/capabilities","/api/v1/auth/start","/api/v1/auth/pow","/api/v1/auth/first-factor",
+      ])
+      expect(calls.map(x=>x.init.method)).toEqual(["GET","POST","POST","POST"])
+      for(const x of calls){
+        expect(x.init.credentials).toBe("same-origin")
+        expect(x.init.redirect).toBe("error")
+      }
+      const body=JSON.parse(String(calls[3]?.init.body))
+      expect(Object.keys(body).sort()).toEqual(["email","password","pow"])
+      expect(body.email).toBe("fixture@example.invalid")
+      expect(body.password).toBe("fixture-only-password")
+      expect(body.pow).toMatch(/^1:10:\d{10}:[A-Z]{16}:[A-Z]{43}:\d+$/)
+      expect(outcome).not.toHaveProperty("identity")
+    })
+  })
+  it("returns unsupported MFA, not signed in, on Backend 409",async()=>{
+    await nativeBrowserFixture([
+      apiReply(200,nativeCapability),apiReply(201,nativeInit),
+      apiReply(200,{challenge:nativeChallenge(),authenticated:false}),
+      apiReply(409,{stage:"otp_pending",authenticated:false,continuation_available:false,restart_required:true}),
+    ],async calls=>{
+      expect(await submitNativePasswordLogin("fixture@example.invalid","fixture-only-password",new AbortController().signal))
+        .toEqual({kind:"continuation_unavailable",stage:"otp_pending"})
+      expect(calls.filter(x=>x.url.endsWith("/first-factor"))).toHaveLength(1)
+    })
+  })
+  it("refuses forged 200 response and preserves uncertainty after aborted POST",async()=>{
+    await nativeBrowserFixture([
+      apiReply(200,nativeCapability),apiReply(201,nativeInit),
+      apiReply(200,{challenge:nativeChallenge(),authenticated:false}),
+      apiReply(200,{...nativeReceipt,access_token:"forged"}),
+    ],async calls=>{
+      expect((await submitNativePasswordLogin("fixture@example.invalid","fixture-only-password",new AbortController().signal)).kind)
+        .toBe("uncertain")
+      expect(calls).toHaveLength(4)
+    })
+  })
+  it("never issues an Init from unavailable capabilities or a preaborted signal",async()=>{
+    await nativeBrowserFixture([apiReply(503,{error:{code:"NATIVE_UNAVAILABLE"}})],async calls=>{
+      expect((await submitNativePasswordLogin("fixture@example.invalid","fixture-only-password",new AbortController().signal)).kind)
+        .toBe("unavailable")
+      expect((await submitNativePasswordLogin("fixture@example.invalid","fixture-only-password",AbortSignal.abort())).kind)
+        .toBe("cancelled")
+      expect(calls.map(x=>x.url)).toEqual(["/api/v1/auth/capabilities"])
+    })
+  })
+})

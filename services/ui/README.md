@@ -43,22 +43,37 @@ isolated local design preview; the production entry has no guest/legacy
 Identity fallback or hosted-provider login action.
 
 The default `/panel/` screen is now the **compact Briareus session-status
-card inside the permanent Control Panel sidebar/header**. No password or
-native-preparation form is presented before real first-factor acceptance. Anonymous navigation does not
+card inside the permanent Control Panel sidebar/header**, now with an
+enabled native email/password form for an explicit user-triggered sign-in.
+There is no separately exposed technical preparation button.
+Anonymous navigation does not
 open a guest MCP preview; direct protected hashes return to the sign-in
 route. Current Rauthy OIDC session is checked read-only, with stable
 in-place loader/status UI. The earlier custom Identity client/form has been
 removed from this Frontend source.
 
-**Current sign-in UI:** the user requested removal of the speculative
-"Prepare sign-in" (Init/Cancel) controls, verbose Rauthy diagnostics and
-nonworking username/password form. Production now shows one compact login
-status with an optional read-only **Check session** action, and server-owned
-logout only when a signed browser session actually exists. There are no
-browser Init, PoW or first-factor POSTs on the sign-in screen, and no hosted
-provider redirect or guest fallback. The existing Backend native prelogin
-clients and the pinned, isolated upstream sPoW worker remain source-only,
-not mounted in the product UI pending genuine password/MFA/PKCE acceptance.
+**Current sign-in UI (P0):** The owner prioritized unblocking the
+actual login form. The single Control Panel sign-in card now accepts email and
+password and executes exactly one explicitly requested same-origin Backend
+chain: GET /api/v1/auth/capabilities (rauthy-native-v1), POST /api/v1/auth/start
+with an empty JSON body, POST /api/v1/auth/pow with an empty JSON body, the
+official isolated sPoW Web Worker, and POST /api/v1/auth/first-factor with
+email, password and solved PoW. There is no hosted provider redirect,
+retired Identity route, browser-stored password, provider cookie or token,
+automatic password retry or client-created Permission/Permit. The password
+input is cleared after every attempt. Explicit cancellation is distinct
+from a confirmed server-side cleanup; a lost reply is not success.
+
+Even HTTP200 from the first-factor endpoint is not Platform User access.
+The component independently re-reads /api/v1/auth/session for the exact
+signed Rauthy issuer/client/expiry proof. Its parent independently checks a
+current /api/v1/auth/me User/Project membership proof before mounting
+protected actions. A required OTP/WebAuthn/ToS/account-update/client MFA
+returns Backend HTTP409 and remains unsupported until Backend accepts its
+atomic Valkey continuation with signed code/PKCE and private provider state.
+The UI never silently bypasses MFA or guesses a login result. Therefore
+password-only source wiring exists, but real Dev user/MFA/Project acceptance
+remains a separate mandatory gate.
 
 Backend `GET /api/v1/auth/session` returns HTTP401 when no valid Secure
 HttpOnly `__Host-briareus_oidc_session` cookie exists. Earlier published Dev
@@ -85,7 +100,8 @@ the parent invalidates the cached login snapshot so a newly mounted
 sign-in screen cannot display a stale `signed_in` state. The UI must never
 submit credentials through the retired Identity route, use OAuth ROPC,
 invent a Rauthy login endpoint, or store passwords/tokens in JS storage.
-Backend+Deployment own the actual native first-factor/MFA session-completion contract.
+Backend+Deployment own the versioned native first-factor contract and the
+still-pending supported MFA completion and real User/Project acceptance.
 
 All browser-facing authenticated Control Panel API clients now decode JSON
 through a shared **bounded, cancel-aware stream** instead of unrestricted

@@ -37,7 +37,7 @@ describe("Control Panel canonical product identity", () => {
     expect(compose).not.toContain('services/external/docker-compose.coolify.yaml')
   })
 
-  it("keeps a compact honest login status without speculative preparations or fake credential forms",()=>{
+  it("provides real native credential input instead of a blocked placeholder",()=>{
     const login=readFileSync("src/pages/platform/ControlPanelAccessPage.vue","utf8")
     const identity=readFileSync("src/features/platform/ui/RauthySignIn.vue","utf8")
     expect(login).toContain('<RauthySignIn :initial-state="initialState"')
@@ -50,11 +50,17 @@ describe("Control Panel canonical product identity", () => {
     expect(login).not.toContain("LoaderCircle")
     expect(identity).not.toContain('href="/api/v1/auth/authorize"')
     expect(identity).not.toContain("redirecting")
-    expect(identity).toContain('Вход пока недоступен.')
+    expect(identity).toContain('type="email"')
+    expect(identity).toContain('type="password"')
+    expect(identity).toContain('autocomplete="current-password"')
+    expect(identity).toContain('autocomplete="username"')
+    expect(identity).toContain('@submit.prevent="submitLogin"')
+    expect(identity).toContain("submitNativePasswordLogin")
+    expect(identity).toContain("readRauthyPanelState(request.signal)")
+    expect(identity).toContain("Для аккаунта требуется дополнительная проверка")
     expect(identity).toContain("Проверить сеанс")
+    expect(identity).not.toContain('href="/api/v1/auth/authorize"')
     expect(login).not.toContain("readRauthyPanelState(")
-    expect(identity).not.toContain("autocomplete=")
-    expect(identity).not.toContain("password")
   })
 
   it("uses one authoritative provider snapshot and discards it on logout or expiry",()=>{
