@@ -86,6 +86,7 @@ class BrowserManager:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._browser_process: asyncio.subprocess.Process | None = None
+        self._manually_stopped = False
         self._display_process: asyncio.subprocess.Process | None = None
         self._context: BrowserContext | None = None
         self._pages: dict[str, Page] = {}
@@ -421,6 +422,8 @@ class BrowserManager:
         context.on("page", self._on_context_page)
 
     async def _ensure_started(self) -> BrowserContext:
+        if self._manually_stopped:
+            raise BrowserError("browser was hard-stopped; call browser_restart to start it")
         if self._context is not None and await self._context_usable():
             return self._context
         if self._context is not None or (
@@ -472,6 +475,7 @@ class BrowserManager:
         """Restart Chromium without deleting the persistent browser profile."""
         async with self._reset_lock:
             await self._notify_restart()
+            self._manually_stopped = False
             self._developer_backend_connected = False
             await self._stop_runtime(stop_display=False)
             async with self._start_lock:
@@ -481,6 +485,7 @@ class BrowserManager:
     async def hard_stop(self) -> JsonObject:
         """Immediately kill the Hand-owned Chromium process group, preserving its profile."""
         async with self._reset_lock:
+            self._manually_stopped = True
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._notify_restart(), timeout=2.0)
             process = self._browser_process
@@ -520,6 +525,8 @@ class BrowserManager:
             return {"stopped": True, "profile_preserved": True}
 
     async def recover_if_broken(self) -> bool:
+        if self._manually_stopped:
+            return False
         process_running = (
             self._browser_process is not None and self._browser_process.returncode is None
         )
@@ -909,7 +916,7 @@ class BrowserManager:
         return cast(JsonObject, observed) if isinstance(observed, dict) else {}
 
     async def status(self) -> JsonObject:
-        if self._context is None and self._browser_process is None:
+        if not self._manually_stopped and self._context is None and self._browser_process is None:
             await self._ensure_started()
 
         process_running = (
@@ -931,6 +938,7 @@ class BrowserManager:
         return {
             "running": running,
             "process_running": process_running,
+            "manually_stopped": self._manually_stopped,
             "cdp_reachable": cdp_reachable,
             "context_usable": context_usable,
             "agent_access_enabled": self._agent_access_enabled,
