@@ -481,7 +481,8 @@ class BrowserManager:
     async def hard_stop(self) -> JsonObject:
         """Immediately kill the Hand-owned Chromium process group, preserving its profile."""
         async with self._reset_lock:
-            await self._notify_restart()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._notify_restart(), timeout=2.0)
             process = self._browser_process
             playwright = self._playwright
             self._browser_process = None
