@@ -484,8 +484,10 @@ class BrowserManager:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._notify_restart(), timeout=2.0)
             process = self._browser_process
+            display_process = self._display_process
             playwright = self._playwright
             self._browser_process = None
+            self._display_process = None
             self._browser = None
             self._context = None
             self._playwright = None
@@ -506,6 +508,12 @@ class BrowserManager:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except TimeoutError as exc:
                     raise BrowserError("Chromium group kill not confirmed") from exc
+            if display_process is not None and display_process.returncode is None:
+                display_process.kill()
+                try:
+                    await asyncio.wait_for(display_process.wait(), timeout=5.0)
+                except TimeoutError as exc:
+                    raise BrowserError("Xvfb hard kill not confirmed") from exc
             if playwright is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(playwright.stop(), timeout=3.0)
