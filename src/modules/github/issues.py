@@ -140,3 +140,42 @@ class GitHubIssueClient(GitHubRepositoryClientBase):
             "comment_id": json_int(result.get("id")),
             "html_url": json_str(result.get("html_url")),
         }
+
+    def update_issue_comment(self, repository: str, comment_id: int, body: str) -> JsonObject:
+        """Edit a top-level issue/PR conversation comment using GitHub permissions."""
+        repository = self._assert_allowed(repository)
+        if type(comment_id) is not int or comment_id <= 0:
+            raise GitHubAgentError("comment_id must be a positive integer")
+        if not isinstance(body, str) or not body.strip():
+            raise GitHubAgentError("comment body must not be empty")
+        _, result = self._repo_request(
+            repository,
+            "PATCH",
+            f"/repos/{repository}/issues/comments/{comment_id}",
+            payload={"body": body},
+        )
+        if not isinstance(result, dict):
+            raise GitHubAgentError("unexpected issue comment update response")
+        return {
+            "repository": repository,
+            "comment_id": json_int(result.get("id")),
+            "html_url": json_str(result.get("html_url")),
+            "body": json_str(result.get("body")),
+            "updated": True,
+        }
+
+    def delete_issue_comment(
+        self, repository: str, comment_id: int, confirm: bool = False,
+    ) -> JsonObject:
+        """Permanently delete a conversation comment, requiring explicit confirmation."""
+        repository = self._assert_allowed(repository)
+        if type(comment_id) is not int or comment_id <= 0:
+            raise GitHubAgentError("comment_id must be a positive integer")
+        if confirm is not True:
+            raise GitHubAgentError("deleting a comment requires confirm=true")
+        status, _ = self._repo_request(
+            repository,
+            "DELETE",
+            f"/repos/{repository}/issues/comments/{comment_id}",
+        )
+        return {"repository": repository, "comment_id": comment_id, "deleted": True}
