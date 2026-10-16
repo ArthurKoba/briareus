@@ -106,6 +106,21 @@ function scheduleExternalStatusPoll(): void {
     }
   }, 3500)
 }
+const browserAction = ref<"" | "stop" | "restart">("")
+async function runInternalBrowserAction(action: "stop" | "restart"): Promise<void> {
+  if (browserAction.value) return
+  if (action === "stop" && !window.confirm("Принудительно завершить Chromium и все вкладки? Сохранённый профиль останется на диске.")) return
+  browserAction.value = action
+  error.value = ""
+  try {
+    if (action === "stop") await managementApi.browserHardStop()
+    else await managementApi.browserRestart()
+    await loadBrowser()
+    notifications.success(String(t("notifications.saved")))
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : String(caught)
+  } finally { browserAction.value = "" }
+}
 const browserTheme = ref<"system" | "light" | "dark">("dark")
 const loading = ref(false)
 const saving = ref(false)
@@ -384,6 +399,13 @@ onBeforeUnmount(() => {
         <span class="font-mono text-xs">{{ browserState?.viewport?.width ?? 1280 }} × {{ browserState?.viewport?.height ?? 720 }}</span>
       </div>
 
+      <div class="setting-row">
+        <span><b>Внутренний Chromium</b><small>Управление локальным браузером не зависит от внешнего Playwright MCP. Hard Stop сохраняет профиль.</small></span>
+        <div class="flex gap-2">
+          <Button variant="outline" size="sm" :disabled="Boolean(browserAction)" @click="runInternalBrowserAction('stop')">Hard Stop</Button>
+          <Button variant="outline" size="sm" :disabled="Boolean(browserAction)" @click="runInternalBrowserAction('restart')">Restart</Button>
+        </div>
+      </div>
       <div class="mt-5 border-t border-border/70 pt-4">
         <h3 class="text-sm font-semibold">{{ t("settings.externalBrowser") }}</h3>
         <p class="mt-1 text-xs text-muted-foreground">{{ t("settings.externalBrowserHint") }}</p>

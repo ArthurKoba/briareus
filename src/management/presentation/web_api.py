@@ -1036,6 +1036,26 @@ def build_admin_api_router(
             )
             raise HTTPException(status_code=code, detail=message) from exc
 
+    @router.post("/browser/hard-stop")
+    async def browser_hard_stop(request: Request) -> JsonObject:
+        service = mutation(request)
+        try:
+            result = await service.web.hard_stop()
+            await publish_management_event(service, "browser.runtime.hard_stopped", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.post("/browser/restart")
+    async def browser_restart(request: Request) -> JsonObject:
+        service = mutation(request)
+        try:
+            result = await service.web.restart()
+            await publish_management_event(service, "browser.runtime.restarted", result)
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     @router.get("/browser/external/status")
     async def browser_external_status(request: Request) -> JsonObject:
         require_user(request)

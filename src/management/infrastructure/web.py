@@ -84,6 +84,12 @@ class WebAdminClient:
     async def debug_target(self, page_id: str) -> JsonObject:
         return await self._call("browser_debug_target", {"page_id": page_id})
 
+    async def hard_stop(self) -> JsonObject:
+        return await self._call("browser_hard_stop")
+
+    async def restart(self) -> JsonObject:
+        return await self._call("browser_restart")
+
     async def external_status(self) -> JsonObject:
         return await self._call("browser_external_status")
 
