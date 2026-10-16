@@ -39,9 +39,13 @@ def register_github_review_tools(
         account_id: str,
         repository: str,
         number: int,
+        page: int = 1,
+        per_page: int = 100,
     ) -> JsonObject:
-        """List top-level issue/PR conversation comments."""
-        return client_factory(account_id).list_conversation_comments(repository, number)
+        """List one page of top-level issue/PR comments; use next_page to continue."""
+        return client_factory(account_id).list_conversation_comments(
+            repository, number, page, per_page
+        )
 
     @mcp.tool(title="GitHub agent inline review comments", annotations=read_annotations)
     def github_agent_list_review_comments(

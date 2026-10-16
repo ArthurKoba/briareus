@@ -168,12 +168,18 @@ class GitHubReviewClient(GitHubRepositoryClientBase):
         self,
         repository: str,
         number: int,
+        page: int = 1,
+        per_page: int = 100,
     ) -> JsonObject:
         repository = self._assert_allowed(repository)
+        if type(page) is not int or page < 1:
+            raise GitHubAgentError("page must be a positive integer")
+        if type(per_page) is not int or not 1 <= per_page <= 100:
+            raise GitHubAgentError("per_page must be between 1 and 100")
         _, result = self._repo_request(
             repository,
             "GET",
-            f"/repos/{repository}/issues/{number}/comments?per_page=100",
+            f"/repos/{repository}/issues/{number}/comments?per_page={per_page}&page={page}",
         )
         if not isinstance(result, list):
             raise GitHubAgentError("unexpected conversation comment response")
@@ -196,6 +202,11 @@ class GitHubReviewClient(GitHubRepositoryClientBase):
             "repository": repository,
             "number": number,
             "comments": json_array(comments, context="GitHub review comments"),
+            "page": page,
+            "per_page": per_page,
+            "returned_count": len(comments),
+            "has_next_page": len(result) == per_page,
+            "next_page": page + 1 if len(result) == per_page else None,
         }
 
     def list_review_comments(
