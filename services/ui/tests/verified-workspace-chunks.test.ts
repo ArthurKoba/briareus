@@ -16,6 +16,7 @@ describe("server-verified resources remain lazy and fail closed",()=>{
       expect(src).not.toContain(`import ${name} from "@/${path}"`)
     }
     expect(src).toContain('v-if="activeContext&&identity"')
+    expect(src).toContain('current.kind==="unavailable"?"unavailable"')
     expect(src).toContain('projectLease.value?.remainingMilliseconds()')
     expect(src).toContain('userLease.value?.remainingMilliseconds()')
     expect(src).toContain('errorComponent:ProtectedSectionLoadError')

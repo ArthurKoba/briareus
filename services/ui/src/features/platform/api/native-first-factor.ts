@@ -35,6 +35,26 @@ function secureBrowser():boolean{
   return typeof window!=="undefined"&&window.location.protocol==="https:"&&
     window.isSecureContext===true
 }
+/** Provider's public challenge expires independently of the Init cookie.
+ * A rollback in the device wall clock cannot extend a PoW already observed.
+ * Keep a small delivery margin so a worker finishing at the boundary never
+ * triggers a doomed password submission.
+ */
+export function usableNativePowDeadline(
+  challenge:string,
+  observedWallMs:number,
+  observedMonotonicMs:number,
+  nowWallMs:number,
+  nowMonotonicMs:number,
+):boolean{
+  const match=/^1:\d{2}:(\d{10}):/.exec(challenge)
+  if(!match||![observedWallMs,observedMonotonicMs,nowWallMs,nowMonotonicMs]
+    .every(Number.isFinite))return false
+  const elapsed=nowMonotonicMs-observedMonotonicMs
+  if(elapsed<0)return false
+  const expires=Number(match[1])*1000
+  return expires-Math.max(nowWallMs,observedWallMs+elapsed)>1500
+}
 function error(kind:NativeLoginOutcome["kind"],code:string):NativeLoginOutcome{
   if(kind==="rejected"||kind==="unavailable"||kind==="expired"||
     kind==="rate_limited"||kind==="cancelled"||kind==="uncertain")return {kind,code}
@@ -75,10 +95,12 @@ export async function submitNativePasswordLogin(
       data.authenticated!==false||!validRauthyPowChallenge(challenge)){
       return {kind:"unavailable",code:"NATIVE_POW_INVALID"}
     }
+    const powObservedWall=Date.now(),powObservedMonotonic=performance.now()
     const solution=await solveRauthyPow(challenge,signal)
     if(signal.aborted||solution.kind==="cancelled")return {kind:"cancelled",code:"NATIVE_LOGIN_CANCELLED"}
     if(solution.kind!=="solved")return {kind:"unavailable",code:"NATIVE_POW_UNAVAILABLE"}
-    if(Date.now()>=init.expiresAt)return {kind:"expired",code:"NATIVE_LOGIN_EXPIRED"}
+    if(!usableNativePowDeadline(challenge,powObservedWall,powObservedMonotonic,Date.now(),performance.now())||
+      Date.now()>=init.expiresAt)return {kind:"expired",code:"NATIVE_LOGIN_EXPIRED"}
     const body=JSON.stringify({email,password,pow:solution.work})
     if(new TextEncoder().encode(body).length>8192)return {kind:"rejected",code:"NATIVE_REQUEST_INVALID"}
     if(signal.aborted)return {kind:"cancelled",code:"NATIVE_LOGIN_CANCELLED"}

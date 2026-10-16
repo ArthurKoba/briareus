@@ -242,7 +242,8 @@ async function refresh():Promise<void>{
     }
     hideAccess()
     state.value=current.kind==="expired"||current.kind==="signed_out"?"signed_out":
-      current.kind==="denied"||current.kind==="not_current"?"denied":"identity_only"
+      current.kind==="denied"||current.kind==="not_current"?"denied":
+      current.kind==="unavailable"?"unavailable":"identity_only"
   }catch{
     if(run===revision.value){
       hideAccess()

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
+import { Eye, EyeOff } from "lucide-vue-next"
 import {submitNativePasswordLogin,type NativeLoginOutcome} from "@/features/platform/api/native-first-factor"
 import {cancelNativePrelogin} from "@/features/platform/api/native-prelogin-control"
 import {
@@ -32,9 +33,10 @@ const hadSession = ref(false)
 const ended = ref(false)
 const email=ref("")
 const password=ref("")
+const passwordVisible=ref(false)
 const loginBusy=ref(false)
 const cancellingLogin=ref(false)
-const loginMessage=ref<"invalid"|"mfa"|"rate_limited"|"unavailable"|"unconfirmed"|"cancelled"|null>(null)
+const loginMessage=ref<"invalid"|"mfa"|"rate_limited"|"expired"|"unavailable"|"unconfirmed"|"cancelled"|null>(null)
 let loginController:AbortController|null=null
 let lastCheckedAt = 0
 let expiryTimer: ReturnType<typeof setTimeout> | null = null
@@ -45,6 +47,8 @@ function acceptState(next:LoginViewState):void {
   emit("state",next)
   if(next.kind==="signed_in"){
     emit("identity",next.identity)
+    password.value=""
+    passwordVisible.value=false
     hadSession.value=true
     ended.value=false
     if(expiryTimer!==null)clearTimeout(expiryTimer)
@@ -76,7 +80,10 @@ const labels = computed(() => locale.value === "ru" ? {
   forbidden: "Доступ не подтверждён.",
   ended: "Сеанс завершён.",
   revokedFailure: "Не удалось подтвердить выход.",
-  refresh: "Проверить сеанс",
+  refresh: "Повторить проверку",
+  checkResult: "Проверить результат входа",
+  showPassword: "Показать пароль",
+  hidePassword: "Скрыть пароль",
   email: "Электронная почта",
   password: "Пароль",
   signIn: "Войти",
@@ -85,6 +92,7 @@ const labels = computed(() => locale.value === "ru" ? {
   loginInvalid: "Не удалось войти. Проверьте адрес почты и пароль.",
   loginMfa: "Для аккаунта требуется дополнительная проверка. Этот способ входа пока не поддерживается.",
   loginRate: "Слишком много попыток. Повторите вход позже.",
+  loginExpired: "Время проверки истекло. Попробуйте войти ещё раз.",
   loginUnavailable: "Не удалось выполнить вход. Проверьте подключение и повторите попытку.",
   loginUnconfirmed: "Результат входа не подтверждён. Проверьте сеанс перед новой попыткой.",
   loginCancelled: "Попытка входа остановлена.",
@@ -100,7 +108,10 @@ const labels = computed(() => locale.value === "ru" ? {
   forbidden: "Access was not verified.",
   ended: "Session ended.",
   revokedFailure: "Unable to confirm sign-out.",
-  refresh: "Check session",
+  refresh: "Retry session check",
+  checkResult: "Check sign-in result",
+  showPassword: "Show password",
+  hidePassword: "Hide password",
   email: "Email",
   password: "Password",
   signIn: "Sign in",
@@ -109,6 +120,7 @@ const labels = computed(() => locale.value === "ru" ? {
   loginInvalid: "Unable to sign in. Check your email and password.",
   loginMfa: "Your account requires an additional verification step that is not yet supported.",
   loginRate: "Too many attempts. Try again later.",
+  loginExpired: "Sign-in verification expired. Try signing in again.",
   loginUnavailable: "Unable to sign in. Check your connection and try again.",
   loginUnconfirmed: "Sign-in result is unconfirmed. Check your session before trying again.",
   loginCancelled: "Sign-in attempt cancelled.",
@@ -118,7 +130,9 @@ async function submitLogin():Promise<void>{
   if(loginBusy.value||busy.value||state.value.kind!=="signed_out")return
   const userEmail=email.value
   const userPassword=password.value
-  password.value=""
+  // Preserve the input on a rejected/unavailable attempt: the user may
+  // correct a typo or retry without retyping an otherwise valid password.
+  // It stays only in this component's memory, never in storage or logs.
   loginMessage.value=null
   const request=new AbortController()
   loginController?.abort()
@@ -144,13 +158,13 @@ async function submitLogin():Promise<void>{
     }
     loginMessage.value=outcome.kind==="continuation_unavailable"?"mfa":
       outcome.kind==="rate_limited"?"rate_limited":
+      outcome.kind==="expired"?"expired":
       outcome.kind==="rejected"?"invalid":
       outcome.kind==="cancelled"?"cancelled":"unavailable"
   }catch{
     if(loginController===request)loginMessage.value="unconfirmed"
   }finally{
     clearTimeout(deadline)
-    password.value=""
     if(loginController===request){loginController=null;loginBusy.value=false}
   }
 }
@@ -160,6 +174,7 @@ async function cancelLogin():Promise<void>{
   loginController?.abort()
   loginController=null
   password.value=""
+  passwordVisible.value=false
   const request=new AbortController()
   const deadline=setTimeout(()=>request.abort(),8000)
   try{
@@ -176,6 +191,7 @@ async function cancelLogin():Promise<void>{
 const loginStatus=computed(()=>loginMessage.value==="invalid"?labels.value.loginInvalid:
   loginMessage.value==="mfa"?labels.value.loginMfa:
   loginMessage.value==="rate_limited"?labels.value.loginRate:
+  loginMessage.value==="expired"?labels.value.loginExpired:
   loginMessage.value==="unavailable"?labels.value.loginUnavailable:
   loginMessage.value==="unconfirmed"?labels.value.loginUnconfirmed:
   loginMessage.value==="cancelled"?labels.value.loginCancelled:"")
@@ -257,6 +273,7 @@ onBeforeUnmount(() => {
   controller?.abort(); controller=null
   loginController?.abort();loginController=null
   password.value=""
+  passwordVisible.value=false
   if(expiryTimer!==null)clearTimeout(expiryTimer)
   document.removeEventListener("visibilitychange",onVisibility)
 })
@@ -285,11 +302,25 @@ onBeforeUnmount(() => {
           <input v-model="email" name="username" type="email" autocomplete="username" required maxlength="320"
             :disabled="loginBusy" class="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground focus-visible:outline-2 focus-visible:outline-ring"/>
         </label>
-        <label class="block space-y-1 text-sm font-medium">
-          <span>{{labels.password}}</span>
-          <input v-model="password" name="password" type="password" autocomplete="current-password" required maxlength="256"
-            :disabled="loginBusy" class="w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground focus-visible:outline-2 focus-visible:outline-ring"/>
-        </label>
+        <div class="space-y-1 text-sm font-medium">
+          <label for="briareus-login-password" class="block">{{labels.password}}</label>
+          <div class="relative">
+            <input id="briareus-login-password" v-model="password" name="password"
+              :type="passwordVisible?'text':'password'"
+              autocomplete="current-password" required maxlength="256"
+              :disabled="loginBusy"
+              class="w-full min-h-11 rounded-lg border border-input bg-background px-3 py-2 pr-12 text-foreground focus-visible:outline-2 focus-visible:outline-ring"/>
+            <button type="button"
+              class="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              :aria-label="passwordVisible?labels.hidePassword:labels.showPassword"
+              :title="passwordVisible?labels.hidePassword:labels.showPassword"
+              :aria-pressed="passwordVisible"
+              @click="passwordVisible=!passwordVisible">
+              <EyeOff v-if="passwordVisible" class="size-5" aria-hidden="true"/>
+              <Eye v-else class="size-5" aria-hidden="true"/>
+            </button>
+          </div>
+        </div>
         <button type="submit"
           class="min-h-11 w-full rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
           :disabled="loginBusy||!email||!password">{{loginBusy?labels.signingIn:labels.signIn}}</button>
@@ -298,9 +329,11 @@ onBeforeUnmount(() => {
         </button>
       </form>
       <p v-if="loginMessage" class="text-sm text-muted-foreground" role="status">{{loginStatus}}</p>
-      <button type="button"
+      <button v-if="state.kind==='unavailable'||loginMessage==='unconfirmed'" type="button"
         class="min-h-11 w-full rounded-lg border border-border px-4 text-sm font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
-        :disabled="busy||loginBusy" @click="refresh">{{labels.refresh}}</button>
+        :disabled="busy||loginBusy" @click="refresh">
+        {{state.kind==='unavailable'?labels.refresh:labels.checkResult}}
+      </button>
     </div>
     <p v-if="error" role="alert" class="mt-3 text-sm text-destructive">
       {{logoutFailure==="forbidden"?labels.forbidden:logoutFailure==="unavailable"?labels.revokedFailure:labels.logoutError}}

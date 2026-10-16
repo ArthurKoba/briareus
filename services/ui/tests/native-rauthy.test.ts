@@ -127,7 +127,7 @@ describe("bounded source-only native Init replies",()=>{
   })
 })
 
-import {submitNativePasswordLogin} from "../src/features/platform/api/native-first-factor"
+import {submitNativePasswordLogin,usableNativePowDeadline} from "../src/features/platform/api/native-first-factor"
 
 const nativeChallenge=()=>"1:10:"+(Math.floor(Date.now()/1000)+120)+":"+"A".repeat(16)+":"+"B".repeat(43)+":"
 const nativeCapability={protocol:"rauthy-native-v1",first_factor:"password",pow:"client-solved",cancel:true,continuations:[]}
@@ -214,5 +214,25 @@ describe("native password sign-in from explicit user action",()=>{
         .toBe("cancelled")
       expect(calls.map(x=>x.url)).toEqual(["/api/v1/auth/capabilities"])
     })
+  })
+})
+
+
+describe("provider PoW's independent 30-second expiry gate",()=>{
+  it("allows fresh difficulty19 results and refuses expiry near the POST boundary",()=>{
+    const observed=1_798_000_000_000,mono=1000
+    const challenge="1:19:"+String(Math.floor(observed/1000)+30)+":"+"A".repeat(16)+":"+"B".repeat(43)+":"
+    expect(usableNativePowDeadline(challenge,observed,mono,observed+20_000,mono+20_000)).toBe(true)
+    expect(usableNativePowDeadline(challenge,observed,mono,observed+28_000,mono+28_000)).toBe(true)
+    expect(usableNativePowDeadline(challenge,observed,mono,observed+29_000,mono+29_000)).toBe(false)
+    expect(usableNativePowDeadline(challenge,observed,mono,observed+31_000,mono+31_000)).toBe(false)
+  })
+  it("does not resurrect a consumed public challenge after device clock rollback",()=>{
+    const observed=1_798_000_000_000,mono=1000
+    const challenge="1:19:"+String(Math.floor(observed/1000)+30)+":"+"A".repeat(16)+":"+"B".repeat(43)+":"
+    expect(usableNativePowDeadline(challenge,observed,mono,observed-60_000,mono+29_000)).toBe(false)
+    expect(usableNativePowDeadline(challenge,observed,mono,observed-60_000,mono+12_000)).toBe(true)
+    expect(usableNativePowDeadline(challenge,observed,mono,observed-60_000,mono-1)).toBe(false)
+    expect(usableNativePowDeadline("invalid",observed,mono,observed,mono)).toBe(false)
   })
 })

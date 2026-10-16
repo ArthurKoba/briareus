@@ -61,8 +61,16 @@ official isolated sPoW Web Worker, and POST /api/v1/auth/first-factor with
 email, password and solved PoW. There is no hosted provider redirect,
 retired Identity route, browser-stored password, provider cookie or token,
 automatic password retry or client-created Permission/Permit. The password
-input is cleared after every attempt. Explicit cancellation is distinct
-from a confirmed server-side cleanup; a lost reply is not success.
+field includes an accessible show/hide control (keyboard and touch). A
+rejected/expired/unavailable sign-in retains its typed password **only in
+the current in-memory Vue component** so the user can check/correct it and
+retry; it is never placed in storage, logs or URL parameters. The password
+is cleared when a verified sign-in succeeds, when the user explicitly cancels,
+or when the component is destroyed. There is no redundant 'Check session'
+button during ordinary signed-out sign-in; only a lost/uncertain login result
+or a failed initial session read exposes a contextual read-only retry.
+Explicit cancellation is distinct from confirmed server-side cleanup; a
+lost reply is not success.
 
 Even HTTP200 from the first-factor endpoint is not Platform User access.
 The component independently re-reads /api/v1/auth/session for the exact
@@ -74,6 +82,21 @@ atomic Valkey continuation with signed code/PKCE and private provider state.
 The UI never silently bypasses MFA or guesses a login result. Therefore
 password-only source wiring exists, but real Dev user/MFA/Project acceptance
 remains a separate mandatory gate.
+
+A Rauthy PoW challenge has its OWN short expiry, distinct from the Init
+transaction. In a public anonymous Development precredential check on
+2026-10-16, provider-issued challenges were difficulty 19 with about 30s
+remaining; the official Web Worker independently solved synthetic difficulty
+19 tasks in Chromium within that window. Before the explicit credential POST,
+the UI requires more than 1.5 seconds of proof validity based on both wall
+and monotonic clocks, so a delayed worker or device clock rollback cannot
+submit an already expired challenge. Backend still makes the definitive PoW,
+first-factor, MFA and signed-cookie decision; solving PoW alone never logs in.
+
+If a signed Rauthy session exists but /api/v1/auth/me is unavailable, the
+Panel displays the Platform owner-unavailable state, not a false authorization
+denial or current Project. A valid Rauthy session without a current User and
+Project is not admin access.
 
 Backend `GET /api/v1/auth/session` returns HTTP401 when no valid Secure
 HttpOnly `__Host-briareus_oidc_session` cookie exists. Earlier published Dev
