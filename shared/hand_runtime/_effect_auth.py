@@ -413,8 +413,12 @@ class EffectAuthorizationMiddleware(Middleware):
         if not valid_resource_claims(claims):
             raise ToolError("MCP_IDENTITY_UNVERIFIED")
         try:
-            request = get_http_request()
-        except RuntimeError as exc:
+            # Starlette Request.headers caches a Headers wrapper; async owner
+            # code may mutate the underlying ASGI scope before our final
+            # continuity check. Reconstruct a fresh read-only Request view
+            # from the CURRENT raw scope rather than reusing cached headers.
+            request = Request(get_http_request().scope)
+        except (RuntimeError, ValueError, TypeError) as exc:
             raise ToolError("MCP_HTTP_CONTEXT_REQUIRED") from exc
         bearer = request.headers.getlist("authorization")
         if (

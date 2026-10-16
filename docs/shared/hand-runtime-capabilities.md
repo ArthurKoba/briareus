@@ -163,6 +163,38 @@ boundaries, including that a synthetic Cedar Permit cannot substitute
 for a trusted Files channel. Real Rauthy/Cedar/Project owner and Dev read
 remain unaccepted.
 
+### Parallel six-Hand read-only adapters (staged, not deployed)
+
+The verified-source [six-Hand owner matrix](runtime-six-hand-owner-matrix-20261016.md)
+records AST declaration counts, default diagnostic-only entrypoints, staged
+read-only candidates, exact existing resource kind/action and the missing
+resource-owner interfaces. Web browser_snapshot originates in the separately
+reviewed Deployment [draft PR #545](https://github.com/KobaProduction/briareus/pull/545)
+and now requires an independent post-read browser-owner/current-lease check
+**after** extracting visible text but **before** returning it. No global
+BrowserManager, Chromium profile, download, CDP or privileged browser tool
+is imported by the staged adapter.
+
+Terminal, SVC, Infrastructure and Reverse use one optional
+shared/hand_runtime/_owner_metadata.py factory with per-Hand fixed tool
+names. Only an explicitly injected real signed resource verifier, the
+current Project/AgentSession scoped effect resolver, a genuine private
+Cedar decision port and a fresh owner inspection port can return the narrow
+{state,revision} DTO. The ordinary entrypoints remain unchanged, return
+two diagnostic tools, and readiness 503. Source-only signed RSA fixtures
+prove foreign audiences deny and altered grant revision during owner awaits
+denies even with a synthetic Allow. Starlette caches Request.headers;
+the PEP's repeated authorization checks now recreate a fresh Request view
+over the **current raw ASGI scope** to avoid accepting a stale cached
+header wrapper.
+
+The current Backend V2 actions terminal.execute, integrations.use and
+analysis.import are broader than read-only inspection. These staged
+candidates are **not authorized product read grants**, even with
+readOnlyHint: true in tool annotations, until Backend agrees a narrower
+per-Hand read vocabulary and matching resource/lease contracts. Neither
+the annotation nor a synthetic test Permit can establish real authority.
+
 ### Independent private Authorization transport (LOCAL source only)
 
 A signed Rauthy Bearer and fixed internal Docker DNS are NOT a trusted
